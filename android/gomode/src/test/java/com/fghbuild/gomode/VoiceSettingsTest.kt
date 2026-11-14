@@ -15,12 +15,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
@@ -28,6 +32,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
@@ -282,7 +287,11 @@ class VoiceSettingsTest {
         allInOne.performScrollTo().assertIsNotSelected().assertIsNotEnabled()
         separate.assertIsSelected().assertIsEnabled()
         chosen("gomode-recognition").assertTextContains("Local")
-        chosen("gomode-language-model").assertTextContains("Choose an available model")
+        // No service lists no gateway model to fall back to, so no language model is checked.
+        composeRule
+            .onAllNodes(
+                hasAnyAncestor(hasTestTag("gomode-language-model")) and isSelected(),
+            ).assertCountEquals(0)
         chosen("gomode-speech").assertTextContains("Local")
         composeRule.onNodeWithTag("gomode-device-speech-rate").performScrollTo().assertTextContains("1× (Normal)")
         assertEquals(VoiceSetupMode.FOLLOW_GATEWAY, repository.settings.value.voiceSetup.mode)
@@ -583,6 +592,34 @@ class VoiceSettingsTest {
         composeRule.runOnIdle { active.value = true }
         composeRule.onNodeWithTag("gomode-model-GEMMA_4_E2B").performScrollTo().assertIsNotEnabled()
         composeRule.onNodeWithTag("gomode-model-download").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test
+    fun chipsReadAsRadioButtons() {
+        showSettings(SettingsRepository(MemoryPreferences())) { false }
+        composeRule
+            .onNodeWithTag("gomode-speech-device")
+            .performScrollTo()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h700dp")
+    fun wideSettingsPlaceTheStagesSideBySide() {
+        showSettings(SettingsRepository(MemoryPreferences())) { false }
+        val recognition = composeRule.onNodeWithTag("gomode-recognition").getBoundsInRoot()
+        val speech = composeRule.onNodeWithTag("gomode-speech").getBoundsInRoot()
+        assertEquals(recognition.top, speech.top)
+        assertTrue(speech.left > recognition.right)
+    }
+
+    @Test
+    fun narrowSettingsStackTheStages() {
+        showSettings(SettingsRepository(MemoryPreferences())) { false }
+        val recognition = composeRule.onNodeWithTag("gomode-recognition").getBoundsInRoot()
+        val speech = composeRule.onNodeWithTag("gomode-speech").getBoundsInRoot()
+        assertEquals(recognition.left, speech.left)
+        assertTrue(speech.top > recognition.bottom)
     }
 
     /** The checked chip of the chip group tagged [field]. */

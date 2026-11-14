@@ -4,7 +4,9 @@ package com.fghbuild.gomode
 import android.Manifest
 import android.os.Environment
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -109,8 +111,9 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         }
         // The closed menu's anchor keeps focus; capture the resting outline instead.
         composeRule.runOnUiThread { composeRule.activity.currentFocus?.clearFocus() }
-        // Show the setup through the Display switches, as the browser capture does.
+        // Start at the Voice heading: scrolled past it, scrolling back aligns it with the top edge.
         composeRule.onNodeWithTag("gomode-show-usage-stats").performScrollTo()
+        composeRule.onNode(hasText("Voice") and isHeading()).performScrollTo()
         capture(device, directory, "voice-settings")
 
         composeRule.onNodeWithTag("gomode-manage-halo").performScrollTo().performClick()

@@ -146,9 +146,11 @@ internal fun SettingsScreen(
             (settings.loadState as? SettingsLoadState.Failed)?.message?.let {
                 Text(it, modifier = Modifier.testTag("gomode-settings-error"))
             }
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SettingsGrid {
                 SectionHeading("Voice")
-                if (voiceSessionActive) Text("End the voice session to change voice settings.")
+                if (voiceSessionActive) {
+                    Text("End the voice session to change voice settings.", modifier = Modifier.fullSpan())
+                }
                 VoiceSetupSetting(
                     settings,
                     settingsRepository,
@@ -161,10 +163,10 @@ internal fun SettingsScreen(
                     edits,
                     enabled = !voiceSessionActive && settings.loadState == SettingsLoadState.Ready,
                 )
-                VoiceErrorDiagnosticsSetting()
+                Column(Modifier.fullSpan()) { VoiceErrorDiagnosticsSetting() }
             }
             HorizontalDivider()
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SettingsGrid {
                 SectionHeading("Display")
                 // Display preferences stay available during calls.
                 SwitchRow(
@@ -312,7 +314,11 @@ private fun SwitchRow(
 
 @Composable
 private fun SectionHeading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+    Text(
+        text,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.fullSpan().semantics { heading() },
+    )
 }
 
 private const val VOICE_LANGUAGE_HINT = "Applies to recognition, speech, and replies."

@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
@@ -76,8 +77,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.coroutineContext
-
-private const val UNAVAILABLE_MODEL = "Choose an available model"
 
 private sealed interface ChoiceDiscovery {
     /** No service is active, so no gateway offers choices. */
@@ -332,7 +331,8 @@ private fun SetupSegments(
     onSelect: (VoiceSetupMode) -> Unit,
 ) {
     val options = listOf(VoiceSetupMode.ALL_IN_ONE to "All-in-one", VoiceSetupMode.SEPARATE_STAGES to "Separate stages")
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    // Bounded like a field, as on the web, when the grid spans a wide screen.
+    Column(Modifier.fullSpan().widthIn(max = 448.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         // A label that wraps at large text sizes keeps both segments the same height.
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
             options.forEachIndexed { index, (option, label) ->
@@ -373,11 +373,11 @@ private fun DiscoveryStatus(
 ) {
     when (discovery) {
         ChoiceDiscovery.Loading -> {
-            Text("Loading voice choices…", modifier = Modifier.testTag("gomode-voice-choices-loading"))
+            Text("Loading voice choices…", modifier = Modifier.fullSpan().testTag("gomode-voice-choices-loading"))
         }
 
         is ChoiceDiscovery.Failed -> {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fullSpan(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     discovery.message,
                     color = MaterialTheme.colorScheme.error,
@@ -410,7 +410,6 @@ private fun AllInOneSetting(
         label = "Model",
         enabled = editor.enabled,
         tag = "gomode-voice-model",
-        unavailable = UNAVAILABLE_MODEL.takeIf { listed.none { it.id == selectedID } },
         error = editor.failure(SetupControl.MODEL) ?: editor.resolution?.exceptionOrNull()?.message,
         errorTag = "gomode-voice-model-error",
     ) {
@@ -444,7 +443,10 @@ private fun SeparateStagesSetting(
     LanguageModelPicker(editor)
     status?.invoke()
     if (shown.preference.languageModel == VoiceLanguageModel.LOCAL_LLM) {
-        ModelDownloadSetting(shown.localLlmModel, enabled = downloadsEnabled)
+        // One grid cell beside the Language model.
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ModelDownloadSetting(shown.localLlmModel, enabled = downloadsEnabled)
+        }
     }
     StagePicker(editor, SpeechStage.SYNTHESIS)
     if (shown.preference.effectiveSpeech == SpeechStageLocation.GATEWAY) {
@@ -480,10 +482,6 @@ private fun LanguageModelPicker(editor: SetupEditor) {
         label = "Language model",
         enabled = editor.enabled,
         tag = "gomode-language-model",
-        unavailable =
-            UNAVAILABLE_MODEL.takeIf {
-                languageModel == VoiceLanguageModel.GATEWAY && listed.none { it.id == gatewayID }
-            },
         error = editor.failure(SetupControl.MODEL) ?: editor.resolutionError(null),
         errorTag = "gomode-language-model-error",
         hint =
@@ -573,10 +571,6 @@ private fun StagePicker(
         label = label,
         enabled = editor.enabled,
         tag = "gomode-$key",
-        unavailable =
-            UNAVAILABLE_MODEL.takeIf {
-                gateway && if (fixed != null) ownSpeech == null else models.none { it.id == modelID }
-            },
         error = editor.failure(control) ?: editor.resolutionError(stage),
         errorTag = "gomode-$key-error",
     ) {

@@ -19,10 +19,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
@@ -50,7 +52,8 @@ internal class SettingsChipsScope(
                 } else {
                     null
                 },
-            modifier = Modifier.testTag(tag),
+            // One chip per group is checked, so it reads as a radio button rather than FilterChip's checkbox.
+            modifier = Modifier.semantics { role = Role.RadioButton }.testTag(tag),
         )
     }
 
@@ -66,10 +69,7 @@ internal class SettingsChipsScope(
     }
 }
 
-/**
- * Picks one of a few models from chips that wrap across the width. [unavailable] names a saved choice the catalog
- * no longer lists; it shows as a disabled selected chip, tagged "[tag]-unavailable", until a pick replaces it.
- */
+/** Picks one of a few models from chips that wrap across the width. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SettingsChips(
@@ -78,7 +78,6 @@ internal fun SettingsChips(
     tag: String,
     error: String?,
     errorTag: String,
-    unavailable: String?,
     /** Guidance below the chips, styled like the web's hints and tagged "[tag]-hint". */
     hint: String? = null,
     items: @Composable SettingsChipsScope.() -> Unit,
@@ -102,7 +101,6 @@ internal fun SettingsChips(
                         error?.let { this.error(it) }
                     }.testTag(tag),
         ) {
-            unavailable?.let { scope.Item(it, selected = true, tag = "$tag-unavailable", enabled = false) {} }
             scope.items()
         }
         hint?.let {
