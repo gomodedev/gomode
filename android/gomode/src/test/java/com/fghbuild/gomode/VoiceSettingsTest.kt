@@ -18,6 +18,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -31,6 +33,8 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.isNotEnabled
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -277,20 +281,15 @@ class VoiceSettingsTest {
         val separate = composeRule.onNodeWithTag("gomode-voice-setup-separate-stages")
         allInOne.performScrollTo().assertIsNotSelected().assertIsNotEnabled()
         separate.assertIsSelected().assertIsEnabled()
-        composeRule.onNodeWithTag("gomode-recognition").performScrollTo().assertTextContains("Local")
-        composeRule
-            .onNodeWithTag("gomode-language-model")
-            .performScrollTo()
-            .assertTextContains("Choose an available model")
-        composeRule.onNodeWithTag("gomode-speech").performScrollTo().assertTextContains("Local")
+        chosen("gomode-recognition").assertTextContains("Local")
+        chosen("gomode-language-model").assertTextContains("Choose an available model")
+        chosen("gomode-speech").assertTextContains("Local")
         composeRule.onNodeWithTag("gomode-device-speech-rate").performScrollTo().assertTextContains("1× (Normal)")
         assertEquals(VoiceSetupMode.FOLLOW_GATEWAY, repository.settings.value.voiceSetup.mode)
-        composeRule.onNodeWithTag("gomode-speech").performClick()
-        composeRule.onNodeWithTag("gomode-speech-device").assertIsSelected()
-        composeRule.onNodeWithTag("gomode-speech-device").performClick()
+        composeRule.onNodeWithTag("gomode-speech-device").performScrollTo().assertIsSelected()
+        composeRule.onNodeWithTag("gomode-speech-device").performScrollTo().performClick()
         assertEquals(VoiceSetupMode.FOLLOW_GATEWAY, repository.settings.value.voiceSetup.mode)
-        composeRule.onNodeWithTag("gomode-language-model").performScrollTo().performClick()
-        composeRule.onNodeWithTag("gomode-language-model-needle-whistle").performClick()
+        composeRule.onNodeWithTag("gomode-language-model-needle-whistle").performScrollTo().performClick()
         val reopened = SettingsRepository(store)
         composeRule.waitUntil {
             reopened.settings.value.voiceSetup.let {
@@ -303,7 +302,8 @@ class VoiceSettingsTest {
         composeRule.runOnIdle { active.value = true }
         separate.performScrollTo().assertIsSelected().assertIsNotEnabled()
         for (tag in listOf("gomode-recognition", "gomode-language-model", "gomode-speech")) {
-            composeRule.onNodeWithTag(tag).performScrollTo().assertIsNotEnabled()
+            composeRule.onNodeWithTag(tag).performScrollTo()
+            composeRule.onAllNodes(hasAnyAncestor(hasTestTag(tag)) and hasClickAction()).assertAll(isNotEnabled())
         }
     }
 
@@ -418,8 +418,7 @@ class VoiceSettingsTest {
         composeRule
             .onNodeWithTag("gomode-language-model")
             .assertContentDescriptionEquals("Language model. Add a service, or choose a Local language model.")
-        composeRule.onNodeWithTag("gomode-language-model").performClick()
-        composeRule.onNodeWithTag("gomode-language-model-needle-whistle").performClick()
+        composeRule.onNodeWithTag("gomode-language-model-needle-whistle").performScrollTo().performClick()
         composeRule.waitUntil {
             repository.settings.value.voiceSetup.effectiveLanguageModel == VoiceLanguageModel.NEEDLE_WHISTLE
         }
@@ -538,29 +537,40 @@ class VoiceSettingsTest {
         showSettings(repository) { active.value }
         val languageModel = composeRule.onNodeWithTag("gomode-language-model")
 
-        languageModel.performScrollTo().performClick()
+        languageModel.performScrollTo()
         composeRule.onNode(hasText("Local") and isHeading()).assertExists()
-        composeRule.onNodeWithTag("gomode-language-model-needle-whistle").assertIsNotSelected().performClick()
+        composeRule
+            .onNodeWithTag(
+                "gomode-language-model-needle-whistle",
+            ).performScrollTo()
+            .assertIsNotSelected()
+            .performClick()
         composeRule.waitUntil {
             repository.settings.value.voiceSetup.effectiveLanguageModel == VoiceLanguageModel.NEEDLE_WHISTLE
         }
-        languageModel.assertTextContains("Whistle + Needle")
+        chosen("gomode-language-model").assertTextContains("Whistle + Needle")
         composeRule.onNodeWithTag("gomode-model-download-status").assertDoesNotExist()
 
         for (model in LocalLlmModel.entries) {
-            languageModel.performScrollTo().performClick()
-            composeRule.onNodeWithTag("gomode-model-${model.name}").assertTextContains(model.label).performClick()
+            composeRule
+                .onNodeWithTag("gomode-model-${model.name}")
+                .performScrollTo()
+                .assertTextContains(model.label)
+                .performClick()
             composeRule.waitUntil {
                 repository.settings.value.let {
                     it.localLlmModel == model && it.voiceSetup.effectiveLanguageModel == VoiceLanguageModel.LOCAL_LLM
                 }
             }
-            languageModel.assertTextContains(model.label)
+            chosen("gomode-language-model").assertTextContains(model.label)
             composeRule.onNodeWithTag("gomode-model-download-status").performScrollTo().assertExists()
         }
-        languageModel.performScrollTo().performClick()
-        composeRule.onNodeWithTag("gomode-model-LFM_3_1_7B_32K").assertIsSelected()
-        composeRule.onNodeWithTag("gomode-model-GEMMA_4_E2B").assertIsNotSelected().performClick()
+        composeRule.onNodeWithTag("gomode-model-LFM_3_1_7B_32K").performScrollTo().assertIsSelected()
+        composeRule
+            .onNodeWithTag("gomode-model-GEMMA_4_E2B")
+            .performScrollTo()
+            .assertIsNotSelected()
+            .performClick()
         composeRule.waitUntil { repository.settings.value.localLlmModel == LocalLlmModel.GEMMA_4_E2B }
         val reopened = SettingsRepository(store)
         composeRule.waitUntil {
@@ -571,9 +581,13 @@ class VoiceSettingsTest {
         }
 
         composeRule.runOnIdle { active.value = true }
-        languageModel.performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithTag("gomode-model-GEMMA_4_E2B").performScrollTo().assertIsNotEnabled()
         composeRule.onNodeWithTag("gomode-model-download").performScrollTo().assertIsNotEnabled()
     }
+
+    /** The checked chip of the chip group tagged [field]. */
+    private fun chosen(field: String): SemanticsNodeInteraction =
+        composeRule.onNode(hasAnyAncestor(hasTestTag(field)) and isSelected()).performScrollTo()
 
     private fun showSettings(
         repository: SettingsRepository,

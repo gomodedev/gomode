@@ -4,7 +4,6 @@ package com.fghbuild.gomode.ui.settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenuItem
@@ -26,7 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -59,17 +57,6 @@ internal class SettingsPickerMenu(
             // A trailing check marks the current item without shifting item labels.
             trailingIcon = { if (selected) Icon(Icons.Default.Check, contentDescription = null) },
             modifier = Modifier.semantics { this.selected = selected }.testTag(tag),
-        )
-    }
-
-    /** A label that names the items after it. */
-    @Composable
-    fun Header(text: String) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).semantics { heading() },
         )
     }
 }

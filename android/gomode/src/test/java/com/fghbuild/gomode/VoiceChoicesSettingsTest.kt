@@ -12,7 +12,9 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -108,7 +110,7 @@ class VoiceChoicesSettingsTest {
 
                 // The gateway's WebRTC default is a native audio model, so the setup shows as all-in-one.
                 composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").assertIsSelected()
-                composeRule.onNodeWithTag("gomode-voice-model").assertTextContains("Gemini Live")
+                chosen("gomode-voice-model").assertTextContains("Gemini Live")
                 composeRule.onNodeWithTag("gomode-recognition").assertDoesNotExist()
                 composeRule.onNodeWithTag("gomode-device-speech-rate").assertDoesNotExist()
                 assertEquals(VoiceSetupMode.FOLLOW_GATEWAY, repository.settings.value.voiceSetup.mode)
@@ -139,20 +141,20 @@ class VoiceChoicesSettingsTest {
                 composeRule.onNodeWithTag("gomode-speaking-voices").assertDoesNotExist()
 
                 // All-in-one lists only native audio models.
-                composeRule.onNodeWithTag("gomode-voice-model").performScrollTo().performClick()
-                composeRule.onNodeWithTag("gomode-voice-choice-live").assertIsSelected()
+                composeRule.onNodeWithTag("gomode-voice-model").performScrollTo()
+                composeRule.onNodeWithTag("gomode-voice-choice-live").performScrollTo().assertIsSelected()
                 composeRule.onNodeWithTag("gomode-voice-choice-llm").assertDoesNotExist()
-                composeRule.onNodeWithTag("gomode-voice-choice-mini").performClick()
+                composeRule.onNodeWithTag("gomode-voice-choice-mini").performScrollTo().performClick()
                 composeRule.waitUntil {
                     repository.settings.value.gateway(base) == GatewayVoiceSetup(allInOneChoiceID = "mini")
                 }
-                composeRule.onNodeWithTag("gomode-voice-model").assertTextContains("Realtime Mini")
+                chosen("gomode-voice-model").assertTextContains("Realtime Mini")
                 composeRule.onNodeWithTag("gomode-speaking-voice").assertDoesNotExist()
 
                 composeRule.runOnIdle { active.value = true }
                 composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").assertIsSelected().assertIsNotEnabled()
                 composeRule.onNodeWithTag("gomode-voice-setup-separate-stages").assertIsNotEnabled()
-                composeRule.onNodeWithTag("gomode-voice-model").assertIsNotEnabled()
+                composeRule.onNodeWithTag("gomode-voice-choice-mini").performScrollTo().assertIsNotEnabled()
                 assertEquals(4, server.requestCount)
             }
         }
@@ -183,9 +185,9 @@ class VoiceChoicesSettingsTest {
                 )
 
                 // Device recognition and speech: the gateway's text default runs the language model.
-                stage("gomode-recognition").assertTextContains("Local")
-                stage("gomode-language-model").assertTextContains("Gateway LLM")
-                stage("gomode-speech").assertTextContains("Local")
+                chosen("gomode-recognition").assertTextContains("Local")
+                chosen("gomode-language-model").assertTextContains("Gateway LLM")
+                chosen("gomode-speech").assertTextContains("Local")
                 stage("gomode-device-speech-rate").assertTextContains("1× (Normal)")
                 composeRule.onNodeWithTag("gomode-speaking-voice").assertDoesNotExist()
 
@@ -198,7 +200,7 @@ class VoiceChoicesSettingsTest {
                         .gateway(base)
                         .recognitionModelID,
                 )
-                stage("gomode-recognition").assertTextContains("Parakeet")
+                chosen("gomode-recognition").assertTextContains("Parakeet")
                 stage("gomode-device-speech-rate").assertIsEnabled()
 
                 // Gateway recognition and speech.
@@ -210,23 +212,32 @@ class VoiceChoicesSettingsTest {
                         .gateway(base)
                         .synthesisModelID,
                 )
-                stage("gomode-speech").assertTextContains("Piper")
+                chosen("gomode-speech").assertTextContains("Piper")
                 composeRule.onNodeWithTag("gomode-device-speech-rate").assertDoesNotExist()
 
                 // Device recognition with gateway speech.
-                stage("gomode-recognition").performClick()
-                composeRule.onNodeWithTag("gomode-recognition-model-parakeet").assertIsSelected()
+                composeRule.onNodeWithTag("gomode-recognition-model-parakeet").performScrollTo().assertIsSelected()
                 // A held write keeps the pickers disabled while it saves, as a slow disk does.
                 store.writes.lock()
-                composeRule.onNodeWithTag("gomode-recognition-device").assertIsNotSelected().performClick()
-                stage("gomode-recognition").assertIsNotEnabled()
+                composeRule
+                    .onNodeWithTag(
+                        "gomode-recognition-device",
+                    ).performScrollTo()
+                    .assertIsNotSelected()
+                    .performClick()
+                composeRule.onNodeWithTag("gomode-recognition-model-parakeet").performScrollTo().assertIsNotEnabled()
                 store.writes.unlock()
                 composeRule.waitUntil { repository.settings.value.voiceSetup.recognition == DEVICE }
-                stage("gomode-recognition").assertTextContains("Local").performClick()
-                // After a save, reselecting the current stage closes the menu.
-                composeRule.onNodeWithTag("gomode-recognition-device").assertIsSelected().performClick()
-                composeRule.onNodeWithTag("gomode-recognition-options").assertDoesNotExist()
-                stage("gomode-speech").assertTextContains("Piper")
+                chosen("gomode-recognition").assertTextContains("Local")
+                // After a save, reselecting the current stage keeps it.
+                composeRule
+                    .onNodeWithTag(
+                        "gomode-recognition-device",
+                    ).performScrollTo()
+                    .assertIsSelected()
+                    .performClick()
+                composeRule.onNodeWithTag("gomode-recognition-device").performScrollTo().assertIsSelected()
+                chosen("gomode-speech").assertTextContains("Piper")
 
                 pick("gomode-language-model", "gomode-voice-choice-other")
                 composeRule.waitUntil {
@@ -234,20 +245,20 @@ class VoiceChoicesSettingsTest {
                         .gateway(base)
                         .separateStagesChoiceID == "other"
                 }
-                stage("gomode-language-model").assertTextContains("Other LLM")
+                chosen("gomode-language-model").assertTextContains("Other LLM")
                 val separate = repository.settings.value.voiceSetup
 
                 composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").performScrollTo().performClick()
                 composeRule.waitUntil { repository.settings.value.voiceSetup.mode == VoiceSetupMode.ALL_IN_ONE }
-                stage("gomode-voice-model").assertTextContains("Gemini Live")
+                chosen("gomode-voice-model").assertTextContains("Gemini Live")
                 composeRule.onNodeWithTag("gomode-language-model").assertDoesNotExist()
 
                 composeRule.onNodeWithTag("gomode-voice-setup-separate-stages").performScrollTo().performClick()
                 composeRule.waitUntil { repository.settings.value.voiceSetup.mode == VoiceSetupMode.SEPARATE_STAGES }
                 assertEquals(separate, repository.settings.value.voiceSetup)
-                stage("gomode-recognition").assertTextContains("Local")
-                stage("gomode-language-model").assertTextContains("Other LLM")
-                stage("gomode-speech").assertTextContains("Piper")
+                chosen("gomode-recognition").assertTextContains("Local")
+                chosen("gomode-language-model").assertTextContains("Other LLM")
+                chosen("gomode-speech").assertTextContains("Piper")
                 assertEquals(
                     GatewayVoiceSetup(
                         allInOneChoiceID = "live",
@@ -276,14 +287,18 @@ class VoiceChoicesSettingsTest {
                 server.enqueue(MockResponse().setBody(catalog))
                 show(repository)
                 waitForTag("gomode-recognition")
-                stage("gomode-recognition").assertTextContains("Whisper")
-                stage("gomode-speech").assertTextContains("Piper")
+                chosen("gomode-recognition").assertTextContains("Whisper")
+                chosen("gomode-speech").assertTextContains("Piper")
                 composeRule.onNodeWithTag("gomode-model-download-status").assertDoesNotExist()
 
-                stage("gomode-language-model").performClick()
-                composeRule.onNodeWithTag("gomode-voice-choice-llm").assertIsSelected()
+                composeRule.onNodeWithTag("gomode-voice-choice-llm").performScrollTo().assertIsSelected()
                 composeRule.onNodeWithTag("gomode-voice-choice-live").assertDoesNotExist()
-                composeRule.onNodeWithTag("gomode-model-GEMMA_4_E4B").assertIsNotSelected().performClick()
+                composeRule
+                    .onNodeWithTag(
+                        "gomode-model-GEMMA_4_E4B",
+                    ).performScrollTo()
+                    .assertIsNotSelected()
+                    .performClick()
                 composeRule.waitUntil { repository.settings.value.localLlmModel == LocalLlmModel.GEMMA_4_E4B }
                 val local = repository.settings.value.voiceSetup
                 assertEquals(VoiceLanguageModel.LOCAL_LLM, local.languageModel)
@@ -291,15 +306,15 @@ class VoiceChoicesSettingsTest {
                 assertEquals(GATEWAY, local.recognition)
                 assertEquals(GATEWAY, local.speech)
 
-                stage("gomode-language-model").assertTextContains("Gemma 4 E4B")
+                chosen("gomode-language-model").assertTextContains("Gemma 4 E4B")
                 stage("gomode-model-download-status").assertExists()
-                stage("gomode-recognition").assertTextContains("Local").performClick()
-                composeRule.onNodeWithTag("gomode-recognition-device").assertIsSelected()
-                composeRule.onNodeWithTag("gomode-recognition-model-whisper").assertIsNotEnabled()
-                composeRule.onNodeWithTag("gomode-recognition-device").performClick()
-                stage("gomode-speech").assertTextContains("Local").performClick()
-                composeRule.onNodeWithTag("gomode-speech-model-piper").assertIsNotEnabled()
-                composeRule.onNodeWithTag("gomode-speech-device").performClick()
+                chosen("gomode-recognition").assertTextContains("Local")
+                composeRule.onNodeWithTag("gomode-recognition-device").performScrollTo().assertIsSelected()
+                composeRule.onNodeWithTag("gomode-recognition-model-whisper").performScrollTo().assertIsNotEnabled()
+                composeRule.onNodeWithTag("gomode-recognition-device").performScrollTo().performClick()
+                chosen("gomode-speech").assertTextContains("Local")
+                composeRule.onNodeWithTag("gomode-speech-model-piper").performScrollTo().assertIsNotEnabled()
+                composeRule.onNodeWithTag("gomode-speech-device").performScrollTo().performClick()
                 stage("gomode-device-speech-rate").assertIsEnabled()
                 assertEquals(local, repository.settings.value.voiceSetup)
 
@@ -307,15 +322,15 @@ class VoiceChoicesSettingsTest {
                 composeRule.waitUntil {
                     repository.settings.value.voiceSetup.languageModel == VoiceLanguageModel.NEEDLE_WHISTLE
                 }
-                stage("gomode-language-model").assertTextContains("Whistle + Needle")
+                chosen("gomode-language-model").assertTextContains("Whistle + Needle")
                 composeRule.onNodeWithTag("gomode-model-download-status").assertDoesNotExist()
 
                 pick("gomode-language-model", "gomode-voice-choice-llm")
                 composeRule.waitUntil {
                     repository.settings.value.voiceSetup.languageModel == VoiceLanguageModel.GATEWAY
                 }
-                stage("gomode-recognition").assertTextContains("Whisper")
-                stage("gomode-speech").assertTextContains("Piper")
+                chosen("gomode-recognition").assertTextContains("Whisper")
+                chosen("gomode-speech").assertTextContains("Piper")
             }
         }
 
@@ -339,7 +354,7 @@ class VoiceChoicesSettingsTest {
 
                 // Settings shows the WebRTC default a session uses, without an error, and saves nothing.
                 composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").assertIsSelected()
-                stage("gomode-voice-model").assertTextContains("Gemini Live")
+                chosen("gomode-voice-model").assertTextContains("Gemini Live")
                 composeRule.onNodeWithTag("gomode-voice-model-error").assertDoesNotExist()
                 assertEquals("gone", gateway.savedSetup(repository.settings.value).followedChoiceID)
                 pick("gomode-voice-model", "gomode-voice-choice-mini")
@@ -366,8 +381,8 @@ class VoiceChoicesSettingsTest {
                 server.enqueue(MockResponse().setResponseCode(503))
                 show(repository)
                 waitForTag("gomode-voice-choices-retry")
-                stage("gomode-language-model").assertTextContains("Whistle + Needle")
-                stage("gomode-recognition").assertTextContains("Local")
+                chosen("gomode-language-model").assertTextContains("Whistle + Needle")
+                chosen("gomode-recognition").assertTextContains("Local")
 
                 // A gateway language model needs the catalog, so the failure replaces the pickers.
                 repository.updateSavedVoiceSetup(null) {
@@ -383,9 +398,9 @@ class VoiceChoicesSettingsTest {
 
                 // Withdrawn selections show the defaults sessions use, without an error.
                 pick("gomode-speech", "gomode-speech-model-piper")
-                stage("gomode-speech").assertTextContains("Piper")
+                chosen("gomode-speech").assertTextContains("Piper")
                 pick("gomode-language-model", "gomode-voice-choice-other")
-                stage("gomode-language-model").assertTextContains("Other LLM")
+                chosen("gomode-language-model").assertTextContains("Other LLM")
                 repository.updateSpeechModel(base, SpeechStage.SYNTHESIS, "removed") { it }
                 repository.updateVoiceChoice(base, "gone") { it }
                 composeRule.waitUntil {
@@ -393,8 +408,8 @@ class VoiceChoicesSettingsTest {
                         it.synthesisModelID == "removed" && it.separateStagesChoiceID == "gone"
                     }
                 }
-                stage("gomode-speech").assertTextContains("Kokoro")
-                stage("gomode-language-model").assertTextContains("Gateway LLM")
+                chosen("gomode-speech").assertTextContains("Kokoro")
+                chosen("gomode-language-model").assertTextContains("Gateway LLM")
                 listOf("gomode-speech-error", "gomode-language-model-error", "gomode-recognition-error").forEach {
                     composeRule.onNodeWithTag(it).assertDoesNotExist()
                 }
@@ -444,10 +459,13 @@ class VoiceChoicesSettingsTest {
         field: String,
         item: String,
     ) {
-        stage(field).performClick()
-        // Long menus scroll within their popup.
+        stage(field)
         composeRule.onNodeWithTag(item).performScrollTo().performClick()
     }
+
+    /** The checked chip of the chip group tagged [field]. */
+    private fun chosen(field: String): SemanticsNodeInteraction =
+        composeRule.onNode(hasAnyAncestor(hasTestTag(field)) and isSelected()).performScrollTo()
 
     private fun SettingsState.gateway(base: String) = gatewayVoiceSetups[base] ?: GatewayVoiceSetup()
 

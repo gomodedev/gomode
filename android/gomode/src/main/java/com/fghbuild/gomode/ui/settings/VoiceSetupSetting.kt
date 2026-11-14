@@ -406,12 +406,11 @@ private fun AllInOneSetting(
     val listed = choices.setupChoices(VoiceSetupKind.ALL_IN_ONE)
     val resolved = editor.resolution?.getOrNull()
     val selectedID = editor.choice?.id
-    SettingsPicker(
+    SettingsChips(
         label = "Model",
-        value = listed.firstOrNull { it.id == selectedID }?.label ?: UNAVAILABLE_MODEL,
         enabled = editor.enabled,
         tag = "gomode-voice-model",
-        menuTag = "gomode-voice-models",
+        unavailable = UNAVAILABLE_MODEL.takeIf { listed.none { it.id == selectedID } },
         error = editor.failure(SetupControl.MODEL) ?: editor.resolution?.exceptionOrNull()?.message,
         errorTag = "gomode-voice-model-error",
     ) {
@@ -477,17 +476,14 @@ private fun LanguageModelPicker(editor: SetupEditor) {
     val choices = editor.choices
     val listed = choices?.setupChoices(VoiceSetupKind.SEPARATE_STAGES).orEmpty()
     val gatewayID = editor.choice?.id ?: shown.gateway.separateStagesChoiceID
-    SettingsPicker(
+    SettingsChips(
         label = "Language model",
-        value =
-            when (languageModel) {
-                VoiceLanguageModel.GATEWAY -> listed.firstOrNull { it.id == gatewayID }?.label ?: UNAVAILABLE_MODEL
-                VoiceLanguageModel.LOCAL_LLM -> shown.localLlmModel.label
-                VoiceLanguageModel.NEEDLE_WHISTLE -> "Whistle + Needle"
-            },
         enabled = editor.enabled,
         tag = "gomode-language-model",
-        menuTag = "gomode-language-models",
+        unavailable =
+            UNAVAILABLE_MODEL.takeIf {
+                languageModel == VoiceLanguageModel.GATEWAY && listed.none { it.id == gatewayID }
+            },
         error = editor.failure(SetupControl.MODEL) ?: editor.resolutionError(null),
         errorTag = "gomode-language-model-error",
         hint =
@@ -573,17 +569,14 @@ private fun StagePicker(
             SpeechStage.SYNTHESIS -> Triple("Speech", "speech", SetupControl.SPEECH)
         }
     val gateway = location == SpeechStageLocation.GATEWAY
-    SettingsPicker(
+    SettingsChips(
         label = label,
-        value =
-            when {
-                !gateway -> "Local"
-                fixed != null -> ownSpeech?.label ?: UNAVAILABLE_MODEL
-                else -> models.firstOrNull { it.id == modelID }?.label ?: UNAVAILABLE_MODEL
-            },
         enabled = editor.enabled,
         tag = "gomode-$key",
-        menuTag = "gomode-$key-options",
+        unavailable =
+            UNAVAILABLE_MODEL.takeIf {
+                gateway && if (fixed != null) ownSpeech == null else models.none { it.id == modelID }
+            },
         error = editor.failure(control) ?: editor.resolutionError(stage),
         errorTag = "gomode-$key-error",
     ) {

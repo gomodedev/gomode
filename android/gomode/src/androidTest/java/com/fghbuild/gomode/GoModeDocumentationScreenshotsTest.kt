@@ -99,8 +99,7 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
                 .isNotEmpty()
         }
         composeRule.onNodeWithTag("gomode-voice-setup-separate-stages").performScrollTo().performClick()
-        composeRule.onNodeWithTag("gomode-speech").performScrollTo().performClick()
-        composeRule.onNodeWithTag("gomode-speech-device").performClick()
+        composeRule.onNodeWithTag("gomode-speech-device").performScrollTo().performClick()
         // The speaking-voice picker enables once the TextToSpeech engine lists its voices.
         composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
             composeRule
