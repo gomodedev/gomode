@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -592,11 +593,19 @@ func TestLocalStackBackend(t *testing.T) {
 	})
 	t.Run("mixed sessions share bounded residency", func(t *testing.T) {
 		t.Parallel()
+		// The remote llama.cpp synthesis stage is pinged when it loads. Closing
+		// each connection leaves no network reader in the synctest bubble.
+		health := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, `{"status":"ok"}`)
+		}))
+		health.Config.SetKeepAlivesEnabled(false)
+		health.Start()
+		t.Cleanup(health.Close)
 		synctest.Test(t, func(t *testing.T) {
 			cfg := poolTestConfig("mixed")
 			cfg.TextOnly = false
-			cfg.ASR = voicegateway.ASRConfig{Engine: voicegateway.ASREngineOpenAIAudio, Remote: "http://localhost:1", Model: "asr"}
-			cfg.TTS = voicegateway.TTSConfig{Engine: voicegateway.TTSEngineOpenAIAudio, Remote: "http://localhost:1", Model: "tts", Voice: "voice"}
+			cfg.ASR = voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "asr"}
+			cfg.TTS = voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: health.URL, Model: "tts", Voice: "voice"}
 			p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
 			b := p.backend(cfg)
 			t.Cleanup(func() { _ = b.Close() })
@@ -641,9 +650,9 @@ func TestLocalStackBackend(t *testing.T) {
 func TestMixedSpeechCapabilities(t *testing.T) {
 	t.Parallel()
 	cfg := voicegateway.PipelineConfig{
-		ASR:            voicegateway.ASRConfig{Engine: voicegateway.ASREngineOpenAIAudio, Remote: "http://localhost:1", Model: "asr"},
+		ASR:            voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "asr"},
 		LLM:            voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "llm"}},
-		TTS:            voicegateway.TTSConfig{Engine: voicegateway.TTSEngineOpenAIAudio, Remote: "http://localhost:1", Model: "tts", Voice: "voice"},
+		TTS:            voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "tts", Voice: "voice"},
 		UnavailableTTS: true,
 	}
 	p := newLocalStackPool(testRuntime)
@@ -753,22 +762,26 @@ func TestIndependentSpeechStages(t *testing.T) {
 	t.Run("compose unbundled recognition and language models", func(t *testing.T) {
 		t.Parallel()
 		requests := make(chan string, 8)
+		// Each recognizer is a remote llama.cpp server; its requests carry no
+		// model, so the server reports its own model.
+		recognizer := func(model string) string {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/health":
+					_, _ = io.WriteString(w, `{"status":"ok"}`)
+				case "/chat/completions":
+					requests <- "asr:" + model
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}]}`)
+				default:
+					t.Errorf("unexpected request %s", r.URL.Path)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			return srv.URL
+		}
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/v1/audio/transcriptions":
-				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-				if err := r.ParseMultipartForm(1 << 20); err != nil { // #nosec G120 -- MaxBytesReader bounds this test request to 1 MiB.
-					t.Error(err)
-					return
-				}
-				defer func() {
-					if err := r.MultipartForm.RemoveAll(); err != nil {
-						t.Error(err)
-					}
-				}()
-				requests <- "asr:" + r.FormValue("model")
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"text":"Hello"}`))
 			case "/chat":
 				var body struct {
 					Model string `json:"model"`
@@ -787,8 +800,8 @@ func TestIndependentSpeechStages(t *testing.T) {
 		t.Cleanup(server.Close)
 		p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
 		p.recognition = []voicegateway.ASRConfig{
-			{ID: "asr-a", Engine: voicegateway.ASREngineOpenAIAudio, Remote: server.URL, Model: "asr-a"},
-			{ID: "asr-b", Engine: voicegateway.ASREngineOpenAIAudio, Remote: server.URL, Model: "asr-b"},
+			{ID: "asr-a", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: recognizer("asr-a"), Model: "asr-a"},
+			{ID: "asr-b", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: recognizer("asr-b"), Model: "asr-b"},
 		}
 		for _, model := range []string{"llm-a", "llm-b"} {
 			b := p.llmBackend(voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: server.URL + "/chat", Model: model}})
@@ -918,8 +931,8 @@ func TestIndependentSpeechStages(t *testing.T) {
 		t.Parallel()
 		p := newLocalStackPool(testRuntime)
 		p.synthesis = []voicegateway.TTSConfig{
-			{ID: "tts-a", Engine: voicegateway.TTSEngineOpenAIAudio, Remote: "http://localhost:1", Model: "tts-a", Voice: "a"},
-			{ID: "tts-b", Engine: voicegateway.TTSEngineOpenAIAudio, Remote: "http://localhost:1", Model: "tts-b", Voice: "b"},
+			{ID: "tts-a", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "tts-a", Voice: "a"},
+			{ID: "tts-b", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "tts-b", Voice: "b"},
 		}
 		b := p.llmBackend(voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "llm"}})
 		t.Cleanup(func() { _ = b.Close() })

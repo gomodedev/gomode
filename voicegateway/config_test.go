@@ -1083,15 +1083,17 @@ model = "chat-model"
 context_size = 65536
 [[asr]]
 id = "recognition"
-engine = "openai-audio"
+engine = "genai"
+provider = "llamacpp"
 remote = "http://127.0.0.1:8000"
-model = "mlx-community/parakeet-tdt-0.6b-v3"
+model = "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0"
 [[tts]]
 id = "speech"
-engine = "openai-audio"
-remote = "http://127.0.0.1:8000"
-model = "mlx-community/Kokoro-82M-bf16"
-voice = "af_heart"
+engine = "genai"
+provider = "llamacpp"
+remote = "http://127.0.0.1:8001"
+model = "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M"
+voice = "female"
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -1103,7 +1105,7 @@ voice = "af_heart"
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Pipelines[0].TTS.Model != "mlx-community/Kokoro-82M-bf16" {
+	if cfg.Pipelines[0].TTS.Model != "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M" {
 		t.Fatalf("TTS model = %q", cfg.Pipelines[0].TTS.Model)
 	}
 	for _, tc := range []struct {
@@ -1111,13 +1113,13 @@ voice = "af_heart"
 		edit func(*ResolvedConfig)
 		want string
 	}{
-		{"ASR remote", func(c *ResolvedConfig) { c.Pipelines[0].ASR.Remote = "" }, "voice.asr.remote"},
+		{"ASR remote", func(c *ResolvedConfig) { c.Pipelines[0].ASR.Remote = "bad" }, "voice.asr.remote"},
 		{"ASR model", func(c *ResolvedConfig) { c.Pipelines[0].ASR.Model = "" }, "voice.asr.model"},
 		{"ASR engine", func(c *ResolvedConfig) { c.Pipelines[0].ASR.Engine = "unknown" }, "voice.asr.engine"},
-		{"ASR provider", func(c *ResolvedConfig) { c.Pipelines[0].ASR.Provider = "llamacpp" }, "voice.asr.provider"},
-		{"TTS voice", func(c *ResolvedConfig) { c.Pipelines[0].TTS.Voice = "" }, "voice.tts"},
+		{"ASR provider", func(c *ResolvedConfig) { c.Pipelines[0].ASR.Provider = "unknown" }, "voice.asr.provider"},
+		{"TTS provider", func(c *ResolvedConfig) { c.Pipelines[0].TTS.Provider = "groq" }, "voice.tts.provider"},
 		{"TTS URL", func(c *ResolvedConfig) { c.Pipelines[0].TTS.Remote = "bad" }, "voice.tts.remote"},
-		{"TTS engine", func(c *ResolvedConfig) { c.Pipelines[0].TTS.Engine = "unknown" }, "voice.tts.engine"},
+		{"TTS engine", func(c *ResolvedConfig) { c.Pipelines[0].TTS.Engine, c.Pipelines[0].TTS.Provider = "unknown", "" }, "voice.tts.engine"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -1128,24 +1130,6 @@ voice = "af_heart"
 				t.Fatalf("error = %v, want %s", err, tc.want)
 			}
 		})
-	}
-	whisper := cfg
-	whisper.Pipelines = slices.Clone(cfg.Pipelines)
-	whisper.Pipelines[0].ASR.Engine = ASREngineWhisperCPP
-	whisper.Pipelines[0].ASR.Model = ""
-	if err := whisper.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	whisper.Pipelines[0].ASR.Model = "ignored"
-	if err := whisper.Validate(); err == nil || !strings.Contains(err.Error(), "voice.asr.model") {
-		t.Fatalf("whisper model error = %v", err)
-	}
-	genai := cfg
-	genai.Pipelines = slices.Clone(cfg.Pipelines)
-	genai.Pipelines[0].ASR.Engine = ASREngineGenAI
-	genai.Pipelines[0].ASR.Provider = "unknown"
-	if err := genai.Validate(); err == nil || !strings.Contains(err.Error(), "voice.asr.provider") {
-		t.Fatalf("genai provider error = %v", err)
 	}
 }
 

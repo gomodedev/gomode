@@ -13,11 +13,19 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/groq"
 	"github.com/maruel/genai/providers/llamacpp"
 )
 
+// groqASRAdapter transcribes through Groq's Whisper endpoint, which detects
+// the language when TranscriptionRequest.Language (ISO 639-1) is empty.
+// Measured with whisper-large-v3-turbo on 4 s English and French requests:
+// detection is correct, and a mismatched Language is ignored rather than
+// translated.
+//
+// TODO: Set Language from the session.
 type groqASRAdapter struct{ client *groq.Client }
 
 func (a *groqASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
@@ -39,6 +47,13 @@ func (a *groqASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, er
 	return strings.TrimSpace(*out.Text), nil
 }
 
+// geminiASRAdapter transcribes through a Gemini transcription model, which
+// detects the language without hints. Measured with gemini-3.5-transcribe on
+// 4 s English and French requests: detection is correct, and a mismatched
+// GenerationConfig.TranscriptionConfig.LanguageCodes hint does not change the
+// words; an English hint on French speech drops the space before "?".
+//
+// TODO: Send the session language as LanguageCodes.
 type geminiASRAdapter struct{ client *gemini.Client }
 
 func (a *geminiASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
@@ -77,6 +92,87 @@ func (a *geminiASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, 
 	return strings.TrimSpace(text.String()), nil
 }
 
+// newChatASRAdapter transcribes through a chat model that accepts audio,
+// using the request format of the configured model.
+func newChatASRAdapter(p genai.Provider, model string) asrAdapter {
+	if strings.Contains(strings.ToLower(model), "qwen3-asr") {
+		return &qwen3ASRAdapter{provider: p}
+	}
+	return &audioChatASRAdapter{provider: p}
+}
+
+// qwen3ASRAdapter sends the format Qwen3-ASR was trained on: no system
+// message, which the model reads as recognition context, and a user message
+// carrying only audio. The reply is "language <Name><asr_text><transcript>"
+// (_build_text_prompt in QwenLM/Qwen3-ASR qwen_asr/inference/qwen3_asr.py).
+//
+// TODO: Force the session language with the assistant prefill
+// "language <Name><asr_text>", which llama-server continues, for the 30
+// SUPPORTED_LANGUAGES of qwen_asr/inference/utils.py. Measured with
+// ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0 on llama-server b12110: a forced
+// language that differs from the speech yields a translation. llama.cpp's own
+// transcription language hint is appended to the user text, which this model
+// was not trained to read.
+//
+// TODO: Stream drafts.
+// llama.cpp has no live path for this GGUF: it needs a streaming audio encoder
+// or an "asr" chat template (server_chat_get_asr_prompt). streaming_transcribe
+// in qwen_asr/inference/qwen3_asr.py instead decodes all audio every 2
+// seconds and, from the third decode on, continues the previous transcript
+// minus its last 5 tokens. On CPU, each step took 0.35 to 0.68 s for 2 to 11.5 s of
+// audio, and an 11.5 s utterance's final transcript arrived 1.6 s after the
+// end of speech.
+type qwen3ASRAdapter struct{ provider genai.Provider }
+
+func (a *qwen3ASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
+	if len(pcm) == 0 {
+		return "", nil
+	}
+	wav, err := speechWAV(pcm, micSampleRate)
+	if err != nil {
+		return "", err
+	}
+	res, err := a.provider.GenSync(ctx, genai.Messages{{Requests: []genai.Request{{Doc: genai.Doc{Filename: "speech.wav", Src: bytes.NewReader(wav)}}}}})
+	if err != nil {
+		return "", err
+	}
+	// parse_asr_output in qwen_asr/inference/utils.py separates the language
+	// metadata at the tag; "language None<asr_text>" is silence.
+	raw := res.String()
+	if _, text, ok := strings.Cut(raw, "<asr_text>"); ok {
+		raw = text
+	}
+	return strings.TrimSpace(raw), nil
+}
+
+// audioChatASRAdapter instructs an audio-capable chat model to transcribe.
+type audioChatASRAdapter struct{ provider genai.Provider }
+
+func (a *audioChatASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
+	if len(pcm) == 0 {
+		return "", nil
+	}
+	wav, err := speechWAV(pcm, micSampleRate)
+	if err != nil {
+		return "", err
+	}
+	msg := genai.Message{Requests: []genai.Request{
+		{Text: "Transcribe the attached audio. Return only the transcript text, with no commentary."},
+		{Doc: genai.Doc{Filename: "speech.wav", Src: bytes.NewReader(wav)}},
+	}}
+	res, err := a.provider.GenSync(ctx, genai.Messages{msg}, &genai.GenOptionText{SystemPrompt: "You are a speech recognition engine. Return only the spoken words."})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(res.String()), nil
+}
+
+// llamaTTSAdapter synthesizes through llama-server's /v1/audio/speech.
+//
+// TODO: Send the session language as SpeechRequest.Lang. llama-server b12110
+// passes "lang" to the model's "tts" chat template. LFM3-Audio's template maps
+// 20 lowercase codes, such as "fr" and "en-gb", to a language name and uses any
+// other value verbatim; without one it speaks American English. Not measured.
 type llamaTTSAdapter struct {
 	client *llamacpp.Client
 	voice  string

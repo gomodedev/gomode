@@ -15,6 +15,22 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// llamaLiveASR streams through llama-server's realtime transcription session.
+//
+// TODO: The session language reaches no model. ConnectTranscriptionRaw opens
+// /v1/realtime?intent=transcription. On llama-server b12110, any model with a
+// streaming audio encoder or an "asr" chat template, including Voxtral
+// Realtime and LFM3-Audio, gets a fixed session in tools/server/server-context.cpp
+// that answers session.update with its unchanged configuration. The prompt is the
+// "asr" template rendered once at load; LFM3-Audio's is "Perform live ASR."
+// The language-aware prompt in tools/server/server-realtime.cpp
+// (common_chat_get_asr_prompt) serves only conversation sessions. Measured on
+// 4 s English and French requests with the update below sent or omitted:
+// session.updated echoes an empty language every time; Voxtral-Mini-4B-Realtime-2602
+// Q4_K_M transcribes both languages correctly; LFM3-Audio-2B Q4_K_M translates
+// French speech into English. By contrast, LFM3-Audio on the batch
+// /v1/audio/transcriptions endpoint detects French without a language, keeps
+// it with "fr", and translates it into English with "en".
 type llamaLiveASR struct{ client *llamacpp.Client }
 
 func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance) (string, error) {
@@ -26,11 +42,8 @@ func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance) (strin
 	if format.Type != llamacpp.AudioPCM || format.Rate != micSampleRate {
 		return "", errors.Join(fmt.Errorf("live ASR input format %s/%d is unsupported; capture is PCM16/%d Hz", format.Type, format.Rate, micSampleRate), conn.Close())
 	}
-	// The session language selects the ASR prompt on the server, so a model such
-	// as Qwen3-ASR does not guess another language on short or accented speech.
-	// llama.cpp applies session.update fields that are present; the update echoes
-	// the negotiated session and gives tools an explicit empty list because the
-	// server rejects a null one.
+	// The update echoes the negotiated session and gives tools an explicit
+	// empty list because the server rejects a null one.
 	s.mu.Lock()
 	lang := s.language
 	s.mu.Unlock()
@@ -103,6 +116,13 @@ func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance) (strin
 	return final, errors.Join(err, sendErr, conn.Close())
 }
 
+// geminiLiveASR streams through a Gemini Live transcription model, which
+// detects the language without hints. Measured with gemini-3.5-transcribe-live
+// on 4 s English and French requests: detection is correct, and a mismatched
+// LiveTranscriptionConfig.LanguageCodes hint does not change the transcript.
+//
+// TODO: Replace with the genai transcription-session adapter, which sends the
+// session language as genai.RealtimeOptionAudio.InputLanguage.
 type geminiLiveASR struct{ client *gemini.Client }
 
 func (a *geminiLiveASR) transcribe(s *localStackSession, u *liveUtterance) (string, error) {

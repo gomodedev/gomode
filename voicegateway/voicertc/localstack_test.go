@@ -1355,8 +1355,8 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := models.asr.(*speechASRAdapter); !ok {
-			t.Fatalf("asr = %T, want speechASRAdapter", models.asr)
+		if _, ok := models.asr.(*audioChatASRAdapter); !ok {
+			t.Fatalf("asr = %T, want audioChatASRAdapter", models.asr)
 		}
 		if _, ok := models.llm.(*genaiLLMAdapter); !ok {
 			t.Fatalf("llm = %T, want genaiLLMAdapter", models.llm)
@@ -1894,7 +1894,7 @@ func TestLocalStackModelsForConfigOpenAICompatible(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 			cfg := &voicegateway.PipelineConfig{
-				ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineOpenAIAudio, Remote: srv.URL, Model: "asr"},
+				ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: srv.URL + "/asr", Model: "asr"},
 				LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: srv.URL + "/v1/chat/completions", Model: "qwen3-8-27b", APIKeyName: envName}},
 			}
 			models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, func(context.Context, string, int) (managedLlamaServer, error) {

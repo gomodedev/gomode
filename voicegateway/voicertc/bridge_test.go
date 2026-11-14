@@ -1302,8 +1302,8 @@ func TestBridge(t *testing.T) {
 			t.Parallel()
 			cfg := voicegateway.ResolvedConfig{Runtime: testRuntime,
 				LLM:         []voicegateway.LLMConfig{{ID: "llm", Label: "LLM", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "llm"}}},
-				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineOpenAIAudio, Remote: "http://localhost:1", Model: "recognition"}},
-				Pipelines:   []voicegateway.PipelineConfig{{ID: "preset", Label: "Preset", ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineOpenAIAudio, Remote: "http://localhost:1", Model: "preset-recognition"}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-llm"}}}},
+				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "recognition"}},
+				Pipelines:   []voicegateway.PipelineConfig{{ID: "preset", Label: "Preset", ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-recognition"}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-llm"}}}},
 			}
 			b, err := newBridgeWithTimeout(t.Context(), &cfg, 0, t.TempDir(), 5*time.Millisecond)
 			if err != nil {
@@ -1326,8 +1326,8 @@ func TestBridge(t *testing.T) {
 			t.Parallel()
 			cfg := voicegateway.ResolvedConfig{Runtime: testRuntime,
 				LLM:         []voicegateway.LLMConfig{{ID: "llm", Label: "LLM", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "llm"}}},
-				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineOpenAIAudio, Remote: "http://localhost:1", Model: "recognition"}},
-				Synthesis:   []voicegateway.TTSConfig{{ID: "speech", Label: "Speech", Engine: voicegateway.TTSEngineOpenAIAudio, Remote: "http://localhost:1", Model: "speech", Voice: "speaker"}},
+				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "recognition"}},
+				Synthesis:   []voicegateway.TTSConfig{{ID: "speech", Label: "Speech", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "speech", Voice: "speaker"}},
 			}
 			b, err := newBridgeWithTimeout(t.Context(), &cfg, 0, t.TempDir(), 5*time.Millisecond)
 			if err != nil {

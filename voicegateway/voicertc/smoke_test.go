@@ -35,7 +35,6 @@ import (
 
 	"github.com/maruel/genai"
 	"github.com/maruel/genaipy/kittentts"
-	"github.com/maruel/genaipy/speech"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
@@ -54,7 +53,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 
 	var spokenPCM24 []byte
 	var tts *kittentts.Runtime
-	var asr *speechASRAdapter
+	var asr asrAdapter
 	var llm *genaiLLMAdapter
 
 	t.Run("Audio", func(t *testing.T) {
@@ -106,11 +105,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 					}
 				})
 			}
-			recognizer, err := speech.NewProviderRecognizer(endpoint.provider)
-			if err != nil {
-				t.Fatal(err)
-			}
-			asr = &speechASRAdapter{recognizer: recognizer}
+			asr = newChatASRAdapter(endpoint.provider, "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0")
 
 			transcription := time.Now()
 			text, err := asr.transcribe(t.Context(), downsample24to16(spokenPCM24))

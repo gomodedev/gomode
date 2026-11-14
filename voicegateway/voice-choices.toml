@@ -230,27 +230,12 @@ model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
 context_size = 131072
 effort = "low"
 
-# External speech server (start separately):
-# [[asr]]
-# id = "parakeet"
-# engine = "openai-audio"
-# remote = "http://127.0.0.1:8000"
-# model = "mlx-community/parakeet-tdt-0.6b-v3"
-
 [[tts]]
 id = "kitten"
 label = "Kitten TTS"
 engine = "kittentts"
 model = "KittenML/kitten-tts-2"
 voice = "Luna"
-
-# External speech server (start separately):
-# [[tts]]
-# id = "kokoro"
-# engine = "openai-audio"
-# remote = "http://127.0.0.1:8000"
-# model = "mlx-community/Kokoro-82M-bf16"
-# voice = "af_heart"
 
 # Provider speech uses its native endpoint. Omit remote to start a managed model.
 [[asr]]
@@ -329,18 +314,3 @@ label = "Groq Whisper with GPT 6 Luna and Gemini speech"
 asr = "whisper"
 llm = "gpt-luna"
 tts = "gemini-tts"
-
-# Choices requiring the external Parakeet server above:
-# [[voice]]
-# id = "local-stack"
-# label = "Local speech and reasoning"
-# asr = "parakeet"
-# llm = "gemma-4-e2b"
-# tts = "kitten"
-
-# [[voice]]
-# id = "local-speech-luna"
-# label = "Local speech with GPT 6 Luna"
-# asr = "parakeet"
-# llm = "gpt-luna"
-# tts = "kitten"

@@ -12,7 +12,6 @@ import (
 	"iter"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -104,16 +103,6 @@ func localStackModelsForConfigWithStarter(
 			}
 			asr.runtime = w
 			asrAdapter = &speechASRAdapter{recognizer: w}
-		case voicegateway.ASREngineOpenAIAudio, voicegateway.ASREngineWhisperCPP:
-			protocol := speech.OpenAI
-			if cfg.ASR.Engine == voicegateway.ASREngineWhisperCPP {
-				protocol = speech.WhisperCPP
-			}
-			recognizer, err := speech.NewHTTPRecognizer(http.DefaultClient, cfg.ASR.Remote, cfg.ASR.Model, protocol)
-			if err != nil {
-				return localStackModels{}, errors.Join(err, llm.runtime.Close())
-			}
-			asrAdapter = &speechASRAdapter{recognizer: recognizer}
 		default:
 			var err error
 			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, start)
@@ -139,11 +128,7 @@ func localStackModelsForConfigWithStarter(
 					}
 				}
 				if asrAdapter == nil {
-					recognizer, err := speech.NewProviderRecognizer(asr.provider)
-					if err != nil {
-						return localStackModels{}, errors.Join(err, asr.runtime.Close(), llm.runtime.Close())
-					}
-					asrAdapter = &speechASRAdapter{recognizer: recognizer}
+					asrAdapter = newChatASRAdapter(asr.provider, cfg.ASR.Model)
 				}
 			}
 		}
@@ -167,15 +152,22 @@ func localStackModelsForConfigWithStarter(
 				return localStackModels{}, errors.Join(errors.New("provider does not support dedicated speech synthesis"), endpoint.runtime.Close(), runtime.Close())
 			}
 			ttsRuntime = endpoint.runtime
-		case voicegateway.TTSEngineOpenAIAudio:
-			synth, err := speech.NewHTTPSynthesizer(http.DefaultClient, cfg.TTS.Remote, cfg.TTS.Model, cfg.TTS.Voice)
-			if err != nil {
-				return localStackModels{}, errors.Join(err, runtime.Close())
-			}
-			tts = &speechTTSAdapter{synthesizer: synth}
 		case voicegateway.TTSEngineKittenTTS:
 			// genaipy owns Python setup and caches. Cancellation preserves its
 			// worker for later fragments; runtime eviction closes the process.
+			//
+			// TODO: Select the voice from the session language. KittenTTS 2
+			// takes no language: the voice carries it, and kitten-tts-2 lists
+			// language-named voices such as French, German and Spanish.
+			// Measured with genaipy v0.1.2, which applies English
+			// normalization: the English voice Luna reads a 4 s French request
+			// intelligibly, as Whisper transcribes it exactly, but in 17.9 s
+			// with a 6.8 s pause mid-sentence; the French voice reads it in
+			// 5.7 s, and its English rendering is also intelligible. Text with
+			// digits under English normalization is untested.
+			//
+			// Hypothesis: the pause comes from the worker's sentence chunking
+			// or English normalization of the French text.
 			kitten, err := kittentts.New(ctx, kittentts.Config{Model: cfg.TTS.Model, Voice: cfg.TTS.Voice})
 			if err != nil {
 				return localStackModels{}, errors.Join(err, runtime.Close())
@@ -371,10 +363,8 @@ func localStackLlamaCacheDir() (string, error) {
 	return filepath.Join(cacheBase, "gomode", "llama-server"), nil
 }
 
-// speechASRAdapter binds the gateway's capture sample rate to a shared recognizer.
-// HTTP engines receive one completed 16 kHz utterance WAV and return final text;
-// the shared runtime bounds responses to 1 MiB and rejects malformed or failed
-// responses. Request cancellation aborts outstanding HTTP work on barge-in.
+// speechASRAdapter binds the gateway's capture sample rate to a shared
+// recognizer. Request cancellation aborts recognition on barge-in.
 type speechASRAdapter struct {
 	recognizer speech.Recognizer
 }

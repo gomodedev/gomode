@@ -687,7 +687,7 @@ func (c *ResolvedConfig) Validate() error {
 		errs = append(errs, errors.New("at least one realtime, llm, or voice entry is required"))
 	}
 	for _, a := range c.Recognition {
-		errs = append(errs, validateASR(a), validateURL("asr.remote", a.Remote, false))
+		errs = append(errs, validateASR(a))
 	}
 	for _, a := range c.Synthesis {
 		errs = append(errs, validateTTS(a))
@@ -833,7 +833,7 @@ func (c *PipelineConfig) validate() error {
 	}
 	var speechErr error
 	if c.ASR != (ASRConfig{}) {
-		speechErr = errors.Join(validateASR(c.ASR), validateURL("voice.asr.remote", c.ASR.Remote, false))
+		speechErr = validateASR(c.ASR)
 	}
 	if c.TTS != (TTSConfig{}) {
 		speechErr = errors.Join(speechErr, validateTTS(c.TTS))
@@ -843,9 +843,7 @@ func (c *PipelineConfig) validate() error {
 
 // ASRConfig configures a speech-to-text adapter.
 //
-// Provider is used only by the genai engine. Remote is a server origin without
-// a path; use loopback to keep speech processing local. External speech servers
-// must be started separately and warmed before a session.
+// Provider and Remote are used only by the genai engine.
 type ASRConfig struct {
 	ID    string `toml:"id"`
 	Label string `toml:"label"`
@@ -869,27 +867,17 @@ const (
 	// Model is required. With llamacpp and no Remote, the gateway starts a
 	// dedicated managed server; other providers use their configured endpoint.
 	ASREngineGenAI ASREngine = "genai"
-	// ASREngineOpenAIAudio uses an OpenAI-compatible transcription endpoint.
-	// Remote and Model are required. POST /v1/audio/transcriptions accepts a
-	// multipart WAV and model and returns JSON text. MLX Audio is one compatible
-	// server on Apple Silicon; the gateway and server may run on different hosts.
-	ASREngineOpenAIAudio ASREngine = "openai-audio"
 	// ASREngineWhistle runs the managed Cactus Whistle recognizer.
 	// Model optionally names local .cact weights; empty downloads the dedicated
 	// Whistle model. Provider and Remote must be empty.
 	ASREngineWhistle ASREngine = "whistle"
-	// ASREngineWhisperCPP uses whisper.cpp's inference endpoint.
-	// Remote is required; Model must be empty because the server selects it.
-	// POST /inference accepts multipart WAV and returns JSON transcription.
-	ASREngineWhisperCPP ASREngine = "whispercpp"
 )
 
 // TTSConfig selects a speech synthesis engine.
 //
 // Engine and Model are required. Voice may be omitted for provider synthesis;
 // fixed-voice models and model defaults then select the speaker.
-// Remote is a separately started server origin without a path; use loopback
-// for local speech processing and warm the selected model before a session.
+// Provider and Remote are used only by the genai engine.
 type TTSConfig struct {
 	ID       string    `toml:"id"`
 	Label    string    `toml:"label"`
@@ -913,11 +901,6 @@ const (
 	// TTSEngineKittenTTS runs the managed KittenTTS worker.
 	// Remote must be empty; the shared genaipy runtime owns Python and caches.
 	TTSEngineKittenTTS TTSEngine = "kittentts"
-	// TTSEngineOpenAIAudio uses an OpenAI-compatible speech endpoint.
-	// POST /v1/audio/speech must accept response_format=pcm and stream=true
-	// and return raw 24 kHz mono S16LE PCM. The gateway does not resample it;
-	// a different format or sample rate produces incorrect playback.
-	TTSEngineOpenAIAudio TTSEngine = "openai-audio"
 )
 
 func validateASR(c ASRConfig) error {
@@ -932,33 +915,11 @@ func validateASREngine(c ASRConfig) error {
 	case "":
 		return errors.New("voice.asr.engine is required")
 	case ASREngineGenAI:
-		if strings.TrimSpace(c.Model) == "" {
-			return errors.New("voice.asr.model is required")
-		}
-		if c.Provider == "" {
-			return errors.New("voice.asr.provider is required")
-		}
-		if entry, ok := providers.All[c.Provider]; !ok || entry.Factory == nil {
-			return fmt.Errorf("voice.asr.provider %q is not supported", c.Provider)
-		}
-		return nil
+		model := c.modelConfig()
+		return model.validate("voice.asr")
 	case ASREngineWhistle:
 		if c.Provider != "" || c.Remote != "" {
 			return errors.New("voice.asr.whistle is managed locally; provider and remote must be empty")
-		}
-		return nil
-	case ASREngineOpenAIAudio, ASREngineWhisperCPP:
-		if c.Provider != "" {
-			return errors.New("voice.asr.provider is only used with the genai engine")
-		}
-		if c.Remote == "" {
-			return fmt.Errorf("voice.asr.remote is required for %s", c.Engine)
-		}
-		if c.Engine == ASREngineOpenAIAudio && strings.TrimSpace(c.Model) == "" {
-			return errors.New("voice.asr.model is required for openai-audio")
-		}
-		if c.Engine == ASREngineWhisperCPP && c.Model != "" {
-			return errors.New("voice.asr.model is set on the whisper.cpp server, not in the gateway")
 		}
 		return nil
 	default:
@@ -991,16 +952,12 @@ func validateTTSEngine(c TTSConfig) error {
 			return errors.New("voice.tts.voice is required")
 		}
 		if c.Remote != "" {
-			return errors.New("voice.tts.remote requires the openai-audio engine")
+			return errors.New("voice.tts.remote is only used with the genai engine")
 		}
-	case TTSEngineOpenAIAudio:
-		if c.Remote == "" || strings.TrimSpace(c.Model) == "" || strings.TrimSpace(c.Voice) == "" {
-			return errors.New("voice.tts.remote, model, and voice are required for openai-audio")
-		}
+		return nil
 	default:
 		return fmt.Errorf("voice.tts.engine %q is not supported", c.Engine)
 	}
-	return validateURL("voice.tts.remote", c.Remote, false)
 }
 
 // DefaultVoiceScope is the OAuth scope a gateway requires on an OAuth access
