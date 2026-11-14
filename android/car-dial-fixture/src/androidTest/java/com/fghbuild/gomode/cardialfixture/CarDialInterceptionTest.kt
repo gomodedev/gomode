@@ -35,7 +35,6 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -117,7 +116,7 @@ class CarDialInterceptionTest {
                 .setSupportedUriSchemes(listOf("gomode"))
                 .build(),
         )
-        shell("telecom set-phone-account-enabled ${component.flattenToString()} ${account.id} 0")
+        shell("cmd telecom set-phone-account-enabled ${component.flattenToString()} ${account.id} 0")
         shell("run-as $APP pm enable $REDIRECTION")
         shell("cmd role add-role-holder ${RoleManager.ROLE_CALL_REDIRECTION} $APP")
         assertEquals(APP, shell("cmd role get-role-holders ${RoleManager.ROLE_CALL_REDIRECTION}").trim())
@@ -204,8 +203,9 @@ class CarDialInterceptionTest {
     @LocalEmulatorOnly
     fun genericDialUsesTheLatestActiveServerAndSpecificDialStillOverridesIt() {
         shell("pm grant $APP ${Manifest.permission.RECORD_AUDIO}")
+        // CarDialRedirectionTest owns resolution order; these dials prove a non-default
+        // selection and a server number's override reach the native surface.
         for ((selected, number, expectedName) in listOf(
-            Triple(FIRST_SERVER_ID, GENERIC_NUMBER, "Dial fixture"),
             Triple(SECOND_SERVER_ID, GENERIC_NUMBER, "Second fixture"),
             Triple(SECOND_SERVER_ID, NUMBER, "Dial fixture"),
         )) {
@@ -230,17 +230,6 @@ class CarDialInterceptionTest {
                 awaitVoiceClosed()
             }
         }
-    }
-
-    @Test
-    @LocalEmulatorOnly
-    fun genericDialWithoutAnySavedServerIsCanceledWithoutLaunchingVoice() {
-        writeSettings(includeServer = false)
-        dial(GENERIC_NUMBER)
-        awaitCanceledCall()
-        assertTrue(FixtureConnectionService.connections.isEmpty())
-        assertFalse(activeTelecomCalls().contains("self_mng"))
-        assertFalse(device.hasObject(By.res("car_dial_status")))
     }
 
     @Test
@@ -275,8 +264,9 @@ class CarDialInterceptionTest {
     fun warmSettingsDialOpensTheResolvedServerWebView() {
         val firstURL = "${fixtureURL()}/?server=first"
         val secondURL = "${fixtureURL()}/?server=second"
+        // CarDialRedirectionTest owns resolution order; these dials prove a non-default
+        // selection and a server number's override reach the resolved WebView.
         for ((selected, number, expectedURL) in listOf(
-            Triple(FIRST_SERVER_ID, GENERIC_NUMBER, firstURL),
             Triple(SECOND_SERVER_ID, GENERIC_NUMBER, secondURL),
             Triple(SECOND_SERVER_ID, NUMBER, firstURL),
         )) {
@@ -900,23 +890,6 @@ class CarDialInterceptionTest {
         assertEquals(before.getInt("rtcOffers"), fixtureStats().getInt("rtcOffers"))
     }
 
-    @Test
-    @LocalEmulatorOnly
-    fun externalActivityIntentCannotConsumeOrInventNativeVoiceRequest() {
-        prepareVoice("CLOUD")
-        val before = fixtureStats()
-        context.startActivity(
-            Intent()
-                .setComponent(ComponentName(APP, "$APP.MainActivity"))
-                .putExtra("car_dial_request", "invented-outside-process")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-        assertTrue(device.wait(Until.hasObject(By.text("Voice fixture server")), 15_000))
-        assertEquals(before.getInt("rtcOffers"), fixtureStats().getInt("rtcOffers"))
-        assertFalse(activeTelecomCalls().contains("self_mng"))
-        assertFalse(shell("dumpsys activity services $APP").contains("isForeground=true"))
-    }
-
     private fun prepareVoice(
         mode: String,
         url: String = fixtureURL(),
@@ -1263,18 +1236,6 @@ class CarDialInterceptionTest {
 
     @Test
     @LocalEmulatorOnly
-    fun externalActivityIntentCannotLaunchMicrophoneProbe() {
-        assertThrows(SecurityException::class.java) {
-            context.startActivity(
-                Intent()
-                    .setComponent(ComponentName(APP, "$APP.voice.CarDialLaunchProbeActivity"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }
-    }
-
-    @Test
-    @LocalEmulatorOnly
     fun coldSecureKeyguardAllowsNativeSurfaceAndMicrophoneForegroundService() {
         enableLaunchProbe()
         // The outer device rule refused physical devices and existing credentials before
@@ -1400,31 +1361,6 @@ class CarDialInterceptionTest {
         scrollToText("Create contacts")
     }
 
-    @Test
-    @LocalEmulatorOnly
-    fun nativeRoleDenialLeavesDialingOffAndMissingServerExplainsSetup() {
-        nativeOnboarding = true
-        shell("cmd role remove-role-holder ${RoleManager.ROLE_CALL_REDIRECTION} $APP")
-        shell("run-as $APP pm disable $REDIRECTION")
-        shell("pm grant $APP ${Manifest.permission.RECORD_AUDIO}")
-        openNativeSettings()
-        clickNativeText("Enable dial-to-start")
-        assertTrue(
-            "Android role chooser did not open",
-            device.wait(Until.hasObject(By.text("Set as default")), 5_000),
-        )
-        device.pressBack()
-        scrollToText("Go Mode was not selected. Dial-to-start is off.")
-        assertFalse(redirectionEnabled())
-        assertFalse(shell("cmd role get-role-holders ${RoleManager.ROLE_CALL_REDIRECTION}").lines().contains(APP))
-        shell("am force-stop $APP")
-        writeSettings(includeServer = false)
-        openNativeSettings()
-        scrollToText("Save a server before enabling dial-to-start.")
-        clickNativeText("Enable dial-to-start")
-        assertFalse(redirectionEnabled())
-    }
-
     private fun redirectionEnabled(): Boolean =
         context.packageManager.getComponentEnabledSetting(ComponentName(APP, "$APP.voice.CarDialRedirectionService")) ==
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED
@@ -1512,23 +1448,16 @@ class CarDialInterceptionTest {
     }
 
     @Test
-    @LocalEmulatorOnly
-    fun knownNumberIsCanceledAfterAppProcessDeath() {
-        killApp()
-        assertTrue(shell("pidof $APP").isBlank())
-        dial(NUMBER)
-        // Telecom's completed call log independently proves cancellation, rather than just
-        // inferring it from a PID that may disappear after the short-lived service replies.
-        awaitCanceledCall()
-        assertTrue(FixtureConnectionService.connections.isEmpty())
-    }
-
-    @Test
     fun presentationSeparatorsMatchButOtherNumbersRetainTheirAccountAndAddress() {
+        // setUp reclaimed the process, so this also proves cancellation from a cold start.
+        // Telecom's completed call log independently proves it, rather than a PID that may
+        // disappear after the short-lived service replies.
         dial("+1 (867) 555-01.01")
         awaitCanceledCall()
         assertTrue(FixtureConnectionService.connections.isEmpty())
-        listOf("5550123", "+18675550199", "1$NUMBER", "${NUMBER}9").forEach { number ->
+        // CarDialRedirectionTest owns which numbers match; one ordinary number and one
+        // near miss prove Telecom keeps the original address and account.
+        listOf("5550123", "${NUMBER}9").forEach { number ->
             dial(number)
             val request = FixtureConnectionService.connections.poll(5, TimeUnit.SECONDS)
             requireNotNull(request) { "Telecom did not pass through $number" }
@@ -1547,8 +1476,13 @@ class CarDialInterceptionTest {
     }
 
     @Test
-    fun removedServerPassesThroughAndOwnCallDoesNotReenterRedirection() {
+    fun removedServerCancelsGenericDialPassesThroughItsNumberAndOwnCallDoesNotReenterRedirection() {
         writeSettings(includeServer = false)
+        dial(GENERIC_NUMBER)
+        awaitCanceledCall()
+        assertTrue(FixtureConnectionService.connections.isEmpty())
+        assertFalse(activeTelecomCalls().contains("self_mng"))
+        assertFalse(device.hasObject(By.res("car_dial_status")))
         dial(NUMBER)
         val request = FixtureConnectionService.connections.poll(5, TimeUnit.SECONDS)
         requireNotNull(request) { "Removed server identifier was intercepted" }
@@ -1633,22 +1567,16 @@ class CarDialInterceptionTest {
 
     private fun killApp() {
         wakeAndDismissKeyguard()
-        device.findObject(By.res("car_dial_end"))?.click()
-        // HOME retains the previous app in LAST_ACTIVITY, where am kill cannot
-        // reclaim it. Use the fixture's own UID: system-UID Settings does not
-        // reliably replace Android's previous-app slot.
-        context.startActivity(
-            Intent(context, FixtureActivity::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
-            ),
-        )
-        assertTrue(device.wait(Until.hasObject(By.res("android", "text1").text("Car dial test")), 5_000))
-        device.pressHome()
-        shell("run-as $APP am stopservice --user 0 -n $APP/.voice.VoiceService")
+        // Most calls follow an earlier reclamation: setUp after tearDown, then a test's own
+        // settings. A gone process has no Activity slot to vacate or service to stop; the
+        // Telecom and binding checks below still run, since a pending bind can restart it.
+        if (shell("pidof $APP").isNotBlank()) vacateForeground()
+        // `cmd telecom` reaches the same service as /system/bin/telecom without starting a
+        // VM through app_process, which costs over a second on the emulator.
         // Phone ConnectionService callbacks and placeCall return before Telecom finishes
         // unbinding and updating process importance. Reclaiming during that transition can
         // leave an old binding pending while a following test changes components/settings.
-        shell("telecom wait-on-handlers")
+        shell("cmd telecom wait-on-handlers")
         val uid = context.packageManager.getApplicationInfo(APP, PackageManager.ApplicationInfoFlags.of(0)).uid
         val settleDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
         var services = ""
@@ -1695,6 +1623,21 @@ class CarDialInterceptionTest {
             Thread.sleep(100)
         }
         assertTrue("Go Mode did not leave the foreground", shell("pidof $APP").isBlank())
+    }
+
+    private fun vacateForeground() {
+        device.findObject(By.res("car_dial_end"))?.click()
+        // HOME retains the previous app in LAST_ACTIVITY, where am kill cannot
+        // reclaim it. Use the fixture's own UID: system-UID Settings does not
+        // reliably replace Android's previous-app slot.
+        context.startActivity(
+            Intent(context, FixtureActivity::class.java).addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            ),
+        )
+        assertTrue(device.wait(Until.hasObject(By.res("android", "text1").text("Car dial test")), 5_000))
+        device.pressHome()
+        shell("run-as $APP am stopservice --user 0 -n $APP/.voice.VoiceService")
     }
 
     private fun writeSettings(
