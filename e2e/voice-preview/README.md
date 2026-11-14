@@ -118,9 +118,11 @@ into `web/src`.
 ## Voice setup settings
 
 Open the preview with `?state=idle`, then open **Voice settings**. Capture both
-**All-in-one** and **Separate stages** at 360 and 640 CSS px widths. Separate
-stages orders recognition, language model, and speech; each speech picker
-includes Browser alongside the configured models. Switching setups retains each
+**All-in-one** and **Separate stages** at 360, 640, and 1280 CSS px widths.
+Separate stages orders recognition, language model, and speech; each picks
+from wrapping filter chips, and each speech stage includes Browser alongside the
+configured models. Wide panels place the stages side by side, followed by the
+short fields; narrow panels stack them. Switching setups retains each
 one. Add `choices=loading` or `choices=error` for pending or failed discovery,
 and use `?state=locked` for a session started after discovery. Seed a removed
 saved stage, such as `gomode.voiceSpeechModel.<origin>.input`, to check that its
@@ -130,9 +132,10 @@ Add `theme=dark` for the host's dark tokens and `lang=de`, `es`, or `fr` for a
 shipped translation; at 360 CSS px the longest segment labels wrap beside the
 close button. Emulate forced colors through CDP `Emulation.setEmulatedMedia`
 with `forced-colors: active`, in both color schemes: icons and the selected
-segment must use system colors.
+segment and chips must use system colors.
 
-The [web reference](../screenshots/voice/web-settings.webp) and the
+The [web reference](../screenshots/voice/web-settings.webp), its
+[desktop layout](../screenshots/voice/web-desktop-settings.webp), and the
 [Android reference](../screenshots/android/voice-settings.webp) show the same
 setup: Whisper recognition, GPT-6 Luna, client speech, and its speaking voice and speed.
 Both fixtures serve `scene/voice-choices.json`. The client speech option is
@@ -278,10 +281,12 @@ agent-browser --session voice-settings open 'http://127.0.0.1:4179/?state=idle'
 agent-browser --session voice-settings set viewport 411 1700 1.75
 agent-browser --session voice-settings reload
 agent-browser --session voice-settings click '[aria-label="Voice settings"]'
-agent-browser --session voice-settings select 'select:has(option[value="model:kokoro"])' Browser
+agent-browser --session voice-settings click '[role="radiogroup"]:has(input[value="model:kokoro"]) input[value="browser"]'
 agent-browser --session voice-settings eval 'document.activeElement.blur()'
 agent-browser --session voice-settings mouse move 0 0
 agent-browser --session voice-settings screenshot '[role="region"][aria-label="Voice assistant"]' /tmp/gomode-voice-web-settings.png
+agent-browser --session voice-settings set viewport 1280 1400
+agent-browser --session voice-settings screenshot '[role="region"][aria-label="Voice assistant"]' /tmp/gomode-voice-web-desktop-settings.png
 agent-browser --session voice-settings close
 ```
 
@@ -326,4 +331,5 @@ ffmpeg -v error -y -i /tmp/gomode-voice-mobile-idle.png -c:v libwebp -lossless 1
 ffmpeg -v error -y -i /tmp/gomode-voice-desktop-idle.png -c:v libwebp -lossless 1 -threads 1 e2e/screenshots/voice/web-desktop-idle.webp
 ffmpeg -v error -y -i /tmp/gomode-voice-web-microphone-denied.png -c:v libwebp -lossless 1 -threads 1 e2e/screenshots/voice/web-microphone-denied.webp
 ffmpeg -v error -y -i /tmp/gomode-voice-web-settings.png -c:v libwebp -lossless 1 -threads 1 e2e/screenshots/voice/web-settings.webp
+ffmpeg -v error -y -i /tmp/gomode-voice-web-desktop-settings.png -c:v libwebp -lossless 1 -threads 1 e2e/screenshots/voice/web-desktop-settings.webp
 ```

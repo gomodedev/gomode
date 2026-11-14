@@ -5,6 +5,7 @@ import { expect, vi } from "../tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
+import { allDisabled, checkedValue, chip, chips } from "../tests/chips";
 import { deferred } from "../tests/deferred";
 import { installBrowserSpeech } from "../tests/browser-speech";
 
@@ -758,7 +759,7 @@ describe("VoiceOverlay settings", () => {
     render(() => <VoiceOverlay />);
     await user.click(screen.getByRole("button", { name: "Voice settings" }));
     voiceSession.setState((s) => ({ ...s, connectStatus: "Connecting…", connectPhase: "setup" }));
-    expect(screen.getByRole("combobox", { name: "Speech" })).toBeDisabled();
+    expect(allDisabled(chips("Speech"))).toBe(true);
     expect(screen.getByRole("textbox", { name: "Voice language" })).toBeDisabled();
     expect(screen.getByText("End the voice session to change voice settings.")).toBeInTheDocument();
   });
@@ -824,8 +825,8 @@ describe("VoiceOverlay settings", () => {
     render(() => <VoiceOverlay />);
     await user.click(screen.getByRole("button", { name: "Voice settings" }));
     await user.type(screen.getByRole("textbox"), "_invalid");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Speech" }), "browser");
-    expect(screen.getByRole("combobox", { name: "Speech" })).toHaveValue("browser");
+    await user.click(chip(chips("Speech"), "browser"));
+    expect(checkedValue(chips("Speech"))).toBe("browser");
     expect(screen.getByRole("textbox")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("alert")).toHaveTextContent("Invalid language tag");
     await user.click(screen.getByRole("button", { name: "Connect voice assistant" }));
@@ -841,7 +842,7 @@ describe("VoiceOverlay settings", () => {
       throw new Error("Storage unavailable");
     });
     try {
-      await user.selectOptions(screen.getByRole("combobox", { name: "Speech" }), "browser");
+      await user.click(chip(chips("Speech"), "browser"));
       expect(screen.getByRole("alert")).toHaveTextContent("Storage unavailable");
       expect(screen.getByRole("textbox")).toHaveAttribute("aria-invalid", "false");
       await user.click(screen.getByRole("button", { name: "Connect voice assistant" }));

@@ -7,6 +7,7 @@ import { FakeAudioContext } from "../tests/thinking-audio";
 import userEvent from "@testing-library/user-event";
 import { expect, vi } from "../tests/expect";
 import { fakeSynthesis, installBrowserSpeech } from "../tests/browser-speech";
+import { allDisabled, checkedValue, chip, chips } from "../tests/chips";
 import VoiceSettings from "./VoiceSettings";
 import { VoiceSession, voiceSession } from "./VoiceSession";
 
@@ -65,7 +66,7 @@ describe("VoiceSettings", () => {
     const user = userEvent.setup();
     render(() => <VoiceSettings />);
     expect(screen.queryByRole("combobox", { name: "Speaking speed" })).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Speech" }), "browser");
+    await user.click(chip(chips("Speech"), "browser"));
     const speed = screen.getByRole("combobox", { name: "Speaking speed" });
     expect(speed).toHaveValue("1");
     await user.selectOptions(speed, "1.5");
@@ -127,8 +128,8 @@ describe("VoiceSettings", () => {
     fakeSynthesis.voices = [...fakeSynthesis.voices];
     fakeSynthesis.dispatchEvent(new Event("voiceschanged"));
     expect(screen.getByRole("combobox", { name: "Speaking voice" })).toHaveValue("samantha");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Speech" }), "model:kokoro");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Speech" }), "browser");
+    await user.click(chip(chips("Speech"), "model:kokoro"));
+    await user.click(chip(chips("Speech"), "browser"));
     expect(screen.getByRole("combobox", { name: "Speaking voice" })).toHaveValue("samantha");
     voiceSession.setState((s) => ({ ...s, connected: true }));
     expect(screen.getByRole("combobox", { name: "Speaking voice" })).toBeDisabled();
@@ -258,22 +259,22 @@ describe("VoiceSettings", () => {
   it("saves recognition and speech output independently and locks both during sessions", async () => {
     const user = userEvent.setup();
     render(() => <VoiceSettings />);
-    const input = screen.getByRole("combobox", { name: "Recognition" });
-    const output = screen.getByRole("combobox", { name: "Speech" });
+    const input = chips("Recognition");
+    const output = chips("Speech");
     expect(input).not.toHaveAttribute("aria-describedby");
     expect(screen.queryByText(/vendor's cloud service/)).not.toBeInTheDocument();
-    await user.selectOptions(output, "browser");
+    await user.click(chip(output, "browser"));
     expect(voiceSession.speech).toEqual({ input: "gateway", output: "client" });
     expect(JSON.parse(localStorage.getItem(`gomode.voiceSetup.${window.location.origin}`) ?? "null")).toMatchObject({
       partsInput: "gateway",
       partsOutput: "client",
     });
-    await user.selectOptions(input, "browser");
+    await user.click(chip(input, "browser"));
     expect(voiceSession.speech).toEqual({ input: "client", output: "client" });
     expect(input).toHaveAccessibleDescription(/cloud service/);
     voiceSession.setState((s) => ({ ...s, connected: true }));
-    expect(input).toBeDisabled();
-    expect(output).toBeDisabled();
+    expect(allDisabled(input)).toBe(true);
+    expect(allDisabled(output)).toBe(true);
   });
 
   it("migrates saved browser and cloud modes while preserving independent overrides", () => {
@@ -296,7 +297,7 @@ describe("VoiceSettings", () => {
     voiceSession.setState((s) => ({ ...s, connected: true }));
     expect(screen.getAllByText(notice)).toHaveLength(1);
     for (const radio of screen.getAllByRole("radio")) expect(radio).toBeDisabled();
-    for (const select of screen.getAllByRole("combobox")) expect(select).toBeDisabled();
+    for (const select of screen.queryAllByRole("combobox")) expect(select).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Voice language" })).toBeDisabled();
     for (const toggle of screen.getAllByRole("switch")) expect(toggle).toBeEnabled();
     expect(screen.getByRole("heading", { name: "Voice" })).toBeInTheDocument();
@@ -509,9 +510,9 @@ describe("VoiceSettings", () => {
       throw new Error("Storage unavailable");
     });
     try {
-      await user.selectOptions(screen.getByRole("combobox", { name: "Speech" }), "browser");
-      expect(screen.getByRole("combobox", { name: "Speech" })).toHaveAccessibleDescription("Storage unavailable");
-      expect(screen.getByRole("combobox", { name: "Speech" })).toHaveValue("model:kokoro");
+      await user.click(chip(chips("Speech"), "browser"));
+      expect(chips("Speech")).toHaveAccessibleDescription("Storage unavailable");
+      expect(checkedValue(chips("Speech"))).toBe("model:kokoro");
       expect(voiceSession.speech).toEqual({ input: "gateway", output: "gateway" });
     } finally {
       save.mockRestore();
@@ -522,11 +523,11 @@ describe("VoiceSettings", () => {
     Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Firefox/150" });
     const user = userEvent.setup();
     render(() => <VoiceSettings />);
-    const input = screen.getByRole("combobox", { name: "Recognition" });
-    const output = screen.getByRole("combobox", { name: "Speech" });
-    expect(input.querySelector('option[value="browser"]')).toBeDisabled();
-    expect(output.querySelector('option[value="browser"]')).toBeEnabled();
-    await user.selectOptions(output, "browser");
+    const input = chips("Recognition");
+    const output = chips("Speech");
+    expect(chip(input, "browser")).toBeDisabled();
+    expect(chip(output, "browser")).toBeEnabled();
+    await user.click(chip(output, "browser"));
     expect(screen.getByRole("combobox", { name: "Speaking speed" })).toBeInTheDocument();
     expect(voiceSession.speech).toEqual({ input: "gateway", output: "client" });
   });
@@ -535,8 +536,8 @@ describe("VoiceSettings", () => {
     Reflect.deleteProperty(window, "speechSynthesis");
     const user = userEvent.setup();
     render(() => <VoiceSettings />);
-    expect(screen.getByRole("combobox", { name: "Speech" }).querySelector('option[value="browser"]')).toBeDisabled();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Recognition" }), "browser");
+    expect(chip(chips("Speech"), "browser")).toBeDisabled();
+    await user.click(chip(chips("Recognition"), "browser"));
     expect(voiceSession.speech).toEqual({ input: "client", output: "gateway" });
   });
 });

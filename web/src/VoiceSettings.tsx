@@ -130,6 +130,8 @@ export default function VoiceSettings(props: {
       ? voiceSession.state.choicesError
       : null;
   const speakingVoicesShown = () => voiceSession.speakingVoices.length > 0;
+  // Loading and catalog failures replace the pickers with their status line.
+  const pickersShown = () => voiceSession.state.choicesStatus !== "loading" && catalogError() === null;
   // Without a speaking-voice picker, the model picker owns the session's voice failure.
   const unplacedVoiceError = () => (speakingVoicesShown() ? null : voiceSession.state.voiceError);
   const modelError = () => saveFailure("model") ?? resolutionError(null) ?? unplacedVoiceError();
@@ -285,272 +287,289 @@ export default function VoiceSettings(props: {
           </div>
           <FieldError id={setupErrorId} message={saveFailure("setup")} />
         </div>
-        <Switch>
-          <Match when={voiceSession.state.choicesStatus === "loading"}>
-            <p class={styles.statusLine} role="status">
-              {messages().choicesLoading}
-            </p>
-          </Match>
-          <Match when={catalogError()}>
-            {(message) => (
-              <div class={styles.statusLine}>
-                <p class={styles.error} role="alert">
-                  {message()}
-                </p>
-                {retry()}
-              </div>
-            )}
-          </Match>
-          <Match when={voiceSession.state.setupMode === "parts"}>
-            <SpeechStageSelect
-              stage="input"
-              label={messages().recognition}
-              browser={messages().browserSpeech}
-              supported={recognitionSupported}
-              unavailable={messages().choiceUnavailable}
-              disabled={active()}
-              error={saveFailure("input") ?? resolutionError("input")}
-              hint={
-                <Show when={voiceSession.state.speechInput === "client"}>
-                  <p id={browserDescriptionId} class={styles.hint}>
-                    {recognitionSupported ? messages().browserSpeechPrivacy : messages().browserRecognitionUnavailable}
+        <div class={styles.fieldGrid}>
+          <Switch>
+            <Match when={voiceSession.state.choicesStatus === "loading"}>
+              <p class={styles.statusLine} role="status">
+                {messages().choicesLoading}
+              </p>
+            </Match>
+            <Match when={catalogError()}>
+              {(message) => (
+                <div class={styles.statusLine}>
+                  <p class={styles.error} role="alert">
+                    {message()}
                   </p>
-                </Show>
-              }
-              hintId={voiceSession.state.speechInput === "client" ? browserDescriptionId : undefined}
-              onSave={onSetupSave("input")}
-            />
-            <ChoiceSelect
-              label={messages().languageModel}
-              disabled={active()}
-              unavailable={messages().choiceUnavailable}
-              error={modelError()}
-              retry={voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined}
-              onSave={onSetupSave("model")}
-            />
-            <SpeechStageSelect
-              stage="output"
-              label={messages().synthesisModel}
-              browser={messages().browserSpeech}
-              supported={synthesisSupported}
-              unavailable={messages().choiceUnavailable}
-              disabled={active()}
-              error={saveFailure("output") ?? resolutionError("output")}
-              hint={
-                <Show when={voiceSession.state.speechOutput === "client" && !synthesisSupported}>
-                  <p class={styles.hint}>{messages().browserSynthesisUnavailable}</p>
-                </Show>
-              }
-              onSave={onSetupSave("output")}
-            />
-            <Show when={voiceSession.state.speechOutput === "client" && synthesisSupported}>
-              <Field label={messages().speakingVoice} for={browserVoiceId} error={browserVoiceError()}>
-                {(errorId) => (
-                  <Picker>
-                    <select
-                      id={browserVoiceId}
-                      ref={(select) => {
-                        createEffect(() => {
-                          const selected = browserVoice();
-                          let cancelled = false;
-                          // Replacing the voice list can reset native selection after
-                          // the selected option was inserted.
-                          queueMicrotask(() => {
-                            if (!cancelled) select.value = selected;
-                          });
-                          onCleanup(() => {
-                            cancelled = true;
-                          });
+                  {retry()}
+                </div>
+              )}
+            </Match>
+            <Match when={voiceSession.state.setupMode === "parts"}>
+              <SpeechStageChips
+                stage="input"
+                label={messages().recognition}
+                browser={messages().browserSpeech}
+                supported={recognitionSupported}
+                unavailable={messages().choiceUnavailable}
+                disabled={active()}
+                error={saveFailure("input") ?? resolutionError("input")}
+                hint={
+                  <Show when={voiceSession.state.speechInput === "client"}>
+                    <p id={browserDescriptionId} class={styles.hint}>
+                      {recognitionSupported
+                        ? messages().browserSpeechPrivacy
+                        : messages().browserRecognitionUnavailable}
+                    </p>
+                  </Show>
+                }
+                hintId={voiceSession.state.speechInput === "client" ? browserDescriptionId : undefined}
+                onSave={onSetupSave("input")}
+              />
+              <ChoiceChips
+                label={messages().languageModel}
+                disabled={active()}
+                unavailable={messages().choiceUnavailable}
+                error={modelError()}
+                retry={
+                  voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined
+                }
+                onSave={onSetupSave("model")}
+              />
+              <SpeechStageChips
+                stage="output"
+                label={messages().synthesisModel}
+                browser={messages().browserSpeech}
+                supported={synthesisSupported}
+                unavailable={messages().choiceUnavailable}
+                disabled={active()}
+                error={saveFailure("output") ?? resolutionError("output")}
+                hint={
+                  <Show when={voiceSession.state.speechOutput === "client" && !synthesisSupported}>
+                    <p class={styles.hint}>{messages().browserSynthesisUnavailable}</p>
+                  </Show>
+                }
+                onSave={onSetupSave("output")}
+              />
+            </Match>
+            <Match when={true}>
+              <ChoiceChips
+                label={messages().gatewayModel}
+                disabled={active()}
+                unavailable={messages().choiceUnavailable}
+                error={modelError()}
+                retry={
+                  voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined
+                }
+                onSave={onSetupSave("model")}
+              />
+            </Match>
+          </Switch>
+          <Show
+            when={
+              pickersShown() &&
+              voiceSession.state.setupMode === "parts" &&
+              voiceSession.state.speechOutput === "client" &&
+              synthesisSupported
+            }
+          >
+            <Field label={messages().speakingVoice} for={browserVoiceId} error={browserVoiceError()}>
+              {(errorId) => (
+                <Picker>
+                  <select
+                    id={browserVoiceId}
+                    ref={(select) => {
+                      createEffect(() => {
+                        const selected = browserVoice();
+                        let cancelled = false;
+                        // Replacing the voice list can reset native selection after
+                        // the selected option was inserted.
+                        queueMicrotask(() => {
+                          if (!cancelled) select.value = selected;
                         });
-                      }}
-                      disabled={active()}
-                      value={browserVoice()}
-                      onChange={(event) => {
-                        try {
-                          voiceSession.selectBrowserVoice(event.currentTarget.value);
-                          setBrowserVoiceError(null);
-                        } catch (err) {
-                          event.currentTarget.value = browserVoice();
-                          setBrowserVoiceError(err instanceof Error ? err.message : String(err));
-                        }
-                      }}
-                      aria-describedby={errorId()}
-                    >
-                      <option value="" selected={browserVoice() === ""}>
-                        {messages().browserVoiceDefault}
-                      </option>
-                      <For each={matchingBrowserVoices()}>
-                        {(voice) => (
-                          <option value={voice.voiceURI} selected={browserVoice() === voice.voiceURI}>
-                            {voice.name} ({voice.lang})
-                          </option>
-                        )}
-                      </For>
-                    </select>
-                  </Picker>
-                )}
-              </Field>
-              <Field label={messages().speakingSpeed} for={speedId} error={speedSaveError()}>
-                {(errorId) => (
-                  <Picker>
-                    <select
-                      id={speedId}
-                      disabled={active()}
-                      value={voiceSession.state.browserSpeechRate}
-                      onChange={(event) => {
-                        try {
-                          voiceSession.selectBrowserSpeechRate(Number(event.currentTarget.value));
-                          setSpeedSaveError(null);
-                        } catch (err) {
-                          event.currentTarget.value = String(voiceSession.state.browserSpeechRate);
-                          setSpeedSaveError(err instanceof Error ? err.message : String(err));
-                        }
-                      }}
-                      aria-describedby={errorId()}
-                    >
-                      <For each={BROWSER_SPEECH_RATES}>
-                        {(rate) => (
-                          <option value={rate}>{rate === 1 ? messages().speakingSpeedNormal : `${rate}×`}</option>
-                        )}
-                      </For>
-                    </select>
-                  </Picker>
-                )}
-              </Field>
-            </Show>
-          </Match>
-          <Match when={true}>
-            <ChoiceSelect
-              label={messages().gatewayModel}
-              disabled={active()}
-              unavailable={messages().choiceUnavailable}
-              error={modelError()}
-              retry={voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined}
-              onSave={onSetupSave("model")}
-            />
-          </Match>
-        </Switch>
-        <Show when={catalogError() === null && voiceSession.state.choicesStatus !== "loading" && speakingVoicesShown()}>
+                        onCleanup(() => {
+                          cancelled = true;
+                        });
+                      });
+                    }}
+                    disabled={active()}
+                    value={browserVoice()}
+                    onChange={(event) => {
+                      try {
+                        voiceSession.selectBrowserVoice(event.currentTarget.value);
+                        setBrowserVoiceError(null);
+                      } catch (err) {
+                        event.currentTarget.value = browserVoice();
+                        setBrowserVoiceError(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
+                    aria-describedby={errorId()}
+                  >
+                    <option value="" selected={browserVoice() === ""}>
+                      {messages().browserVoiceDefault}
+                    </option>
+                    <For each={matchingBrowserVoices()}>
+                      {(voice) => (
+                        <option value={voice.voiceURI} selected={browserVoice() === voice.voiceURI}>
+                          {voice.name} ({voice.lang})
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </Picker>
+              )}
+            </Field>
+            <Field label={messages().speakingSpeed} for={speedId} error={speedSaveError()}>
+              {(errorId) => (
+                <Picker>
+                  <select
+                    id={speedId}
+                    disabled={active()}
+                    value={voiceSession.state.browserSpeechRate}
+                    onChange={(event) => {
+                      try {
+                        voiceSession.selectBrowserSpeechRate(Number(event.currentTarget.value));
+                        setSpeedSaveError(null);
+                      } catch (err) {
+                        event.currentTarget.value = String(voiceSession.state.browserSpeechRate);
+                        setSpeedSaveError(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
+                    aria-describedby={errorId()}
+                  >
+                    <For each={BROWSER_SPEECH_RATES}>
+                      {(rate) => (
+                        <option value={rate}>{rate === 1 ? messages().speakingSpeedNormal : `${rate}×`}</option>
+                      )}
+                    </For>
+                  </select>
+                </Picker>
+              )}
+            </Field>
+          </Show>
+          <Show when={pickersShown() && speakingVoicesShown()}>
+            <Field
+              label={messages().speakingVoice}
+              for={speakingVoiceId}
+              error={speakingVoiceError()}
+              retry={voiceSession.state.voiceStatus === "error" ? retry() : undefined}
+            >
+              {(errorId) => (
+                <Picker>
+                  <select
+                    id={speakingVoiceId}
+                    disabled={
+                      active() ||
+                      voiceSession.state.choicesStatus !== "ready" ||
+                      voiceSession.state.voiceStatus !== "ready"
+                    }
+                    value={voiceSession.state.voiceName ?? ""}
+                    onChange={(event) => {
+                      try {
+                        voiceSession.selectSpeakingVoice(event.currentTarget.value);
+                        setVoiceSaveError(null);
+                      } catch (err) {
+                        event.currentTarget.value = voiceSession.state.voiceName ?? "";
+                        setVoiceSaveError(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
+                    aria-describedby={errorId()}
+                  >
+                    <option value="">{messages().speakingVoiceDefault}</option>
+                    <For each={voiceSession.speakingVoices}>{(name) => <option value={name}>{name}</option>}</For>
+                  </select>
+                </Picker>
+              )}
+            </Field>
+          </Show>
           <Field
-            label={messages().speakingVoice}
-            for={speakingVoiceId}
-            error={speakingVoiceError()}
-            retry={voiceSession.state.voiceStatus === "error" ? retry() : undefined}
+            label={messages().voiceLanguage}
+            for={languageId}
+            error={shownLanguageError()}
+            hint={
+              <p id={languageHintId} class={styles.hint}>
+                {messages().voiceLanguageHint}
+              </p>
+            }
           >
             {(errorId) => (
-              <Picker>
-                <select
-                  id={speakingVoiceId}
-                  disabled={
-                    active() ||
-                    voiceSession.state.choicesStatus !== "ready" ||
-                    voiceSession.state.voiceStatus !== "ready"
-                  }
-                  value={voiceSession.state.voiceName ?? ""}
-                  onChange={(event) => {
-                    try {
-                      voiceSession.selectSpeakingVoice(event.currentTarget.value);
-                      setVoiceSaveError(null);
-                    } catch (err) {
-                      event.currentTarget.value = voiceSession.state.voiceName ?? "";
-                      setVoiceSaveError(err instanceof Error ? err.message : String(err));
-                    }
-                  }}
-                  aria-describedby={errorId()}
-                >
-                  <option value="">{messages().speakingVoiceDefault}</option>
-                  <For each={voiceSession.speakingVoices}>{(name) => <option value={name}>{name}</option>}</For>
-                </select>
-              </Picker>
+              <input
+                id={languageId}
+                class={styles.textField}
+                type="text"
+                disabled={active()}
+                value={tag()}
+                // The example shows the BCP 47 format once the field is cleared.
+                placeholder={messages().voiceLanguageExample}
+                onInput={(event) => {
+                  setTag(event.currentTarget.value);
+                  setLanguageError(null);
+                }}
+                // Flush before a close or connect click can use the saved preference.
+                onBlur={saveLanguage}
+                aria-invalid={shownLanguageError() !== null}
+                aria-describedby={[errorId(), languageHintId].filter(Boolean).join(" ")}
+                spellcheck={false}
+                autocapitalize="none"
+              />
             )}
           </Field>
-        </Show>
-        <Field
-          label={messages().voiceLanguage}
-          for={languageId}
-          error={shownLanguageError()}
-          hint={
-            <p id={languageHintId} class={styles.hint}>
-              {messages().voiceLanguageHint}
-            </p>
-          }
-        >
-          {(errorId) => (
-            <input
-              id={languageId}
-              class={styles.textField}
-              type="text"
-              disabled={active()}
-              value={tag()}
-              // The example shows the BCP 47 format once the field is cleared.
-              placeholder={messages().voiceLanguageExample}
-              onInput={(event) => {
-                setTag(event.currentTarget.value);
-                setLanguageError(null);
-              }}
-              // Flush before a close or connect click can use the saved preference.
-              onBlur={saveLanguage}
-              aria-invalid={shownLanguageError() !== null}
-              aria-describedby={[errorId(), languageHintId].filter(Boolean).join(" ")}
-              spellcheck={false}
-              autocapitalize="none"
-            />
-          )}
-        </Field>
+        </div>
       </section>
       <section class={styles.group} aria-labelledby={displayHeadingId}>
         <h2 id={displayHeadingId} class={styles.heading}>
           {messages().displaySection}
         </h2>
-        <div>
-          <label class={styles.switchRow}>
-            <span>{messages().showReasoning}</span>
-            <input
-              type="checkbox"
-              role="switch"
-              class={styles.switch}
-              checked={voiceSession.state.showReasoning}
-              aria-describedby={reasoningError() === null ? undefined : reasoningErrorId}
-              onChange={(event) => {
-                const next = event.currentTarget.checked;
-                try {
-                  voiceSession.setShowReasoning(next);
-                  setReasoningError(null);
-                } catch (err) {
-                  event.currentTarget.checked = !next;
-                  setReasoningError(
-                    `Could not save the reasoning preference: ${err instanceof Error ? err.message : String(err)}`,
-                  );
-                }
-              }}
-            />
-          </label>
-          <FieldError id={reasoningErrorId} message={reasoningError()} />
-        </div>
-        <div>
-          <label class={styles.switchRow}>
-            <span>{messages().showUsageStats}</span>
-            <input
-              type="checkbox"
-              role="switch"
-              class={styles.switch}
-              checked={voiceSession.state.showUsageStats}
-              aria-describedby={usageError() === null ? undefined : usageErrorId}
-              onChange={(event) => {
-                const next = event.currentTarget.checked;
-                try {
-                  voiceSession.setShowUsageStats(next);
-                  setUsageError(null);
-                } catch (err) {
-                  event.currentTarget.checked = !next;
-                  setUsageError(
-                    `Could not save the usage preference: ${err instanceof Error ? err.message : String(err)}`,
-                  );
-                }
-              }}
-            />
-          </label>
-          <FieldError id={usageErrorId} message={usageError()} />
+        <div class={styles.fieldGrid}>
+          <div>
+            <label class={styles.switchRow}>
+              <span>{messages().showReasoning}</span>
+              <input
+                type="checkbox"
+                role="switch"
+                class={styles.switch}
+                checked={voiceSession.state.showReasoning}
+                aria-describedby={reasoningError() === null ? undefined : reasoningErrorId}
+                onChange={(event) => {
+                  const next = event.currentTarget.checked;
+                  try {
+                    voiceSession.setShowReasoning(next);
+                    setReasoningError(null);
+                  } catch (err) {
+                    event.currentTarget.checked = !next;
+                    setReasoningError(
+                      `Could not save the reasoning preference: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  }
+                }}
+              />
+            </label>
+            <FieldError id={reasoningErrorId} message={reasoningError()} />
+          </div>
+          <div>
+            <label class={styles.switchRow}>
+              <span>{messages().showUsageStats}</span>
+              <input
+                type="checkbox"
+                role="switch"
+                class={styles.switch}
+                checked={voiceSession.state.showUsageStats}
+                aria-describedby={usageError() === null ? undefined : usageErrorId}
+                onChange={(event) => {
+                  const next = event.currentTarget.checked;
+                  try {
+                    voiceSession.setShowUsageStats(next);
+                    setUsageError(null);
+                  } catch (err) {
+                    event.currentTarget.checked = !next;
+                    setUsageError(
+                      `Could not save the usage preference: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  }
+                }}
+              />
+            </label>
+            <FieldError id={usageErrorId} message={usageError()} />
+          </div>
         </div>
       </section>
       <details class={styles.credits} onToggle={(event) => setCreditsOpen(event.currentTarget.open)}>
@@ -660,7 +679,78 @@ function ThinkingMusicPreview(props: { active: boolean; visible: boolean; messag
   );
 }
 
-function ChoiceSelect(props: {
+type ChipOption = { value: string; label: string; disabled: boolean };
+
+/** A labelled radio group of wrapping filter chips, its hint, and the error it owns. */
+function ChipField(props: {
+  label: string;
+  options: readonly ChipOption[];
+  selected: string;
+  disabled: boolean;
+  error: string | null;
+  hint?: JSX.Element;
+  hintId?: string;
+  retry?: JSX.Element;
+  /** Saves the picked value, throwing when it cannot be saved. */
+  onSelect: (value: string) => void;
+  onSave: (error: string | null) => void;
+}) {
+  const name = createUniqueId();
+  const labelId = createUniqueId();
+  const errorId = createUniqueId();
+  // Keyed by value, so a chip keeps its element, and focus, when others come and go.
+  const byValue = createMemo(() => new Map(props.options.map((option) => [option.value, option])));
+  const values = createMemo(() => props.options.map((option) => option.value));
+  let group!: HTMLDivElement;
+  return (
+    <div class={styles.field}>
+      <span id={labelId} class={styles.label}>
+        {props.label}
+      </span>
+      <div
+        ref={group}
+        class={styles.chips}
+        role="radiogroup"
+        aria-labelledby={labelId}
+        aria-describedby={
+          [props.error === null ? undefined : errorId, props.hintId].filter(Boolean).join(" ") || undefined
+        }
+      >
+        <For each={values()}>
+          {(value) => (
+            <label class={styles.chip}>
+              <input
+                type="radio"
+                name={name}
+                value={value}
+                checked={props.selected === value}
+                disabled={props.disabled || byValue().get(value)?.disabled === true}
+                onChange={() => {
+                  try {
+                    props.onSelect(value);
+                    props.onSave(null);
+                  } catch (err) {
+                    // A native radio checks itself before change; restore the effective choice.
+                    for (const radio of group.querySelectorAll("input")) radio.checked = radio.value === props.selected;
+                    props.onSave(err instanceof Error ? err.message : String(err));
+                  }
+                }}
+              />
+              <span class={styles.chipCheck}>
+                <VoiceIcon name="check" />
+              </span>
+              <span class={styles.chipLabel}>{byValue().get(value)?.label}</span>
+            </label>
+          )}
+        </For>
+      </div>
+      {props.hint}
+      <FieldError id={errorId} message={props.error} retry={props.retry} />
+    </div>
+  );
+}
+
+function ChoiceChips(props: {
   label: string;
   unavailable: string;
   disabled: boolean;
@@ -668,58 +758,29 @@ function ChoiceSelect(props: {
   retry: JSX.Element | undefined;
   onSave: (error: string | null) => void;
 }) {
-  const id = createUniqueId();
-  const choices = () => voiceSession.choicesForSetup(voiceSession.state.setupMode);
-  const selected = () => voiceSession.state.choiceIDs[voiceSession.transport];
+  const selected = () => voiceSession.state.choiceIDs[voiceSession.transport] ?? "";
+  const options = createMemo(() => {
+    const choices = voiceSession.choicesForSetup(voiceSession.state.setupMode);
+    const listed = choices.map((choice) => ({ value: choice.id, label: choice.label, disabled: false }));
+    return choices.some((choice) => choice.id === selected())
+      ? listed
+      : [{ value: selected(), label: props.unavailable, disabled: true }, ...listed];
+  });
   return (
-    <Field label={props.label} for={id} error={props.error} retry={props.retry}>
-      {(errorId) => (
-        <Picker>
-          <select
-            id={id}
-            ref={(select) => {
-              createEffect(() => {
-                const value = selected() ?? "";
-                choices();
-                let cancelled = false;
-                // Replacing an unavailable option with a late catalog resets the
-                // native select even when the saved model ID itself is unchanged.
-                queueMicrotask(() => {
-                  if (!cancelled) select.value = value;
-                });
-                onCleanup(() => {
-                  cancelled = true;
-                });
-              });
-            }}
-            disabled={props.disabled || voiceSession.state.choicesStatus !== "ready"}
-            value={selected() ?? ""}
-            onChange={(event) => {
-              const previous = selected() ?? "";
-              try {
-                voiceSession.selectChoice(event.currentTarget.value);
-                props.onSave(null);
-              } catch (err) {
-                event.currentTarget.value = previous;
-                props.onSave(err instanceof Error ? err.message : String(err));
-              }
-            }}
-            aria-describedby={errorId()}
-          >
-            <Show when={!choices().some((choice) => choice.id === selected())}>
-              <option value={selected() ?? ""} selected disabled>
-                {props.unavailable}
-              </option>
-            </Show>
-            <For each={choices()}>{(choice) => <option value={choice.id}>{choice.label}</option>}</For>
-          </select>
-        </Picker>
-      )}
-    </Field>
+    <ChipField
+      label={props.label}
+      options={options()}
+      selected={selected()}
+      disabled={props.disabled || voiceSession.state.choicesStatus !== "ready"}
+      error={props.error}
+      retry={props.retry}
+      onSelect={(value) => voiceSession.selectChoice(value)}
+      onSave={props.onSave}
+    />
   );
 }
 
-function SpeechStageSelect(props: {
+function SpeechStageChips(props: {
   stage: SpeechStage;
   label: string;
   browser: string;
@@ -731,77 +792,44 @@ function SpeechStageSelect(props: {
   hintId?: string;
   onSave: (error: string | null) => void;
 }) {
-  const id = createUniqueId();
-  const models = () => voiceSession.state.speechModels[props.stage];
   const selected = () =>
     voiceSession.speech[props.stage] === "client"
       ? "browser"
       : voiceSession.composableChoice
         ? `model:${voiceSession.state.speechModelIDs[props.stage] ?? ""}`
         : "gateway";
-  const fixed = () =>
-    voiceSession.state.choices.find((choice) => choice.id === voiceSession.state.choiceIDs[voiceSession.transport]);
+  const options = createMemo(() => {
+    const models = voiceSession.state.speechModels[props.stage];
+    const fixed = voiceSession.state.choices.find(
+      (choice) => choice.id === voiceSession.state.choiceIDs[voiceSession.transport],
+    );
+    const fixedStage = !voiceSession.composableChoice && fixed?.transports.includes("webrtc") ? fixed : null;
+    const current = selected();
+    const options: ChipOption[] = [];
+    if (fixedStage !== null) options.push({ value: "gateway", label: fixedStage.label, disabled: false });
+    else if (current !== "browser" && !models.some((model) => `model:${model.id}` === current))
+      options.push({ value: current, label: props.unavailable, disabled: true });
+    options.push({ value: "browser", label: props.browser, disabled: !props.supported });
+    for (const model of models) options.push({ value: `model:${model.id}`, label: model.label, disabled: false });
+    return options;
+  });
   return (
-    <Field label={props.label} for={id} error={props.error} hint={props.hint}>
-      {(errorId) => (
-        <Picker>
-          <select
-            id={id}
-            ref={(select) => {
-              createEffect(() => {
-                const value = selected();
-                models();
-                fixed();
-                let cancelled = false;
-                // A late catalog can insert the selected unavailable option after
-                // the browser has already reset the select's value.
-                queueMicrotask(() => {
-                  if (!cancelled) select.value = value;
-                });
-                onCleanup(() => {
-                  cancelled = true;
-                });
-              });
-            }}
-            disabled={props.disabled || voiceSession.state.choicesStatus === "loading"}
-            value={selected()}
-            aria-describedby={[errorId(), props.hintId].filter(Boolean).join(" ") || undefined}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              try {
-                voiceSession.selectSpeechStage(
-                  props.stage,
-                  value === "browser" ? "client" : "gateway",
-                  value.startsWith("model:") ? value.slice(6) : null,
-                );
-                props.onSave(null);
-              } catch (error) {
-                event.currentTarget.value = selected();
-                props.onSave(error instanceof Error ? error.message : String(error));
-              }
-            }}
-          >
-            <Show when={!voiceSession.composableChoice && fixed()?.transports.includes("webrtc") ? fixed() : null}>
-              {(choice) => <option value="gateway">{choice().label}</option>}
-            </Show>
-            <Show
-              when={
-                selected() !== "browser" &&
-                !models().some((model) => `model:${model.id}` === selected()) &&
-                (voiceSession.composableChoice || !fixed()?.transports.includes("webrtc"))
-              }
-            >
-              <option value={selected()} selected disabled>
-                {props.unavailable}
-              </option>
-            </Show>
-            <option value="browser" disabled={!props.supported}>
-              {props.browser}
-            </option>
-            <For each={models()}>{(model) => <option value={`model:${model.id}`}>{model.label}</option>}</For>
-          </select>
-        </Picker>
-      )}
-    </Field>
+    <ChipField
+      label={props.label}
+      options={options()}
+      selected={selected()}
+      disabled={props.disabled || voiceSession.state.choicesStatus === "loading"}
+      error={props.error}
+      hint={props.hint}
+      hintId={props.hintId}
+      onSelect={(value) =>
+        voiceSession.selectSpeechStage(
+          props.stage,
+          value === "browser" ? "client" : "gateway",
+          value.startsWith("model:") ? value.slice(6) : null,
+        )
+      }
+      onSave={props.onSave}
+    />
   );
 }
