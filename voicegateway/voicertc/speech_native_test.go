@@ -78,8 +78,8 @@ func testNativeTTS(t *testing.T, provider string) {
 				if in.Input != "Hello." || in.Voice != "female" || !in.Stream || in.ResponseFormat != llamacpp.SpeechPCM {
 					t.Errorf("native speech request %+v", in)
 				}
-				w.Header().Set("Content-Type", "audio/pcm;rate=12000;encoding=float;bits=32")
-				if _, err := w.Write(floatSamples(0, 0.5)); err != nil {
+				w.Header().Set("Content-Type", "audio/pcm;rate=12000;encoding=signed-int;bits=16")
+				if _, err := w.Write(pcm16Samples(0, 16384)); err != nil {
 					t.Error(err)
 				}
 			} else {
@@ -128,7 +128,7 @@ func testNativeTTS(t *testing.T, provider string) {
 	})
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
-		cases := []struct{ name, mime, body string }{{"container", "audio/wav", "RIFF"}, {"incomplete sample", "audio/pcm;rate=24000;encoding=float;bits=32", "x"}}
+		cases := []struct{ name, mime, body string }{{"container", "audio/wav", "RIFF"}, {"incomplete sample", "audio/pcm;rate=24000;encoding=signed-int;bits=16", "x"}}
 		if provider == "gemini" {
 			cases = []struct{ name, mime, body string }{
 				{"format", "text/event-stream", "data: {\"event_type\":\"step.delta\",\"delta\":{\"type\":\"audio\",\"sample_rate\":16000,\"data\":\"AAA=\"}}\n\n"},
@@ -165,8 +165,8 @@ func testNativeTTS(t *testing.T, provider string) {
 		stopped := make(chan struct{})
 		a := nativeTTSClient(t, provider, func(w http.ResponseWriter, r *http.Request) {
 			if provider == "llama" {
-				w.Header().Set("Content-Type", "audio/pcm;rate=24000;encoding=float;bits=32")
-				if _, err := w.Write(floatSamples(0.5)); err != nil {
+				w.Header().Set("Content-Type", "audio/pcm;rate=24000;encoding=signed-int;bits=16")
+				if _, err := w.Write(pcm16Samples(16384)); err != nil {
 					t.Error(err)
 				}
 			} else {

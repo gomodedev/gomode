@@ -34,7 +34,8 @@ import (
 	"time"
 
 	"github.com/maruel/genai"
-	"github.com/maruel/genaipy/kittentts"
+	"github.com/maruel/genaipy/providers/kittentts"
+	"github.com/maruel/genaipy/providers/kittentts/kittenttssrv"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
@@ -52,24 +53,28 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 	root := t
 
 	var spokenPCM24 []byte
-	var tts *kittentts.Runtime
+	var tts *kittentts.Client
 	var asr asrAdapter
 	var llm *genaiLLMAdapter
 
 	t.Run("Audio", func(t *testing.T) {
 		t.Run("TTS", func(t *testing.T) {
 			startup := time.Now()
-			adapter, err := kittentts.New(runtimeCtx, kittentts.Config{Model: "KittenML/kitten-tts-2"})
+			srv, err := kittenttssrv.New(runtimeCtx, kittenttssrv.Config{Model: "KittenML/kitten-tts-2"})
 			t.Logf("KittenTTS startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 			if err != nil {
 				t.Fatal(err)
 			}
-			tts = adapter
 			root.Cleanup(func() {
-				if err := adapter.Close(); err != nil {
+				if err := srv.Close(); err != nil {
 					root.Fatal(err)
 				}
 			})
+			adapter, err := kittentts.New(http.DefaultClient, srv.URL(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			tts = adapter
 
 			const smokeSentence = "I love bananas"
 			chunks, firstAudioLatency, synthesisLatency, err := collectTimedTTSChunks(t.Context(), adapter, smokeSentence)
@@ -256,12 +261,16 @@ func TestSmokeVoiceGatewayToolCall(t *testing.T) {
 
 	// Synthesize the microphone input before the gateway starts its own
 	// KittenTTS worker, so only one worker runs at a time.
-	tts, err := kittentts.New(runtimeCtx, kittentts.Config{Model: "KittenML/kitten-tts-2"})
+	worker, err := kittenttssrv.New(runtimeCtx, kittenttssrv.Config{Model: "KittenML/kitten-tts-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	tts, err := kittentts.New(http.DefaultClient, worker.URL(), "")
+	if err != nil {
+		t.Fatal(errors.Join(err, worker.Close()))
+	}
 	chunks, _, _, err := collectTimedTTSChunks(ctx, tts, "Set a timer for five minutes.")
-	if err := errors.Join(err, tts.Close()); err != nil {
+	if err := errors.Join(err, worker.Close()); err != nil {
 		t.Fatal(err)
 	}
 	speech := bytes.Join(chunks, nil)
@@ -604,7 +613,7 @@ func genAIText(msg *genai.Message) string {
 	return text.String()
 }
 
-func collectTimedTTSChunks(ctx context.Context, tts *kittentts.Runtime, text string) ([][]byte, time.Duration, time.Duration, error) {
+func collectTimedTTSChunks(ctx context.Context, tts *kittentts.Client, text string) ([][]byte, time.Duration, time.Duration, error) {
 	start := time.Now()
 	var firstChunkLatency time.Duration
 	var chunks [][]byte

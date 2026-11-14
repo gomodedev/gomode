@@ -98,7 +98,7 @@ func (b *realtimeBridgeBackend) setupOptions(msg *voicev2.SessionSetup, handle s
 		// minutes unless context compression is enabled; the zero value selects
 		// the server's thresholds, which scale with the model's context window.
 		// https://ai.google.dev/gemini-api/docs/live-api/session-management
-		opts = append(opts, &gemini.RealtimeOption{InputLanguages: []string{msg.Voice.Language}, SessionResumption: true, ResumeHandle: handle, Compression: &gemini.RealtimeCompression{}})
+		opts = append(opts, &gemini.RealtimeOption{SessionResumption: true, ResumeHandle: handle, Compression: &gemini.RealtimeCompression{}})
 	}
 	if b.provider == "openai" || b.provider == "openairesponses" {
 		// OpenAI drops the oldest items once the conversation outgrows the
@@ -326,12 +326,18 @@ func (s *realtimeBridgeSession) setup(msg *voicev2.SessionSetup) error {
 	s.workers.Add(1)
 	s.mu.Unlock()
 	defer s.workers.Done()
+	audio := &genai.RealtimeOptionAudio{Voice: msg.Voice.Name, OutputTranscription: true}
+	if s.backend.inputTranscription() {
+		// The language hints input transcription; the instruction selects the
+		// reply language.
+		audio.InputTranscription, audio.InputLanguage = true, msg.Voice.Language
+	}
 	s.setupOpts = []genai.RealtimeOption{
 		genai.RealtimeOptionInstructions(instruction),
 		&genai.RealtimeOptionTools{Tools: tools},
 		genai.Modalities{genai.ModalityAudio},
 		genai.RealtimeTurnServer,
-		&genai.RealtimeOptionAudio{Voice: msg.Voice.Name, InputTranscription: s.backend.inputTranscription(), OutputTranscription: true},
+		audio,
 	}
 	s.setupMsg = msg
 	rt, err := s.dial("")

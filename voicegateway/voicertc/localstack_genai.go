@@ -12,6 +12,7 @@ import (
 	"iter"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,9 +20,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/maruel/genaipy/kittentts"
-	"github.com/maruel/genaipy/speech"
-	"github.com/maruel/genaipy/whistle"
+	"github.com/maruel/genaipy/providers/kittentts"
+	"github.com/maruel/genaipy/providers/kittentts/kittenttssrv"
+	"github.com/maruel/genaipy/providers/whistle"
+	"github.com/maruel/genaipy/providers/whistle/whistlesrv"
 
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
@@ -97,12 +99,16 @@ func localStackModelsForConfigWithStarter(
 			// calls, and splits utterances into consecutive 30-second windows;
 			// words crossing a window boundary may lose accuracy. Cancellation
 			// preserves the model for subsequent requests.
-			w, err := whistle.New(ctx, cfg.ASR.Model)
+			srv, err := whistlesrv.New(ctx, cfg.ASR.Model)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
-			asr.runtime = w
-			asrAdapter = &speechASRAdapter{recognizer: w}
+			c, err := whistle.New(http.DefaultClient, srv.URL(), cfg.ASR.Model)
+			if err != nil {
+				return localStackModels{}, errors.Join(err, srv.Close(), llm.runtime.Close())
+			}
+			asr.runtime = srv
+			asrAdapter = &speechASRAdapter{provider: c}
 		default:
 			var err error
 			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, start)
@@ -168,11 +174,15 @@ func localStackModelsForConfigWithStarter(
 			//
 			// Hypothesis: the pause comes from the worker's sentence chunking
 			// or English normalization of the French text.
-			kitten, err := kittentts.New(ctx, kittentts.Config{Model: cfg.TTS.Model, Voice: cfg.TTS.Voice})
+			srv, err := kittenttssrv.New(ctx, kittenttssrv.Config{Model: cfg.TTS.Model})
 			if err != nil {
 				return localStackModels{}, errors.Join(err, runtime.Close())
 			}
-			tts, ttsRuntime = &speechTTSAdapter{synthesizer: kitten}, kitten
+			kitten, err := kittentts.New(http.DefaultClient, srv.URL(), cfg.TTS.Voice)
+			if err != nil {
+				return localStackModels{}, errors.Join(err, srv.Close(), runtime.Close())
+			}
+			tts, ttsRuntime = &speechTTSAdapter{synthesizer: kitten}, srv
 		}
 	}
 	return localStackModels{
@@ -363,19 +373,49 @@ func localStackLlamaCacheDir() (string, error) {
 	return filepath.Join(cacheBase, "gomode", "llama-server"), nil
 }
 
-// speechASRAdapter binds the gateway's capture sample rate to a shared
-// recognizer. Request cancellation aborts recognition on barge-in.
+// speechASRAdapter transcribes one complete utterance per genai
+// transcription session at the gateway's capture sample rate. Request
+// cancellation aborts recognition on barge-in.
 type speechASRAdapter struct {
-	recognizer speech.Recognizer
+	provider genai.Provider
 }
 
 func (a *speechASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
-	return a.recognizer.Transcribe(ctx, pcm, micSampleRate)
+	rt, err := a.provider.ConnectRealtime(ctx, genai.RealtimeOptionTranscription{}, &genai.RealtimeOptionAudio{InputFormat: genai.AudioFormat{SampleRate: micSampleRate}})
+	if err != nil {
+		return "", err
+	}
+	if err := rt.Send(ctx, genai.RealtimeInputContent{Audio: pcm, Commit: true}); err != nil {
+		return "", errors.Join(err, rt.Close())
+	}
+	text := ""
+	for e, err := range rt.Receive(ctx) {
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = io.ErrUnexpectedEOF
+			}
+			return "", errors.Join(err, rt.Close())
+		}
+		switch e.Kind {
+		case genai.RealtimeEventTranscriptInput:
+			if e.Content.Final {
+				text = e.Content.Text
+			} else {
+				text += e.Content.Text
+			}
+		case genai.RealtimeEventError:
+			return "", errors.Join(fmt.Errorf("%s transcription: %s", a.provider.Name(), e.Error.Message), rt.Close())
+		case genai.RealtimeEventTurnDone:
+			return text, rt.Close()
+		default:
+		}
+	}
+	return "", errors.Join(io.ErrUnexpectedEOF, rt.Close())
 }
 
-// speechTTSAdapter adapts shared synthesis to the gateway's private boundary.
+// speechTTSAdapter adapts KittenTTS synthesis to the gateway's private boundary.
 type speechTTSAdapter struct {
-	synthesizer speech.Synthesizer
+	synthesizer *kittentts.Client
 }
 
 func (a *speechTTSAdapter) synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error] {

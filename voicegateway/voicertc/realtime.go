@@ -90,7 +90,8 @@ func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfi
 			directAudio: true,
 			newVAD:      func() vadSegmenter { return &energyVAD{maxUtteranceBytes: 30 * micSampleRate * 2} },
 			llm:         &genaiLLMAdapter{provider: provider, effort: cfg.Effort, audioInput: true, maxOutputTokens: cfg.MaxOutputTokens},
-			tts:         &llamaSpeechAdapter{client: provider.(*llamacpp.Client)},
+			// Staged sessions support English only.
+			tts: &llamaTTSAdapter{client: provider.(*llamacpp.Client), lang: "en"},
 		}
 	}
 	return b, nil

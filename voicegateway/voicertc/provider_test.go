@@ -383,7 +383,7 @@ func TestRealtimeBridgeBackendSetupOptions(t *testing.T) {
 	t.Parallel()
 	setup := &voicev2.SessionSetup{Voice: voicev2.VoiceConfig{Language: "fr-CA"}}
 	geminiOpts := (&realtimeBridgeBackend{provider: "gemini"}).setupOptions(setup, "handle")
-	if o := geminiOpts[0].(*gemini.RealtimeOption); len(geminiOpts) != 1 || o.InputLanguages[0] != "fr-CA" || !o.SessionResumption || o.ResumeHandle != "handle" || o.Compression == nil {
+	if o := geminiOpts[0].(*gemini.RealtimeOption); len(geminiOpts) != 1 || !o.SessionResumption || o.ResumeHandle != "handle" || o.Compression == nil {
 		t.Fatalf("Gemini options = %+v", geminiOpts)
 	}
 	openAIOpts := (&realtimeBridgeBackend{provider: "openai"}).setupOptions(setup, "")

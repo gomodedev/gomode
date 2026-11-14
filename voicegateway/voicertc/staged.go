@@ -1,4 +1,4 @@
-// Single-model LFM3 audio input, text reasoning and tools, and streamed speech synthesis.
+// Single-model LFM3 audio input, text reasoning and tools for staged sessions.
 
 package voicertc
 
@@ -7,15 +7,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
-	"iter"
-	"math"
-	"mime"
 	"strings"
 
 	"github.com/maruel/genai"
-	"github.com/maruel/genai/providers/llamacpp"
 )
 
 // stagedLlamaSession reserves the same operator-declared session capacity as
@@ -146,69 +140,4 @@ func (c *genaiConversation) userAudio(ctx context.Context, pcm []byte) (llmStep,
 		return newLLMStep(nil, llmReply{}, nil), nil
 	}
 	return c.startGenerationLocked(ctx), nil
-}
-
-type llamaSpeechAdapter struct {
-	client *llamacpp.Client
-}
-
-func (a *llamaSpeechAdapter) synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error] {
-	return func(yield func([]byte, error) bool) {
-		out := &llamaSpeechPCM{yield: yield}
-		// LFM3-Audio produces 24 kHz float32 PCM. SpeechRaw owns HTTP and
-		// cancellation; this writer converts incremental samples to gateway PCM16.
-		headers, err := a.client.SpeechRaw(ctx, &llamacpp.SpeechRequest{
-			Input: text, Lang: "en", ResponseFormat: llamacpp.SpeechPCM, Stream: true,
-		}, out)
-		if out.stopped {
-			return
-		}
-		if err == nil {
-			kind, params, parseErr := mime.ParseMediaType(headers.Get("Content-Type"))
-			if parseErr != nil || kind != "audio/pcm" || params["rate"] != "24000" || params["encoding"] != "float" || params["bits"] != "32" {
-				err = errors.New("LFM3 speech requires 24 kHz float32 PCM output")
-			} else if out.n != 0 {
-				err = errors.New("LFM3 speech returned an incomplete float32 sample")
-			}
-		}
-		if err != nil {
-			yield(nil, err)
-		}
-	}
-}
-
-// llamaSpeechPCM retains only an incomplete float32 sample between HTTP writes.
-type llamaSpeechPCM struct {
-	yield   func([]byte, error) bool
-	tail    [4]byte
-	n       int
-	stopped bool
-}
-
-func (w *llamaSpeechPCM) Write(p []byte) (int, error) {
-	size := len(p)
-	// Bound each converted chunk even if the HTTP reader uses a large write.
-	for len(p) != 0 {
-		n := min(len(p), 32*1024)
-		buf := make([]byte, w.n+n)
-		copy(buf, w.tail[:w.n])
-		copy(buf[w.n:], p[:n])
-		p = p[n:]
-		complete := len(buf) / 4 * 4
-		pcm := make([]byte, complete/2)
-		for i := 0; i < complete; i += 4 {
-			v := math.Float32frombits(binary.LittleEndian.Uint32(buf[i:]))
-			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
-				return size - len(p) - n, fmt.Errorf("LFM3 speech returned a non-finite sample")
-			}
-			sample := int16(max(-32768, min(32767, float64(v)*32768)))
-			binary.LittleEndian.PutUint16(pcm[i/2:], uint16(sample)) //nolint:gosec // PCM bit reinterpretation
-		}
-		w.n = copy(w.tail[:], buf[complete:])
-		if len(pcm) != 0 && !w.yield(pcm, nil) {
-			w.stopped = true
-			return size - len(p), io.ErrClosedPipe
-		}
-	}
-	return size, nil
 }

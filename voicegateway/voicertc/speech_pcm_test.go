@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math"
 	"reflect"
 	"testing"
 )
@@ -20,10 +19,9 @@ func TestNormalizePCM(t *testing.T) {
 			data       []byte
 			want       []int16
 		}{
-			{"signed PCM", "audio/pcm;rate=24000;encoding=signed-integer;bits=16", []byte{0, 128, 0, 0, 255, 127}, []int16{-32768, 0, 32767}},
-			{"float clipping", "audio/pcm;rate=24000;encoding=float;bits=32", floatSamples(-2, -0.5, 0, 0.5, 2), []int16{-32768, -16384, 0, 16384, 32767}},
-			{"upsampling", "audio/pcm;rate=12000;encoding=float;bits=32", floatSamples(0, 0.5), []int16{0, 8192, 16384, 16384}},
-			{"downsampling", "audio/pcm;rate=48000;encoding=float;bits=32", floatSamples(0, 0.25, 0.5, 0.75), []int16{0, 16384}},
+			{"native rate", "audio/pcm;rate=24000;encoding=signed-int;bits=16", []byte{0, 128, 0, 0, 255, 127}, []int16{-32768, 0, 32767}},
+			{"upsampling", "audio/pcm;rate=12000;encoding=signed-int;bits=16", pcm16Samples(0, 16384), []int16{0, 8192, 16384, 16384}},
+			{"downsampling", "audio/pcm;rate=48000;encoding=signed-int;bits=16", pcm16Samples(0, 8192, 16384, 24576), []int16{0, 16384}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				var got []int16
@@ -52,12 +50,11 @@ func TestNormalizePCM(t *testing.T) {
 		}{
 			{"broken", nil},
 			{"audio/wav", nil},
-			{"audio/pcm;rate=0;encoding=float;bits=32", nil},
-			{"audio/pcm;rate=24000;encoding=float;bits=32;channels=2", nil},
-			{"audio/pcm;rate=24000;encoding=float;bits=32;endian=big", nil},
+			{"audio/pcm;rate=0;encoding=signed-int;bits=16", nil},
+			{"audio/pcm;rate=24000;encoding=signed-int;bits=16;channels=2", nil},
+			{"audio/pcm;rate=24000;encoding=signed-int;bits=16;endian=big", nil},
 			{"audio/pcm;rate=24000", nil},
-			{"audio/pcm;rate=24000;encoding=float;bits=32", []byte{1, 2, 3}},
-			{"audio/pcm;rate=24000;encoding=float;bits=32", floatSamples(float32(math.NaN()))},
+			{"audio/pcm;rate=24000;encoding=signed-int;bits=16", []byte{1, 2, 3}},
 		} {
 			var got error
 			for _, err := range normalizePCM(bytes.NewReader(tc.data), tc.mime) {
@@ -69,7 +66,7 @@ func TestNormalizePCM(t *testing.T) {
 		}
 		sentinel := errors.New("failed audio stream")
 		var got error
-		for _, err := range normalizePCM(&fragmentReader{parts: [][]byte{floatSamples(0.5)}, err: sentinel}, "audio/pcm;rate=24000;encoding=float;bits=32") {
+		for _, err := range normalizePCM(&fragmentReader{parts: [][]byte{pcm16Samples(16384)}, err: sentinel}, "audio/pcm;rate=24000;encoding=signed-int;bits=16") {
 			got = err
 		}
 		if !errors.Is(got, sentinel) {
@@ -78,10 +75,10 @@ func TestNormalizePCM(t *testing.T) {
 	})
 }
 
-func floatSamples(samples ...float32) []byte {
+func pcm16Samples(samples ...int16) []byte {
 	var out []byte
 	for _, x := range samples {
-		out = binary.LittleEndian.AppendUint32(out, math.Float32bits(x))
+		out = binary.LittleEndian.AppendUint16(out, uint16(x)) //nolint:gosec // Encode signed PCM bit representation.
 	}
 	return out
 }

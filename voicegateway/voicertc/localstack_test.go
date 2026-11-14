@@ -1321,7 +1321,7 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 	t.Run("configured models", func(t *testing.T) {
 		t.Parallel()
 		remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/tts" {
+			if r.URL.Path != "/v1/audio/speech" {
 				t.Errorf("unexpected request %s", r.URL.Path)
 			}
 			var req struct {
@@ -1336,8 +1336,8 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 			if req.Input != "Hello." || req.Voice != "" || !req.Stream {
 				t.Errorf("TTS request: %+v", req)
 			}
-			w.Header().Set("Content-Type", "audio/pcm;rate=24000;encoding=float;bits=32")
-			if _, err := w.Write([]byte{0, 0, 0, 63}); err != nil {
+			w.Header().Set("Content-Type", "audio/pcm;rate=24000;encoding=signed-int;bits=16")
+			if _, err := w.Write([]byte{0, 64}); err != nil {
 				t.Error(err)
 			}
 		}))

@@ -13,9 +13,12 @@ import (
 	"strconv"
 )
 
-// normalizePCM converts a bounded window at a time, retaining only the prior
-// sample for interpolation across response chunks. Providers must identify raw
-// little-endian mono PCM explicitly; containers and ambiguous formats fail.
+// normalizePCM resamples llama-server's /v1/audio/speech PCM to the gateway
+// output rate, a bounded window at a time, retaining only the prior sample for
+// interpolation across response chunks. The response must identify raw
+// little-endian mono signed 16-bit PCM in llama-server's spelling, such as
+// audio/pcm;rate=24000;encoding=signed-int;bits=16 (tools/server/README.md at
+// ggml-org/llama.cpp b1b770d90d94); containers and other encodings fail.
 func normalizePCM(r io.Reader, contentType string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		typ, params, err := mime.ParseMediaType(contentType)
@@ -28,18 +31,13 @@ func normalizePCM(r io.Reader, contentType string) iter.Seq2[[]byte, error] {
 			yield(nil, fmt.Errorf("invalid speech PCM format %q", contentType))
 			return
 		}
-		size := 2
-		switch {
-		case params["encoding"] == "float" && params["bits"] == "32":
-			size = 4
-		case params["encoding"] == "signed-integer" && params["bits"] == "16":
-		default:
+		if params["encoding"] != "signed-int" || params["bits"] != "16" {
 			yield(nil, fmt.Errorf("unsupported speech PCM encoding %q", contentType))
 			return
 		}
 		var n, next int64
 		var previous float64
-		buf := make([]byte, 8192+4)
+		buf := make([]byte, 8192)
 		pending := 0
 		encode := func(out []byte, sample float64) []byte {
 			value := math.Max(-32768, math.Min(32767, math.Round(sample*32768)))
@@ -48,17 +46,10 @@ func normalizePCM(r io.Reader, contentType string) iter.Seq2[[]byte, error] {
 		for {
 			count, readErr := r.Read(buf[pending:8192])
 			count += pending
-			end := count - count%size
+			end := count - count%2
 			out := make([]byte, 0, end*3)
-			for i := 0; i < end; i += size {
+			for i := 0; i < end; i += 2 {
 				x := float64(int16(binary.LittleEndian.Uint16(buf[i:]))) / 32768 //nolint:gosec // Decode signed PCM bit representation.
-				if size == 4 {
-					x = float64(math.Float32frombits(binary.LittleEndian.Uint32(buf[i:])))
-					if math.IsNaN(x) || math.IsInf(x, 0) {
-						yield(nil, errors.New("speech PCM contains a non-finite sample"))
-						return
-					}
-				}
 				for next <= n*backendOutputSampleRate {
 					v := x
 					if n != 0 {

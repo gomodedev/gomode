@@ -1256,15 +1256,15 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 				if _, err := fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":%s,\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", delta); err != nil {
 					t.Error(err)
 				}
-			case "/tts":
+			case "/v1/audio/speech":
 				var req llamacpp.SpeechRequest
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					t.Error(err)
 					return
 				}
 				speech <- req
-				w.Header().Set("Content-Type", "audio/pcm;rate=24000;encoding=float;bits=32")
-				if _, err := w.Write([]byte{0, 0, 0, 63}); err != nil {
+				w.Header().Set("Content-Type", "audio/pcm;rate=24000;encoding=signed-int;bits=16")
+				if _, err := w.Write([]byte{0, 64}); err != nil {
 					t.Error(err)
 				}
 			default:
@@ -1337,7 +1337,7 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 			}
 		}
 		tts := <-speech
-		if tts.Input != "The answer is ready." || !tts.Stream || sink.pcmLen() != 2 || sink.reasoningText() != "" {
+		if tts.Input != "The answer is ready." || tts.Lang != "en" || !tts.Stream || sink.pcmLen() != 2 || sink.reasoningText() != "" {
 			t.Fatalf("staged synthesis leaked reasoning or lost audio: %+v", tts)
 		}
 		sink.mu.Lock()

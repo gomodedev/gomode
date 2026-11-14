@@ -167,7 +167,8 @@ func (a *audioChatASRAdapter) transcribe(ctx context.Context, pcm []byte) (strin
 	return strings.TrimSpace(res.String()), nil
 }
 
-// llamaTTSAdapter synthesizes through llama-server's /v1/audio/speech.
+// llamaTTSAdapter synthesizes through llama-server's /v1/audio/speech. lang
+// is a fixed SpeechRequest.Lang; staged LFM3 sessions send "en".
 //
 // TODO: Send the session language as SpeechRequest.Lang. llama-server b12110
 // passes "lang" to the model's "tts" chat template. LFM3-Audio's template maps
@@ -176,13 +177,14 @@ func (a *audioChatASRAdapter) transcribe(ctx context.Context, pcm []byte) (strin
 type llamaTTSAdapter struct {
 	client *llamacpp.Client
 	voice  string
+	lang   string
 }
 
 func (a *llamaTTSAdapter) synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		res, err := a.client.SpeechStreamRaw(ctx, &llamacpp.SpeechRequest{Input: text, Voice: a.voice, ResponseFormat: llamacpp.SpeechPCM, Stream: true}) //nolint:bodyclose // Iteration owns and closes the native body below.
+		res, err := a.client.SpeechStreamRaw(ctx, &llamacpp.SpeechRequest{Input: text, Voice: a.voice, Lang: a.lang, ResponseFormat: llamacpp.SpeechPCM, Stream: true}) //nolint:bodyclose // Iteration owns and closes the native body below.
 		if err != nil {
 			yield(nil, err)
 			return
