@@ -125,7 +125,8 @@ describe("VoiceSettings", () => {
     view.unmount();
     render(() => <VoiceSettings />);
     expect(screen.getByRole("combobox", { name: "Speaking voice" })).toHaveValue("samantha");
-    fakeSynthesis.voices = [...fakeSynthesis.voices];
+    // Browsers return new voice objects from every getVoices() call.
+    fakeSynthesis.voices = fakeSynthesis.voices.map((voice) => ({ ...voice }) as SpeechSynthesisVoice);
     fakeSynthesis.dispatchEvent(new Event("voiceschanged"));
     expect(screen.getByRole("combobox", { name: "Speaking voice" })).toHaveValue("samantha");
     await user.click(chip(chips("Speech"), "model:kokoro"));

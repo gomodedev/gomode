@@ -233,6 +233,14 @@ Run from the repository root after `pnpm install --frozen-lockfile`:
 node scripts/voice_preview.mjs
 ```
 
+Stop it with Ctrl-C. Stop a background server by its exact command line;
+`pkill -f voice_preview.mjs` also matches, and kills, any shell whose command
+line names the script:
+
+```bash
+kill $(pgrep -f '^node scripts/voice_preview.mjs')
+```
+
 In another terminal, use an isolated `agent-browser` session:
 
 ```bash

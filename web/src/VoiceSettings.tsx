@@ -170,6 +170,9 @@ export default function VoiceSettings(props: {
   const matchingBrowserVoices = createMemo(() =>
     browserVoices().filter((voice) => browserVoiceMatchesLanguage(voice, voiceSession.state.languageTag)),
   );
+  const browserVoiceLabels = createMemo(
+    () => new Map(matchingBrowserVoices().map((voice) => [voice.voiceURI, `${voice.name} (${voice.lang})`])),
+  );
   // A saved voice the browser no longer offers shows as the browser default, which speech uses.
   const browserVoice = createMemo(() => {
     const uri = voiceSession.state.browserVoiceURI;
@@ -310,7 +313,6 @@ export default function VoiceSettings(props: {
                 label={messages().recognition}
                 browser={messages().browserSpeech}
                 supported={recognitionSupported}
-                unavailable={messages().choiceUnavailable}
                 disabled={active()}
                 error={saveFailure("input") ?? resolutionError("input")}
                 hint={
@@ -328,7 +330,6 @@ export default function VoiceSettings(props: {
               <ChoiceChips
                 label={messages().languageModel}
                 disabled={active()}
-                unavailable={messages().choiceUnavailable}
                 error={modelError()}
                 retry={
                   voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined
@@ -340,7 +341,6 @@ export default function VoiceSettings(props: {
                 label={messages().synthesisModel}
                 browser={messages().browserSpeech}
                 supported={synthesisSupported}
-                unavailable={messages().choiceUnavailable}
                 disabled={active()}
                 error={saveFailure("output") ?? resolutionError("output")}
                 hint={
@@ -355,7 +355,6 @@ export default function VoiceSettings(props: {
               <ChoiceChips
                 label={messages().gatewayModel}
                 disabled={active()}
-                unavailable={messages().choiceUnavailable}
                 error={modelError()}
                 retry={
                   voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined
@@ -377,20 +376,6 @@ export default function VoiceSettings(props: {
                 <Picker>
                   <select
                     id={browserVoiceId}
-                    ref={(select) => {
-                      createEffect(() => {
-                        const selected = browserVoice();
-                        let cancelled = false;
-                        // Replacing the voice list can reset native selection after
-                        // the selected option was inserted.
-                        queueMicrotask(() => {
-                          if (!cancelled) select.value = selected;
-                        });
-                        onCleanup(() => {
-                          cancelled = true;
-                        });
-                      });
-                    }}
                     disabled={active()}
                     value={browserVoice()}
                     onChange={(event) => {
@@ -407,10 +392,11 @@ export default function VoiceSettings(props: {
                     <option value="" selected={browserVoice() === ""}>
                       {messages().browserVoiceDefault}
                     </option>
-                    <For each={matchingBrowserVoices()}>
-                      {(voice) => (
-                        <option value={voice.voiceURI} selected={browserVoice() === voice.voiceURI}>
-                          {voice.name} ({voice.lang})
+                    {/* Keyed by URI: a refreshed voice list keeps each option, so the selection survives. */}
+                    <For each={matchingBrowserVoices().map((voice) => voice.voiceURI)}>
+                      {(uri) => (
+                        <option value={uri} selected={browserVoice() === uri}>
+                          {browserVoiceLabels().get(uri)}
                         </option>
                       )}
                     </For>
@@ -537,7 +523,7 @@ export default function VoiceSettings(props: {
                   } catch (err) {
                     event.currentTarget.checked = !next;
                     setReasoningError(
-                      `Could not save the reasoning preference: ${err instanceof Error ? err.message : String(err)}`,
+                      `${messages().reasoningSaveFailed}: ${err instanceof Error ? err.message : String(err)}`,
                     );
                   }
                 }}
@@ -561,9 +547,7 @@ export default function VoiceSettings(props: {
                     setUsageError(null);
                   } catch (err) {
                     event.currentTarget.checked = !next;
-                    setUsageError(
-                      `Could not save the usage preference: ${err instanceof Error ? err.message : String(err)}`,
-                    );
+                    setUsageError(`${messages().usageSaveFailed}: ${err instanceof Error ? err.message : String(err)}`);
                   }
                 }}
               />
@@ -752,20 +736,18 @@ function ChipField(props: {
 
 function ChoiceChips(props: {
   label: string;
-  unavailable: string;
   disabled: boolean;
   error: string | null;
   retry: JSX.Element | undefined;
   onSave: (error: string | null) => void;
 }) {
   const selected = () => voiceSession.state.choiceIDs[voiceSession.transport] ?? "";
-  const options = createMemo(() => {
-    const choices = voiceSession.choicesForSetup(voiceSession.state.setupMode);
-    const listed = choices.map((choice) => ({ value: choice.id, label: choice.label, disabled: false }));
-    return choices.some((choice) => choice.id === selected())
-      ? listed
-      : [{ value: selected(), label: props.unavailable, disabled: true }, ...listed];
-  });
+  // Discovery falls back from a withdrawn choice, so only an empty list leaves no chip checked.
+  const options = createMemo(() =>
+    voiceSession
+      .choicesForSetup(voiceSession.state.setupMode)
+      .map((choice) => ({ value: choice.id, label: choice.label, disabled: false })),
+  );
   return (
     <ChipField
       label={props.label}
@@ -786,7 +768,6 @@ function SpeechStageChips(props: {
   browser: string;
   supported: boolean;
   disabled: boolean;
-  unavailable: string;
   error: string | null;
   hint: JSX.Element;
   hintId?: string;
@@ -804,11 +785,8 @@ function SpeechStageChips(props: {
       (choice) => choice.id === voiceSession.state.choiceIDs[voiceSession.transport],
     );
     const fixedStage = !voiceSession.composableChoice && fixed?.transports.includes("webrtc") ? fixed : null;
-    const current = selected();
     const options: ChipOption[] = [];
     if (fixedStage !== null) options.push({ value: "gateway", label: fixedStage.label, disabled: false });
-    else if (current !== "browser" && !models.some((model) => `model:${model.id}` === current))
-      options.push({ value: current, label: props.unavailable, disabled: true });
     options.push({ value: "browser", label: props.browser, disabled: !props.supported });
     for (const model of models) options.push({ value: `model:${model.id}`, label: model.label, disabled: false });
     return options;

@@ -283,7 +283,6 @@ describe("voice choices", () => {
     const select = chips("Recognition");
     expect(checkedValue(select)).toBe("model:asr-a");
     expect(select).not.toHaveAttribute("aria-describedby");
-    expect(screen.queryByRole("radio", { name: "Choose an available model" })).toBeNull();
     const save = vi.spyOn(window.Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("Storage unavailable");
     });
@@ -686,7 +685,6 @@ describe("voice choices", () => {
     await user.click(screen.getByRole("radio", { name: "Separate stages" }));
     expect(checkedValue(await readyModel())).toBe("remote");
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByRole("radio", { name: "Choose an available model" })).toBeNull();
     expect(localStorage.getItem("gomode.voiceChoice.https://voice.example.text")).toBe("removed");
   });
 
