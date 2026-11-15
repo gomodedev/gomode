@@ -528,7 +528,7 @@ func TestVoiceChoices(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				catalog := voicev2.VoiceChoicesResp{Choices: []voicev2.VoiceChoice{{ID: "stack", Label: "Stack", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText, voicev2.VoiceTransportWebRTC}, SpeechModes: slices.Clone(all), Composable: true}}, RecognitionModels: []voicev2.SpeechModel{{ID: "asr", Label: "Recognition"}}, SynthesisModels: []voicev2.SpeechModel{{ID: "tts", Label: "Speech"}}}
+				catalog := voicev2.VoiceChoicesResp{Choices: []voicev2.VoiceChoice{{ID: "stack", Label: "Stack", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText, voicev2.VoiceTransportWebRTC}, SpeechModes: slices.Clone(all), Composable: true}}, RecognitionModels: []voicev2.SpeechModel{{ID: "asr", Label: "Recognition"}}, SynthesisModels: []voicev2.SpeechModel{{ID: "tts", Label: "Speech"}}, STUNServers: []string{"stun:stun.example:3478"}}
 				b := &choiceBridge{choices: &catalog}
 				var media MediaBridge
 				if tc.media {
@@ -555,8 +555,11 @@ func TestVoiceChoices(t *testing.T) {
 					if !slices.Equal(got.RecognitionModels, catalog.RecognitionModels) || !slices.Equal(got.SynthesisModels, catalog.SynthesisModels) {
 						t.Fatal("HTTP projection lost speech catalogs")
 					}
-				} else if len(got.RecognitionModels) != 0 || len(got.SynthesisModels) != 0 {
-					t.Fatal("text-only handler advertised gateway speech models")
+					if !slices.Equal(got.STUNServers, catalog.STUNServers) {
+						t.Fatalf("STUN servers = %q, want the media bridge's %q", got.STUNServers, catalog.STUNServers)
+					}
+				} else if len(got.RecognitionModels) != 0 || len(got.SynthesisModels) != 0 || len(got.STUNServers) != 0 {
+					t.Fatal("text-only handler advertised gateway speech models or STUN servers")
 				}
 				if !slices.Equal(catalog.Choices[0].SpeechModes, all) {
 					t.Fatal("HTTP projection mutated the shared source catalog")

@@ -283,6 +283,10 @@ type VoiceChoicesResp struct {
 	RecognitionModels []SpeechModel `json:"recognitionModels,omitempty"`
 	// SynthesisModels lists gateway synthesis stages in preference order.
 	SynthesisModels []SpeechModel `json:"synthesisModels,omitempty"`
+	// STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
+	// its ICE servers. Omitted means none: the client gathers host candidates
+	// only and contacts no STUN server.
+	STUNServers []string `json:"stunServers,omitempty"`
 }
 
 // DefaultChoiceID returns the default choice for transport, or "" when the

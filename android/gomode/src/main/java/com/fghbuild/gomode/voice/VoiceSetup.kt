@@ -48,6 +48,8 @@ internal data class VoiceSetup(
     val service: ServiceAuthorization?,
     /** The gateway voice setup; null when an on-device engine runs the language model. */
     val voice: GatewayVoiceSelection? = null,
+    /** The gateway's advertised STUN URLs; WebRTC contacts no other STUN server. */
+    val stunServers: List<String> = emptyList(),
     val tokenEndpointURL: String?,
     val gatewayHeaders: Map<String, String>,
     val mcpClient: McpClient?,
@@ -143,16 +145,13 @@ internal suspend fun prepareVoiceSetup(
     }
 
     val gatewayHeaders = serviceAuthHeaders(gatewayEndpointURL, bearerTokenFor)
-    val selection =
+    val choices =
         if (usesGatewayVoice(settings)) {
-            discoverVoiceChoices(
-                settings.activeServiceURL,
-                serviceSettings,
-                bearerTokenFor,
-            ).resolve(settings, pinnedVoice)
+            discoverVoiceChoices(settings.activeServiceURL, serviceSettings, bearerTokenFor)
         } else {
             null
         }
+    val selection = choices?.resolve(settings, pinnedVoice)
     requireCurrent()
 
     val participant =
@@ -184,6 +183,7 @@ internal suspend fun prepareVoiceSetup(
         serverID = settings.activeServiceId,
         gatewayEndpointURL = gatewayEndpointURL,
         voice = selection,
+        stunServers = choices?.catalog?.stunServers.orEmpty(),
         service = service,
         tokenEndpointURL = tokenEndpointURL,
         gatewayHeaders = gatewayHeaders,

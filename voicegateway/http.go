@@ -196,7 +196,7 @@ func (h *handler) voiceChoices() voicev2.VoiceChoicesResp {
 		text.Choices = []voicev2.VoiceChoice{{ID: id, Label: "Default", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText}}}
 		text.Defaults = []voicev2.VoiceChoiceDefault{{Transport: voicev2.VoiceTransportText, ID: id}}
 	}
-	choices := voicev2.VoiceChoicesResp{Choices: []voicev2.VoiceChoice{}, RecognitionModels: slices.Clone(media.RecognitionModels), SynthesisModels: slices.Clone(media.SynthesisModels)}
+	choices := voicev2.VoiceChoicesResp{Choices: []voicev2.VoiceChoice{}, RecognitionModels: slices.Clone(media.RecognitionModels), SynthesisModels: slices.Clone(media.SynthesisModels), STUNServers: slices.Clone(media.STUNServers)}
 	for _, ch := range media.Choices {
 		if slices.Contains(ch.Transports, voicev2.VoiceTransportWebRTC) {
 			ch.Transports = []voicev2.VoiceTransport{voicev2.VoiceTransportWebRTC}

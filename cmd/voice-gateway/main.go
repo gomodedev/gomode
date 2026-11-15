@@ -165,7 +165,7 @@ func mainImpl(args []string) (err error) {
 	}
 	defer func() { err = errors.Join(err, watcher.Close()) }()
 
-	bridge, err := voicertc.NewBridge(ctx, &resolved, cfg.Server.WebRTCUDPPort, cacheDir)
+	bridge, err := voicertc.NewBridge(ctx, &resolved, cfg.Server, cacheDir)
 	if err != nil {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)

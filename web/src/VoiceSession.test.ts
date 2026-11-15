@@ -65,7 +65,7 @@ class FakePeerConnection extends EventTarget {
   oniceconnectionstatechange: ((this: RTCPeerConnection, ev: Event) => unknown) | null = null;
   ontrack: ((this: RTCPeerConnection, ev: RTCTrackEvent) => unknown) | null = null;
 
-  constructor() {
+  constructor(readonly configuration?: RTCConfiguration) {
     super();
     FakePeerConnection.last = this;
     FakePeerConnection.instances.push(this);
@@ -177,6 +177,7 @@ let diagnosticRequests: Array<{ url: string; authorization: string | null }> = [
 let offerResponse: Promise<Response> | null = null;
 let diagnosticResponse: VoiceRTCDiagnosticsResp | null = null;
 let offeredVoices: string[] | null = null;
+let advertisedSTUN: string[] | null = null;
 let mixedSpeech = false;
 let independentSpeech = false;
 
@@ -209,6 +210,7 @@ beforeEach(() => {
   offerResponse = null;
   diagnosticResponse = null;
   offeredVoices = null;
+  advertisedSTUN = null;
   mixedSpeech = false;
   independentSpeech = false;
   globalThis.fetch = async (input, init) => {
@@ -236,6 +238,7 @@ beforeEach(() => {
                 : {}),
             },
           ],
+          ...(advertisedSTUN === null ? {} : { stunServers: advertisedSTUN }),
           ...(independentSpeech
             ? {
                 recognitionModels: [
@@ -1051,6 +1054,22 @@ describe("VoiceSession", () => {
       stopObserving();
       session.disconnect();
       Object.defineProperty(navigator, "permissions", { configurable: true, value: originalPermissions });
+    }
+  });
+
+  it("configures only the STUN servers the gateway advertises", async () => {
+    for (const [advertised, want] of [
+      [null, []],
+      [["stun:stun.example:3478", "stuns:stun.example"], [{ urls: ["stun:stun.example:3478", "stuns:stun.example"] }]],
+    ] as const) {
+      advertisedSTUN = advertised === null ? null : [...advertised];
+      const session = new VoiceSession();
+      try {
+        await session.connect();
+        expect(FakePeerConnection.last?.configuration?.iceServers).toEqual(want);
+      } finally {
+        session.disconnect();
+      }
     }
   });
 

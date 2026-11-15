@@ -12,11 +12,13 @@ import (
 	"io/fs"
 	"iter"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -581,7 +583,7 @@ func LoadConfig(path string) (configFile, error) {
 	if err != nil {
 		return configFile{}, fmt.Errorf("read config: %w", err)
 	}
-	cfg := configFile{AutoUpdate: autoupdate.DefaultSchedule, Server: ServerConfig{HTTP: ":3479"}}
+	cfg := configFile{AutoUpdate: autoupdate.DefaultSchedule, Server: ServerConfig{HTTP: ":3479", STUNServers: slices.Clone(DefaultSTUNServers)}}
 	dec := toml.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
@@ -762,10 +764,20 @@ type ServerConfig struct {
 	// TrustedProxies lists direct proxy CIDRs allowed to supply client IP headers.
 	TrustedProxies []string `toml:"trusted_proxies"`
 	// DebugFrontend enables the unauthenticated live-test UI on the API listener.
-	DebugFrontend bool       `toml:"debug_frontend"`
-	WebRTCUDPPort int        `toml:"webrtc_udp_port"`
-	LogLevel      slog.Level `toml:"log_level"`
+	DebugFrontend bool `toml:"debug_frontend"`
+	WebRTCUDPPort int  `toml:"webrtc_udp_port"`
+	// STUNServers lists the stun: or stuns: URLs WebRTC clients use to learn
+	// their public address. The gateway advertises them in its voice choices
+	// and runs no STUN itself. Empty means clients gather host candidates only,
+	// which suffices when clients can reach the gateway's advertised UDP
+	// endpoint: the gateway learns each client's address from its checks.
+	STUNServers []string   `toml:"stun_servers"`
+	LogLevel    slog.Level `toml:"log_level"`
 }
+
+// DefaultSTUNServers is the standalone gateway's STUN list when its config
+// omits server.stun_servers.
+var DefaultSTUNServers = []string{"stun:stun.l.google.com:19302"}
 
 // Validate checks HTTP policies and the WebRTC port, where -1 disables media
 // transport. The caller owns listener requirements and may bind its own server.
@@ -783,6 +795,30 @@ func (c *ServerConfig) Validate() error {
 	}
 	if c.WebRTCUDPPort < -1 || c.WebRTCUDPPort > 65535 {
 		return fmt.Errorf("server.webrtc_udp_port must be between -1 and 65535, got %d", c.WebRTCUDPPort)
+	}
+	for i, raw := range c.STUNServers {
+		if err := validateSTUNURL(raw); err != nil {
+			return fmt.Errorf("server.stun_servers[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// validateSTUNURL accepts RFC 7064 stun: and stuns: URIs with an explicit host.
+func validateSTUNURL(raw string) error {
+	scheme, rest, ok := strings.Cut(raw, ":")
+	if !ok || (scheme != "stun" && scheme != "stuns") {
+		return fmt.Errorf("%q needs the stun or stuns scheme", raw)
+	}
+	host := rest
+	if h, port, err := net.SplitHostPort(rest); err == nil {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("%q has an invalid port", raw)
+		}
+		host = h
+	}
+	if host == "" || strings.ContainsAny(host, "/?#@ ") {
+		return fmt.Errorf("%q must name a host", raw)
 	}
 	return nil
 }

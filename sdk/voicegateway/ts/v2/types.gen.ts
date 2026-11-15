@@ -288,6 +288,12 @@ export interface VoiceChoicesResp {
   recognitionModels?: SpeechModel[];
   /** SynthesisModels lists gateway synthesis stages in preference order. */
   synthesisModels?: SpeechModel[];
+  /**
+   * STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
+   * its ICE servers. Omitted means none: the client gathers host candidates
+   * only and contacts no STUN server.
+   */
+  stunServers?: string[];
 }
 
 /** ServiceAuthorization identifies the host and carries its scoped gateway token. */

@@ -179,8 +179,11 @@ class CarDialInterceptionTest {
                 awaitMicrophoneForeground()
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
                 var after = fixtureStats()
-                // Connecting sends no model turn; an active text session is the evidence.
-                while (after.getInt("textActive") != 1 && System.nanoTime() < deadline) {
+                // Connecting sends no model turn; a new, active text session is the evidence.
+                // An earlier test's session may still be closing, so activity alone is not.
+                while ((after.getInt("textSetups") == before.getInt("textSetups") || after.getInt("textActive") != 1) &&
+                    System.nanoTime() < deadline
+                ) {
                     Thread.sleep(100)
                     after = fixtureStats()
                 }
@@ -202,34 +205,30 @@ class CarDialInterceptionTest {
 
     @Test
     @LocalEmulatorOnly
-    fun genericDialUsesTheLatestActiveServerAndSpecificDialStillOverridesIt() {
+    fun genericDialUsesTheLatestActiveServer() {
         shell("pm grant $APP ${Manifest.permission.RECORD_AUDIO}")
-        // CarDialRedirectionTest owns resolution order; these dials prove a non-default
-        // selection and a server number's override reach the native surface.
-        for ((selected, number, expectedName) in listOf(
-            Triple(SECOND_SERVER_ID, GENERIC_NUMBER, "Second fixture"),
-            Triple(SECOND_SERVER_ID, NUMBER, "Dial fixture"),
-        )) {
-            writeSettings(
-                includeServer = true,
-                includeSecondServer = true,
-                activeID = selected,
-                mode = "CLOUD",
-                url = fixtureURL(),
+        // CarDialRedirectionTest owns resolution order, including a server number's override,
+        // which warmSettingsDialOpensTheResolvedServerWebView dials end to end. This proves a
+        // non-default selection reaches the locked native surface.
+        writeSettings(
+            includeServer = true,
+            includeSecondServer = true,
+            activeID = SECOND_SERVER_ID,
+            mode = "CLOUD",
+            url = fixtureURL(),
+        )
+        assertTrue("Expected ordinary process death", shell("pidof $APP").isBlank())
+        withSecureKeyguard {
+            val before = fixtureStats()
+            dial(GENERIC_NUMBER)
+            awaitVoice("CLOUD", before)
+            assertLockedNativeSurface()
+            assertTrue(
+                "Wrong dial target: expected Second fixture",
+                device.hasObject(By.res("car_dial_server").text("Second fixture")),
             )
-            assertTrue("Expected ordinary process death", shell("pidof $APP").isBlank())
-            withSecureKeyguard {
-                val before = fixtureStats()
-                dial(number)
-                awaitVoice("CLOUD", before)
-                assertLockedNativeSurface()
-                assertTrue(
-                    "Wrong dial target: expected $expectedName",
-                    device.hasObject(By.res("car_dial_server").text(expectedName)),
-                )
-                endNativeVoice()
-                awaitVoiceClosed()
-            }
+            endNativeVoice()
+            awaitVoiceClosed()
         }
     }
 
@@ -1197,7 +1196,8 @@ class CarDialInterceptionTest {
     @Test
     @LocalEmulatorOnly
     fun repeatedSecureKeyguardCleanupAllowsProcessReclamation() {
-        repeat(3) {
+        // The second round proves the first left nothing that blocks reclamation.
+        repeat(2) {
             val launch = shell("am start -W -f 0x10008000 -n $APP/.MainActivity")
             assertTrue(launch, launch.contains("Status: ok"))
             assertFalse(shell("pidof $APP").isBlank())
@@ -1341,7 +1341,7 @@ class CarDialInterceptionTest {
     }
 
     @Test
-    fun nativeSetupRequiresMicrophoneAndUsesRealRoleSelectionThenDisableAndReselect() {
+    fun nativeSetupUsesRealMicrophoneAndRoleDialogsAndOffersReselectionAfterRoleLoss() {
         nativeOnboarding = true
         shell("cmd role remove-role-holder ${RoleManager.ROLE_CALL_REDIRECTION} $APP")
         shell("run-as $APP pm disable $REDIRECTION")
@@ -1351,9 +1351,8 @@ class CarDialInterceptionTest {
             PackageManager.PERMISSION_DENIED,
             context.packageManager.checkPermission(Manifest.permission.RECORD_AUDIO, APP),
         )
-        scrollToText("Allow microphone")
-        clickNativeText("Enable dial-to-start")
-        assertFalse(redirectionEnabled())
+        // CarDialSettingTest owns the prerequisite states and disable/enable; this proves
+        // Android's real permission dialog and role chooser, and live role-loss detection.
         clickNativeText("Allow microphone")
         val permission =
             device.wait(
@@ -1365,12 +1364,6 @@ class CarDialInterceptionTest {
         acceptRoleChooser()
         scrollToText("Dial-to-start is on.")
         assertEquals(APP, shell("cmd role get-role-holders ${RoleManager.ROLE_CALL_REDIRECTION}").trim())
-        clickNativeText("Disable dial-to-start")
-        scrollToText("Dial-to-start is off.")
-        assertFalse(redirectionEnabled())
-        clickNativeText("Enable dial-to-start")
-        if (device.wait(Until.hasObject(By.text("Set as default")), 1_000)) acceptRoleChooser()
-        scrollToText("Dial-to-start is on.")
         assertTrue(redirectionEnabled())
         shell("cmd role remove-role-holder ${RoleManager.ROLE_CALL_REDIRECTION} $APP")
         scrollToText("Select Go Mode again")

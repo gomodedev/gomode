@@ -552,11 +552,7 @@ internal class VoiceSession(
                             return@launch
                         }
 
-                    val iceServers =
-                        listOf(
-                            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                        )
-                    val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
+                    val rtcConfig = PeerConnection.RTCConfiguration(rtcIceServers(setup.stunServers))
 
                     val pc =
                         factory.createPeerConnection(
@@ -2379,3 +2375,7 @@ internal fun VoiceState.withToolCall(name: String): VoiceState =
                     ToolInvocation((toolHistory.lastOrNull()?.sequence ?: 0) + 1, name)
             ).takeLast(32),
     )
+
+/** The gateway owns STUN: an empty list gathers host candidates only and contacts no STUN server. */
+internal fun rtcIceServers(stunServers: List<String>): List<PeerConnection.IceServer> =
+    if (stunServers.isEmpty()) emptyList() else listOf(PeerConnection.IceServer.builder(stunServers).createIceServer())

@@ -505,19 +505,25 @@ public struct VoiceChoicesResp: Codable {
     public let recognitionModels: [SpeechModel]?
     /// SynthesisModels lists gateway synthesis stages in preference order.
     public let synthesisModels: [SpeechModel]?
+    /// STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
+    /// its ICE servers. Omitted means none: the client gathers host candidates
+    /// only and contacts no STUN server.
+    public let stunServers: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case choices
         case defaults
         case recognitionModels
         case synthesisModels
+        case stunServers
     }
 
-    public init(choices: [VoiceChoice]?, defaults: [VoiceChoiceDefault]?, recognitionModels: [SpeechModel]? = nil, synthesisModels: [SpeechModel]? = nil) {
+    public init(choices: [VoiceChoice]?, defaults: [VoiceChoiceDefault]?, recognitionModels: [SpeechModel]? = nil, synthesisModels: [SpeechModel]? = nil, stunServers: [String]? = nil) {
         self.choices = choices
         self.defaults = defaults
         self.recognitionModels = recognitionModels
         self.synthesisModels = synthesisModels
+        self.stunServers = stunServers
     }
 
     public init(from decoder: Decoder) throws {
@@ -526,6 +532,7 @@ public struct VoiceChoicesResp: Codable {
         self.defaults = try c.decode([VoiceChoiceDefault]?.self, forKey: .defaults)
         self.recognitionModels = try c.decodeIfPresent([SpeechModel].self, forKey: .recognitionModels)
         self.synthesisModels = try c.decodeIfPresent([SpeechModel].self, forKey: .synthesisModels)
+        self.stunServers = try c.decodeIfPresent([String].self, forKey: .stunServers)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -534,6 +541,7 @@ public struct VoiceChoicesResp: Codable {
         try c.encode(self.defaults, forKey: .defaults)
         try c.encodeIfPresent(self.recognitionModels, forKey: .recognitionModels)
         try c.encodeIfPresent(self.synthesisModels, forKey: .synthesisModels)
+        try c.encodeIfPresent(self.stunServers, forKey: .stunServers)
     }
 }
 

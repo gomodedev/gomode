@@ -384,6 +384,53 @@ class VoiceConversationTest {
         }
 
     @Test
+    fun setupCarriesTheGatewaysSTUNServers() =
+        runTest {
+            MockWebServer().use { server ->
+                server.dispatcher =
+                    object : Dispatcher() {
+                        override fun dispatch(request: RecordedRequest): MockResponse =
+                            when (request.requestUrl?.encodedPath) {
+                                "/.well-known/gomode.json" -> {
+                                    MockResponse().setBody(
+                                        """{"service":"fixture","apiVersion":1,"webShell":{"bridgeVersion":3,
+                        "toolGroups":[],"voiceGateway":{"url":"/","required":false,"authRequired":false}}}""",
+                                    )
+                                }
+
+                                "/api/voicegateway/v2/voice/choices" -> {
+                                    MockResponse().setBody(
+                                        """{"choices":[{"id":"live","label":"Live","transports":["webrtc"]}],
+                        "defaults":[{"transport":"webrtc","id":"live"}],"stunServers":["stun:stun.example:3478"]}""",
+                                    )
+                                }
+
+                                else -> {
+                                    MockResponse().setResponseCode(500)
+                                }
+                            }
+                    }
+                server.start()
+                val gateway = server.url("/").toString().trimEnd('/')
+                val repository = SettingsRepository(MemoryPreferences())
+                val id = repository.addService("Gateway", gateway)
+                repository.settings.first { it.activeServiceId == id }
+                val key = ServiceShellKey(id, gateway)
+                val page = ServiceShellSession(key) {}.also { authenticate(it, "initial") }
+                val catalog = ServiceCatalog(backgroundScope)
+                val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { mapOf(key to page) }
+                try {
+                    owner.begin(false)
+                    assertEquals(listOf("stun:stun.example:3478"), owner.prepare(pinnedVoice = null).stunServers)
+                } finally {
+                    owner.finish()
+                    page.close()
+                    catalog.close()
+                }
+            }
+        }
+
+    @Test
     fun selectionDuringSetupAndRecoveryKeepsSponsorAndResolvedVoice() =
         runTest {
             val choicesStarted = CountDownLatch(1)

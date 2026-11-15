@@ -268,6 +268,9 @@ offered family.
 | `defaults` | `VoiceChoiceDefault[] \| null` | Defaults holds one entry per offered transport, ordered by transport name. | yes |
 | `recognitionModels` | `SpeechModel[]` | RecognitionModels lists gateway recognition stages in preference order. |  |
 | `synthesisModels` | `SpeechModel[]` | SynthesisModels lists gateway synthesis stages in preference order. |  |
+| `stunServers` | `string[]` | STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
+its ICE servers. Omitted means none: the client gathers host candidates
+only and contacts no STUN server. |  |
 
 ### ServiceAuthorization
 

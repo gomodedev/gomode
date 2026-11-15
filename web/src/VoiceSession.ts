@@ -1337,7 +1337,11 @@ export class VoiceSession {
     this._applySetup(next, true);
   }
 
-  private async _resolveSessionChoice(attempt: VoiceConnection): Promise<string | null> {
+  // Resolves the session's choice and the gateway's STUN servers; the gateway
+  // owns STUN, so the client contacts none it does not advertise.
+  private async _resolveSessionChoice(
+    attempt: VoiceConnection,
+  ): Promise<{ choiceID: string; stunServers: string[] } | null> {
     const snapshot = attempt.gateway;
     const metadata = validateVoiceChoices(await snapshot.api.voiceChoices());
     if (!this._ownsConnection(attempt)) return null;
@@ -1436,7 +1440,7 @@ export class VoiceSession {
         s.voiceError = null;
         s.voiceStatus = "ready";
       });
-    return choiceID;
+    return { choiceID, stunServers: metadata.stunServers ?? [] };
   }
 
   /** Save recognition ownership for the next session. */
@@ -1780,8 +1784,9 @@ export class VoiceSession {
     try {
       const snapshot = attempt.gateway;
       if (!(await this._prepareHostSession(attempt))) return;
-      const choiceID = await this._resolveSessionChoice(attempt);
-      if (choiceID === null || this._connection !== attempt) return;
+      const resolved = await this._resolveSessionChoice(attempt);
+      if (resolved === null || this._connection !== attempt) return;
+      const { choiceID, stunServers } = resolved;
       const [systemInstruction, mcpTools, serviceContext] = await Promise.all([
         mcpClient.serverInstructions({ sessionID: this.conversationID }),
         mcpClient.listTools({ sessionID: this.conversationID }),
@@ -1795,7 +1800,7 @@ export class VoiceSession {
 
       // Create PeerConnection.
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        iceServers: stunServers.length === 0 ? [] : [{ urls: stunServers }],
       });
       attempt.pc = pc;
 
@@ -1966,8 +1971,9 @@ export class VoiceSession {
     try {
       const snapshot = attempt.gateway;
       if (!(await this._prepareHostSession(attempt))) return;
-      const choiceID = await this._resolveSessionChoice(attempt);
-      if (choiceID === null || this._connection !== attempt) return;
+      const resolved = await this._resolveSessionChoice(attempt);
+      if (resolved === null || this._connection !== attempt) return;
+      const { choiceID } = resolved;
       const [systemInstruction, tools, serviceContext, service] = await Promise.all([
         mcpClient.serverInstructions({ sessionID: this.conversationID }),
         mcpClient.listTools({ sessionID: this.conversationID }),

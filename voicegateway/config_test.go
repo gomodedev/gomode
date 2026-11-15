@@ -977,6 +977,41 @@ public_key = %q
 			}
 		})
 	})
+	t.Run("STUN servers", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, settings string
+			want           []string
+		}{
+			{name: "omitted keeps the default", want: DefaultSTUNServers},
+			{name: "empty disables STUN", settings: "stun_servers = []", want: []string{}},
+			{name: "explicit", settings: `stun_servers = ["stun:stun.example:3478", "stuns:stun.example", "stun:[2001:db8::1]:3478"]`, want: []string{"stun:stun.example:3478", "stuns:stun.example", "stun:[2001:db8::1]:3478"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "config.toml")
+				if err := os.WriteFile(path, []byte("[server]\n"+tc.settings), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				cfg, err := LoadConfig(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := cfg.Server.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(cfg.Server.STUNServers, tc.want) {
+					t.Fatalf("stun_servers = %q, want %q", cfg.Server.STUNServers, tc.want)
+				}
+			})
+		}
+		t.Run("invalid", func(t *testing.T) {
+			for _, raw := range []string{"turn:relay.example:3478", "stun.example:3478", "stun:", "stun:host:0", "stun:host:x", "stun://host"} {
+				cfg := ServerConfig{STUNServers: []string{raw}}
+				if err := cfg.Validate(); err == nil || !strings.HasPrefix(err.Error(), "server.stun_servers[0]: ") {
+					t.Errorf("%q: error = %v", raw, err)
+				}
+			}
+		})
+	})
 	t.Run("unknown fields", func(t *testing.T) {
 		// Voice tables belong in ConfigFileName, not in config.toml.
 		for _, data := range []string{"bogus = 1", "[[realtime]]\nid = \"live\""} {

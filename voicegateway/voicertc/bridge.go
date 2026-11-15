@@ -107,20 +107,21 @@ type Bridge struct {
 //
 // Credentials use each provider's native environment variables or, for OpenAI
 // Codex authentication, the file-backed Codex login. Configured choices share
-// the UDP listener selected by udpPort (-1 disables WebRTC).
+// the UDP listener selected by server.WebRTCUDPPort (-1 disables WebRTC) and
+// advertise server.STUNServers to clients.
 //
 // Choice discovery and transport setup happen during construction. Managed local
 // model runtimes load on first use through the shared capacity and idle-eviction
 // pool. A construction failure closes all backends already initialized.
-func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, udpPort int, activityLogDir string) (*Bridge, error) {
-	return newBridgeWithTimeout(ctx, cfg, udpPort, activityLogDir, defaultUPnPSSDPTimeout)
+func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, server voicegateway.ServerConfig, activityLogDir string) (*Bridge, error) {
+	return newBridgeWithTimeout(ctx, cfg, server, activityLogDir, defaultUPnPSSDPTimeout)
 }
 
-func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig, udpPort int, activityLogDir string, upnpSSDPTimeout time.Duration) (*Bridge, error) {
-	listener := voicegateway.ServerConfig{WebRTCUDPPort: udpPort}
-	if err := listener.Validate(); err != nil {
+func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig, server voicegateway.ServerConfig, activityLogDir string, upnpSSDPTimeout time.Duration) (*Bridge, error) {
+	if err := server.Validate(); err != nil {
 		return nil, err
 	}
+	udpPort := server.WebRTCUDPPort
 	if activityLogDir == "" {
 		return nil, errors.New("voice activity log directory is required")
 	}
@@ -131,7 +132,7 @@ func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig,
 	pool := newLocalStackPool(cfg.Runtime)
 	pool.recognition, pool.synthesis = slices.Clone(cfg.Recognition), slices.Clone(cfg.Synthesis)
 	backends := make(map[string]backendConnector, count)
-	advertised := voicev2.VoiceChoicesResp{Choices: make([]voicev2.VoiceChoice, 0, count)}
+	advertised := voicev2.VoiceChoicesResp{Choices: make([]voicev2.VoiceChoice, 0, count), STUNServers: slices.Clone(server.STUNServers)}
 	for _, a := range cfg.Recognition {
 		advertised.RecognitionModels = append(advertised.RecognitionModels, voicev2.SpeechModel{ID: a.ID, Label: cmp.Or(a.Label, a.Model, string(a.Engine))})
 	}
@@ -291,6 +292,7 @@ func (b *Bridge) VoiceChoices() voicev2.VoiceChoicesResp {
 	out.RecognitionModels = slices.Clone(b.choices.RecognitionModels)
 	out.SynthesisModels = slices.Clone(b.choices.SynthesisModels)
 	out.Defaults = slices.Clone(b.choices.Defaults)
+	out.STUNServers = slices.Clone(b.choices.STUNServers)
 	return out
 }
 
@@ -329,9 +331,10 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 	}
 
 	// Create PeerConnection using the shared UDP mux. The gateway publishes a
-	// host candidate rewritten to the UPnP external address when available; the
-	// client owns STUN for its side. Server-side STUN would re-enter Pion's
-	// default interface discovery and fail on hosts without IPv6 netlink support.
+	// host candidate rewritten to the UPnP external address when available;
+	// clients use the STUN servers VoiceChoices advertises for their side.
+	// Server-side STUN would re-enter Pion's default interface discovery and
+	// fail on hosts without IPv6 netlink support.
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return "", "", fmt.Errorf("create peer connection: %w", err)

@@ -748,6 +748,12 @@ data class VoiceChoicesResp(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val recognitionModels: List<SpeechModel>? = null,
     /** SynthesisModels lists gateway synthesis stages in preference order. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val synthesisModels: List<SpeechModel>? = null,
+    /**
+     * STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
+     * its ICE servers. Omitted means none: the client gathers host candidates
+     * only and contacts no STUN server.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val stunServers: List<String>? = null,
 )
 
 /** ServiceAuthorization identifies the host and carries its scoped gateway token. */
