@@ -326,3 +326,97 @@ func TestFixtureRejectsInvalidOffer(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
+
+func TestFixtureSettingsGate(t *testing.T) {
+	config := func(t *testing.T, url, body string) {
+		resp, err := httpPost(t, url+"/fixture/config", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := resp.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stats := func(t *testing.T, url string) fixtureStats {
+		resp, err := httpGet(t, url+"/fixture/stats")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s fixtureStats
+		err = json.NewDecoder(resp.Body).Decode(&s)
+		if closeErr := resp.Body.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// start issues a settings request and returns its status once it ends.
+	start := func(t *testing.T, ctx context.Context, url string) <-chan int {
+		done := make(chan int, 1)
+		var workers sync.WaitGroup
+		t.Cleanup(workers.Wait)
+		workers.Go(func() {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/.well-known/gomode.json", http.NoBody)
+			if err != nil {
+				done <- -1
+				return
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				done <- 0
+				return
+			}
+			_ = resp.Body.Close()
+			done <- resp.StatusCode
+		})
+		for stats(t, url).SettingsRequests == 0 {
+			if err := t.Context().Err(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return done
+	}
+	t.Run("valid", func(t *testing.T) {
+		t.Run("served", func(t *testing.T) {
+			srv := newFixture(t)
+			config(t, srv.URL, `{"settingsBlocked":true}`)
+			done := start(t, t.Context(), srv.URL)
+			// Opening another gate must leave this one closed.
+			config(t, srv.URL, `{"frontendBlocked":false}`)
+			select {
+			case code := <-done:
+				t.Fatalf("settings completed before release with status %d", code)
+			default:
+			}
+			config(t, srv.URL, `{"settingsBlocked":false}`)
+			if code := <-done; code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", code)
+			}
+			if s := stats(t, srv.URL); s.SettingsServed != 1 || s.SettingsAbandoned != 0 {
+				t.Fatalf("served=%d abandoned=%d, want 1 and 0", s.SettingsServed, s.SettingsAbandoned)
+			}
+		})
+		t.Run("abandoned", func(t *testing.T) {
+			srv := newFixture(t)
+			config(t, srv.URL, `{"settingsBlocked":true}`)
+			ctx, cancel := context.WithCancel(t.Context())
+			done := start(t, ctx, srv.URL)
+			cancel()
+			<-done
+			for {
+				s := stats(t, srv.URL)
+				if s.SettingsAbandoned == 1 {
+					if s.SettingsServed != 0 {
+						t.Fatalf("served = %d, want 0", s.SettingsServed)
+					}
+					break
+				}
+				if err := t.Context().Err(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	})
+}

@@ -30,7 +30,7 @@ class ThinkingEarconTest {
     }
 
     @Test
-    fun livePianoSurvivesLongWaitAndRapidStopRestart() {
+    fun livePianoSustainsPlaybackAndSurvivesRapidStopRestart() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val audio = instrumentation.targetContext.getSystemService(AudioManager::class.java)
         val earcon = AndroidThinkingEarcon(instrumentation.targetContext)
@@ -68,7 +68,10 @@ class ThinkingEarconTest {
                 }
                 awaitPlayback(true)
                 if (turn == 0) {
-                    SystemClock.sleep(32_000)
+                    // Real time proves the producer keeps the track fed across many buffer
+                    // refills; each repeats the same write. The JVM ThinkingEarconTest renders
+                    // the full score and its restart for synthesis beyond this window.
+                    SystemClock.sleep(3_000)
                     awaitPlayback(true)
                 }
                 // Replace an active producer before its write/finally has necessarily completed.

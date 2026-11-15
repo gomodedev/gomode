@@ -28,19 +28,56 @@ import (
 // voice gateway routes the Android app calls. Its synthetic assistant supports
 // real text WebSockets and bidirectional Opus media over WebRTC.
 type fixture struct {
-	log             *slog.Logger
-	rtcIP           string
-	mu              sync.Mutex
-	stats           fixtureStats
-	peers           map[string]*mediaPeer
-	settingsDelay   time.Duration
-	frontendBlocked bool
-	frontendChanged chan struct{}
-	textPeer        *websocket.Conn
+	log      *slog.Logger
+	rtcIP    string
+	mu       sync.Mutex
+	stats    fixtureStats
+	peers    map[string]*mediaPeer
+	settings gate
+	frontend gate
+	textPeer *websocket.Conn
+}
+
+// gate holds requests until a test opens it through /fixture/config, so a test
+// observes an exact startup stage instead of racing a fixed delay. The fixture
+// mutex guards it.
+type gate struct {
+	closed  bool
+	changed chan struct{}
+}
+
+func newGate() gate {
+	return gate{changed: make(chan struct{})}
+}
+
+func (g *gate) setLocked(closed bool) {
+	if g.closed != closed {
+		g.closed = closed
+		close(g.changed)
+		g.changed = make(chan struct{})
+	}
+}
+
+// waitLocked returns with f.mu held, reporting false when the client abandons
+// the request first.
+func (f *fixture) waitLocked(r *http.Request, g *gate) bool {
+	for g.closed {
+		changed := g.changed
+		f.mu.Unlock()
+		select {
+		case <-changed:
+		case <-r.Context().Done():
+			f.mu.Lock()
+			return false
+		}
+		f.mu.Lock()
+	}
+	return true
 }
 
 func (f *fixture) routes() http.Handler {
-	f.frontendChanged = make(chan struct{})
+	f.settings = newGate()
+	f.frontend = newGate()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -135,14 +172,16 @@ func (f *fixture) settingsDocument() gomode.Settings {
 
 func (f *fixture) handleSettings(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
-	delay := f.settingsDelay
+	f.stats.SettingsRequests++
+	served := f.waitLocked(r, &f.settings)
+	if served {
+		f.stats.SettingsServed++
+	} else {
+		f.stats.SettingsAbandoned++
+	}
 	f.mu.Unlock()
-	if delay > 0 {
-		select {
-		case <-time.After(delay):
-		case <-r.Context().Done():
-			return
-		}
+	if !served {
+		return
 	}
 	f.log.InfoContext(r.Context(), "settings", "path", r.URL.Path)
 	writeJSON(w, f.settingsDocument())

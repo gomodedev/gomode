@@ -32,6 +32,9 @@ type fixtureStats struct {
 	FrontendPreparations int               `json:"frontendPreparations"`
 	FrontendPublished    int               `json:"frontendPublished"`
 	MCPToolLists         int               `json:"mcpToolLists"`
+	SettingsRequests     int               `json:"settingsRequests"`
+	SettingsServed       int               `json:"settingsServed"`
+	SettingsAbandoned    int               `json:"settingsAbandoned"`
 	TextActive           int               `json:"textActive"`
 	TextSetups           int               `json:"textSetups"`
 	TextTurns            int               `json:"textTurns"`
@@ -74,6 +77,12 @@ type mediaPeer struct {
 	clientOutput atomic.Bool
 }
 
+// fixtureConfig closes or opens the fixture's request gates.
+type fixtureConfig struct {
+	SettingsBlocked *bool `json:"settingsBlocked"`
+	FrontendBlocked *bool `json:"frontendBlocked"`
+}
+
 func (f *fixture) handleStats(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	stats := f.stats
@@ -85,20 +94,18 @@ func (f *fixture) handleStats(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (f *fixture) handleConfig(w http.ResponseWriter, r *http.Request) {
-	var cfg struct {
-		SettingsDelayMS int  `json:"settingsDelayMs"`
-		FrontendBlocked bool `json:"frontendBlocked"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&cfg); err != nil || cfg.SettingsDelayMS < 0 || cfg.SettingsDelayMS > 30_000 {
-		http.Error(w, "settingsDelayMs must be between 0 and 30000", http.StatusBadRequest)
+	// Each request changes only the gates it names.
+	var cfg fixtureConfig
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&cfg); err != nil {
+		http.Error(w, "invalid fixture config", http.StatusBadRequest)
 		return
 	}
 	f.mu.Lock()
-	f.settingsDelay = time.Duration(cfg.SettingsDelayMS) * time.Millisecond
-	if f.frontendBlocked != cfg.FrontendBlocked {
-		f.frontendBlocked = cfg.FrontendBlocked
-		close(f.frontendChanged)
-		f.frontendChanged = make(chan struct{})
+	if cfg.SettingsBlocked != nil {
+		f.settings.setLocked(*cfg.SettingsBlocked)
+	}
+	if cfg.FrontendBlocked != nil {
+		f.frontend.setLocked(*cfg.FrontendBlocked)
 	}
 	f.mu.Unlock()
 	writeJSON(w, map[string]bool{"ok": true})
@@ -107,18 +114,11 @@ func (f *fixture) handleConfig(w http.ResponseWriter, r *http.Request) {
 func (f *fixture) handleFrontend(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.stats.FrontendPreparations++
-	for f.frontendBlocked {
-		changed := f.frontendChanged
-		f.mu.Unlock()
-		select {
-		case <-changed:
-		case <-r.Context().Done():
-			return
-		}
-		f.mu.Lock()
-	}
+	released := f.waitLocked(r, &f.frontend)
 	f.mu.Unlock()
-	writeJSON(w, []any{})
+	if released {
+		writeJSON(w, []any{})
+	}
 }
 
 func (f *fixture) handleOffer(w http.ResponseWriter, r *http.Request) {

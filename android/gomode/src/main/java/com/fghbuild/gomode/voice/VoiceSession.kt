@@ -172,6 +172,10 @@ internal fun voiceToolDeclarations(
         }
     }
 
+// Gathering completed with no IPv4 UDP candidate the gateway can reach.
+private class NoUsableICECandidateException :
+    IllegalStateException("WebRTC ICE gathering completed without a usable candidate")
+
 internal fun isUsableICECandidate(candidate: String): Boolean {
     val fields = candidate.trim().split(sdpWhitespaceRegex)
     return fields.size >= 8 && fields[2] == "udp" && isUsableIPv4(fields[4])
@@ -682,16 +686,33 @@ internal class VoiceSession(
                                             // ICE gathering on a route that is still settling.
                                             if (ownsAttempt(attempt)) {
                                                 Log.w(TAG, "No usable ICE candidate: $lastIceGatheringState", e)
-                                                if (preserveTranscript) {
-                                                    retryRecovery("Network connection failed")
-                                                } else {
-                                                    timing?.finish(VoiceStartupOutcome.TIMED_OUT)
-                                                    setError("Network connection failed: no usable route")
-                                                }
+                                                retryRecovery("Network connection failed")
                                             }
                                             throw e
                                         } catch (e: CancellationException) {
                                             throw e
+                                        } catch (e: NoUsableICECandidateException) {
+                                            // A fresh start retries too, bounded by recovery.
+                                            // TODO: Find why gathering sometimes yields only IPv6 host
+                                            // candidates. Before this retry, CI failed one CLOUD
+                                            // CarDialInterceptionTest case in most runs with "Voice
+                                            // controls did not connect", a different case each time, and
+                                            // one degraded local emulator gathered only IPv6 on every
+                                            // start. Users reported "voice fails, restarting works". The
+                                            // cause is unconfirmed. An earlier inference that the IPv4 UDP
+                                            // socket reported 0.0.0.0 rested on "Discarding candidate
+                                            // because it doesn't match filter"; healthy runs log that line
+                                            // for every TCP port, which listens on 0.0.0.0. In M125, a
+                                            // failed AndroidNetworkMonitor::BindSocketToNetwork makes
+                                            // PhysicalSocket::Bind fail, which drops the UDP port with no
+                                            // filter line. In a failing run's logcat, find this warning,
+                                            // then look beside the IPv4 network for "BindSocketToNetwork
+                                            // got error", "Binding socket to network address failed", or
+                                            // "UDP bind failed".
+                                            if (ownsAttempt(attempt)) {
+                                                Log.w(TAG, "No usable ICE candidate after gathering", e)
+                                                retryRecovery("Network connection failed")
+                                            }
                                         } catch (e: GatewayConnectionException) {
                                             if (ownsAttempt(attempt)) {
                                                 if (preserveTranscript && e.transient) {
@@ -704,7 +725,6 @@ internal class VoiceSession(
                                         } catch (e: Exception) {
                                             if (ownsAttempt(attempt)) {
                                                 if (preserveTranscript) {
-                                                    // A new route can finish ICE gathering without a usable candidate.
                                                     retryRecovery("Network connection failed")
                                                 } else {
                                                     timing?.finishFailure(e)
@@ -837,9 +857,7 @@ internal class VoiceSession(
             lastIceGatheringState = state.name.lowercase()
             // Candidates arrive on this thread before COMPLETE, so an open waiter has no usable one.
             if (state == PeerConnection.IceGatheringState.COMPLETE) {
-                usableICECandidateWaiter?.completeExceptionally(
-                    IllegalStateException("WebRTC ICE gathering completed without a usable candidate"),
-                )
+                usableICECandidateWaiter?.completeExceptionally(NoUsableICECandidateException())
             }
         }
 
