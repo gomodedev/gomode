@@ -181,9 +181,12 @@ func (s *barrierSink) sendGatewayMessage(ctx context.Context, data []byte) error
 	}
 }
 
-type scriptedASR struct{ texts chan string }
+type scriptedASR struct {
+	anyLanguage
+	texts chan string
+}
 
-func (a *scriptedASR) transcribe(ctx context.Context, _ []byte) (string, error) {
+func (a *scriptedASR) transcribe(ctx context.Context, _ string, _ []byte) (string, error) {
 	select {
 	case text := <-a.texts:
 		return text, nil
@@ -195,12 +198,13 @@ func (a *scriptedASR) transcribe(ctx context.Context, _ []byte) (string, error) 
 // interruptibleSpeech holds synthesis until cancellation, proving tools remain
 // session-owned while speech and generation are superseded.
 type interruptibleSpeech struct {
+	anyLanguage
 	started chan struct{}
 	stopped chan struct{}
 	once    sync.Once
 }
 
-func (s *interruptibleSpeech) synthesize(ctx context.Context, _ string) iter.Seq2[[]byte, error] {
+func (s *interruptibleSpeech) synthesize(ctx context.Context, _, _ string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		hold := false
 		s.once.Do(func() { hold = true })
@@ -637,9 +641,12 @@ func TestLocalStackASRShutdown(t *testing.T) {
 	}
 }
 
-type barrierASR struct{ started, stopped chan struct{} }
+type barrierASR struct {
+	anyLanguage
+	started, stopped chan struct{}
+}
 
-func (a *barrierASR) transcribe(ctx context.Context, _ []byte) (string, error) {
+func (a *barrierASR) transcribe(ctx context.Context, _ string, _ []byte) (string, error) {
 	close(a.started)
 	<-ctx.Done()
 	close(a.stopped)
@@ -672,7 +679,7 @@ func TestSpeechASRAdapter(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			var got []byte
 			a := worker(t, http.StatusOK, `{"text":" hello there "}`, &got)
-			text, err := a.transcribe(t.Context(), []byte{1, 0, 2, 0})
+			text, err := a.transcribe(t.Context(), "en", []byte{1, 0, 2, 0})
 			if err != nil || text != "hello there" {
 				t.Fatalf("text %q err %v", text, err)
 			}
@@ -683,7 +690,7 @@ func TestSpeechASRAdapter(t *testing.T) {
 		t.Run("error", func(t *testing.T) {
 			var got []byte
 			a := worker(t, http.StatusInternalServerError, `{"error":"engine failed"}`, &got)
-			text, err := a.transcribe(t.Context(), []byte{1, 0})
+			text, err := a.transcribe(t.Context(), "en", []byte{1, 0})
 			if err == nil || !strings.Contains(err.Error(), "engine failed") || text != "" {
 				t.Fatalf("text %q err %v", text, err)
 			}

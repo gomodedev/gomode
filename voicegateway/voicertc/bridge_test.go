@@ -827,6 +827,15 @@ func newVoiceRTCTestSession(ctx context.Context, t *testing.T, b backendConnecto
 // connectVoiceRTCClient opens a client peer connection through offer, sends
 // setup, and returns once the gateway reports session.ready.
 func connectVoiceRTCClient(ctx context.Context, t *testing.T, fn voiceRTCOffer, cfg *voicev2.SessionSetup) *voiceRTCTestSession {
+	s := dialVoiceRTCClient(ctx, t, fn)
+	s.send(ctx, t, cfg)
+	s.waitMessage(ctx, t, voicev2.MessageKindSessionReady)
+	return s
+}
+
+// dialVoiceRTCClient opens a client peer connection through offer and returns
+// once its data channel is open, before any setup.
+func dialVoiceRTCClient(ctx context.Context, t *testing.T, fn voiceRTCOffer) *voiceRTCTestSession {
 	ctx, cancel := context.WithCancel(ctx)
 	t.Cleanup(cancel)
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
@@ -941,8 +950,6 @@ func connectVoiceRTCClient(ctx context.Context, t *testing.T, fn voiceRTCOffer, 
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	s.send(ctx, t, cfg)
-	s.waitMessage(ctx, t, voicev2.MessageKindSessionReady)
 	return s
 }
 

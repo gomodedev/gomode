@@ -14,14 +14,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type controlledLiveASR struct{ streams chan *controlledLiveStream }
+type controlledLiveASR struct {
+	anyLanguage
+	streams chan *controlledLiveStream
+}
 
 type controlledTranscript struct {
 	Text  string
 	Final bool
 }
 
-func (p controlledLiveASR) transcribe(s *localStackSession, u *liveUtterance) (string, error) {
+func (p controlledLiveASR) transcribe(s *localStackSession, u *liveUtterance, _ string) (string, error) {
 	var stream *controlledLiveStream
 	select {
 	case stream = <-p.streams:

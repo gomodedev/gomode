@@ -113,7 +113,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 			asr = newChatASRAdapter(endpoint.provider, "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0")
 
 			transcription := time.Now()
-			text, err := asr.transcribe(t.Context(), downsample24to16(spokenPCM24))
+			text, err := asr.transcribe(t.Context(), "en", downsample24to16(spokenPCM24))
 			t.Logf("Qwen3-ASR transcription latency: %s", smokeElapsed(transcription))
 			if err != nil {
 				t.Fatal(err)

@@ -26,6 +26,7 @@ import (
 	"github.com/maruel/genaipy/providers/whistle/whistlesrv"
 
 	"github.com/maruel/genai"
+	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/groq"
 	"github.com/maruel/genai/providers/llamacpp"
@@ -94,7 +95,9 @@ func localStackModelsForConfigWithStarter(
 			// genaipy owns the isolated uv/Python 3.12 Needle worker and disables
 			// telemetry. Needle downloads a prebuilt native engine and weights
 			// into its own cache, rather than building the runtime from source.
-			// Recognition is final-only with automatic language detection. The
+			// Recognition is final-only with automatic language detection, and
+			// the provider rejects a session language outside the languages it
+			// declares when an utterance connects. The
 			// worker normalizes 16 kHz PCM to float samples, serializes native
 			// calls, and splits utterances into consecutive 30-second windows;
 			// words crossing a window boundary may lose accuracy. Cancellation
@@ -151,7 +154,7 @@ func localStackModelsForConfigWithStarter(
 			}
 			switch p := endpoint.provider.(type) {
 			case *llamacpp.Client:
-				tts = &llamaTTSAdapter{client: p, voice: cfg.TTS.Voice}
+				tts = &llamaTTSAdapter{client: p, model: cfg.TTS.Model, voice: cfg.TTS.Voice}
 			case *gemini.Client:
 				tts = &geminiTTSAdapter{client: p, voice: cfg.TTS.Voice}
 			default:
@@ -377,12 +380,18 @@ func localStackLlamaCacheDir() (string, error) {
 // transcription session at the gateway's capture sample rate. Request
 // cancellation aborts recognition on barge-in.
 type speechASRAdapter struct {
+	anyLanguage
 	provider genai.Provider
 }
 
-func (a *speechASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
-	rt, err := a.provider.ConnectRealtime(ctx, genai.RealtimeOptionTranscription{}, &genai.RealtimeOptionAudio{InputFormat: genai.AudioFormat{SampleRate: micSampleRate}})
+func (a *speechASRAdapter) transcribe(ctx context.Context, lang string, pcm []byte) (string, error) {
+	rt, err := a.provider.ConnectRealtime(ctx, genai.RealtimeOptionTranscription{}, &genai.RealtimeOptionAudio{InputFormat: genai.AudioFormat{SampleRate: micSampleRate}, InputLanguage: lang})
 	if err != nil {
+		// genai providers name a rejected input language as an
+		// "input language" option of base.ErrNotSupported.
+		if e, ok := errors.AsType[*base.ErrNotSupported](err); ok && slices.ContainsFunc(e.Options, func(o string) bool { return strings.HasPrefix(o, "input language") }) {
+			return "", newUnsupportedLanguageError(a.provider.ModelID(), lang)
+		}
 		return "", err
 	}
 	if err := rt.Send(ctx, genai.RealtimeInputContent{Audio: pcm, Commit: true}); err != nil {
@@ -414,11 +423,14 @@ func (a *speechASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, 
 }
 
 // speechTTSAdapter adapts KittenTTS synthesis to the gateway's private boundary.
+// It accepts any language at setup until the voice follows the session
+// language; see the TODO where the kittentts engine is built.
 type speechTTSAdapter struct {
+	anyLanguage
 	synthesizer *kittentts.Client
 }
 
-func (a *speechTTSAdapter) synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error] {
+func (a *speechTTSAdapter) synthesize(ctx context.Context, _, text string) iter.Seq2[[]byte, error] {
 	return a.synthesizer.Synthesize(ctx, text)
 }
 

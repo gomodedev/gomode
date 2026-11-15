@@ -112,7 +112,7 @@ func testNativeTTS(t *testing.T, provider string) {
 			}
 		})
 		var pcm []byte
-		for chunk, err := range a.synthesize(t.Context(), "Hello.") {
+		for chunk, err := range a.synthesize(t.Context(), "en", "Hello.") {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +149,7 @@ func testNativeTTS(t *testing.T, provider string) {
 					}
 				})
 				var failure error
-				for _, err := range a.synthesize(t.Context(), "Hello.") {
+				for _, err := range a.synthesize(t.Context(), "en", "Hello.") {
 					if err != nil {
 						failure = err
 					}
@@ -181,7 +181,7 @@ func testNativeTTS(t *testing.T, provider string) {
 			<-r.Context().Done()
 			close(stopped)
 		})
-		for pcm, err := range a.synthesize(t.Context(), "Hello.") {
+		for pcm, err := range a.synthesize(t.Context(), "en", "Hello.") {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func testNativeTTS(t *testing.T, provider string) {
 		t.Cleanup(cancel)
 		cancel()
 		var failure error
-		for _, err := range a.synthesize(ctx, "Hello.") {
+		for _, err := range a.synthesize(ctx, "en", "Hello.") {
 			failure = err
 		}
 		if !errors.Is(failure, context.Canceled) {
@@ -246,7 +246,7 @@ func TestGeminiASRAdapter(t *testing.T) {
 							t.Error(err)
 						}
 					})
-					text, err := (&geminiASRAdapter{client: p}).transcribe(t.Context(), []byte{1, 0})
+					text, err := (&geminiASRAdapter{client: p}).transcribe(t.Context(), "en", []byte{1, 0})
 					if err == nil || text != "" {
 						t.Fatalf("failed native recognition: text %q err %v", text, err)
 					}
@@ -282,7 +282,7 @@ func TestGroqASRAdapter(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			text, err := (&groqASRAdapter{client: p}).transcribe(t.Context(), []byte{1, 0})
+			text, err := (&groqASRAdapter{client: p}).transcribe(t.Context(), "en", []byte{1, 0})
 			if err == nil || text != "" {
 				t.Fatalf("missing native text: text %q err %v", text, err)
 			}
@@ -333,7 +333,7 @@ func TestChatASRAdapter(t *testing.T) {
 				}
 			})
 			a := newChatASRAdapter(p, tc.model)
-			if text, err := a.transcribe(t.Context(), []byte{1, 0, 2, 0}); err != nil || text != "Turn left." {
+			if text, err := a.transcribe(t.Context(), "en", []byte{1, 0, 2, 0}); err != nil || text != "Turn left." {
 				t.Fatalf("transcribe = %q, %v", text, err)
 			}
 			req := <-got
@@ -357,7 +357,7 @@ func TestChatASRAdapter(t *testing.T) {
 			if !slices.Equal(roles, tc.roles) || !slices.EqualFunc(parts, tc.parts, slices.Equal) {
 				t.Errorf("messages = %v %v, want %v %v", roles, parts, tc.roles, tc.parts)
 			}
-			if text, err := a.transcribe(t.Context(), nil); err != nil || text != "" {
+			if text, err := a.transcribe(t.Context(), "en", nil); err != nil || text != "" {
 				t.Errorf("empty audio = %q, %v", text, err)
 			}
 		})

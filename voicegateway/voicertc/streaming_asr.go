@@ -96,6 +96,7 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 	s.liveDraftID = u.id
 	s.emit(&voicev2.TranscriptDraft{Kind: voicev2.MessageKindTranscriptDraft, ID: u.id})
 	s.emit(&voicev2.TurnStatus{Kind: voicev2.MessageKindTurnStatus, State: voicev2.TurnStateIdle})
+	lang := s.language
 	s.turns.Go(func() error {
 		defer s.finishTurn(generation)
 		defer s.clearLiveDraft(u.id)
@@ -117,7 +118,7 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 			delete(s.livePending, u.id)
 			s.mu.Unlock()
 		}()
-		text, err := s.liveASR.transcribe(s, u)
+		text, err := s.liveASR.transcribe(s, u, lang)
 		if err != nil {
 			s.clearLiveDraft(u.id)
 			s.warnTurn(u.ctx, "asr", err)
@@ -137,9 +138,11 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 }
 
 // liveASRAdapter executes one gateway-owned utterance using a native provider.
-// It exposes no portable connection or event protocol.
+// It exposes no portable connection or event protocol. lang is the session's
+// ISO 639 base language; see localStackSession.language.
 type liveASRAdapter interface {
-	transcribe(*localStackSession, *liveUtterance) (string, error)
+	languageChecker
+	transcribe(s *localStackSession, u *liveUtterance, lang string) (string, error)
 }
 
 func (s *localStackSession) publishLiveDraft(u *liveUtterance, text string) {

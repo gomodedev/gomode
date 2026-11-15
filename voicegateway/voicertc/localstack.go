@@ -19,6 +19,8 @@ import (
 	"unicode"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
@@ -44,9 +46,47 @@ type vadSegmenter interface {
 	reset()
 }
 
-// asrAdapter converts an utterance's PCM into final text.
+// asrAdapter converts an utterance's PCM into final text. lang is the
+// session's ISO 639 base language; see localStackSession.language.
 type asrAdapter interface {
-	transcribe(ctx context.Context, pcm []byte) (string, error)
+	languageChecker
+	transcribe(ctx context.Context, lang string, pcm []byte) (string, error)
+}
+
+// languageChecker declares which session languages a speech stage's model
+// accepts. session.setup rejects a session language that any selected stage
+// rejects, with an *unsupportedLanguageError.
+type languageChecker interface {
+	checkLanguage(lang string) error
+}
+
+// anyLanguage accepts every session language at setup. The embedding
+// adapter's comment says why: its model detects the language, its provider
+// rejects one when the stage connects with an *unsupportedLanguageError, or a
+// TODO names the missing declaration.
+type anyLanguage struct{}
+
+func (anyLanguage) checkLanguage(string) error { return nil }
+
+// unsupportedLanguageError reports a session language a speech model cannot
+// use. Its message reaches clients verbatim.
+type unsupportedLanguageError struct {
+	model    string
+	language string
+}
+
+// newUnsupportedLanguageError rejects lang for model. A Hugging Face
+// "Author/Repo/File" model is named by its repository, keeping the message
+// short.
+func newUnsupportedLanguageError(model, lang string) *unsupportedLanguageError {
+	if parts := strings.SplitN(model, "/", 3); len(parts) == 3 {
+		model = parts[0] + "/" + parts[1]
+	}
+	return &unsupportedLanguageError{model: model, language: lang}
+}
+
+func (e *unsupportedLanguageError) Error() string {
+	return e.model + " does not support " + display.English.Languages().Name(language.Make(e.language))
 }
 
 // llmToolCall is a normalized tool invocation requested by the local LLM.
@@ -105,9 +145,11 @@ type llmAdapter interface {
 	newConversation(systemInstruction string, tools []voicev2.ToolDeclaration, includeReasoning bool) llmConversation
 }
 
-// ttsAdapter streams S16LE mono PCM at backendOutputSampleRate from text.
+// ttsAdapter streams S16LE mono PCM at backendOutputSampleRate from text
+// spoken in lang, the session's ISO 639 base language.
 type ttsAdapter interface {
-	synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error]
+	languageChecker
+	synthesize(ctx context.Context, lang, text string) iter.Seq2[[]byte, error]
 }
 
 // localStackBackend acquires a session-pinned lazy runtime for every connection.
@@ -273,7 +315,8 @@ type localStackSession struct {
 	livePending       map[string]*liveUtterance
 	liveDraftID       string
 	liveSequence      uint64
-	// language is the session's ISO 639 base language, set once by session.setup.
+	// language is the session's ISO 639 base language, set once by session.setup
+	// before conv. Every gateway speech stage receives it.
 	language string
 
 	// Microphone framing and its current capture belong to the RTP owner.
@@ -296,13 +339,12 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 		if err := applySessionPolicy(&msg); err != nil {
 			return err
 		}
-		if s.directAudio {
-			if msg.Voice.Name != "" {
-				return errors.New("staged LFM3 audio does not support voice selection")
-			}
-			if msg.Voice.Language != "en" && !strings.HasPrefix(msg.Voice.Language, "en-") {
-				return errors.New("staged LFM3 conversation supports English only")
-			}
+		if s.directAudio && msg.Voice.Name != "" {
+			return errors.New("staged LFM3 audio does not support voice selection")
+		}
+		lang := baseLanguage(msg.Voice.Language)
+		if err := s.checkLanguage(lang); err != nil {
+			return err
 		}
 		s.events.Lock()
 		s.mu.Lock()
@@ -311,7 +353,7 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 			s.events.Unlock()
 			return errors.New("session is already configured or closed")
 		}
-		s.language = baseLanguage(msg.Voice.Language)
+		s.language = lang
 		s.conv = s.llm.newConversation(msg.Context.SystemInstruction, msg.Tools, msg.IncludeReasoning)
 		if msg.Context.Text != "" {
 			s.conv.addContext(msg.Context.Text)
@@ -367,6 +409,28 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 	default:
 		return fmt.Errorf("unsupported gateway message kind %q", env.Kind)
 	}
+}
+
+// checkLanguage applies the declarations of the stages this session runs.
+func (s *localStackSession) checkLanguage(lang string) error {
+	var stages []languageChecker
+	if !s.clientInput {
+		if s.asr != nil {
+			stages = append(stages, s.asr)
+		}
+		if s.liveASR != nil {
+			stages = append(stages, s.liveASR)
+		}
+	}
+	if !s.clientOutput && s.tts != nil {
+		stages = append(stages, s.tts)
+	}
+	for _, stage := range stages {
+		if err := stage.checkLanguage(lang); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *localStackSession) inputSampleRate() int {
@@ -490,6 +554,7 @@ func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	previous := s.transcriptionTail
 	done := make(chan struct{})
 	s.transcriptionTail = done
+	lang := s.language
 	s.turns.Go(func() error {
 		defer close(done)
 		defer s.finishTurn(generation)
@@ -503,7 +568,7 @@ func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 		if s.baseCtx.Err() != nil {
 			return nil
 		}
-		text, err := s.asr.transcribe(s.baseCtx, utterance) //nolint:contextcheck // turn goroutines run on the session lifetime context
+		text, err := s.asr.transcribe(s.baseCtx, lang, utterance) //nolint:contextcheck // turn goroutines run on the session lifetime context
 		if err != nil {
 			s.warnTurn(s.baseCtx, "asr", err) //nolint:contextcheck // turn goroutines run on the session lifetime context
 			return nil
@@ -702,6 +767,9 @@ func (s *localStackSession) speakFragments(ctx, turnCtx context.Context, fragmen
 		}
 	}()
 
+	s.mu.Lock()
+	lang := s.language
+	s.mu.Unlock()
 	fragmentIndex := 0
 	for text := range fragments {
 		if text == "" {
@@ -710,7 +778,7 @@ func (s *localStackSession) speakFragments(ctx, turnCtx context.Context, fragmen
 		fragmentIndex++
 		ttsStart := time.Now()
 		textEmitted := false
-		for pcm, err := range s.tts.synthesize(ctx, text) {
+		for pcm, err := range s.tts.synthesize(ctx, lang, text) {
 			if err != nil {
 				if ctx.Err() == nil {
 					s.warnTurn(ctx, "tts", err)
@@ -974,9 +1042,9 @@ func frameRMS(frame []byte) float64 {
 }
 
 // placeholderASR returns a fixed transcript. Real ASR is wired in a later phase.
-type placeholderASR struct{}
+type placeholderASR struct{ anyLanguage }
 
-func (placeholderASR) transcribe(_ context.Context, _ []byte) (string, error) {
+func (placeholderASR) transcribe(context.Context, string, []byte) (string, error) {
 	return "(local speech input)", nil
 }
 
@@ -1016,9 +1084,9 @@ func (c *placeholderConversation) respond(context.Context) (llmStep, error) {
 
 // placeholderTTS emits a quiet tone whose length scales with the text. Real TTS
 // is wired in a later phase.
-type placeholderTTS struct{}
+type placeholderTTS struct{ anyLanguage }
 
-func (placeholderTTS) synthesize(_ context.Context, text string) iter.Seq2[[]byte, error] {
+func (placeholderTTS) synthesize(_ context.Context, _, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		if text == "" {
 			return

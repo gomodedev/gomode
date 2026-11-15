@@ -3,6 +3,7 @@
 package voicertc
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -90,8 +91,9 @@ func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfi
 			directAudio: true,
 			newVAD:      func() vadSegmenter { return &energyVAD{maxUtteranceBytes: 30 * micSampleRate * 2} },
 			llm:         &genaiLLMAdapter{provider: provider, effort: cfg.Effort, audioInput: true, maxOutputTokens: cfg.MaxOutputTokens},
-			// Staged sessions support English only.
-			tts: &llamaTTSAdapter{client: provider.(*llamacpp.Client), lang: "en"},
+			// Staged sessions support English only: the fixed TTS language
+			// rejects any other at session.setup.
+			tts: &llamaTTSAdapter{client: provider.(*llamacpp.Client), model: cmp.Or(cfg.Model, cfg.ID), lang: "en"},
 		}
 	}
 	return b, nil
@@ -194,8 +196,9 @@ func (s *llamaRealtimeSession) setup(msg *voicev2.SessionSetup) error {
 	if err := applySessionPolicy(msg); err != nil {
 		return err
 	}
-	if msg.Voice.Language != "en" && !strings.HasPrefix(msg.Voice.Language, "en-") {
-		return errors.New("LFM3 realtime conversation supports English only")
+	// The LFM3 realtime conversation supports English only.
+	if lang := baseLanguage(msg.Voice.Language); lang != "en" {
+		return newUnsupportedLanguageError(cmp.Or(s.backend.cfg.Model, s.backend.cfg.ID), lang)
 	}
 	tools, err := genaiToolDefs(msg.Tools)
 	if err != nil {

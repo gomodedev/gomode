@@ -31,9 +31,16 @@ import (
 // French speech into English. By contrast, LFM3-Audio on the batch
 // /v1/audio/transcriptions endpoint detects French without a language, keeps
 // it with "fr", and translates it into English with "en".
-type llamaLiveASR struct{ client *llamacpp.Client }
+//
+// TODO: Declare each model's languages for session.setup with a checkLanguage
+// replacing anyLanguage: Voxtral Realtime detects the languages of its model
+// card, and LFM3-Audio is English only on this path.
+type llamaLiveASR struct {
+	anyLanguage
+	client *llamacpp.Client
+}
 
-func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance) (string, error) {
+func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance, lang string) (string, error) {
 	conn, err := a.client.ConnectTranscriptionRaw(u.ctx)
 	if err != nil {
 		return "", err
@@ -44,16 +51,11 @@ func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance) (strin
 	}
 	// The update echoes the negotiated session and gives tools an explicit
 	// empty list because the server rejects a null one.
-	s.mu.Lock()
-	lang := s.language
-	s.mu.Unlock()
-	if lang != "" {
-		cfg := *conn.Initial.Session
-		cfg.Tools = llamacpp.ToolList{}
-		cfg.Audio.Input.Transcription = &llamacpp.Transcription{Model: cfg.Model, Language: lang}
-		if err := conn.Send(u.ctx, &llamacpp.ClientMessage{Type: llamacpp.EventSessionUpdate, Session: &cfg}); err != nil {
-			return "", errors.Join(err, conn.Close())
-		}
+	cfg := *conn.Initial.Session
+	cfg.Tools = llamacpp.ToolList{}
+	cfg.Audio.Input.Transcription = &llamacpp.Transcription{Model: cfg.Model, Language: lang}
+	if err := conn.Send(u.ctx, &llamacpp.ClientMessage{Type: llamacpp.EventSessionUpdate, Session: &cfg}); err != nil {
+		return "", errors.Join(err, conn.Close())
 	}
 	ctx, cancel := context.WithCancel(u.ctx)
 	workers, workerCtx := errgroup.WithContext(ctx)
@@ -123,9 +125,12 @@ func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance) (strin
 //
 // TODO: Replace with the genai transcription-session adapter, which sends the
 // session language as genai.RealtimeOptionAudio.InputLanguage.
-type geminiLiveASR struct{ client *gemini.Client }
+type geminiLiveASR struct {
+	anyLanguage
+	client *gemini.Client
+}
 
-func (a *geminiLiveASR) transcribe(s *localStackSession, u *liveUtterance) (string, error) {
+func (a *geminiLiveASR) transcribe(s *localStackSession, u *liveUtterance, _ string) (string, error) {
 	setup := &gemini.LiveSetup{Model: "models/" + strings.TrimPrefix(a.client.ModelID(), "models/"), GenerationConfig: gemini.LiveGenerationConfig{ResponseModalities: []gemini.Modality{gemini.ModalityText}}, InputAudioTranscription: &gemini.LiveTranscriptionConfig{}, RealtimeInputConfig: gemini.LiveRealtimeInputConfig{AutomaticActivityDetection: &gemini.LiveAutomaticActivityDetection{Disabled: true}, ActivityHandling: gemini.LiveActivityNoInterruption, TurnCoverage: gemini.LiveTurnOnlyActivity}}
 	conn, err := a.client.ConnectLiveRaw(u.ctx, setup)
 	if err != nil {

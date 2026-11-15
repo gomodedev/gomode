@@ -1225,6 +1225,50 @@ func TestLlamaRealtimeSession(t *testing.T) {
 }
 
 func TestLlamaRealtimeBackend(t *testing.T) {
+	t.Run("staged language reaches the client", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		t.Cleanup(cancel)
+		// The contributed staged choice; setup fails before any model request.
+		b, err := newLlamaRealtimeBackend(ctx, voicegateway.RealtimeConfig{
+			ID:          "lfm3-audio-staged",
+			ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: "http://127.0.0.1:1", Model: "LiquidAI/LFM3-Audio-2B-GGUF/LFM3-Audio-2B-Q4_K_M.gguf"},
+			Slots:       1,
+			Staged:      true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		br, err := newTestBridgeWithBackend(ctx, b, 0, t.TempDir())
+		if err != nil {
+			t.Fatal(errors.Join(err, b.Close()))
+		}
+		t.Cleanup(func() { br.CloseAll(ctx) })
+		s := dialVoiceRTCClient(ctx, t, br.HandleOffer)
+		s.send(ctx, t, &voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Language: "fr-FR"}})
+		for {
+			select {
+			case m := <-s.messages:
+				if m.kind == voicev2.MessageKindSessionReady {
+					t.Fatal("staged session accepted French")
+				}
+				if m.kind != voicev2.MessageKindError {
+					continue
+				}
+				var msg voicev2.Error
+				if err := json.Unmarshal(m.data, &msg); err != nil {
+					t.Fatal(err)
+				}
+				if msg.Message != "session: LiquidAI/LFM3-Audio-2B-GGUF does not support French" {
+					t.Fatalf("client error %q, want the model repository and language", msg.Message)
+				}
+				return
+			case err := <-s.signalErrs:
+				t.Fatal(err)
+			case <-ctx.Done():
+				t.Fatal("no client error for an unsupported staged language")
+			}
+		}
+	})
 	t.Run("staged audio thinking and tools", func(t *testing.T) {
 		requests := make(chan llamacpp.ChatRequest, 2)
 		speech := make(chan llamacpp.SpeechRequest, 1)

@@ -26,9 +26,12 @@ import (
 // translated.
 //
 // TODO: Set Language from the session.
-type groqASRAdapter struct{ client *groq.Client }
+type groqASRAdapter struct {
+	anyLanguage
+	client *groq.Client
+}
 
-func (a *groqASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
+func (a *groqASRAdapter) transcribe(ctx context.Context, _ string, pcm []byte) (string, error) {
 	if len(pcm) == 0 {
 		return "", nil
 	}
@@ -54,9 +57,12 @@ func (a *groqASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, er
 // words; an English hint on French speech drops the space before "?".
 //
 // TODO: Send the session language as LanguageCodes.
-type geminiASRAdapter struct{ client *gemini.Client }
+type geminiASRAdapter struct {
+	anyLanguage
+	client *gemini.Client
+}
 
-func (a *geminiASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
+func (a *geminiASRAdapter) transcribe(ctx context.Context, _ string, pcm []byte) (string, error) {
 	if len(pcm) == 0 {
 		return "", nil
 	}
@@ -93,7 +99,7 @@ func (a *geminiASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, 
 }
 
 // newChatASRAdapter transcribes through a chat model that accepts audio,
-// using the request format of the configured model.
+// using the request format and language mechanism of the configured model.
 func newChatASRAdapter(p genai.Provider, model string) asrAdapter {
 	if strings.Contains(strings.ToLower(model), "qwen3-asr") {
 		return &qwen3ASRAdapter{provider: p}
@@ -108,7 +114,8 @@ func newChatASRAdapter(p genai.Provider, model string) asrAdapter {
 //
 // TODO: Force the session language with the assistant prefill
 // "language <Name><asr_text>", which llama-server continues, for the 30
-// SUPPORTED_LANGUAGES of qwen_asr/inference/utils.py. Measured with
+// SUPPORTED_LANGUAGES of qwen_asr/inference/utils.py, and reject the others
+// at session.setup with a checkLanguage replacing anyLanguage. Measured with
 // ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0 on llama-server b12110: a forced
 // language that differs from the speech yields a translation. llama.cpp's own
 // transcription language hint is appended to the user text, which this model
@@ -122,9 +129,12 @@ func newChatASRAdapter(p genai.Provider, model string) asrAdapter {
 // minus its last 5 tokens. On CPU, each step took 0.35 to 0.68 s for 2 to 11.5 s of
 // audio, and an 11.5 s utterance's final transcript arrived 1.6 s after the
 // end of speech.
-type qwen3ASRAdapter struct{ provider genai.Provider }
+type qwen3ASRAdapter struct {
+	anyLanguage
+	provider genai.Provider
+}
 
-func (a *qwen3ASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
+func (a *qwen3ASRAdapter) transcribe(ctx context.Context, _ string, pcm []byte) (string, error) {
 	if len(pcm) == 0 {
 		return "", nil
 	}
@@ -146,9 +156,17 @@ func (a *qwen3ASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, e
 }
 
 // audioChatASRAdapter instructs an audio-capable chat model to transcribe.
-type audioChatASRAdapter struct{ provider genai.Provider }
+//
+// TODO: Name the session language in the transcription instruction, the only
+// mechanism a generic chat model has; today the request carries no language
+// and the model detects it. Whether an instruction forces the language, or
+// translates mismatched speech as Qwen3-ASR does, is not measured.
+type audioChatASRAdapter struct {
+	anyLanguage
+	provider genai.Provider
+}
 
-func (a *audioChatASRAdapter) transcribe(ctx context.Context, pcm []byte) (string, error) {
+func (a *audioChatASRAdapter) transcribe(ctx context.Context, _ string, pcm []byte) (string, error) {
 	if len(pcm) == 0 {
 		return "", nil
 	}
@@ -167,20 +185,31 @@ func (a *audioChatASRAdapter) transcribe(ctx context.Context, pcm []byte) (strin
 	return strings.TrimSpace(res.String()), nil
 }
 
-// llamaTTSAdapter synthesizes through llama-server's /v1/audio/speech. lang
-// is a fixed SpeechRequest.Lang; staged LFM3 sessions send "en".
+// llamaTTSAdapter synthesizes through llama-server's /v1/audio/speech. A
+// non-empty lang is a fixed SpeechRequest.Lang and the only session language
+// the adapter accepts; staged LFM3 sessions fix "en". model names the
+// configured model in errors.
 //
-// TODO: Send the session language as SpeechRequest.Lang. llama-server b12110
+// TODO: Send the session language as SpeechRequest.Lang when lang is empty;
+// staged LFM3 keeps its fixed English. llama-server b12110
 // passes "lang" to the model's "tts" chat template. LFM3-Audio's template maps
 // 20 lowercase codes, such as "fr" and "en-gb", to a language name and uses any
 // other value verbatim; without one it speaks American English. Not measured.
 type llamaTTSAdapter struct {
 	client *llamacpp.Client
+	model  string
 	voice  string
 	lang   string
 }
 
-func (a *llamaTTSAdapter) synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error] {
+func (a *llamaTTSAdapter) checkLanguage(lang string) error {
+	if a.lang != "" && lang != a.lang {
+		return newUnsupportedLanguageError(a.model, lang)
+	}
+	return nil
+}
+
+func (a *llamaTTSAdapter) synthesize(ctx context.Context, _, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -208,12 +237,19 @@ func (a *llamaTTSAdapter) synthesize(ctx context.Context, text string) iter.Seq2
 	}
 }
 
+// geminiTTSAdapter synthesizes through a Gemini speech model.
+//
+// TODO: Send the session language as InteractionSpeechConfig.Language in
+// GenerationConfig.SpeechConfig, and declare the model's languages with a
+// checkLanguage replacing anyLanguage; today the request sets only Voice, and
+// only when one is configured. Not measured.
 type geminiTTSAdapter struct {
+	anyLanguage
 	client *gemini.Client
 	voice  string
 }
 
-func (a *geminiTTSAdapter) synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error] {
+func (a *geminiTTSAdapter) synthesize(ctx context.Context, _, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
