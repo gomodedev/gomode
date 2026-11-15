@@ -2561,8 +2561,10 @@ func testLocalStackSessionLanguage(t *testing.T) {
 		}
 		t.Run("live", func(t *testing.T) {
 			t.Parallel()
-			live := languageLiveASR{got: make(chan string, 1)}
-			s := (&localStackRuntime{liveASR: live, llm: echoLLM{}}).newSession(t.Context(), "language", &captureSink{}, true)
+			session := newFakeTranscription()
+			sessions := make(chan *fakeTranscription, 1)
+			sessions <- session
+			s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions), llm: echoLLM{}}).newSession(t.Context(), "language", &captureSink{}, true)
 			t.Cleanup(func() { _ = s.close() })
 			if err := setup(t, s, "fr-CA"); err != nil {
 				t.Fatal(err)
@@ -2570,7 +2572,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 			if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
 				t.Fatal(err)
 			}
-			if got := next(t, live.got); got != "fr" {
+			if got := session.audioOption(t).InputLanguage; got != "fr" {
 				t.Fatalf("live ASR language %q, want fr", got)
 			}
 		})
@@ -2593,13 +2595,15 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				t.Fatal(err)
 			}
 			sink := &captureSink{}
-			runtime := &localStackRuntime{newVAD: func() vadSegmenter { return &energyVAD{} }, asr: &speechASRAdapter{provider: c}, llm: echoLLM{}}
+			runtime := &localStackRuntime{liveASR: newLiveASR(c, c.ModelID()), llm: echoLLM{}}
 			s := runtime.newSession(t.Context(), "language", sink, true)
 			t.Cleanup(func() { _ = s.close() })
 			if err := setup(t, s, "ja-JP"); err != nil {
 				t.Fatal(err)
 			}
-			s.startTurn(t.Context(), loudPCM(200))
+			if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
+				t.Fatal(err)
+			}
 			waitForKind(t, sink, voicev2.MessageKindError)
 			var msg voicev2.Error
 			kinds := sink.kinds()
@@ -2630,15 +2634,4 @@ func (l languageStages) transcribe(_ context.Context, lang string, _ []byte) (st
 func (l languageStages) synthesize(_ context.Context, lang, _ string) iter.Seq2[[]byte, error] {
 	l.got <- "tts " + lang
 	return func(func([]byte, error) bool) {}
-}
-
-// languageLiveASR records the language of each live utterance.
-type languageLiveASR struct {
-	anyLanguage
-	got chan string
-}
-
-func (l languageLiveASR) transcribe(_ *localStackSession, _ *liveUtterance, lang string) (string, error) {
-	l.got <- lang
-	return "", nil
 }

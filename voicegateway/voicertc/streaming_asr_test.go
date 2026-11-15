@@ -11,89 +11,19 @@ import (
 	"time"
 
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
-	"golang.org/x/sync/errgroup"
 )
-
-type controlledLiveASR struct {
-	anyLanguage
-	streams chan *controlledLiveStream
-}
-
-type controlledTranscript struct {
-	Text  string
-	Final bool
-}
-
-func (p controlledLiveASR) transcribe(s *localStackSession, u *liveUtterance, _ string) (string, error) {
-	var stream *controlledLiveStream
-	select {
-	case stream = <-p.streams:
-	case <-u.ctx.Done():
-		return "", u.ctx.Err()
-	}
-	ctx, cancel := context.WithCancel(u.ctx)
-	workers, workerCtx := errgroup.WithContext(ctx)
-	workers.Go(func() error { return s.sendLiveAudio(workerCtx, u, stream.SendAudio, stream.Finish) })
-	var final string
-	var err error
-	for {
-		var event controlledTranscript
-		event, err = stream.Receive(workerCtx)
-		if err != nil {
-			break
-		}
-		if event.Final {
-			final = event.Text
-			break
-		}
-		s.publishLiveDraft(u, event.Text)
-	}
-	if err != nil {
-		cancel()
-	}
-	sendErr := workers.Wait()
-	cancel()
-	return final, errors.Join(err, sendErr, stream.Close())
-}
-
-type controlledLiveStream struct {
-	events   chan controlledTranscript
-	finished chan struct{}
-	closed   chan struct{}
-	failure  chan error
-}
-
-func (*controlledLiveStream) SendAudio(context.Context, []byte) error { return nil }
-func (s *controlledLiveStream) Finish(context.Context) error {
-	close(s.finished)
-	return nil
-}
-func (s *controlledLiveStream) Receive(ctx context.Context) (controlledTranscript, error) {
-	select {
-	case err := <-s.failure:
-		return controlledTranscript{}, err
-	case e := <-s.events:
-		return e, nil
-	case <-ctx.Done():
-		return controlledTranscript{}, ctx.Err()
-	}
-}
-func (s *controlledLiveStream) Close() error { close(s.closed); return nil }
-func newControlledLiveStream() *controlledLiveStream {
-	return &controlledLiveStream{events: make(chan controlledTranscript, 8), finished: make(chan struct{}), closed: make(chan struct{}), failure: make(chan error, 1)}
-}
 
 func testLocalStackSessionLiveTranscription(t *testing.T) {
 	t.Parallel()
 	t.Run("partial precedes end and delayed final retains newer draft", func(t *testing.T) {
 		t.Parallel()
-		a, b := newControlledLiveStream(), newControlledLiveStream()
-		provider := controlledLiveASR{streams: make(chan *controlledLiveStream, 2)}
-		provider.streams <- a
-		provider.streams <- b
+		a, b := newFakeTranscription(), newFakeTranscription()
+		sessions := make(chan *fakeTranscription, 2)
+		sessions <- a
+		sessions <- b
 		sink := &captureSink{changed: make(chan struct{}, 1)}
 		conv := &fakeConversation{}
-		runtime := &localStackRuntime{liveASR: provider}
+		runtime := &localStackRuntime{liveASR: newFakeLiveASR(sessions)}
 		s := runtime.newSession(t.Context(), "live", sink, true)
 		s.conv = conv
 		t.Cleanup(func() {
@@ -104,13 +34,13 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 		if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
 			t.Fatal(err)
 		}
-		a.events <- controlledTranscript{Text: "First hypothesis"}
+		a.interim("First hypothesis")
 		waitLiveDraft(t, sink, "First hypothesis")
 		if conv.userCalls() != 0 {
 			t.Fatal("partial reached LLM")
 		}
 		select {
-		case <-a.finished:
+		case <-a.committed:
 			t.Fatal("input ended before partial")
 		default:
 		}
@@ -118,16 +48,16 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 			t.Fatal(err)
 		}
 		select {
-		case <-a.finished:
+		case <-a.committed:
 		case <-time.After(3 * time.Second):
 			t.Fatal("missing finish")
 		}
 		if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
 			t.Fatal(err)
 		}
-		b.events <- controlledTranscript{Text: "Second hypothesis"}
+		b.interim("Second hypothesis")
 		waitLiveDraft(t, sink, "Second hypothesis")
-		a.events <- controlledTranscript{Text: "First committed.", Final: true}
+		a.final("First committed.", true)
 		waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "", 1)
 		s.mu.Lock()
 		draftID := s.liveDraftID
@@ -139,11 +69,11 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 			t.Fatal(err)
 		}
 		select {
-		case <-b.finished:
+		case <-b.committed:
 		case <-time.After(3 * time.Second):
 			t.Fatal("missing second finish")
 		}
-		b.events <- controlledTranscript{Text: "Second committed.", Final: true}
+		b.final("Second committed.", true)
 		waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "", 2)
 		sink.mu.Lock()
 		var texts []string
@@ -163,12 +93,12 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 	})
 	t.Run("cancel clears draft without committing", func(t *testing.T) {
 		t.Parallel()
-		a := newControlledLiveStream()
-		provider := controlledLiveASR{streams: make(chan *controlledLiveStream, 1)}
-		provider.streams <- a
+		a := newFakeTranscription()
+		sessions := make(chan *fakeTranscription, 1)
+		sessions <- a
 		sink := &captureSink{changed: make(chan struct{}, 1)}
 		conv := &fakeConversation{}
-		s := (&localStackRuntime{liveASR: provider}).newSession(t.Context(), "cancel", sink, true)
+		s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "cancel", sink, true)
 		s.conv = conv
 		t.Cleanup(func() {
 			if err := s.close(); err != nil {
@@ -178,10 +108,10 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 		if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
 			t.Fatal(err)
 		}
-		a.events <- controlledTranscript{Text: "Do not commit"}
+		a.interim("Do not commit")
 		waitLiveDraft(t, sink, "Do not commit")
 		s.cancelLiveTranscriptions()
-		a.events <- controlledTranscript{Text: "Late final", Final: true}
+		a.final("Late final", true)
 		<-a.closed
 		if conv.userCalls() != 0 {
 			t.Fatal("canceled transcript reached LLM")
@@ -192,28 +122,28 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 			if err := json.Unmarshal(raw, &msg); err != nil {
 				t.Error(err)
 			}
-			if msg.Kind == voicev2.MessageKindTranscriptDelta {
-				t.Errorf("late transcript %s", raw)
+			if msg.Kind == voicev2.MessageKindTranscriptDelta || msg.Kind == voicev2.MessageKindError {
+				t.Errorf("canceled input published %s", raw)
 			}
 		}
 		sink.mu.Unlock()
 	})
 	t.Run("retirement preserves predecessor barrier", func(t *testing.T) {
 		t.Parallel()
-		for name, retire := range map[string]func(*liveUtterance, *controlledLiveStream){
-			"provider failure": func(_ *liveUtterance, s *controlledLiveStream) { s.failure <- errors.New("recognizer failed") },
-			"canceled input":   func(u *liveUtterance, _ *controlledLiveStream) { u.cancel() },
+		for name, retire := range map[string]func(*liveUtterance, *fakeTranscription){
+			"provider failure": func(_ *liveUtterance, s *fakeTranscription) { s.failure <- errors.New("recognizer failed") },
+			"canceled input":   func(u *liveUtterance, _ *fakeTranscription) { u.cancel() },
 		} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 				synctest.Test(t, func(t *testing.T) {
-					a, b, c := newControlledLiveStream(), newControlledLiveStream(), newControlledLiveStream()
-					p := controlledLiveASR{streams: make(chan *controlledLiveStream, 3)}
-					p.streams <- a
-					p.streams <- b
-					p.streams <- c
+					a, b, c := newFakeTranscription(), newFakeTranscription(), newFakeTranscription()
+					sessions := make(chan *fakeTranscription, 3)
+					sessions <- a
+					sessions <- b
+					sessions <- c
 					sink := &captureSink{changed: make(chan struct{}, 1)}
-					s := (&localStackRuntime{liveASR: p}).newSession(t.Context(), "ordered", sink, true)
+					s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "ordered", sink, true)
 					s.conv = &fakeConversation{}
 					t.Cleanup(func() {
 						if err := s.close(); err != nil {
@@ -222,16 +152,16 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 					})
 					ua := s.startLiveUtterance()
 					ua.audio <- liveASRAudio{pcm: []byte{0, 0}, end: true}
-					<-a.finished
+					<-a.committed
 					ub := s.startLiveUtterance()
 					ub.audio <- liveASRAudio{pcm: []byte{0, 0}, end: true}
-					<-b.finished
+					<-b.committed
 					uc := s.startLiveUtterance()
 					uc.audio <- liveASRAudio{pcm: []byte{0, 0}, end: true}
-					<-c.finished
+					<-c.committed
 					retire(ub, b)
 					<-b.closed
-					c.events <- controlledTranscript{Text: "Third.", Final: true}
+					c.final("Third.", true)
 					synctest.Wait()
 					select {
 					case <-ub.done:
@@ -249,7 +179,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 						}
 					}
 					sink.mu.Unlock()
-					a.events <- controlledTranscript{Text: "First.", Final: true}
+					a.final("First.", true)
 					<-uc.done
 					sink.mu.Lock()
 					var texts []string
@@ -273,12 +203,12 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 	t.Run("deadline reports recoverable repeat request", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			a := newControlledLiveStream()
-			p := controlledLiveASR{streams: make(chan *controlledLiveStream, 1)}
-			p.streams <- a
+			a := newFakeTranscription()
+			sessions := make(chan *fakeTranscription, 1)
+			sessions <- a
 			sink := &captureSink{changed: make(chan struct{}, 1)}
 			conv := &fakeConversation{}
-			s := (&localStackRuntime{liveASR: p}).newSession(t.Context(), "timeout", sink, true)
+			s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "timeout", sink, true)
 			s.conv = conv
 			t.Cleanup(func() {
 				if err := s.close(); err != nil {
@@ -288,7 +218,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 			if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
 				t.Fatal(err)
 			}
-			a.events <- controlledTranscript{Text: "Unfinished hypothesis"}
+			a.interim("Unfinished hypothesis")
 			waitLiveDraft(t, sink, "Unfinished hypothesis")
 			time.Sleep(time.Minute)
 			synctest.Wait()
@@ -320,9 +250,9 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 	t.Run("stalled connection never blocks microphone", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			provider := controlledLiveASR{streams: make(chan *controlledLiveStream)}
+			sessions := make(chan *fakeTranscription)
 			sink := &captureSink{changed: make(chan struct{}, 1)}
-			s := (&localStackRuntime{liveASR: provider}).newSession(t.Context(), "bounded", sink, true)
+			s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "bounded", sink, true)
 			s.conv = &fakeConversation{}
 			t.Cleanup(func() {
 				if err := s.close(); err != nil {

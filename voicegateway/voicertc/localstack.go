@@ -75,14 +75,22 @@ type unsupportedLanguageError struct {
 	language string
 }
 
-// newUnsupportedLanguageError rejects lang for model. A Hugging Face
-// "Author/Repo/File" model is named by its repository, keeping the message
-// short.
+// newUnsupportedLanguageError rejects lang for model, named by its
+// repository to keep the message short.
 func newUnsupportedLanguageError(model, lang string) *unsupportedLanguageError {
+	return &unsupportedLanguageError{model: modelRepository(model), language: lang}
+}
+
+// modelRepository returns the Hugging Face repository of an "Author/Repo/File"
+// or "Author/Repo:Quant" model, and any other model unchanged.
+func modelRepository(model string) string {
 	if parts := strings.SplitN(model, "/", 3); len(parts) == 3 {
-		model = parts[0] + "/" + parts[1]
+		return parts[0] + "/" + parts[1]
 	}
-	return &unsupportedLanguageError{model: model, language: lang}
+	if repo, _, ok := strings.Cut(model, ":"); ok && strings.Count(repo, "/") == 1 {
+		return repo
+	}
+	return model
 }
 
 func (e *unsupportedLanguageError) Error() string {
@@ -223,7 +231,7 @@ type localStackRuntime struct {
 	directAudio bool
 	newVAD      func() vadSegmenter
 	asr         asrAdapter
-	liveASR     liveASRAdapter
+	liveASR     *liveASR
 	llm         llmAdapter
 	tts         ttsAdapter
 	runtime     io.Closer
@@ -290,7 +298,7 @@ type localStackSession struct {
 
 	vad     vadSegmenter
 	asr     asrAdapter
-	liveASR liveASRAdapter
+	liveASR *liveASR
 	llm     llmAdapter
 	tts     ttsAdapter
 	// Client-owned stages have no gateway adapter and never receive media work.

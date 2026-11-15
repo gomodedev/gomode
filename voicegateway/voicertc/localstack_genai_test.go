@@ -26,7 +26,6 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers/openairesponses"
-	"github.com/maruel/genaipy/providers/whistle"
 	"github.com/maruel/gomode/voicegateway"
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
@@ -651,49 +650,4 @@ func (a *barrierASR) transcribe(ctx context.Context, _ string, _ []byte) (string
 	<-ctx.Done()
 	close(a.stopped)
 	return "", ctx.Err()
-}
-
-func TestSpeechASRAdapter(t *testing.T) {
-	t.Parallel()
-	// worker is a fake Whistle worker: raw 16 kHz PCM in, JSON out.
-	worker := func(t *testing.T, status int, body string, got *[]byte) *speechASRAdapter {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			pcm, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Error(err)
-			}
-			*got = append(*got, pcm...)
-			w.WriteHeader(status)
-			if _, err := io.WriteString(w, body); err != nil {
-				t.Error(err)
-			}
-		}))
-		t.Cleanup(srv.Close)
-		c, err := whistle.New(srv.Client(), srv.URL, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		return &speechASRAdapter{provider: c}
-	}
-	t.Run("transcribe", func(t *testing.T) {
-		t.Run("valid", func(t *testing.T) {
-			var got []byte
-			a := worker(t, http.StatusOK, `{"text":" hello there "}`, &got)
-			text, err := a.transcribe(t.Context(), "en", []byte{1, 0, 2, 0})
-			if err != nil || text != "hello there" {
-				t.Fatalf("text %q err %v", text, err)
-			}
-			if !slices.Equal(got, []byte{1, 0, 2, 0}) {
-				t.Fatalf("worker received %v", got)
-			}
-		})
-		t.Run("error", func(t *testing.T) {
-			var got []byte
-			a := worker(t, http.StatusInternalServerError, `{"error":"engine failed"}`, &got)
-			text, err := a.transcribe(t.Context(), "en", []byte{1, 0})
-			if err == nil || !strings.Contains(err.Error(), "engine failed") || text != "" {
-				t.Fatalf("text %q err %v", text, err)
-			}
-		})
-	})
 }

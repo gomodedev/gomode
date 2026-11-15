@@ -1,4 +1,4 @@
-// Native llama.cpp and Gemini live transcription policy for gateway-owned utterances.
+// Live transcription of gateway-owned utterances through genai transcription sessions.
 
 package voicertc
 
@@ -7,206 +7,183 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync/atomic"
 
-	"github.com/maruel/genai/providers/gemini"
-	"github.com/maruel/genai/providers/llamacpp"
+	"github.com/maruel/genai"
+	"github.com/maruel/genai/base"
+	"github.com/maruel/genai/scoreboard"
 	"golang.org/x/sync/errgroup"
 )
 
-// llamaLiveASR streams through llama-server's realtime transcription session.
+// liveASR recognizes each utterance in its own genai transcription session,
+// opened with genai.RealtimeOptionTranscription at the capture rate. Input
+// transcript deltas and interim hypotheses become drafts while the user
+// speaks; the final transcript arrives at TurnDone. Both are trimmed. A
+// session that yields no drafts, such as Whistle's, publishes only the final
+// transcript.
 //
-// TODO: The session language reaches no model. ConnectTranscriptionRaw opens
-// /v1/realtime?intent=transcription. On llama-server b12110, any model with a
-// streaming audio encoder or an "asr" chat template, including Voxtral
-// Realtime and LFM3-Audio, gets a fixed session in tools/server/server-context.cpp
-// that answers session.update with its unchanged configuration. The prompt is the
-// "asr" template rendered once at load; LFM3-Audio's is "Perform live ASR."
-// The language-aware prompt in tools/server/server-realtime.cpp
-// (common_chat_get_asr_prompt) serves only conversation sessions. Measured on
-// 4 s English and French requests with the update below sent or omitted:
-// session.updated echoes an empty language every time; Voxtral-Mini-4B-Realtime-2602
-// Q4_K_M transcribes both languages correctly; LFM3-Audio-2B Q4_K_M translates
-// French speech into English. By contrast, LFM3-Audio on the batch
-// /v1/audio/transcriptions endpoint detects French without a language, keeps
-// it with "fr", and translates it into English with "en".
+// Measured on 2026-11-15 with TestSmokeLiveASR: English and French sentences
+// from gemini-3.8-flash-lite-tts, paced at real time, in English and French
+// sessions. Each streamed 6 to 13 drafts before its final transcript.
 //
-// TODO: Declare each model's languages for session.setup with a checkLanguage
-// replacing anyLanguage: Voxtral Realtime detects the languages of its model
-// card, and LFM3-Audio is English only on this path.
-type llamaLiveASR struct {
-	anyLanguage
-	client *llamacpp.Client
+//   - gemini-3.5-transcribe-live receives the session language as a
+//     languageCodes hint, which does not change the words: each sentence is
+//     transcribed exactly in its spoken language in either session.
+//   - ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M on managed
+//     llama-server v1.0.0 (b12359) receives no language and transcribes each
+//     sentence exactly in its spoken language in either session.
+//   - LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M on the same server receives no
+//     language. It transcribes English exactly and translates French speech
+//     into English ("I would like to reserve a table for two this evening.").
+//
+// Immutable: one instance serves every session of its runtime.
+type liveASR struct {
+	provider genai.Provider
+	// model names the configured model in errors and selects its language
+	// declaration. A managed llama.cpp provider reports no ModelID.
+	model string
+	// languages are the ISO 639 base languages the model accepts at
+	// session.setup; nil accepts any. With inputLanguage, the provider then
+	// rejects an unsupported language at connect. Without it, as on llama.cpp,
+	// the model detects the language and nothing checks it, so a llama.cpp
+	// live model is checked only through its liveASRLanguages row.
+	languages []string
+	// inputLanguage sends the session language as
+	// genai.RealtimeOptionAudio.InputLanguage.
+	inputLanguage bool
 }
 
-func (a *llamaLiveASR) transcribe(s *localStackSession, u *liveUtterance, lang string) (string, error) {
-	conn, err := a.client.ConnectTranscriptionRaw(u.ctx)
+// newLiveASR transcribes through p's transcription sessions with model.
+//
+// The provider's scoreboard decides whether the session language is sent.
+// genai's transcription qualification records a provider that rejects
+// RealtimeOptionAudio.InputLanguage with base.ErrNotSupported as
+// RealtimeTranscription.InputLanguage false. Providers decide this in their
+// client, not per model, so one declining row stands for every model of the
+// provider: genai's llama.cpp client rejects any language for both session
+// types, and its Voxtral Realtime row records it. A connect rejection cannot
+// decide instead, since Whistle and the OpenAI and Mistral clients use the same
+// rejection for one unsupported language. A provider without a qualified
+// transcription session, such as Whistle, receives the language; its connect
+// rejection then names an unsupported one.
+func newLiveASR(p genai.Provider, model string) *liveASR {
+	score := p.Scoreboard()
+	declined := slices.ContainsFunc(score.Realtime, func(r scoreboard.Realtime) bool {
+		f := r.Realtime
+		return f != nil && f.InputSampleRate != 0 && f.Transcription != nil && !f.Transcription.InputLanguage
+	})
+	return &liveASR{provider: p, model: model, languages: liveASRLanguages(model), inputLanguage: !declined}
+}
+
+// liveASRLanguages declares the session languages of live models that receive
+// none, by Hugging Face repository. nil accepts any language: an unlisted
+// llama.cpp model is treated as detecting every language.
+//
+// Voxtral Realtime detects the 13 languages its model card lists
+// (https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602).
+// LFM3-Audio translates non-English speech into English on this path, as
+// measured on liveASR, so it supports English only.
+func liveASRLanguages(model string) []string {
+	switch modelRepository(model) {
+	case "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF":
+		return []string{"ar", "de", "en", "es", "fr", "hi", "it", "ja", "ko", "nl", "pt", "ru", "zh"}
+	case "LiquidAI/LFM3-Audio-2B-GGUF":
+		return []string{"en"}
+	default:
+		return nil
+	}
+}
+
+func (a *liveASR) checkLanguage(lang string) error {
+	if a.languages != nil && !slices.Contains(a.languages, lang) {
+		return newUnsupportedLanguageError(a.model, lang)
+	}
+	return nil
+}
+
+// transcribe recognizes u and returns its final transcript. lang is the
+// session's ISO 639 base language; see localStackSession.language.
+func (a *liveASR) transcribe(s *localStackSession, u *liveUtterance, lang string) (string, error) {
+	audio := &genai.RealtimeOptionAudio{InputFormat: genai.AudioFormat{SampleRate: micSampleRate}}
+	if a.inputLanguage {
+		audio.InputLanguage = lang
+	}
+	rt, err := a.provider.ConnectRealtime(u.ctx, genai.RealtimeOptionTranscription{}, audio)
 	if err != nil {
+		// genai providers name a rejected input language as an
+		// "input language" option of base.ErrNotSupported.
+		if e, ok := errors.AsType[*base.ErrNotSupported](err); ok && audio.InputLanguage != "" && slices.ContainsFunc(e.Options, func(o string) bool { return strings.HasPrefix(o, "input language") }) {
+			return "", newUnsupportedLanguageError(a.model, lang)
+		}
 		return "", err
 	}
-	format := conn.Initial.Session.Audio.Input.Format
-	if format.Type != llamacpp.AudioPCM || format.Rate != micSampleRate {
-		return "", errors.Join(fmt.Errorf("live ASR input format %s/%d is unsupported; capture is PCM16/%d Hz", format.Type, format.Rate, micSampleRate), conn.Close())
-	}
-	// The update echoes the negotiated session and gives tools an explicit
-	// empty list because the server rejects a null one.
-	cfg := *conn.Initial.Session
-	cfg.Tools = llamacpp.ToolList{}
-	cfg.Audio.Input.Transcription = &llamacpp.Transcription{Model: cfg.Model, Language: lang}
-	if err := conn.Send(u.ctx, &llamacpp.ClientMessage{Type: llamacpp.EventSessionUpdate, Session: &cfg}); err != nil {
-		return "", errors.Join(err, conn.Close())
-	}
 	ctx, cancel := context.WithCancel(u.ctx)
+	defer cancel()
 	workers, workerCtx := errgroup.WithContext(ctx)
-	var finishing atomic.Bool
+	var committed atomic.Bool
 	workers.Go(func() error {
 		return s.sendLiveAudio(workerCtx, u, func(ctx context.Context, pcm []byte) error {
-			return conn.Send(ctx, &llamacpp.ClientMessage{Type: llamacpp.EventAudioAppend, Audio: pcm})
+			return rt.Send(ctx, genai.RealtimeInputContent{Audio: pcm})
 		}, func(ctx context.Context) error {
-			finishing.Store(true)
-			return conn.Send(ctx, &llamacpp.ClientMessage{Type: llamacpp.EventAudioCommit, Final: true})
+			committed.Store(true)
+			return rt.Send(ctx, genai.RealtimeInputContent{Commit: true})
 		})
 	})
-	text, item := "", ""
-	final := ""
-	for {
-		var msg llamacpp.ServerMessage
-		msg, err = conn.Receive(workerCtx)
+	text, err := a.receive(workerCtx, s, u, rt, &committed)
+	if err != nil {
+		cancel()
+	}
+	return text, errors.Join(err, workers.Wait(), rt.Close())
+}
+
+// receive publishes drafts until TurnDone and returns the final transcript.
+// A final transcript replaces the deltas since the previous one, so done
+// accumulates finished segments, segment the deltas after them, and interim
+// the provider's revisable hypothesis for speech not yet in a delta.
+func (a *liveASR) receive(ctx context.Context, s *localStackSession, u *liveUtterance, rt genai.RealtimeSession, committed *atomic.Bool) (string, error) {
+	done, segment, interim := "", "", ""
+	for e, err := range rt.Receive(ctx) {
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				err = io.ErrUnexpectedEOF
 			}
-			break
+			return "", err
 		}
-		if msg.Type == llamacpp.EventError || msg.Type == llamacpp.EventInputTranscriptFailed {
-			err = errors.New("llama.cpp live transcription rejected by server")
-			break
-		}
-		if msg.Type != llamacpp.EventInputTranscriptDelta && msg.Type != llamacpp.EventInputTranscriptDone {
+		draft := false
+		switch e.Kind {
+		case genai.RealtimeEventTranscriptInput:
+			if e.Content.Final {
+				done += e.Content.Text
+				segment = ""
+				// A Final may revise its segment. While input continues, show
+				// it; after Commit, TurnDone delivers it.
+				draft = !committed.Load()
+			} else {
+				segment += e.Content.Text
+				draft = true
+			}
+			interim = ""
+		case genai.RealtimeEventTranscriptInputInterim:
+			interim = e.Content.Text
+			draft = true
+		case genai.RealtimeEventError:
+			return "", fmt.Errorf("%s transcription: %s", a.provider.Name(), e.Error.Message)
+		case genai.RealtimeEventTurnDone:
+			if !committed.Load() {
+				return "", fmt.Errorf("%s transcription completed before input ended", a.provider.Name())
+			}
+			return strings.TrimSpace(done + segment), nil
+		default:
 			continue
 		}
-		if msg.ItemID == "" || item != "" && item != msg.ItemID {
-			err = errors.New("llama.cpp transcription changed utterance identity")
-			break
+		if len(done)+len(segment)+len(interim) > 64<<10 {
+			return "", errors.New("transcription text exceeds 64 KiB")
 		}
-		item = msg.ItemID
-		if msg.Type == llamacpp.EventInputTranscriptDone {
-			if !finishing.Load() {
-				err = errors.New("llama.cpp transcription completed before input ended")
-				break
-			}
-			if len(msg.Transcript) > 64<<10 {
-				err = errors.New("transcription text exceeds 64 KiB")
-				break
-			}
-			final = msg.Transcript
-			break
-		}
-		if len(text)+len(msg.Delta) > 64<<10 {
-			err = errors.New("transcription text exceeds 64 KiB")
-			break
-		}
-		text += msg.Delta
-		s.publishLiveDraft(u, text)
-	}
-	if err != nil {
-		cancel()
-	}
-	sendErr := workers.Wait()
-	cancel()
-	return final, errors.Join(err, sendErr, conn.Close())
-}
-
-// geminiLiveASR streams through a Gemini Live transcription model, which
-// detects the language without hints. Measured with gemini-3.5-transcribe-live
-// on 4 s English and French requests: detection is correct, and a mismatched
-// LiveTranscriptionConfig.LanguageCodes hint does not change the transcript.
-//
-// TODO: Replace with the genai transcription-session adapter, which sends the
-// session language as genai.RealtimeOptionAudio.InputLanguage.
-type geminiLiveASR struct {
-	anyLanguage
-	client *gemini.Client
-}
-
-func (a *geminiLiveASR) transcribe(s *localStackSession, u *liveUtterance, _ string) (string, error) {
-	setup := &gemini.LiveSetup{Model: "models/" + strings.TrimPrefix(a.client.ModelID(), "models/"), GenerationConfig: gemini.LiveGenerationConfig{ResponseModalities: []gemini.Modality{gemini.ModalityText}}, InputAudioTranscription: &gemini.LiveTranscriptionConfig{}, RealtimeInputConfig: gemini.LiveRealtimeInputConfig{AutomaticActivityDetection: &gemini.LiveAutomaticActivityDetection{Disabled: true}, ActivityHandling: gemini.LiveActivityNoInterruption, TurnCoverage: gemini.LiveTurnOnlyActivity}}
-	conn, err := a.client.ConnectLiveRaw(u.ctx, setup)
-	if err != nil {
-		return "", err
-	}
-	ctx, cancel := context.WithCancel(u.ctx)
-	workers, workerCtx := errgroup.WithContext(ctx)
-	var finishing atomic.Bool
-	workers.Go(func() error {
-		started := false
-		return s.sendLiveAudio(workerCtx, u, func(ctx context.Context, pcm []byte) error {
-			if !started {
-				if err := conn.Send(ctx, &gemini.LiveClientMessage{RealtimeInput: &gemini.LiveRealtimeInput{ActivityStart: &gemini.LiveActivity{}}}); err != nil {
-					return err
-				}
-				started = true
-			}
-			return conn.Send(ctx, &gemini.LiveClientMessage{RealtimeInput: &gemini.LiveRealtimeInput{Audio: &gemini.LiveBlob{MIMEType: "audio/pcm;rate=16000", Data: pcm}}})
-		}, func(ctx context.Context) error {
-			finishing.Store(true)
-			return conn.Send(ctx, &gemini.LiveClientMessage{RealtimeInput: &gemini.LiveRealtimeInput{ActivityEnd: &gemini.LiveActivity{}}})
-		})
-	})
-	committed, partial := "", ""
-	final := ""
-	for {
-		var msg gemini.LiveServerMessage
-		msg, err = conn.Receive(workerCtx)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				err = io.ErrUnexpectedEOF
-			}
-			break
-		}
-		if msg.Error != nil || msg.GoAway != nil {
-			err = errors.New("gemini live transcription terminated")
-			break
-		}
-		content := msg.ServerContent
-		if content == nil {
-			continue
-		}
-		changed := false
-		if t := content.InterimInputTranscription; t != nil {
-			partial = t.Text
-			changed = true
-		}
-		if t := content.InputTranscription; t != nil {
-			if len(committed)+len(t.Text) > 64<<10 {
-				err = errors.New("transcription text exceeds 64 KiB")
-				break
-			}
-			committed += t.Text
-			partial = ""
-			changed = true
-		}
-		if len(committed)+len(partial) > 64<<10 {
-			err = errors.New("transcription text exceeds 64 KiB")
-			break
-		}
-		if content.GenerationComplete || content.TurnComplete {
-			if !finishing.Load() {
-				err = errors.New("gemini transcription completed before input ended")
-				break
-			}
-			final = committed
-			break
-		}
-		if changed {
-			s.publishLiveDraft(u, committed+partial)
+		if draft {
+			s.publishLiveDraft(u, strings.TrimSpace(done+segment+interim))
 		}
 	}
-	if err != nil {
-		cancel()
-	}
-	sendErr := workers.Wait()
-	cancel()
-	return final, errors.Join(err, sendErr, conn.Close())
+	return "", io.ErrUnexpectedEOF
 }

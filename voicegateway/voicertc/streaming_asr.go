@@ -137,14 +137,6 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 	return u
 }
 
-// liveASRAdapter executes one gateway-owned utterance using a native provider.
-// It exposes no portable connection or event protocol. lang is the session's
-// ISO 639 base language; see localStackSession.language.
-type liveASRAdapter interface {
-	languageChecker
-	transcribe(s *localStackSession, u *liveUtterance, lang string) (string, error)
-}
-
 func (s *localStackSession) publishLiveDraft(u *liveUtterance, text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

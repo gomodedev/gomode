@@ -26,7 +26,6 @@ import (
 	"github.com/maruel/genaipy/providers/whistle/whistlesrv"
 
 	"github.com/maruel/genai"
-	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/groq"
 	"github.com/maruel/genai/providers/llamacpp"
@@ -62,7 +61,7 @@ func localStackRuntimeForConfig(ctx context.Context, cfg *voicegateway.PipelineC
 
 type localStackModels struct {
 	asr     asrAdapter
-	liveASR liveASRAdapter
+	liveASR *liveASR
 	llm     llmAdapter
 	tts     ttsAdapter
 	runtime io.Closer
@@ -88,20 +87,21 @@ func localStackModelsForConfigWithStarter(
 	}
 	var asr localStackEndpoint
 	var asrAdapter asrAdapter
-	var liveASR liveASRAdapter
+	var liveASR *liveASR
 	if !cfg.TextOnly && cfg.ASR != (voicegateway.ASRConfig{}) {
 		switch cfg.ASR.Engine {
 		case voicegateway.ASREngineWhistle:
 			// genaipy owns the isolated uv/Python 3.12 Needle worker and disables
 			// telemetry. Needle downloads a prebuilt native engine and weights
 			// into its own cache, rather than building the runtime from source.
-			// Recognition is final-only with automatic language detection, and
-			// the provider rejects a session language outside the languages it
-			// declares when an utterance connects. The
-			// worker normalizes 16 kHz PCM to float samples, serializes native
-			// calls, and splits utterances into consecutive 30-second windows;
-			// words crossing a window boundary may lose accuracy. Cancellation
-			// preserves the model for subsequent requests.
+			// Its sessions buffer the utterance until Commit and yield only the
+			// final transcript, with automatic language detection; the provider
+			// rejects a session language outside the languages it declares when
+			// an utterance connects. The worker normalizes 16 kHz PCM to float
+			// samples, serializes native calls, and splits utterances into
+			// consecutive 30-second windows; words crossing a window boundary
+			// may lose accuracy. Cancellation preserves the model for subsequent
+			// requests.
 			srv, err := whistlesrv.New(ctx, cfg.ASR.Model)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
@@ -111,7 +111,7 @@ func localStackModelsForConfigWithStarter(
 				return localStackModels{}, errors.Join(err, srv.Close(), llm.runtime.Close())
 			}
 			asr.runtime = srv
-			asrAdapter = &speechASRAdapter{provider: c}
+			liveASR = newLiveASR(c, c.ModelID())
 		default:
 			var err error
 			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, start)
@@ -119,14 +119,7 @@ func localStackModelsForConfigWithStarter(
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
 			if cfg.ASR.Streaming {
-				switch p := asr.provider.(type) {
-				case *llamacpp.Client:
-					liveASR = &llamaLiveASR{client: p}
-				case *gemini.Client:
-					liveASR = &geminiLiveASR{client: p}
-				default:
-					return localStackModels{}, errors.Join(errors.New("ASR provider does not support live transcription"), asr.runtime.Close(), llm.runtime.Close())
-				}
+				liveASR = newLiveASR(asr.provider, cfg.ASR.Model)
 			} else {
 				switch p := asr.provider.(type) {
 				case *groq.Client:
@@ -374,52 +367,6 @@ func localStackLlamaCacheDir() (string, error) {
 		return "", fmt.Errorf("get user cache dir: %w", err)
 	}
 	return filepath.Join(cacheBase, "gomode", "llama-server"), nil
-}
-
-// speechASRAdapter transcribes one complete utterance per genai
-// transcription session at the gateway's capture sample rate. Request
-// cancellation aborts recognition on barge-in.
-type speechASRAdapter struct {
-	anyLanguage
-	provider genai.Provider
-}
-
-func (a *speechASRAdapter) transcribe(ctx context.Context, lang string, pcm []byte) (string, error) {
-	rt, err := a.provider.ConnectRealtime(ctx, genai.RealtimeOptionTranscription{}, &genai.RealtimeOptionAudio{InputFormat: genai.AudioFormat{SampleRate: micSampleRate}, InputLanguage: lang})
-	if err != nil {
-		// genai providers name a rejected input language as an
-		// "input language" option of base.ErrNotSupported.
-		if e, ok := errors.AsType[*base.ErrNotSupported](err); ok && slices.ContainsFunc(e.Options, func(o string) bool { return strings.HasPrefix(o, "input language") }) {
-			return "", newUnsupportedLanguageError(a.provider.ModelID(), lang)
-		}
-		return "", err
-	}
-	if err := rt.Send(ctx, genai.RealtimeInputContent{Audio: pcm, Commit: true}); err != nil {
-		return "", errors.Join(err, rt.Close())
-	}
-	text := ""
-	for e, err := range rt.Receive(ctx) {
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				err = io.ErrUnexpectedEOF
-			}
-			return "", errors.Join(err, rt.Close())
-		}
-		switch e.Kind {
-		case genai.RealtimeEventTranscriptInput:
-			if e.Content.Final {
-				text = e.Content.Text
-			} else {
-				text += e.Content.Text
-			}
-		case genai.RealtimeEventError:
-			return "", errors.Join(fmt.Errorf("%s transcription: %s", a.provider.Name(), e.Error.Message), rt.Close())
-		case genai.RealtimeEventTurnDone:
-			return text, rt.Close()
-		default:
-		}
-	}
-	return "", errors.Join(io.ErrUnexpectedEOF, rt.Close())
 }
 
 // speechTTSAdapter adapts KittenTTS synthesis to the gateway's private boundary.
