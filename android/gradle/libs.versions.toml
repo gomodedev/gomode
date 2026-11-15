@@ -38,7 +38,7 @@ robolectric = "4.16.1"
 # match both the Robolectric version above and the modules' compileSdk (API 36).
 robolectricAndroidAll = "16-robolectric-13921718-i7"
 multiplatformMarkdownRenderer = "0.39.2"
-streamWebrtc = "1.3.8"
+streamWebrtc = "1.3.10"
 androidsvg = "1.4"
 webkit = "1.16.0"
 credentials = "1.6.0"

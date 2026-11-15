@@ -1098,7 +1098,11 @@ func newDTXBrowser(ctx context.Context, t *testing.T) *dtxBrowser {
 	t.Logf("browser executable: %s", exe)
 	dir := t.TempDir()
 	// Cleanup owns shutdown; test cancellation must not kill Chromium before its children exit.
+	// Tests never reach external services: the resolver rule fails every name
+	// lookup, so Chromium's update, variations, and sign-in fetches cannot leave
+	// the host; only the loopback gateway stays reachable.
 	cmd := exec.Command(exe, "--headless", "--no-sandbox", "--disable-gpu", //nolint:gosec // Test executable from CHROME_BIN or LookPath, with fixed flags and a test-owned profile.
+		"--disable-background-networking", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
 		"--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=0", "--user-data-dir="+dir, "about:blank")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -1233,7 +1237,7 @@ func (c *dtxBrowser) call(m string, p any, sid string, v any) {
 		}
 		if v != nil {
 			if err := json.Unmarshal(msg.Result, v); err != nil {
-				c.t.Fatal(err)
+				c.t.Fatal(err, string(msg.Result))
 			}
 		}
 		return
