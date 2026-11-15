@@ -43,6 +43,7 @@ import org.junit.Test
 import org.junit.rules.TestRule
 import org.junit.runner.RunWith
 import org.junit.runners.model.MultipleFailureException
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -679,11 +680,7 @@ class CarDialInterceptionTest {
             dial(NUMBER)
             awaitMicrophoneForeground()
             awaitSettingsRequest(before)
-            val activities = shell("dumpsys activity activities")
-            assertTrue(
-                "Unlocked startup must use MainActivity: $activities",
-                activities.lines().any { it.contains("topResumedActivity=") && it.contains("MainActivity") },
-            )
+            awaitMainActivityResumed()
             assertFalse(device.hasObject(By.res("car_dial_end")))
             settingsBlocked(false)
             awaitVoice("CLOUD", before)
@@ -810,14 +807,20 @@ class CarDialInterceptionTest {
             )
         }
         assertFalse(device.hasObject(By.res("car_dial_end")))
-        val activities = shell("dumpsys activity activities")
-        assertTrue(
-            activities,
-            activities.lines().any {
-                it.contains("topResumedActivity=") &&
-                    it.contains("MainActivity")
-            },
-        )
+        awaitMainActivityResumed()
+    }
+
+    // The redirection service starts MainActivity while the dialer's in-call
+    // screen is still resuming, so Android may briefly resume the dialer first.
+    private fun awaitMainActivityResumed() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        var activities: String
+        do {
+            activities = shell("dumpsys activity activities")
+            if (activities.lines().any { it.contains("topResumedActivity=") && it.contains("MainActivity") }) return
+            Thread.sleep(50)
+        } while (System.nanoTime() < deadline)
+        throw AssertionError("MainActivity did not resume: $activities")
     }
 
     @Test
@@ -1106,7 +1109,9 @@ class CarDialInterceptionTest {
                     "basic_packet_socket_factory.cc:V physical_socket_server.cc:V *:S",
             )
         val call = latestCallRecord(shell("dumpsys telecom")).take(4_000)
-        return "fixture before=$before\nfixture after=${fixtureStats()}\napp log:\n$log\nTelecom call:\n$call"
+        val windows = ByteArrayOutputStream().also { device.dumpWindowHierarchy(it) }.toString()
+        return "fixture before=$before\nfixture after=${fixtureStats()}\napp log:\n$log\nTelecom call:\n$call\n" +
+            "windows:\n$windows"
     }
 
     private fun voiceStatusText(): String = device.findObject(By.res("car_dial_status"))?.text ?: "no status"
