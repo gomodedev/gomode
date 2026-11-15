@@ -75,7 +75,7 @@ func testNativeTTS(t *testing.T, provider string) {
 					t.Error(err)
 					return
 				}
-				if in.Input != "Hello." || in.Voice != "female" || !in.Stream || in.ResponseFormat != llamacpp.SpeechPCM {
+				if in.Input != "Hello." || in.Voice != "female" || in.Lang != "fr" || !in.Stream || in.ResponseFormat != llamacpp.SpeechPCM {
 					t.Errorf("native speech request %+v", in)
 				}
 				w.Header().Set("Content-Type", "audio/pcm;rate=12000;encoding=signed-int;bits=16")
@@ -102,7 +102,7 @@ func testNativeTTS(t *testing.T, provider string) {
 					t.Error(err)
 					return
 				}
-				if !in.Stream || in.Input[0].Text != "Hello." || in.GenerationConfig.SpeechConfig[0].Voice != "Kore" {
+				if c := in.GenerationConfig.SpeechConfig[0]; !in.Stream || in.Input[0].Text != "Hello." || c.Voice != "Kore" || c.Language != "fr" {
 					t.Errorf("native speech request %+v", in)
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -112,7 +112,7 @@ func testNativeTTS(t *testing.T, provider string) {
 			}
 		})
 		var pcm []byte
-		for chunk, err := range a.synthesize(t.Context(), "en", "Hello.") {
+		for chunk, err := range a.synthesize(t.Context(), "fr", "", "Hello.") {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +149,7 @@ func testNativeTTS(t *testing.T, provider string) {
 					}
 				})
 				var failure error
-				for _, err := range a.synthesize(t.Context(), "en", "Hello.") {
+				for _, err := range a.synthesize(t.Context(), "en", "", "Hello.") {
 					if err != nil {
 						failure = err
 					}
@@ -181,7 +181,7 @@ func testNativeTTS(t *testing.T, provider string) {
 			<-r.Context().Done()
 			close(stopped)
 		})
-		for pcm, err := range a.synthesize(t.Context(), "en", "Hello.") {
+		for pcm, err := range a.synthesize(t.Context(), "en", "", "Hello.") {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func testNativeTTS(t *testing.T, provider string) {
 		t.Cleanup(cancel)
 		cancel()
 		var failure error
-		for _, err := range a.synthesize(ctx, "en", "Hello.") {
+		for _, err := range a.synthesize(ctx, "en", "", "Hello.") {
 			failure = err
 		}
 		if !errors.Is(failure, context.Canceled) {

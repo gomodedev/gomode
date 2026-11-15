@@ -22,6 +22,7 @@ export const voiceMessages: VoiceMessages = {
   speakingSpeed: "Vitesse de parole",
   speakingSpeedNormal: "1× (Normale)",
   speakingVoiceDefault: "Par défaut du fournisseur",
+  speakingVoiceNamedDefault: "Par défaut ({voice})",
   browserVoiceDefault: "Par défaut du navigateur",
   choicesLoading: "Chargement des options vocales…",
   choicesRetry: "Réessayer de charger les options vocales",

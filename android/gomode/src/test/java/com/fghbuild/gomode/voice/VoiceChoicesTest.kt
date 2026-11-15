@@ -15,9 +15,11 @@ import com.fghbuild.gomode.sdk.v1.Settings
 import com.fghbuild.gomode.sdk.v1.VoiceGatewaySettings
 import com.fghbuild.gomode.sdk.v1.WebShellSettings
 import com.fghbuild.voicegateway.sdk.v2.ApiClient
+import com.fghbuild.voicegateway.sdk.v2.RecognitionModel
 import com.fghbuild.voicegateway.sdk.v2.SpeechConfig
 import com.fghbuild.voicegateway.sdk.v2.SpeechLocation
-import com.fghbuild.voicegateway.sdk.v2.SpeechModel
+import com.fghbuild.voicegateway.sdk.v2.SynthesisModel
+import com.fghbuild.voicegateway.sdk.v2.Voice
 import com.fghbuild.voicegateway.sdk.v2.VoiceChoice
 import com.fghbuild.voicegateway.sdk.v2.VoiceChoiceDefault
 import com.fghbuild.voicegateway.sdk.v2.VoiceChoicesResp
@@ -148,8 +150,12 @@ class VoiceChoicesTest {
                     ),
                 ),
                 listOf(VoiceChoiceDefault(VoiceTransport.WebRTC, "live")),
-                recognitionModels = listOf(SpeechModel("whisper", "Whisper"), SpeechModel("parakeet", "Parakeet")),
-                synthesisModels = listOf(SpeechModel("kokoro", "Kokoro")),
+                recognitionModels =
+                    listOf(
+                        RecognitionModel("whisper", "Whisper"),
+                        RecognitionModel("parakeet", "Parakeet"),
+                    ),
+                synthesisModels = listOf(SynthesisModel("kokoro", "Kokoro")),
             ),
         )
 
@@ -159,7 +165,7 @@ class VoiceChoicesTest {
         GatewayVoiceChoices(
             gateway,
             VoiceChoicesResp(
-                listOf(VoiceChoice("live", "Gemini Live", listOf(VoiceTransport.WebRTC), voices)),
+                listOf(VoiceChoice("live", "Gemini Live", listOf(VoiceTransport.WebRTC), voices?.map { Voice(it) })),
                 listOf(VoiceChoiceDefault(VoiceTransport.WebRTC, "live")),
             ),
         )
@@ -200,7 +206,11 @@ class VoiceChoicesTest {
                     val preferences = if (saved == null) emptyMap() else mapOf(gateway to mapOf("live" to saved))
                     catalog
                         .resolve(
-                            settings.copy(voiceSetup = setup, speakingVoices = preferences),
+                            settings.copy(
+                                voiceSetup = setup,
+                                speakingVoices = preferences,
+                                voiceLanguageTag = row["languageTag"]?.jsonPrimitive?.content ?: "en-US",
+                            ),
                             pinned = null,
                         ).voiceName
                 }
@@ -218,6 +228,37 @@ class VoiceChoicesTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `sessions name only a saved synthesis voice of the voice language`() {
+        val voiced =
+            composable.copy(
+                catalog =
+                    composable.catalog.copy(
+                        synthesisModels =
+                            listOf(
+                                SynthesisModel(
+                                    "kokoro",
+                                    "Kokoro",
+                                    listOf(Voice("French", "fr"), Voice("Luna", "en")),
+                                ),
+                            ),
+                    ),
+            )
+        val saved =
+            settings.with(gatewayStages).copy(
+                voiceLanguageTag = "fr-CA",
+                synthesisVoices = mapOf(gateway to mapOf("kokoro" to "French")),
+            )
+        val pinned = voiced.resolve(saved, pinned = null)
+        assertEquals("French" to "kokoro", pinned.voiceName to pinned.synthesisModelID)
+        // The saved voice does not speak English: an English session uses the gateway default.
+        assertEquals("", voiced.resolve(saved.copy(voiceLanguageTag = "en-US"), pinned = null).voiceName)
+        assertEquals(
+            "Session speaking voice is unavailable. Start a new voice session.",
+            assertThrows(VoiceSetupException::class.java) { composable.resolve(saved, pinned) }.message,
+        )
     }
 
     @Test
@@ -483,7 +524,9 @@ class VoiceChoicesTest {
         // Recovery keeps the pinned owners and models even after the saved setup changes.
         assertEquals(pinned, composable.resolve(settings.with(gatewayStages), pinned))
         val withdrawnModel =
-            composable.copy(catalog = composable.catalog.copy(recognitionModels = listOf(SpeechModel("whisper", "W"))))
+            composable.copy(
+                catalog = composable.catalog.copy(recognitionModels = listOf(RecognitionModel("whisper", "W"))),
+            )
         assertEquals(
             "Session speech model is unavailable. Start a new voice session.",
             assertThrows(VoiceSetupException::class.java) { withdrawnModel.resolve(mixed, pinned) }.message,

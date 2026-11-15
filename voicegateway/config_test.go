@@ -143,6 +143,12 @@ tts = "speech"
 				{"unused invalid synthesis", func(c *Config) {
 					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Provider: "gemini"})
 				}, "voice.tts.model is required"},
+				{"language-selected KittenTTS 2", func(c *Config) {
+					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Engine: TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2-nano", Voice: "Eleanor"})
+				}, `voice.tts.model: KittenTTS model "KittenML/kitten-tts-2-nano" is not supported`},
+				{"unknown KittenTTS voice", func(c *Config) {
+					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Engine: TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2", Voice: "Nobody"})
+				}, `voice.tts.voice "Nobody" is not a KittenML/kitten-tts-2 voice`},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
@@ -1639,7 +1645,7 @@ context_size = 32768
 [[tts]]
 id = "speech"
 engine = "kittentts"
-model = "owner/kitten-tts-2"
+model = "KittenML/kitten-tts-2"
 voice = "Luna"
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -1652,7 +1658,7 @@ voice = "Luna"
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Pipelines[0].TTS.Model != "owner/kitten-tts-2" || cfg.Pipelines[0].TTS.Voice != "Luna" {
+	if cfg.Pipelines[0].TTS.Model != "KittenML/kitten-tts-2" || cfg.Pipelines[0].TTS.Voice != "Luna" {
 		t.Fatalf("TTS = %#v", cfg.Pipelines[0].TTS)
 	}
 	cfg.Pipelines[0].TTS.Remote = "http://127.0.0.1:8000"

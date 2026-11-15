@@ -399,6 +399,29 @@ public struct VoiceTransport: Codable, Equatable, Hashable {
     }
 }
 
+/// Voice is one selectable voice of a voice choice or synthesis model.
+public struct Voice: Codable {
+    /// Name is the SessionSetup.voice.name that selects this voice.
+    public let name: String
+    /// Language is the ISO 639-1 code of the only language the voice speaks,
+    /// such as "fr". Clients offer the voice only in sessions whose language
+    /// tag has that base subtag, and session.setup rejects it in another.
+    /// Empty means the voice speaks every language the model does.
+    public let language: String?
+    /// Default marks the voice a session speaks with when SessionSetup.voice.name
+    /// is empty and the session language is one the voice speaks. A list has
+    /// either one default without a language or at most one default per
+    /// language; clients reject a list that mixes both. A list without a
+    /// default leaves the choice to the provider.
+    public let `default`: Bool?
+
+    public init(name: String, language: String? = nil, `default`: Bool? = nil) {
+        self.name = name
+        self.language = language
+        self.`default` = `default`
+    }
+}
+
 /// SpeechConfig selects recognition and synthesis independently. Empty fields use
 /// transport defaults: WebRTC uses each configured gateway stage; text uses client
 /// speech. Explicit unsupported selections fail before model initialization.
@@ -420,8 +443,9 @@ public struct VoiceChoice: Codable {
     public let id: String
     public let label: String
     public let transports: [VoiceTransport]?
-    /// Voices lists supported audio voice names. Omitted when the choice does not offer voice selection.
-    public let voices: [String]?
+    /// Voices lists the selectable voices. Omitted when the choice does not
+    /// offer voice selection.
+    public let voices: [Voice]?
     /// SpeechModes lists supported input/output ownership combinations.
     /// Missing metadata from older gateways means transport defaults only.
     public let speechModes: [SpeechConfig]?
@@ -437,7 +461,7 @@ public struct VoiceChoice: Codable {
         case composable
     }
 
-    public init(id: String, label: String, transports: [VoiceTransport]?, voices: [String]? = nil, speechModes: [SpeechConfig]? = nil, composable: Bool? = nil) {
+    public init(id: String, label: String, transports: [VoiceTransport]?, voices: [Voice]? = nil, speechModes: [SpeechConfig]? = nil, composable: Bool? = nil) {
         self.id = id
         self.label = label
         self.transports = transports
@@ -451,7 +475,7 @@ public struct VoiceChoice: Codable {
         self.id = try c.decode(String.self, forKey: .id)
         self.label = try c.decode(String.self, forKey: .label)
         self.transports = try c.decode([VoiceTransport]?.self, forKey: .transports)
-        self.voices = try c.decodeIfPresent([String].self, forKey: .voices)
+        self.voices = try c.decodeIfPresent([Voice].self, forKey: .voices)
         self.speechModes = try c.decodeIfPresent([SpeechConfig].self, forKey: .speechModes)
         self.composable = try c.decodeIfPresent(Bool.self, forKey: .composable)
     }
@@ -482,8 +506,9 @@ public struct VoiceChoiceDefault: Codable {
     }
 }
 
-/// SpeechModel identifies one configured speech stage without exposing endpoints or credentials.
-public struct SpeechModel: Codable {
+/// RecognitionModel identifies one configured recognition stage without
+/// exposing endpoints or credentials.
+public struct RecognitionModel: Codable {
     /// ID is the operator-configured id; it stays the same while the stage's
     /// settings change.
     public let id: String
@@ -495,6 +520,24 @@ public struct SpeechModel: Codable {
     }
 }
 
+/// SynthesisModel identifies one configured synthesis stage without exposing
+/// endpoints or credentials.
+public struct SynthesisModel: Codable {
+    /// ID is the operator-configured id; it stays the same while the stage's
+    /// settings change.
+    public let id: String
+    public let label: String
+    /// Voices lists the selectable voices. Omitted when the stage offers no
+    /// voice selection.
+    public let voices: [Voice]?
+
+    public init(id: String, label: String, voices: [Voice]? = nil) {
+        self.id = id
+        self.label = label
+        self.voices = voices
+    }
+}
+
 /// VoiceChoicesResp advertises the available voice choices and one default per
 /// offered family.
 public struct VoiceChoicesResp: Codable {
@@ -502,9 +545,9 @@ public struct VoiceChoicesResp: Codable {
     /// Defaults holds one entry per offered transport, ordered by transport name.
     public let defaults: [VoiceChoiceDefault]?
     /// RecognitionModels lists gateway recognition stages in preference order.
-    public let recognitionModels: [SpeechModel]?
+    public let recognitionModels: [RecognitionModel]?
     /// SynthesisModels lists gateway synthesis stages in preference order.
-    public let synthesisModels: [SpeechModel]?
+    public let synthesisModels: [SynthesisModel]?
     /// STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
     /// its ICE servers. Omitted means none: the client gathers host candidates
     /// only and contacts no STUN server.
@@ -518,7 +561,7 @@ public struct VoiceChoicesResp: Codable {
         case stunServers
     }
 
-    public init(choices: [VoiceChoice]?, defaults: [VoiceChoiceDefault]?, recognitionModels: [SpeechModel]? = nil, synthesisModels: [SpeechModel]? = nil, stunServers: [String]? = nil) {
+    public init(choices: [VoiceChoice]?, defaults: [VoiceChoiceDefault]?, recognitionModels: [RecognitionModel]? = nil, synthesisModels: [SynthesisModel]? = nil, stunServers: [String]? = nil) {
         self.choices = choices
         self.defaults = defaults
         self.recognitionModels = recognitionModels
@@ -530,8 +573,8 @@ public struct VoiceChoicesResp: Codable {
         let c = try decoder.container(keyedBy: Self.CodingKeys.self)
         self.choices = try c.decode([VoiceChoice]?.self, forKey: .choices)
         self.defaults = try c.decode([VoiceChoiceDefault]?.self, forKey: .defaults)
-        self.recognitionModels = try c.decodeIfPresent([SpeechModel].self, forKey: .recognitionModels)
-        self.synthesisModels = try c.decodeIfPresent([SpeechModel].self, forKey: .synthesisModels)
+        self.recognitionModels = try c.decodeIfPresent([RecognitionModel].self, forKey: .recognitionModels)
+        self.synthesisModels = try c.decodeIfPresent([SynthesisModel].self, forKey: .synthesisModels)
         self.stunServers = try c.decodeIfPresent([String].self, forKey: .stunServers)
     }
 
@@ -770,7 +813,10 @@ public struct MessageEnvelope: Codable {
 
 /// VoiceConfig describes provider-neutral voice preferences.
 public struct VoiceConfig: Codable {
-    /// Name is the requested provider-specific voice name. Empty uses the provider default.
+    /// Name is the requested provider-specific voice name. Empty uses the
+    /// provider default, or for a synthesis stage that advertises voices, its
+    /// configured voice when that voice speaks the session language and its
+    /// first voice of the session language otherwise.
     public let name: String?
     /// Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA".
     /// Empty defaults to "en-US". Invalid tags fail session setup. The gateway

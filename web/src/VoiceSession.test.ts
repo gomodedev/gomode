@@ -225,7 +225,7 @@ beforeEach(() => {
               label: "Gemini Live",
               transports: ["webrtc", "text"],
               ...(independentSpeech ? { composable: true } : {}),
-              ...(offeredVoices === null ? {} : { voices: offeredVoices }),
+              ...(offeredVoices === null ? {} : { voices: offeredVoices.map((name) => ({ name })) }),
               ...(mixedSpeech
                 ? {
                     speechModes: [
@@ -247,7 +247,14 @@ beforeEach(() => {
                 ],
                 synthesisModels: [
                   { id: "tts-a", label: "TTS A" },
-                  { id: "tts-b", label: "TTS B" },
+                  {
+                    id: "tts-b",
+                    label: "TTS B",
+                    voices: [
+                      { name: "French", language: "fr" },
+                      { name: "Luna", language: "en" },
+                    ],
+                  },
                 ],
               }
             : {}),
@@ -381,7 +388,7 @@ describe("VoiceSession", () => {
     const restore = installBrowserSpeech("Chrome desktop");
     const catalog = {
       choices: [
-        { id: "native", label: "Gemini Live", transports: ["webrtc"], voices: ["Kore"] },
+        { id: "native", label: "Gemini Live", transports: ["webrtc"], voices: [{ name: "Kore" }] },
         {
           id: "parts",
           label: "Language model",
@@ -498,19 +505,25 @@ describe("VoiceSession", () => {
           session.selectSpeechOutput(output);
           await session.loadVoiceChoices();
           if (input === "gateway") session.selectSpeechModel("input", "asr-b");
-          if (output === "gateway") session.selectSpeechModel("output", "tts-b");
+          if (output === "gateway") {
+            session.selectSpeechModel("output", "tts-b");
+            expect(session.speakingVoices).toEqual(["Luna"]);
+            session.selectSpeakingVoice("Luna");
+          }
           await session.connect();
           const channel = FakePeerConnection.dataChannels.at(-1)!;
           channel.onopen?.();
           const expected = {
             ...(input === "gateway" ? { recognitionModelID: "asr-b" } : {}),
-            ...(output === "gateway" ? { synthesisModelID: "tts-b" } : {}),
+            ...(output === "gateway" ? { synthesisModelID: "tts-b", voice: { name: "Luna" } } : {}),
           };
           expect(JSON.parse(channel.send.mock.calls[0]![0] as string)).toMatchObject(expected);
           if (input === "client")
             expect(JSON.parse(channel.send.mock.calls[0]![0] as string)).not.toHaveProperty("recognitionModelID");
-          if (output === "client")
+          if (output === "client") {
             expect(JSON.parse(channel.send.mock.calls[0]![0] as string)).not.toHaveProperty("synthesisModelID");
+            expect(JSON.parse(channel.send.mock.calls[0]![0] as string)).not.toHaveProperty("voice.name");
+          }
           channel.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: "session.ready" }) }));
           localStorage.setItem("gomode.voiceSpeechModel.https://voice.example.input", "asr-a");
           localStorage.setItem("gomode.voiceSpeechModel.https://voice.example.output", "tts-a");

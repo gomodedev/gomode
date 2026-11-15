@@ -43,7 +43,7 @@ func TestSmokeLiveASR(t *testing.T) {
 		"fr": "Je voudrais réserver une table pour deux ce soir.",
 	} {
 		var pcm []byte
-		for chunk, err := range (&geminiTTSAdapter{client: tts, voice: "Kore"}).synthesize(t.Context(), lang, text) {
+		for chunk, err := range (&geminiTTSAdapter{client: tts, voice: "Kore"}).synthesize(t.Context(), lang, "", text) {
 			if err != nil {
 				t.Fatal(err)
 			}

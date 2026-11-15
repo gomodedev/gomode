@@ -363,6 +363,38 @@ export default function VoiceSettings(props: {
               />
             </Match>
           </Switch>
+          <Field
+            label={messages().voiceLanguage}
+            for={languageId}
+            error={shownLanguageError()}
+            hint={
+              <p id={languageHintId} class={styles.hint}>
+                {messages().voiceLanguageHint}
+              </p>
+            }
+          >
+            {(errorId) => (
+              <input
+                id={languageId}
+                class={styles.textField}
+                type="text"
+                disabled={active()}
+                value={tag()}
+                // The example shows the BCP 47 format once the field is cleared.
+                placeholder={messages().voiceLanguageExample}
+                onInput={(event) => {
+                  setTag(event.currentTarget.value);
+                  setLanguageError(null);
+                }}
+                // Flush before a close or connect click can use the saved preference.
+                onBlur={saveLanguage}
+                aria-invalid={shownLanguageError() !== null}
+                aria-describedby={[errorId(), languageHintId].filter(Boolean).join(" ")}
+                spellcheck={false}
+                autocapitalize="none"
+              />
+            )}
+          </Field>
           <Show
             when={
               pickersShown() &&
@@ -460,45 +492,17 @@ export default function VoiceSettings(props: {
                     }}
                     aria-describedby={errorId()}
                   >
-                    <option value="">{messages().speakingVoiceDefault}</option>
+                    <option value="">
+                      {voiceSession.defaultSpeakingVoice === ""
+                        ? messages().speakingVoiceDefault
+                        : messages().speakingVoiceNamedDefault.replace("{voice}", voiceSession.defaultSpeakingVoice)}
+                    </option>
                     <For each={voiceSession.speakingVoices}>{(name) => <option value={name}>{name}</option>}</For>
                   </select>
                 </Picker>
               )}
             </Field>
           </Show>
-          <Field
-            label={messages().voiceLanguage}
-            for={languageId}
-            error={shownLanguageError()}
-            hint={
-              <p id={languageHintId} class={styles.hint}>
-                {messages().voiceLanguageHint}
-              </p>
-            }
-          >
-            {(errorId) => (
-              <input
-                id={languageId}
-                class={styles.textField}
-                type="text"
-                disabled={active()}
-                value={tag()}
-                // The example shows the BCP 47 format once the field is cleared.
-                placeholder={messages().voiceLanguageExample}
-                onInput={(event) => {
-                  setTag(event.currentTarget.value);
-                  setLanguageError(null);
-                }}
-                // Flush before a close or connect click can use the saved preference.
-                onBlur={saveLanguage}
-                aria-invalid={shownLanguageError() !== null}
-                aria-describedby={[errorId(), languageHintId].filter(Boolean).join(" ")}
-                spellcheck={false}
-                autocapitalize="none"
-              />
-            )}
-          </Field>
         </div>
       </section>
       <section class={styles.group} aria-labelledby={displayHeadingId}>

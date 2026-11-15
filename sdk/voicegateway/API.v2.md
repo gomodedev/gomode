@@ -209,6 +209,23 @@ VoiceTransport identifies how clients communicate with a voice choice.
 | `text` | VoiceTransportText carries text with client speech recognition and synthesis. |
 | `webrtc` | VoiceTransportWebRTC carries audio through WebRTC. |
 
+### Voice
+
+Voice is one selectable voice of a voice choice or synthesis model.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` | Name is the SessionSetup.voice.name that selects this voice. | yes |
+| `language` | `string` | Language is the ISO 639-1 code of the only language the voice speaks,
+such as "fr". Clients offer the voice only in sessions whose language
+tag has that base subtag, and session.setup rejects it in another.
+Empty means the voice speaks every language the model does. |  |
+| `default` | `boolean` | Default marks the voice a session speaks with when SessionSetup.voice.name
+is empty and the session language is one the voice speaks. A list has
+either one default without a language or at most one default per
+language; clients reject a list that mixes both. A list without a
+default leaves the choice to the provider. |  |
+
 ### SpeechConfig
 
 SpeechConfig selects recognition and synthesis independently. Empty fields use
@@ -231,7 +248,8 @@ settings change, so clients save it; a saved id the catalog no longer
 lists falls back to the default. | yes |
 | `label` | `string` |  | yes |
 | `transports` | `VoiceTransport[] \| null` |  | yes |
-| `voices` | `string[]` | Voices lists supported audio voice names. Omitted when the choice does not offer voice selection. |  |
+| `voices` | `Voice[]` | Voices lists the selectable voices. Omitted when the choice does not
+offer voice selection. |  |
 | `speechModes` | `SpeechConfig[]` | SpeechModes lists supported input/output ownership combinations.
 Missing metadata from older gateways means transport defaults only. |  |
 | `composable` | `boolean` | Composable allows independent recognition and synthesis model selections. |  |
@@ -247,15 +265,29 @@ or text for client speech with a gateway LLM.
 | `transport` | `VoiceTransport` | Transport is the family this default applies to. | yes |
 | `id` | `string` | ID names a choice that offers Transport. | yes |
 
-### SpeechModel
+### RecognitionModel
 
-SpeechModel identifies one configured speech stage without exposing endpoints or credentials.
+RecognitionModel identifies one configured recognition stage without
+exposing endpoints or credentials.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `id` | `string` | ID is the operator-configured id; it stays the same while the stage's
 settings change. | yes |
 | `label` | `string` |  | yes |
+
+### SynthesisModel
+
+SynthesisModel identifies one configured synthesis stage without exposing
+endpoints or credentials.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` | ID is the operator-configured id; it stays the same while the stage's
+settings change. | yes |
+| `label` | `string` |  | yes |
+| `voices` | `Voice[]` | Voices lists the selectable voices. Omitted when the stage offers no
+voice selection. |  |
 
 ### VoiceChoicesResp
 
@@ -266,8 +298,8 @@ offered family.
 |-------|------|-------------|----------|
 | `choices` | `VoiceChoice[] \| null` |  | yes |
 | `defaults` | `VoiceChoiceDefault[] \| null` | Defaults holds one entry per offered transport, ordered by transport name. | yes |
-| `recognitionModels` | `SpeechModel[]` | RecognitionModels lists gateway recognition stages in preference order. |  |
-| `synthesisModels` | `SpeechModel[]` | SynthesisModels lists gateway synthesis stages in preference order. |  |
+| `recognitionModels` | `RecognitionModel[]` | RecognitionModels lists gateway recognition stages in preference order. |  |
+| `synthesisModels` | `SynthesisModel[]` | SynthesisModels lists gateway synthesis stages in preference order. |  |
 | `stunServers` | `string[]` | STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
 its ICE servers. Omitted means none: the client gathers host candidates
 only and contacts no STUN server. |  |
@@ -420,7 +452,10 @@ VoiceConfig describes provider-neutral voice preferences.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `name` | `string` | Name is the requested provider-specific voice name. Empty uses the provider default. |  |
+| `name` | `string` | Name is the requested provider-specific voice name. Empty uses the
+provider default, or for a synthesis stage that advertises voices, its
+configured voice when that voice speaks the session language and its
+first voice of the session language otherwise. |  |
 | `language` | `string` | Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA".
 Empty defaults to "en-US". Invalid tags fail session setup. The gateway
 instructs the assistant to use this language and supplies recognition hints

@@ -54,7 +54,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 	root := t
 
 	var spokenPCM24 []byte
-	var tts *kittentts.Client
+	var tts *kittenTTSAdapter
 	var asr asrAdapter
 	var llm *genaiLLMAdapter
 
@@ -71,14 +71,14 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 					root.Fatal(err)
 				}
 			})
-			adapter, err := kittentts.New(http.DefaultClient, srv.URL(), "")
+			adapter, err := newKittenTTSAdapter(srv.URL(), "KittenML/kitten-tts-2", kittentts.DefaultVoice)
 			if err != nil {
 				t.Fatal(err)
 			}
 			tts = adapter
 
 			const smokeSentence = "I love bananas"
-			chunks, firstAudioLatency, synthesisLatency, err := collectTimedTTSChunks(t.Context(), adapter, smokeSentence)
+			chunks, firstAudioLatency, synthesisLatency, err := collectTimedTTSChunks(t.Context(), adapter.synthesizer, smokeSentence)
 			t.Logf("KittenTTS first-audio latency: %s", firstAudioLatency)
 			t.Logf("KittenTTS synthesis latency: %s", synthesisLatency)
 			if err != nil {
@@ -209,7 +209,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 		t.Cleanup(cancel)
 		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t,
 			func() vadSegmenter { return &energyVAD{} },
-			asr, llm, &speechTTSAdapter{synthesizer: tts},
+			asr, llm, tts,
 		))
 		turn := time.Now()
 		writePCM24MicAudio(ctx, t, s.micTrack, spokenPCM24)
@@ -266,7 +266,7 @@ func TestSmokeVoiceGatewayToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tts, err := kittentts.New(http.DefaultClient, worker.URL(), "")
+	tts, err := kittentts.New(http.DefaultClient, worker.URL())
 	if err != nil {
 		t.Fatal(errors.Join(err, worker.Close()))
 	}
@@ -616,7 +616,7 @@ func collectTimedTTSChunks(ctx context.Context, tts *kittentts.Client, text stri
 	start := time.Now()
 	var firstChunkLatency time.Duration
 	var chunks [][]byte
-	for pcm, err := range tts.Synthesize(ctx, text) {
+	for pcm, err := range tts.Synthesize(ctx, kittentts.Voice{}, text) {
 		if err != nil {
 			return nil, firstChunkLatency, time.Since(start).Round(time.Millisecond), err
 		}

@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -1348,7 +1349,10 @@ func TestBridge(t *testing.T) {
 			cfg := voicegateway.ResolvedConfig{Runtime: testRuntime,
 				LLM:         []voicegateway.LLMConfig{{ID: "llm", Label: "LLM", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "llm"}}},
 				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "recognition"}},
-				Synthesis:   []voicegateway.TTSConfig{{ID: "speech", Label: "Speech", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "speech", Voice: "speaker"}},
+				Synthesis: []voicegateway.TTSConfig{
+					{ID: "speech", Label: "Speech", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "speech", Voice: "speaker"},
+					{ID: "kitten", Engine: voicegateway.TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2", Voice: "Luna"},
+				},
 			}
 			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.ServerConfig{}, t.TempDir(), 5*time.Millisecond)
 			if err != nil {
@@ -1357,9 +1361,24 @@ func TestBridge(t *testing.T) {
 			t.Cleanup(func() { b.CloseAll(t.Context()) })
 			catalog := b.VoiceChoices()
 			if len(catalog.Choices) != 1 || catalog.Choices[0].ID != "llm" || !catalog.Choices[0].Composable || len(catalog.Choices[0].SpeechModes) != 4 ||
-				!slices.Equal(catalog.RecognitionModels, []voicev2.SpeechModel{{ID: "recognition", Label: "recognition"}}) ||
-				!slices.Equal(catalog.SynthesisModels, []voicev2.SpeechModel{{ID: "speech", Label: "Speech"}}) {
+				!reflect.DeepEqual(catalog.RecognitionModels, []voicev2.RecognitionModel{{ID: "recognition", Label: "recognition"}}) ||
+				len(catalog.SynthesisModels) != 2 ||
+				!reflect.DeepEqual(catalog.SynthesisModels[0], voicev2.SynthesisModel{ID: "speech", Label: "Speech"}) {
 				t.Fatalf("stage discovery = %+v", catalog)
+			}
+			// The configured voice is the default of its language; another
+			// language defaults to its first voice.
+			defaults := map[string]string{}
+			for _, v := range catalog.SynthesisModels[1].Voices {
+				if v.Default {
+					if prev, ok := defaults[v.Language]; ok {
+						t.Fatalf("%s has defaults %s and %s", v.Language, prev, v.Name)
+					}
+					defaults[v.Language] = v.Name
+				}
+			}
+			if defaults["en"] != "Luna" || defaults["fr"] != "French" || len(defaults) != 16 {
+				t.Fatalf("KittenTTS defaults = %v", defaults)
 			}
 			recognitionID, synthesisID := catalog.RecognitionModels[0].ID, catalog.SynthesisModels[0].ID
 			catalog.RecognitionModels[0].ID = "changed"
@@ -1383,10 +1402,13 @@ func TestBridge(t *testing.T) {
 			name    string
 			backend backendConnector
 			voice   string
+			// defaultVoice is the voice marked default: none for Gemini, whose
+			// default is undocumented.
+			defaultVoice string
 		}{
 			{name: "Gemini audio", backend: &realtimeBridgeBackend{provider: "gemini", apiKey: "test", model: "gemini-3.8-live"}, voice: "orus"},
-			{name: "OpenAI alias", backend: &realtimeBridgeBackend{provider: "openai", apiKey: "test", model: "gpt-realtime-2.1-mini"}, voice: "marin"},
-			{name: "OpenAI Responses", backend: &realtimeBridgeBackend{provider: "openairesponses", apiKey: "test", model: "gpt-realtime-2.1"}, voice: "cedar"},
+			{name: "OpenAI alias", backend: &realtimeBridgeBackend{provider: "openai", apiKey: "test", model: "gpt-realtime-2.1-mini"}, voice: "marin", defaultVoice: "alloy"},
+			{name: "OpenAI Responses", backend: &realtimeBridgeBackend{provider: "openairesponses", apiKey: "test", model: "gpt-realtime-2.1"}, voice: "cedar", defaultVoice: "alloy"},
 			{name: "unknown model", backend: &realtimeBridgeBackend{provider: "openai", apiKey: "test", model: "unknown"}},
 			{name: "local audio", backend: newTestLocalStackBackend(t, nil, fixedASR{text: "test"}, &smokeLLM{text: "test"}, placeholderTTS{})},
 			{name: "local text", backend: newTestLocalStackBackend(t, nil, nil, &smokeLLM{text: "test"}, nil)},
@@ -1406,11 +1428,25 @@ func TestBridge(t *testing.T) {
 					}
 					return
 				}
-				if !slices.IsSorted(ch.Voices) || !slices.Contains(ch.Voices, tc.voice) {
+				names := make([]string, len(ch.Voices))
+				defaultVoice := ""
+				for i, v := range ch.Voices {
+					if v.Language != "" {
+						t.Fatalf("realtime voice %+v carries a language", v)
+					}
+					if v.Default {
+						defaultVoice += v.Name
+					}
+					names[i] = v.Name
+				}
+				if defaultVoice != tc.defaultVoice {
+					t.Fatalf("default voice %q, want %q", defaultVoice, tc.defaultVoice)
+				}
+				if !slices.IsSorted(names) || !slices.Contains(names, tc.voice) {
 					t.Fatalf("invalid catalog: %+v", ch)
 				}
 				originalVoice := ch.Voices[0]
-				ch.Voices[0] = "changed"
+				ch.Voices[0].Name = "changed"
 				ch.Transports[0] = voicev2.VoiceTransportText
 				next := b.VoiceChoices().Choices[0]
 				if next.Voices[0] != originalVoice || next.Transports[0] != voicev2.VoiceTransportWebRTC {

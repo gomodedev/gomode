@@ -158,11 +158,12 @@ internal fun SettingsScreen(
                     bearerTokenFor,
                     bearerToken,
                     authEpoch,
-                )
-                VoiceLanguageSetting(
-                    edits,
-                    enabled = !voiceSessionActive && settings.loadState == SettingsLoadState.Ready,
-                )
+                ) {
+                    VoiceLanguageSetting(
+                        edits,
+                        enabled = !voiceSessionActive && settings.loadState == SettingsLoadState.Ready,
+                    )
+                }
                 Column(Modifier.fullSpan()) { VoiceErrorDiagnosticsSetting() }
             }
             HorizontalDivider()

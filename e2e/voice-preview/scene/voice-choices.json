@@ -51,7 +51,7 @@
     {
       "id": "native",
       "label": "Gemini Live",
-      "voices": ["Aoede", "Kore", "Orus"],
+      "voices": [{ "name": "Aoede" }, { "name": "Kore" }, { "name": "Orus" }],
       "transports": ["webrtc"],
       "speechModes": [
         {

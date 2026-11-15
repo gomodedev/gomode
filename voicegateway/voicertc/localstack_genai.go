@@ -166,28 +166,15 @@ func localStackModelsForConfigWithStarter(
 		case voicegateway.TTSEngineKittenTTS:
 			// genaipy owns Python setup and caches. Cancellation preserves its
 			// worker for later fragments; runtime eviction closes the process.
-			//
-			// TODO: Select the voice from the session language. KittenTTS 2
-			// takes no language: the voice carries it, and kitten-tts-2 lists
-			// language-named voices such as French, German and Spanish.
-			// Measured with genaipy v0.1.2, which applies English
-			// normalization: the English voice Luna reads a 4 s French request
-			// intelligibly, as Whisper transcribes it exactly, but in 17.9 s
-			// with a 6.8 s pause mid-sentence; the French voice reads it in
-			// 5.7 s, and its English rendering is also intelligible. Text with
-			// digits under English normalization is untested.
-			//
-			// Hypothesis: the pause comes from the worker's sentence chunking
-			// or English normalization of the French text.
 			srv, err := kittenttssrv.New(ctx, kittenttssrv.Config{Model: cfg.TTS.Model})
 			if err != nil {
 				return localStackModels{}, errors.Join(err, runtime.Close())
 			}
-			kitten, err := kittentts.New(http.DefaultClient, srv.URL(), cfg.TTS.Voice)
+			kitten, err := newKittenTTSAdapter(srv.URL(), cfg.TTS.Model, cfg.TTS.Voice)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, srv.Close(), runtime.Close())
 			}
-			tts, ttsRuntime = &speechTTSAdapter{synthesizer: kitten}, srv
+			tts, ttsRuntime = kitten, srv
 		}
 	}
 	return localStackModels{
@@ -438,16 +425,72 @@ func localStackLlamaCacheDir() (string, error) {
 	return filepath.Join(cacheBase, "gomode", "llama-server"), nil
 }
 
-// speechTTSAdapter adapts KittenTTS synthesis to the gateway's private boundary.
-// It accepts any language at setup until the voice follows the session
-// language; see the TODO where the kittentts engine is built.
-type speechTTSAdapter struct {
-	anyLanguage
+// kittenTTSAdapter speaks through KittenTTS, whose voice carries the language:
+// the model has no language argument. A session language is supported when a
+// voice speaks it. A session without a requested voice uses the configured
+// voice when it speaks the session language, and otherwise the first voice
+// that does. genaipy receives the language beside the voice and disables
+// English text normalization for other languages.
+//
+// Measured with genaipy v0.1.2, which normalized every language as English:
+// the English voice Luna read a 4 s French request intelligibly, as Whisper
+// transcribed it exactly, but in 17.9 s with a 6.8 s pause mid-sentence; the
+// French voice read it in 5.7 s.
+type kittenTTSAdapter struct {
 	synthesizer *kittentts.Client
+	model       string
+	// voices is in name order.
+	voices []kittentts.Voice
+	voice  string
 }
 
-func (a *speechTTSAdapter) synthesize(ctx context.Context, _, text string) iter.Seq2[[]byte, error] {
-	return a.synthesizer.Synthesize(ctx, text)
+// newKittenTTSAdapter speaks through the KittenTTS worker at remote, which
+// loaded model, with voice for sessions in its language.
+func newKittenTTSAdapter(remote, model, voice string) (*kittenTTSAdapter, error) {
+	voices, err := kittentts.Voices(model)
+	if err != nil {
+		return nil, err
+	}
+	c, err := kittentts.New(http.DefaultClient, remote)
+	if err != nil {
+		return nil, err
+	}
+	return &kittenTTSAdapter{synthesizer: c, model: model, voices: voices, voice: voice}, nil
+}
+
+func (a *kittenTTSAdapter) checkLanguage(lang string) error {
+	if !slices.ContainsFunc(a.voices, func(v kittentts.Voice) bool { return v.Language == lang }) {
+		return newUnsupportedLanguageError(a.model, lang)
+	}
+	return nil
+}
+
+func (a *kittenTTSAdapter) sessionVoice(lang, requested string) (string, error) {
+	if requested != "" {
+		i := slices.IndexFunc(a.voices, func(v kittentts.Voice) bool { return v.Name == requested })
+		if i < 0 {
+			return "", fmt.Errorf("%s has no voice %s", a.model, requested)
+		}
+		if a.voices[i].Language != lang {
+			return "", fmt.Errorf("%s voice %s does not speak %s", a.model, requested, languageName(lang))
+		}
+		return requested, nil
+	}
+	return kittenDefaultVoice(a.voices, a.voice, lang), nil
+}
+
+// kittenDefaultVoice returns the voice of a session in lang that names none:
+// configured when it speaks lang, otherwise the first of voices that does.
+// voices is in name order and covers lang.
+func kittenDefaultVoice(voices []kittentts.Voice, configured, lang string) string {
+	if slices.Contains(voices, kittentts.Voice{Name: configured, Language: lang}) {
+		return configured
+	}
+	return voices[slices.IndexFunc(voices, func(v kittentts.Voice) bool { return v.Language == lang })].Name
+}
+
+func (a *kittenTTSAdapter) synthesize(ctx context.Context, lang, voice, text string) iter.Seq2[[]byte, error] {
+	return a.synthesizer.Synthesize(ctx, kittentts.Voice{Name: voice, Language: lang}, text)
 }
 
 type genaiLLMAdapter struct {

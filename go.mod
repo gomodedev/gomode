@@ -12,7 +12,7 @@ require (
 	github.com/lmittmann/tint v1.2.1
 	github.com/maruel/apisdkgen v0.3.0
 	github.com/maruel/genai v0.11.2-0.20261114223038-75d3f77b7198
-	github.com/maruel/genaipy v0.1.3-0.20261114231459-f57cc454edaf
+	github.com/maruel/genaipy v0.1.3-0.20261116004219-cad62d34f47e
 	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24

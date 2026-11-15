@@ -246,8 +246,9 @@ type VoiceChoice struct {
 	ID         string           `json:"id"`
 	Label      string           `json:"label"`
 	Transports []VoiceTransport `json:"transports"`
-	// Voices lists supported audio voice names. Omitted when the choice does not offer voice selection.
-	Voices []string `json:"voices,omitempty"`
+	// Voices lists the selectable voices. Omitted when the choice does not
+	// offer voice selection.
+	Voices []Voice `json:"voices,omitempty"`
 	// SpeechModes lists supported input/output ownership combinations.
 	// Missing metadata from older gateways means transport defaults only.
 	SpeechModes []SpeechConfig `json:"speechModes,omitempty"`
@@ -255,12 +256,42 @@ type VoiceChoice struct {
 	Composable bool `json:"composable,omitempty"`
 }
 
-// SpeechModel identifies one configured speech stage without exposing endpoints or credentials.
-type SpeechModel struct {
+// Voice is one selectable voice of a voice choice or synthesis model.
+type Voice struct {
+	// Name is the SessionSetup.voice.name that selects this voice.
+	Name string `json:"name"`
+	// Language is the ISO 639-1 code of the only language the voice speaks,
+	// such as "fr". Clients offer the voice only in sessions whose language
+	// tag has that base subtag, and session.setup rejects it in another.
+	// Empty means the voice speaks every language the model does.
+	Language string `json:"language,omitempty"`
+	// Default marks the voice a session speaks with when SessionSetup.voice.name
+	// is empty and the session language is one the voice speaks. A list has
+	// either one default without a language or at most one default per
+	// language; clients reject a list that mixes both. A list without a
+	// default leaves the choice to the provider.
+	Default bool `json:"default,omitempty"`
+}
+
+// RecognitionModel identifies one configured recognition stage without
+// exposing endpoints or credentials.
+type RecognitionModel struct {
 	// ID is the operator-configured id; it stays the same while the stage's
 	// settings change.
 	ID    string `json:"id"`
 	Label string `json:"label"`
+}
+
+// SynthesisModel identifies one configured synthesis stage without exposing
+// endpoints or credentials.
+type SynthesisModel struct {
+	// ID is the operator-configured id; it stays the same while the stage's
+	// settings change.
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Voices lists the selectable voices. Omitted when the stage offers no
+	// voice selection.
+	Voices []Voice `json:"voices,omitempty"`
 }
 
 // VoiceChoiceDefault names the choice a transport family uses when a session
@@ -280,9 +311,9 @@ type VoiceChoicesResp struct {
 	// Defaults holds one entry per offered transport, ordered by transport name.
 	Defaults []VoiceChoiceDefault `json:"defaults"`
 	// RecognitionModels lists gateway recognition stages in preference order.
-	RecognitionModels []SpeechModel `json:"recognitionModels,omitempty"`
+	RecognitionModels []RecognitionModel `json:"recognitionModels,omitempty"`
 	// SynthesisModels lists gateway synthesis stages in preference order.
-	SynthesisModels []SpeechModel `json:"synthesisModels,omitempty"`
+	SynthesisModels []SynthesisModel `json:"synthesisModels,omitempty"`
 	// STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
 	// its ICE servers. Omitted means none: the client gathers host candidates
 	// only and contacts no STUN server.

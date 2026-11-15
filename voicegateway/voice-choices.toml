@@ -230,6 +230,9 @@ model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
 context_size = 131072
 effort = "low"
 
+# Each KittenTTS voice speaks one language. voice serves sessions in its
+# language; other sessions use the voice the client picks, by default the
+# first voice of the session language.
 [[tts]]
 id = "kitten"
 label = "Kitten TTS"

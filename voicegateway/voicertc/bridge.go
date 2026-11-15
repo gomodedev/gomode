@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/maruel/genai/providers"
+	"github.com/maruel/genaipy/providers/kittentts"
 
 	activitydata "github.com/maruel/gomode/voicegateway/voicertc/data"
 
@@ -134,10 +135,22 @@ func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig,
 	backends := make(map[string]backendConnector, count)
 	advertised := voicev2.VoiceChoicesResp{Choices: make([]voicev2.VoiceChoice, 0, count), STUNServers: slices.Clone(server.STUNServers)}
 	for _, a := range cfg.Recognition {
-		advertised.RecognitionModels = append(advertised.RecognitionModels, voicev2.SpeechModel{ID: a.ID, Label: cmp.Or(a.Label, a.Model, string(a.Engine))})
+		advertised.RecognitionModels = append(advertised.RecognitionModels, voicev2.RecognitionModel{ID: a.ID, Label: cmp.Or(a.Label, a.Model, string(a.Engine))})
 	}
 	for _, t := range cfg.Synthesis {
-		advertised.SynthesisModels = append(advertised.SynthesisModels, voicev2.SpeechModel{ID: t.ID, Label: cmp.Or(t.Label, t.Model, string(t.Engine))})
+		model := voicev2.SynthesisModel{ID: t.ID, Label: cmp.Or(t.Label, t.Model, string(t.Engine))}
+		// KittenTTS voices each speak one language; the other engines' voices
+		// are not advertised.
+		if t.Engine == voicegateway.TTSEngineKittenTTS {
+			voices, err := kittentts.Voices(t.Model)
+			if err != nil {
+				return nil, err
+			}
+			for _, v := range voices {
+				model.Voices = append(model.Voices, voicev2.Voice{Name: v.Name, Language: v.Language, Default: kittenDefaultVoice(voices, t.Voice, v.Language) == v.Name})
+			}
+		}
+		advertised.SynthesisModels = append(advertised.SynthesisModels, model)
 	}
 	var defaultID string
 	cleanup := func() error {
@@ -259,7 +272,7 @@ func backendChoice(ctx context.Context, backend backendConnector, id, label stri
 		if err != nil {
 			return voicev2.VoiceChoice{}, err
 		}
-		ch.Voices = append([]string(nil), voices...)
+		ch.Voices = voices
 	}
 	return ch, nil
 }
@@ -285,12 +298,15 @@ func (b *Bridge) VoiceChoices() voicev2.VoiceChoicesResp {
 	out.Choices = make([]voicev2.VoiceChoice, len(b.choices.Choices))
 	for i, ch := range b.choices.Choices {
 		ch.Transports = append([]voicev2.VoiceTransport(nil), ch.Transports...)
-		ch.Voices = append([]string(nil), ch.Voices...)
+		ch.Voices = slices.Clone(ch.Voices)
 		ch.SpeechModes = slices.Clone(ch.SpeechModes)
 		out.Choices[i] = ch
 	}
 	out.RecognitionModels = slices.Clone(b.choices.RecognitionModels)
 	out.SynthesisModels = slices.Clone(b.choices.SynthesisModels)
+	for i := range out.SynthesisModels {
+		out.SynthesisModels[i].Voices = slices.Clone(out.SynthesisModels[i].Voices)
+	}
 	out.Defaults = slices.Clone(b.choices.Defaults)
 	out.STUNServers = slices.Clone(b.choices.STUNServers)
 	return out

@@ -7,8 +7,9 @@
 // local model variants and Whistle + Needle. An on-device language model requires device
 // recognition and speech: those pickers show Local and disable gateway options while the saved
 // gateway selections stay, and the model's download, storage, and diagnostics follow the Language
-// model picker. Speech details follow the Speech picker: the speaking voice for gateway speech, the
-// speaking voice and speed for device speech. All-in-one has no device stage, so the gateway is
+// model picker. The voice language follows the Model or Speech picker, before the speech details it
+// filters: the speaking voice for gateway speech, the speaking voice and speed for device speech.
+// All-in-one has no device stage, so the gateway is
 // required. Without a service, a gateway language model cannot run, so a line under the Language
 // model picker says to add a service or choose a local model.
 //
@@ -61,6 +62,7 @@ import com.fghbuild.gomode.data.SavedVoiceSetup
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.data.SpeakingVoiceOwner
 import com.fghbuild.gomode.data.SpeechStage
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -173,12 +175,12 @@ private class SetupEditor(
     suspend fun saveExplicit(transform: (SavedVoiceSetup) -> SavedVoiceSetup) =
         repository.updateSavedVoiceSetup(choices?.gatewayURL) { transform(explicit(it)) }
 
-    /** Saves the speaking voice of [choice] with the explicit setup, which keeps running that choice. */
+    /** Saves the speaking voice of [owner] with the explicit setup, which keeps running the same choice. */
     suspend fun saveSpeakingVoice(
         choices: GatewayVoiceChoices,
-        choice: VoiceChoice,
+        owner: SpeakingVoiceOwner,
         voiceName: String,
-    ) = repository.updateSpeakingVoice(choices.gatewayURL, choice.id, voiceName, ::explicit)
+    ) = repository.updateSpeakingVoice(choices.gatewayURL, owner, voiceName, ::explicit)
 }
 
 @Composable
@@ -189,6 +191,7 @@ internal fun VoiceSetupSetting(
     bearerTokenFor: (String) -> String?,
     bearerToken: String?,
     authEpoch: Long,
+    languageSetting: @Composable () -> Unit,
 ) {
     val identity = listOf(settings.activeServiceId, settings.activeServiceURL, bearerToken, authEpoch)
     val noService = settings.activeServiceURL.isBlank()
@@ -289,12 +292,13 @@ internal fun VoiceSetupSetting(
     when (mode) {
         null -> {
             status()
+            languageSetting()
         }
 
         VoiceSetupMode.ALL_IN_ONE -> {
             when {
                 choices != null -> {
-                    AllInOneSetting(editor, choices)
+                    AllInOneSetting(editor, choices, languageSetting)
                 }
 
                 // All-in-one runs on a gateway; Separate stages stays available for local speech.
@@ -303,10 +307,12 @@ internal fun VoiceSetupSetting(
                         "Add a service to use All-in-one.",
                         modifier = Modifier.testTag("gomode-all-in-one-no-service"),
                     )
+                    languageSetting()
                 }
 
                 else -> {
                     status()
+                    languageSetting()
                 }
             }
         }
@@ -315,8 +321,14 @@ internal fun VoiceSetupSetting(
             val onDevice = shown.preference.languageModel != VoiceLanguageModel.GATEWAY
             if (choices == null && !onDevice && !noService) {
                 status()
+                languageSetting()
             } else {
-                SeparateStagesSetting(editor, downloadsEnabled = enabled, status = if (onDevice) status else null)
+                SeparateStagesSetting(
+                    editor,
+                    downloadsEnabled = enabled,
+                    status = if (onDevice) status else null,
+                    languageSetting = languageSetting,
+                )
             }
         }
     }
@@ -402,6 +414,7 @@ private fun DiscoveryStatus(
 private fun AllInOneSetting(
     editor: SetupEditor,
     choices: GatewayVoiceChoices,
+    languageSetting: @Composable () -> Unit,
 ) {
     val listed = choices.setupChoices(VoiceSetupKind.ALL_IN_ONE)
     val resolved = editor.resolution?.getOrNull()
@@ -425,9 +438,10 @@ private fun AllInOneSetting(
             }
         }
     }
-    resolved?.choice?.let { choice ->
-        SpeakingVoiceSetting(choices, choice, editor.settings, editor.enabled) {
-            editor.saveSpeakingVoice(choices, choice, it)
+    languageSetting()
+    resolved?.let { setup ->
+        SpeakingVoiceSetting(choices, setup, editor.settings, editor.enabled) { owner, name ->
+            editor.saveSpeakingVoice(choices, owner, name)
         }
     }
 }
@@ -437,6 +451,7 @@ private fun SeparateStagesSetting(
     editor: SetupEditor,
     downloadsEnabled: Boolean,
     status: (@Composable () -> Unit)?,
+    languageSetting: @Composable () -> Unit,
 ) {
     val shown = editor.shown
     StagePicker(editor, SpeechStage.RECOGNITION)
@@ -449,12 +464,13 @@ private fun SeparateStagesSetting(
         }
     }
     StagePicker(editor, SpeechStage.SYNTHESIS)
+    languageSetting()
     if (shown.preference.effectiveSpeech == SpeechStageLocation.GATEWAY) {
         val choices = editor.choices
-        val choice = editor.resolution?.getOrNull()?.choice
-        if (choices != null && choice != null) {
-            SpeakingVoiceSetting(choices, choice, editor.settings, editor.enabled) {
-                editor.saveSpeakingVoice(choices, choice, it)
+        val setup = editor.resolution?.getOrNull()
+        if (choices != null && setup != null) {
+            SpeakingVoiceSetting(choices, setup, editor.settings, editor.enabled) { owner, name ->
+                editor.saveSpeakingVoice(choices, owner, name)
             }
         }
     } else {
@@ -533,6 +549,12 @@ private fun LanguageModelPicker(editor: SetupEditor) {
     }
 }
 
+/** A gateway recognition or synthesis model offered as a stage chip. */
+private data class StageModel(
+    val id: String,
+    val label: String,
+)
+
 @Composable
 private fun StagePicker(
     editor: SetupEditor,
@@ -549,8 +571,8 @@ private fun StagePicker(
         }
     val catalogModels =
         when (stage) {
-            SpeechStage.RECOGNITION -> choices?.catalog?.recognitionModels
-            SpeechStage.SYNTHESIS -> choices?.catalog?.synthesisModels
+            SpeechStage.RECOGNITION -> choices?.catalog?.recognitionModels?.map { StageModel(it.id, it.label) }
+            SpeechStage.SYNTHESIS -> choices?.catalog?.synthesisModels?.map { StageModel(it.id, it.label) }
         }.orEmpty()
     // Only a composable language model takes gateway speech models; another runs its own gateway speech.
     val fixed = languageModel?.takeIf { it.composable != true }

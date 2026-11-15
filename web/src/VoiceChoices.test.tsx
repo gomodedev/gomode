@@ -13,12 +13,12 @@ import { configureVoiceGateway, voiceSession, VoiceSession } from "./VoiceSessio
 
 const metadata = {
   choices: [
-    { id: "gemini", label: "Gemini Live", transports: ["webrtc"], voices: ["Aoede", "Orus"] },
+    { id: "gemini", label: "Gemini Live", transports: ["webrtc"], voices: [{ name: "Aoede" }, { name: "Orus" }] },
     {
       id: "remote",
       label: "Remote LLM",
       transports: ["text", "webrtc"],
-      voices: ["Kore", "Leda"],
+      voices: [{ name: "Kore" }, { name: "Leda" }],
     },
     { id: "local", label: "Local LLM", transports: ["text"] },
   ],
@@ -93,7 +93,7 @@ const independent = {
       ],
     },
     { id: "bundle", label: "Fixed bundle", composable: false, transports: ["text", "webrtc"] },
-    { id: "native", label: "Native audio", composable: false, transports: ["webrtc"], voices: ["Aoede"] },
+    { id: "native", label: "Native audio", composable: false, transports: ["webrtc"], voices: [{ name: "Aoede" }] },
   ],
   defaults: [
     { transport: "text", id: "first" },
@@ -411,6 +411,7 @@ describe("voice choices", () => {
       name: string;
       catalog: { voices?: unknown };
       savedVoice?: string;
+      languageTag?: string;
       mode?: "text";
       voice?: string;
       error?: "catalog";
@@ -419,6 +420,7 @@ describe("voice choices", () => {
   for (const row of fixtures.selection) {
     it(`shared voice selection: ${row.name}`, async () => {
       localStorage.setItem("gomode.voiceMode", row.mode === "text" ? "browser" : "cloud");
+      voiceSession.selectLanguage(row.languageTag ?? "en-US");
       if (row.savedVoice !== undefined) {
         localStorage.setItem('gomode.speakingVoice.["https://voice.example","gemini"]', row.savedVoice);
       }
@@ -479,7 +481,14 @@ describe("voice choices", () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          choices: [{ id: "gemini", label: "Gemini Live", transports: ["webrtc"], voices: ["Aoede", "Orus"] }],
+          choices: [
+            {
+              id: "gemini",
+              label: "Gemini Live",
+              transports: ["webrtc"],
+              voices: [{ name: "Aoede" }, { name: "Orus" }],
+            },
+          ],
           defaults: [{ transport: "webrtc", id: "gemini" }],
         }),
       );
@@ -581,6 +590,54 @@ describe("voice choices", () => {
     expect(speaking()).toBeDisabled();
     expect(() => voiceSession.selectSpeakingVoice("Kore")).toThrow("End the session");
     restored.disconnect();
+  });
+
+  it("offers the voices of the session language and saves synthesis voices per model", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          ...independent,
+          synthesisModels: [
+            {
+              id: "tts-a",
+              label: "Kitten",
+              voices: [
+                { name: "French", language: "fr", default: true },
+                { name: "FrenchWaiter", language: "fr" },
+                { name: "Luna", language: "en", default: true },
+                { name: "Narrator" },
+              ],
+            },
+            { id: "tts-b", label: "Kokoro" },
+          ],
+        }),
+      );
+    voiceSession.selectLanguage("en-US");
+    const user = userEvent.setup();
+    render(() => <VoiceSettings />);
+    await readyModel();
+    await user.click(screen.getByRole("radio", { name: "Separate stages" }));
+    const options = () =>
+      [...screen.getByRole("combobox", { name: "Speaking voice" }).querySelectorAll("option")].map((o) => o.value);
+    // The default option names the voice the gateway uses in this language.
+    const defaultLabel = () =>
+      screen.getByRole("combobox", { name: "Speaking voice" }).querySelector("option")?.textContent;
+    // A voice without a language speaks every one.
+    expect(options()).toEqual(["", "Luna", "Narrator"]);
+    expect(defaultLabel()).toBe("Default (Luna)");
+    voiceSession.selectLanguage("fr-CA");
+    expect(options()).toEqual(["", "French", "FrenchWaiter", "Narrator"]);
+    expect(defaultLabel()).toBe("Default (French)");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Speaking voice" }), "FrenchWaiter");
+    expect(localStorage.getItem('gomode.synthesisVoice.["https://voice.example","tts-a"]')).toBe("FrenchWaiter");
+    expect(voiceSession.state.voiceName).toBe("FrenchWaiter");
+    // The saved French voice does not speak English; English sessions use the default.
+    voiceSession.selectLanguage("en-US");
+    expect(options()).toEqual(["", "Luna", "Narrator"]);
+    expect(voiceSession.state.voiceName).toBe("");
+    // A synthesis model without voices offers no picker.
+    await user.click(chip(chips("Speech"), "model:tts-b"));
+    expect(screen.queryByRole("combobox", { name: "Speaking voice" })).toBeNull();
   });
 
   it("recovers failed speaking-voice reads and shows the default for a withdrawn saved voice", async () => {

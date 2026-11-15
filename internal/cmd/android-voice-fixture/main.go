@@ -262,8 +262,8 @@ func (f *fixture) handleChoices(w http.ResponseWriter, _ *http.Request) {
 			},
 			Composable: true,
 		}},
-		RecognitionModels: []voicev2.SpeechModel{{ID: "fixture-asr", Label: "Fixture recognition"}},
-		SynthesisModels:   []voicev2.SpeechModel{{ID: "fixture-tts", Label: "Fixture speech"}},
+		RecognitionModels: []voicev2.RecognitionModel{{ID: "fixture-asr", Label: "Fixture recognition"}},
+		SynthesisModels:   []voicev2.SynthesisModel{{ID: "fixture-tts", Label: "Fixture speech"}},
 		Defaults: []voicev2.VoiceChoiceDefault{
 			{Transport: voicev2.VoiceTransportText, ID: "fixture"},
 			{Transport: voicev2.VoiceTransportWebRTC, ID: "fixture"},

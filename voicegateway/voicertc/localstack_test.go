@@ -856,10 +856,11 @@ func (s *correlationSink) waitKindCount(t *testing.T, kind voicev2.MessageKind, 
 // delayedCorrelationTTS holds the first PCM until usage has reached the client.
 type delayedCorrelationTTS struct {
 	anyLanguage
+	noVoiceSelection
 	release <-chan struct{}
 }
 
-func (d delayedCorrelationTTS) synthesize(ctx context.Context, _, _ string) iter.Seq2[[]byte, error] {
+func (d delayedCorrelationTTS) synthesize(ctx context.Context, _, _, _ string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		select {
 		case <-d.release:
@@ -1379,7 +1380,7 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 			t.Fatal("runtime = nil, want managed server closer")
 		}
 		var pcm []byte
-		for chunk, err := range models.tts.synthesize(t.Context(), "en", "Hello.") {
+		for chunk, err := range models.tts.synthesize(t.Context(), "en", "", "Hello.") {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1501,7 +1502,7 @@ func TestLocalStackGeminiSpeech(t *testing.T) { //nolint:paralleltest // Replace
 		t.Fatalf("Gemini recognition %q: %v", text, err)
 	}
 	var pcm []byte
-	for chunk, err := range runtime.tts.synthesize(t.Context(), "en", "Hello.") {
+	for chunk, err := range runtime.tts.synthesize(t.Context(), "en", "", "Hello.") {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2222,10 +2223,11 @@ func (l *blockingLLM) addContext(string) {}
 
 type longTTS struct {
 	anyLanguage
+	noVoiceSelection
 	ms int
 }
 
-func (t longTTS) synthesize(context.Context, string, string) iter.Seq2[[]byte, error] {
+func (t longTTS) synthesize(context.Context, string, string, string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		yield(make([]byte, backendOutputSampleRate*2*t.ms/1000), nil)
 	}
@@ -2233,10 +2235,11 @@ func (t longTTS) synthesize(context.Context, string, string) iter.Seq2[[]byte, e
 
 type failingTTS struct {
 	anyLanguage
+	noVoiceSelection
 	called chan struct{}
 }
 
-func (t failingTTS) synthesize(context.Context, string, string) iter.Seq2[[]byte, error] {
+func (t failingTTS) synthesize(context.Context, string, string, string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		close(t.called)
 		yield(nil, errors.New("synthesis failed"))
@@ -2245,11 +2248,12 @@ func (t failingTTS) synthesize(context.Context, string, string) iter.Seq2[[]byte
 
 type blockingTTS struct {
 	anyLanguage
+	noVoiceSelection
 	firstChunk         chan struct{}
 	releaseSecondChunk chan struct{}
 }
 
-func (t blockingTTS) synthesize(context.Context, string, string) iter.Seq2[[]byte, error] {
+func (t blockingTTS) synthesize(context.Context, string, string, string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		if !yield([]byte{1, 2}, nil) {
 			return
@@ -2262,11 +2266,12 @@ func (t blockingTTS) synthesize(context.Context, string, string) iter.Seq2[[]byt
 
 type recordingTTS struct {
 	anyLanguage
+	noVoiceSelection
 	mu    sync.Mutex
 	texts []string
 }
 
-func (t *recordingTTS) synthesize(_ context.Context, _, text string) iter.Seq2[[]byte, error] {
+func (t *recordingTTS) synthesize(_ context.Context, _, _, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		t.mu.Lock()
 		t.texts = append(t.texts, text)
@@ -2577,6 +2582,44 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				t.Fatalf("live ASR language %q, want fr", got)
 			}
 		})
+		t.Run("voice", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct{ tag, voice, want string }{
+				{"en-US", "", `{"text":"echo: Hello.","voice":"Luna","language":"en"}`},
+				{"fr-FR", "", `{"text":"echo: Hello.","voice":"French","language":"fr"}`},
+				{"fr-FR", "FrenchWaiter", `{"text":"echo: Hello.","voice":"FrenchWaiter","language":"fr"}`},
+			} {
+				t.Run(tc.tag+"/"+tc.voice, func(t *testing.T) {
+					t.Parallel()
+					requests := make(chan string, 1)
+					worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						body, _ := io.ReadAll(r.Body)
+						requests <- string(body)
+						w.Header().Set("Content-Type", "audio/pcm")
+					}))
+					t.Cleanup(worker.Close)
+					tts, err := newKittenTTSAdapter(worker.URL, "KittenML/kitten-tts-2", "Luna")
+					if err != nil {
+						t.Fatal(err)
+					}
+					s := (&localStackRuntime{llm: echoLLM{}, tts: tts}).newSession(t.Context(), "voice", &captureSink{}, false)
+					t.Cleanup(func() { _ = s.close() })
+					setup := voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: tc.voice, Language: tc.tag}}
+					if err := s.acceptClientMessage(t.Context(), mustJSON(t, setup)); err != nil {
+						t.Fatal(err)
+					}
+					s.startUserMessage(t.Context(), "Hello.")
+					select {
+					case got := <-requests:
+						if got != tc.want {
+							t.Fatalf("KittenTTS request %s, want %s", got, tc.want)
+						}
+					case <-time.After(3 * time.Second):
+						t.Fatal("no synthesis request")
+					}
+				})
+			}
+		})
 		t.Run("client synthesis skips the gateway voice", func(t *testing.T) {
 			t.Parallel()
 			runtime := &localStackRuntime{llm: echoLLM{}, tts: &llamaTTSAdapter{model: "LiquidAI/LFM3-Audio-2B-GGUF", lang: "en"}}
@@ -2633,12 +2676,39 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				})
 			}
 		})
+		t.Run("rejected at setup", func(t *testing.T) {
+			t.Parallel()
+			kitten, err := newKittenTTSAdapter("http://127.0.0.1:1", "KittenML/kitten-tts-2", "Luna")
+			if err != nil {
+				t.Fatal(err)
+			}
+			qwen := &llamaTTSAdapter{model: "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF:Q8_0"}
+			for _, tc := range []struct {
+				tts              ttsAdapter
+				tag, voice, want string
+			}{
+				{kitten, "fr-FR", "Luna", "KittenML/kitten-tts-2 voice Luna does not speak French"},
+				{kitten, "el-GR", "", "KittenML/kitten-tts-2 does not support Greek"},
+				{qwen, "el-GR", "", "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF does not support Greek"},
+			} {
+				t.Run(tc.want, func(t *testing.T) {
+					t.Parallel()
+					s := (&localStackRuntime{llm: echoLLM{}, tts: tc.tts}).newSession(t.Context(), "voice", &captureSink{}, false)
+					t.Cleanup(func() { _ = s.close() })
+					setup := voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: tc.voice, Language: tc.tag}}
+					if err := s.acceptClientMessage(t.Context(), mustJSON(t, setup)); err == nil || err.Error() != tc.want {
+						t.Fatalf("setup error %v, want %q", err, tc.want)
+					}
+				})
+			}
+		})
 	})
 }
 
 // languageStages records the language its recognition and synthesis calls receive.
 type languageStages struct {
 	anyLanguage
+	noVoiceSelection
 	got chan string
 }
 
@@ -2647,7 +2717,7 @@ func (l languageStages) transcribe(_ context.Context, lang string, _ []byte) (st
 	return "Hello.", nil
 }
 
-func (l languageStages) synthesize(_ context.Context, lang, _ string) iter.Seq2[[]byte, error] {
+func (l languageStages) synthesize(_ context.Context, lang, _, _ string) iter.Seq2[[]byte, error] {
 	l.got <- "tts " + lang
 	return func(func([]byte, error) bool) {}
 }

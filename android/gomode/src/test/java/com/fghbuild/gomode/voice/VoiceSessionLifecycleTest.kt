@@ -8,6 +8,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SpeakingVoiceOwner
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -539,7 +540,7 @@ class VoiceSessionLifecycleTest {
                     assertTrue(discoveryStarted.await(5, TimeUnit.SECONDS))
                     when (change) {
                         "speaking voice" -> {
-                            repository.updateSpeakingVoice(base, "live", "Kore") { it }
+                            repository.updateSpeakingVoice(base, SpeakingVoiceOwner.Choice("live"), "Kore") { it }
                             repository.settings.first { it.speakingVoices[base]?.get("live") == "Kore" }
                         }
 

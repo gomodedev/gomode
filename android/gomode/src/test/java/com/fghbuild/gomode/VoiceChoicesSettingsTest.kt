@@ -67,7 +67,7 @@ class VoiceChoicesSettingsTest {
     private val catalog =
         """
         {"choices":[
-        {"id":"live","label":"Gemini Live","transports":["webrtc"],"voices":["Kore","Orus"]},
+        {"id":"live","label":"Gemini Live","transports":["webrtc"],"voices":[{"name":"Kore"},{"name":"Orus"}]},
         {"id":"mini","label":"Realtime Mini","transports":["webrtc"]},
         {"id":"llm","label":"Gateway LLM","transports":["text","webrtc"],"composable":true,"speechModes":[
         {"input":"client","output":"client"},{"input":"client","output":"gateway"},
@@ -335,6 +335,35 @@ class VoiceChoicesSettingsTest {
         }
 
     @Test
+    fun aSynthesisModelWithoutVoicesOffersNoPicker() =
+        runTest {
+            MockWebServer().use { server ->
+                server.start()
+                val base = server.url("/").toString().trimEnd('/')
+                val repository = SettingsRepository(MemoryPreferences())
+                repository.addService("Choices fixture", base)
+                repository.settings.first { it.activeServiceURL == base }
+                repository.updateSavedVoiceSetup(base) { it.copy(preference = gatewayStages) }
+                repository.updateVoiceLanguageTag("fr-CA")
+                val voiced =
+                    catalog.replace(
+                        """{"id":"kokoro","label":"Kokoro"}""",
+                        """{"id":"kokoro","label":"Kokoro","voices":[{"name":"French","language":"fr"}]}""",
+                    )
+                server.enqueue(MockResponse().setBody(manifest))
+                server.enqueue(MockResponse().setBody(voiced))
+                show(repository)
+                waitForTag("gomode-speaking-voice")
+
+                // A synthesis model without voices offers no picker.
+                pick("gomode-speech", "gomode-speech-model-piper")
+                composeRule.waitUntil {
+                    composeRule.onAllNodes(hasTestTag("gomode-speaking-voice")).fetchSemanticsNodes().isEmpty()
+                }
+            }
+        }
+
+    @Test
     fun aWithdrawnFollowedChoiceShowsTheDefaultTheSessionUses() =
         runTest {
             MockWebServer().use { server ->
@@ -397,10 +426,11 @@ class VoiceChoicesSettingsTest {
                 waitForTag("gomode-language-model")
 
                 // Withdrawn selections show the defaults sessions use, without an error.
+                // Settings publish on another dispatcher: wait for each save before the next pick.
                 pick("gomode-speech", "gomode-speech-model-piper")
-                chosen("gomode-speech").assertTextContains("Piper")
+                awaitSelected("gomode-speech-model-piper")
                 pick("gomode-language-model", "gomode-voice-choice-other")
-                chosen("gomode-language-model").assertTextContains("Other LLM")
+                awaitSelected("gomode-voice-choice-other")
                 repository.updateSpeechModel(base, SpeechStage.SYNTHESIS, "removed") { it }
                 repository.updateVoiceChoice(base, "gone") { it }
                 composeRule.waitUntil {
@@ -461,6 +491,16 @@ class VoiceChoicesSettingsTest {
     ) {
         stage(field)
         composeRule.onNodeWithTag(item).performScrollTo().performClick()
+    }
+
+    private fun awaitSelected(tag: String) {
+        composeRule.waitUntil {
+            composeRule
+                .onAllNodes(
+                    hasTestTag(tag) and isSelected(),
+                ).fetchSemanticsNodes()
+                .isNotEmpty()
+        }
     }
 
     /** The checked chip of the chip group tagged [field]. */

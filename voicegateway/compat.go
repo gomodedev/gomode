@@ -27,11 +27,11 @@ func publishedChoices(choices voicev2.VoiceChoicesResp) voicev1.VoiceChoicesResp
 		for i, tr := range ch.Transports {
 			transports[i] = voicev1.VoiceTransport(tr)
 		}
-		old := voicev1.VoiceChoice{ID: ch.ID, Label: ch.Label, Transports: transports, Voices: ch.Voices}
+		old := voicev1.VoiceChoice{ID: ch.ID, Label: ch.Label, Transports: transports, Voices: voiceNames(ch.Voices)}
 		// The tagged clients require an advertised default in every nonempty
 		// catalog. This is an explicit gateway choice, not a provider default.
 		if len(ch.Voices) != 0 {
-			old.DefaultVoice = ch.Voices[0]
+			old.DefaultVoice = ch.Voices[0].Name
 		}
 		out.Choices = append(out.Choices, old)
 	}
@@ -41,12 +41,24 @@ func publishedChoices(choices voicev2.VoiceChoicesResp) voicev1.VoiceChoicesResp
 	return out
 }
 
+// voiceNames returns the v1 voice list, which carries names only.
+func voiceNames(voices []voicev2.Voice) []string {
+	if len(voices) == 0 {
+		return nil
+	}
+	names := make([]string, len(voices))
+	for i, v := range voices {
+		names[i] = v.Name
+	}
+	return names
+}
+
 func (h *handler) bindChoiceProtocol(r *http.Request, choiceID string) *http.Request {
 	p := voiceapi.SessionProtocolFromContext(r.Context())
 	if p.Version == voiceapi.ProtocolV1 {
 		for _, ch := range h.voiceChoices().Choices {
 			if ch.ID == choiceID && len(ch.Voices) != 0 {
-				p.DefaultVoice = ch.Voices[0]
+				p.DefaultVoice = ch.Voices[0].Name
 				break
 			}
 		}

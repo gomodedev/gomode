@@ -58,7 +58,9 @@ import {
   type VoiceTransport,
   type SpeechConfig,
   type SpeechLocation,
-  type SpeechModel,
+  type RecognitionModel,
+  type SynthesisModel,
+  type Voice,
 } from "../../sdk/voicegateway/ts/v2/types.gen";
 
 import { mcpClient, type McpToolDescriptor } from "./McpClient";
@@ -410,7 +412,7 @@ export interface VoiceState extends AudioRouteState {
   setupMode: VoiceSetupMode;
   usage: VoiceUsage | null;
   choices: ValidatedVoiceChoice[];
-  speechModels: Record<"input" | "output", SpeechModel[]>;
+  speechModels: { input: RecognitionModel[]; output: SynthesisModel[] };
   speechModelIDs: Record<"input" | "output", string | null>;
   /** Effective gateway choice per family, null when the gateway offers none. */
   choiceIDs: Record<VoiceTransport, string | null>;
@@ -645,16 +647,16 @@ const SESSION_MODEL_UNAVAILABLE = "Session speech model is unavailable. Start a 
 const SESSION_VOICE_UNAVAILABLE = "Session speaking voice is unavailable. Start a new voice session.";
 
 // A saved model the gateway no longer lists falls back to its first model.
-function resolveSpeechModel(models: SpeechModel[], selected: string | null, stage: SpeechStage): string {
-  const model = models.find((candidate) => candidate.id === selected) ?? models[0];
-  if (!model)
+function resolveSpeechModel(modelIDs: string[], selected: string | null, stage: SpeechStage): string {
+  const id = modelIDs.find((candidate) => candidate === selected) ?? modelIDs[0];
+  if (id === undefined)
     throw new Error(
       `The gateway has no ${stage === "input" ? "recognition" : "speech"} models. Choose browser ${stage === "input" ? "recognition" : "speech output"} or a native audio model.`,
     );
-  return model.id;
+  return id;
 }
 
-function validSpeechModels(models: SpeechModel[] | undefined): boolean {
+function validSpeechModels(models: RecognitionModel[] | undefined): boolean {
   return (
     models === undefined ||
     (Array.isArray(models) &&
@@ -671,24 +673,94 @@ function validSpeechModels(models: SpeechModel[] | undefined): boolean {
   );
 }
 
-function validVoiceCatalog(choice: VoiceChoice): boolean {
-  if (choice.voices == null) return true;
+// The ISO 639 base language of a BCP 47 tag, or null for an invalid tag. Intl canonicalizes
+// deprecated codes such as "in", so a catalog code and a session tag compare alike.
+function baseLanguage(tag: string): string | null {
+  try {
+    return new Intl.Locale(tag).language;
+  } catch {
+    return null;
+  }
+}
+
+// Defaults are either one language-free voice or at most one voice per language.
+function validVoices(voices: Voice[] | null | undefined): boolean {
+  if (voices == null) return true;
+  if (!Array.isArray(voices)) return false;
+  const defaults = new Set<string>();
+  for (const voice of voices) {
+    if (
+      voice === null ||
+      typeof voice !== "object" ||
+      typeof voice.name !== "string" ||
+      voice.name.trim() === "" ||
+      (voice.language !== undefined && (typeof voice.language !== "string" || baseLanguage(voice.language) === null)) ||
+      (voice.default !== undefined && typeof voice.default !== "boolean")
+    )
+      return false;
+    if (voice.default) {
+      const language = voice.language ? baseLanguage(voice.language) : "";
+      if (language === null || defaults.has(language)) return false;
+      defaults.add(language);
+    }
+  }
   return (
-    Array.isArray(choice.voices) &&
-    choice.voices.every((name) => typeof name === "string" && name.trim() !== "") &&
-    new Set(choice.voices).size === choice.voices.length
+    (!defaults.has("") || defaults.size === 1) && new Set(voices.map((voice) => voice.name)).size === voices.length
   );
 }
 
-function speakingVoiceStorageKey(origin: string, choiceID: string): string {
-  return `gomode.speakingVoice.${JSON.stringify([origin, choiceID])}`;
+// A voice with a language speaks only that one, so a session offers it only in that language.
+function sessionVoices(voices: Voice[] | null | undefined, languageTag: string): Voice[] {
+  const language = baseLanguage(languageTag);
+  return (voices ?? []).filter((voice) => !voice.language || baseLanguage(voice.language) === language);
 }
 
-// A saved voice the choice no longer offers falls back to the provider default.
-function savedSpeakingVoice(origin: string, choice: VoiceChoice, output: SpeechLocation): string {
-  if (output !== "gateway") return "";
-  const name = localStorage.getItem(speakingVoiceStorageKey(origin, choice.id)) ?? "";
-  return choice.voices?.includes(name) ? name : "";
+/** The speaking voices gateway speech offers and the storage key of the saved one. */
+interface SpeakingVoices {
+  key: string;
+  names: string[];
+  /** The voice the gateway speaks with when the session names none, or "" when the provider picks. */
+  defaultName: string;
+}
+
+function speakingVoices(key: string, voices: Voice[]): SpeakingVoices {
+  return {
+    key,
+    names: voices.map((voice) => voice.name),
+    defaultName: voices.find((voice) => voice.default)?.name ?? "",
+  };
+}
+
+// A composable choice speaks through its synthesis model and saves the voice per model; other
+// choices offer their own voices, saved per choice.
+function gatewaySpeakingVoices(
+  origin: string,
+  choice: VoiceChoice,
+  synthesisModels: SynthesisModel[],
+  synthesisModelID: string | null,
+  output: SpeechLocation,
+  languageTag: string,
+): SpeakingVoices | null {
+  if (output !== "gateway") return null;
+  if (!choice.composable) {
+    return speakingVoices(
+      `gomode.speakingVoice.${JSON.stringify([origin, choice.id])}`,
+      sessionVoices(choice.voices, languageTag),
+    );
+  }
+  const model = synthesisModels.find((model) => model.id === synthesisModelID);
+  if (!model) return null;
+  return speakingVoices(
+    `gomode.synthesisVoice.${JSON.stringify([origin, model.id])}`,
+    sessionVoices(model.voices, languageTag),
+  );
+}
+
+// A saved voice the gateway no longer offers falls back to the default.
+function savedSpeakingVoice(voices: SpeakingVoices | null): string {
+  if (voices === null) return "";
+  const name = localStorage.getItem(voices.key) ?? "";
+  return voices.names.includes(name) ? name : "";
 }
 
 type ValidatedVoiceChoices = Omit<VoiceChoicesResp, "choices" | "defaults"> & {
@@ -702,6 +774,8 @@ function validateVoiceChoices(value: VoiceChoicesResp): ValidatedVoiceChoices {
     !Array.isArray(value.defaults) ||
     !validSpeechModels(value.recognitionModels) ||
     !validSpeechModels(value.synthesisModels) ||
+    // Recognition models carry no voices.
+    (value.synthesisModels ?? []).some((model) => !validVoices(model.voices)) ||
     value.choices.some(
       (choice) =>
         choice === null ||
@@ -714,7 +788,7 @@ function validateVoiceChoices(value: VoiceChoicesResp): ValidatedVoiceChoices {
         !Array.isArray(choice.transports) ||
         choice.transports.length === 0 ||
         choice.transports.some((transport) => !VOICE_TRANSPORTS.includes(transport)) ||
-        !validVoiceCatalog(choice) ||
+        !validVoices(choice.voices) ||
         (choice.speechModes !== undefined &&
           (!Array.isArray(choice.speechModes) ||
             choice.speechModes.length === 0 ||
@@ -1077,7 +1151,11 @@ export class VoiceSession {
       for (const stage of ["input", "output"] as const) {
         if (speech[stage] !== "gateway") continue;
         try {
-          models[stage] = resolveSpeechModel(this.state.speechModels[stage], models[stage], stage);
+          models[stage] = resolveSpeechModel(
+            this.state.speechModels[stage].map((model) => model.id),
+            models[stage],
+            stage,
+          );
         } catch (error) {
           if (failure === null) {
             failure = error instanceof Error ? error.message : String(error);
@@ -1093,7 +1171,18 @@ export class VoiceSession {
     let voiceError: string | null = null;
     let voiceStatus: VoiceState["voiceStatus"] = "ready";
     try {
-      name = choice ? savedSpeakingVoice(origin, choice, speech.output) : null;
+      name = choice
+        ? savedSpeakingVoice(
+            gatewaySpeakingVoices(
+              origin,
+              choice,
+              this.state.speechModels.output,
+              models.output,
+              speech.output,
+              this.state.languageTag,
+            ),
+          )
+        : null;
     } catch (error) {
       // Storage reads can fail; the speaking voice picker reports it and offers a retry.
       if (persist) throw error;
@@ -1169,8 +1258,26 @@ export class VoiceSession {
   }
 
   get speakingVoices(): string[] {
-    if (this.state.speechOutput !== "gateway") return [];
-    return this.state.choices.find((choice) => choice.id === this.state.choiceIDs.webrtc)?.voices ?? [];
+    return this._speakingVoices()?.names ?? [];
+  }
+
+  /** The voice the gateway speaks with when none is chosen, or "" when the provider picks it. */
+  get defaultSpeakingVoice(): string {
+    return this._speakingVoices()?.defaultName ?? "";
+  }
+
+  // The speaking voices of the selected setup, or null without gateway speech.
+  private _speakingVoices(): SpeakingVoices | null {
+    const choice = this.state.choices.find((choice) => choice.id === this.state.choiceIDs.webrtc);
+    if (!choice) return null;
+    return gatewaySpeakingVoices(
+      gatewaySnapshot().url.origin,
+      choice,
+      this.state.speechModels.output,
+      this.state.speechModelIDs.output,
+      this.state.speechOutput,
+      this.state.languageTag,
+    );
   }
 
   /** Save a supported speaking voice for this gateway and backend choice. */
@@ -1184,9 +1291,9 @@ export class VoiceSession {
       (name !== "" && !this.speakingVoices.includes(name))
     )
       throw new Error("Choose an available speaking voice");
-    const choiceID = this.state.choiceIDs.webrtc;
-    if (choiceID === null) throw new Error("Choose a voice model first");
-    localStorage.setItem(speakingVoiceStorageKey(gatewaySnapshot().url.origin, choiceID), name);
+    const voices = this._speakingVoices();
+    if (voices === null) throw new Error("Choose a voice model first");
+    localStorage.setItem(voices.key, name);
     this._update((s) => {
       s.voiceName = name;
       s.voiceError = null;
@@ -1394,7 +1501,11 @@ export class VoiceSession {
         const models = stage === "input" ? (metadata.recognitionModels ?? []) : (metadata.synthesisModels ?? []);
         const id = this._sessionSpeechModelIDs[stage];
         if (pinned && !models.some((model) => model.id === id)) throw new Error(SESSION_MODEL_UNAVAILABLE);
-        this._sessionSpeechModelIDs[stage] = resolveSpeechModel(models, id, stage);
+        this._sessionSpeechModelIDs[stage] = resolveSpeechModel(
+          models.map((model) => model.id),
+          id,
+          stage,
+        );
       }
     } catch (error) {
       if (snapshot.version === untrack(gatewayVersion))
@@ -1405,8 +1516,16 @@ export class VoiceSession {
       throw error;
     }
     const choiceID = choice.id;
-    const offered = choice.voices ?? [];
     const output = this.state.speechOutput;
+    const voices = gatewaySpeakingVoices(
+      snapshot.url.origin,
+      choice,
+      metadata.synthesisModels ?? [],
+      this._sessionSpeechModelIDs.output,
+      output,
+      this.state.languageTag,
+    );
+    const offered = voices?.names ?? [];
     if (pinned && output === "gateway" && this._sessionVoiceName && !offered.includes(this._sessionVoiceName))
       throw new Error(SESSION_VOICE_UNAVAILABLE);
     // A saved voice the choice no longer offers falls back to the provider default.
@@ -1418,7 +1537,7 @@ export class VoiceSession {
           : this._sessionVoiceName !== null &&
               (this._sessionVoiceName === "" || offered.includes(this._sessionVoiceName))
             ? this._sessionVoiceName
-            : savedSpeakingVoice(snapshot.url.origin, choice, output);
+            : savedSpeakingVoice(voices);
     } catch (error) {
       if (snapshot.version === untrack(gatewayVersion))
         this._update((s) => {
@@ -1488,6 +1607,9 @@ export class VoiceSession {
     const normalized = normalizeVoiceLanguage(tag);
     localStorage.setItem("gomode.voiceLanguage", normalized);
     this.setState((s) => ({ ...s, languageTag: normalized }));
+    // Gateway voices that each speak one language follow it.
+    if (this._choicesVersion === untrack(gatewayVersion) && this.state.choicesStatus === "ready")
+      this._applySetup(this._setupPreference(), false);
   }
 
   /** Control reasoning display immediately and request provider reasoning on the next connection. */
@@ -1714,8 +1836,18 @@ export class VoiceSession {
         : savedVoiceChoice(this._sessionGateway.url.origin, this.transport);
       if (catalogReady) {
         const choice = this.state.choices.find((choice) => choice.id === this._sessionChoiceID);
-        if (choice && (this.state.speechOutput !== "gateway" || choice.voices?.length))
-          this._sessionVoiceName = savedSpeakingVoice(this._sessionGateway.url.origin, choice, this.state.speechOutput);
+        const voices =
+          choice &&
+          gatewaySpeakingVoices(
+            this._sessionGateway.url.origin,
+            choice,
+            this.state.speechModels.output,
+            this.state.speechModelIDs.output,
+            this.state.speechOutput,
+            this.state.languageTag,
+          );
+        if (choice && (this.state.speechOutput !== "gateway" || voices?.names.length))
+          this._sessionVoiceName = savedSpeakingVoice(voices ?? null);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

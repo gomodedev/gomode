@@ -69,7 +69,7 @@ func TestSmokeGeminiSpeech(t *testing.T) {
 	synth := &geminiTTSAdapter{client: tts, voice: "Kore"}
 	start = time.Now()
 	var pcm []byte
-	for chunk, err := range synth.synthesize(t.Context(), "en", "I love bananas.") {
+	for chunk, err := range synth.synthesize(t.Context(), "en", "", "I love bananas.") {
 		if err != nil {
 			t.Fatal(err)
 		}

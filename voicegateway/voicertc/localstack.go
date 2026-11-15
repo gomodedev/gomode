@@ -94,7 +94,12 @@ func modelRepository(model string) string {
 }
 
 func (e *unsupportedLanguageError) Error() string {
-	return e.model + " does not support " + display.English.Languages().Name(language.Make(e.language))
+	return e.model + " does not support " + languageName(e.language)
+}
+
+// languageName is the English name of an ISO 639 language, such as "French".
+func languageName(lang string) string {
+	return display.English.Languages().Name(language.Make(lang))
 }
 
 // llmToolCall is a normalized tool invocation requested by the local LLM.
@@ -157,8 +162,19 @@ type llmAdapter interface {
 // spoken in lang, the session's ISO 639 base language.
 type ttsAdapter interface {
 	languageChecker
-	synthesize(ctx context.Context, lang, text string) iter.Seq2[[]byte, error]
+	// sessionVoice returns the voice of a session in lang that requested a
+	// voice name, empty for none. session.setup calls it after checkLanguage
+	// accepted lang, and a rejection fails the setup.
+	sessionVoice(lang, requested string) (string, error)
+	// synthesize speaks text with a voice that sessionVoice returned.
+	synthesize(ctx context.Context, lang, voice, text string) iter.Seq2[[]byte, error]
 }
+
+// noVoiceSelection is the voice of a synthesis stage that advertises no
+// voices: it speaks with its configured voice and ignores a requested one.
+type noVoiceSelection struct{}
+
+func (noVoiceSelection) sessionVoice(string, string) (string, error) { return "", nil }
 
 // localStackBackend acquires a session-pinned lazy runtime for every connection.
 type localStackBackend struct {
@@ -326,6 +342,8 @@ type localStackSession struct {
 	// language is the session's ISO 639 base language, set once by session.setup
 	// before conv. Every gateway speech stage receives it.
 	language string
+	// voice is the synthesis voice, set with language.
+	voice string
 
 	// Microphone framing and its current capture belong to the RTP owner.
 	micMu       sync.Mutex
@@ -354,6 +372,13 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 		if err := s.checkLanguage(lang); err != nil {
 			return err
 		}
+		var voice string
+		if !s.clientOutput && s.tts != nil {
+			var err error
+			if voice, err = s.tts.sessionVoice(lang, msg.Voice.Name); err != nil {
+				return err
+			}
+		}
 		s.events.Lock()
 		s.mu.Lock()
 		if s.conv != nil || s.closed {
@@ -362,6 +387,7 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 			return errors.New("session is already configured or closed")
 		}
 		s.language = lang
+		s.voice = voice
 		s.conv = s.llm.newConversation(msg.Context.SystemInstruction, msg.Tools, msg.IncludeReasoning)
 		if msg.Context.Text != "" {
 			s.conv.addContext(msg.Context.Text)
@@ -776,7 +802,7 @@ func (s *localStackSession) speakFragments(ctx, turnCtx context.Context, fragmen
 	}()
 
 	s.mu.Lock()
-	lang := s.language
+	lang, voice := s.language, s.voice
 	s.mu.Unlock()
 	fragmentIndex := 0
 	for text := range fragments {
@@ -786,7 +812,7 @@ func (s *localStackSession) speakFragments(ctx, turnCtx context.Context, fragmen
 		fragmentIndex++
 		ttsStart := time.Now()
 		textEmitted := false
-		for pcm, err := range s.tts.synthesize(ctx, lang, text) {
+		for pcm, err := range s.tts.synthesize(ctx, lang, voice, text) {
 			if err != nil {
 				if ctx.Err() == nil {
 					s.warnTurn(ctx, "tts", err)
@@ -1092,9 +1118,12 @@ func (c *placeholderConversation) respond(context.Context) (llmStep, error) {
 
 // placeholderTTS emits a quiet tone whose length scales with the text. Real TTS
 // is wired in a later phase.
-type placeholderTTS struct{ anyLanguage }
+type placeholderTTS struct {
+	anyLanguage
+	noVoiceSelection
+}
 
-func (placeholderTTS) synthesize(_ context.Context, _, text string) iter.Seq2[[]byte, error] {
+func (placeholderTTS) synthesize(_ context.Context, _, _, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		if text == "" {
 			return

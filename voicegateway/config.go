@@ -27,6 +27,7 @@ import (
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/openairesponses"
 	"github.com/maruel/genai/providers/openrouter"
+	"github.com/maruel/genaipy/providers/kittentts"
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/pelletier/go-toml/v2"
 
@@ -945,6 +946,8 @@ const (
 	TTSEngineGenAI TTSEngine = "genai"
 	// TTSEngineKittenTTS runs the managed KittenTTS worker.
 	// Remote must be empty; the shared genaipy runtime owns Python and caches.
+	// Model must be one whose voices genaipy lists; each voice speaks one
+	// language, and Voice is the voice of sessions in its language.
 	TTSEngineKittenTTS TTSEngine = "kittentts"
 )
 
@@ -1008,6 +1011,13 @@ func validateTTSEngine(c TTSConfig) error {
 		}
 		if c.Remote != "" {
 			return errors.New("voice.tts.remote is only used with the genai engine")
+		}
+		voices, err := kittentts.Voices(c.Model)
+		if err != nil {
+			return fmt.Errorf("voice.tts.model: %w", err)
+		}
+		if !slices.ContainsFunc(voices, func(v kittentts.Voice) bool { return v.Name == c.Voice }) {
+			return fmt.Errorf("voice.tts.voice %q is not a %s voice", c.Voice, c.Model)
 		}
 		return nil
 	default:

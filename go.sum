@@ -308,8 +308,8 @@ github.com/maruel/apisdkgen v0.3.0 h1:zDvG3d95bg526mzMSdt0RoS/28640/JHcx44b5RaaS
 github.com/maruel/apisdkgen v0.3.0/go.mod h1:jz+pYct5Kla2Kp+DU+EEh0moySaB8kaleT0pQmMx9/8=
 github.com/maruel/genai v0.11.2-0.20261114223038-75d3f77b7198 h1:yi8f58bvJHFjUY/u7wa0vzV5XtuINxjkp8C6UbStIaM=
 github.com/maruel/genai v0.11.2-0.20261114223038-75d3f77b7198/go.mod h1:s1k7dxL59wB8/LVPuqL4M5rfxUK6eVljdeJYWIjcgNg=
-github.com/maruel/genaipy v0.1.3-0.20261114231459-f57cc454edaf h1:6A+GBvUU/5nS8cq6Sg5pilx9veDS9wGuLusliRmvyrc=
-github.com/maruel/genaipy v0.1.3-0.20261114231459-f57cc454edaf/go.mod h1:veuCB5KhcZ6ZFUczMvb82F5l55UdllsUwfgyTha3Lc4=
+github.com/maruel/genaipy v0.1.3-0.20261116004219-cad62d34f47e h1:KEcr8Rx0oovz+SOcC7KliabIrM3wzTPMTUwDRfTGIvM=
+github.com/maruel/genaipy v0.1.3-0.20261116004219-cad62d34f47e/go.mod h1:veuCB5KhcZ6ZFUczMvb82F5l55UdllsUwfgyTha3Lc4=
 github.com/maruel/httpjson v0.5.3 h1:GXxDoiaMJyax0nMR0RfefzDiKd86lbMeqPIgkoFqI2I=
 github.com/maruel/httpjson v0.5.3/go.mod h1:YJmWM63IM6ykT1NKm67b5Cuhshl1JUXuxFnmnqmr5Rg=
 github.com/maruel/roundtrippers v0.5.1 h1:ztW+4P91AV2e1ifzRnw7XG593IFn7po4Z3hdxMXzACQ=

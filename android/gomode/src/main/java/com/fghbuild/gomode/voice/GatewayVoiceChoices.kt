@@ -15,8 +15,10 @@
 //
 // Connecting pins the resolved choice, stage owners, speech models, and speaking voice per
 // session; recovery keeps them and fails when the gateway withdrew one. Speaking voices are saved
-// per gateway and choice when the gateway owns speech and the choice advertises voices; the
-// provider default applies until then and when the choice no longer offers the saved voice.
+// per gateway and choice when the gateway owns speech and the choice advertises voices. A composable
+// choice speaks through its synthesis model instead and saves the selection per gateway and model.
+// Settings offer the voices without a language and those of the voice language. The provider
+// default applies until then and when the gateway no longer offers the saved voice.
 // External gateway metadata requests carry no hosted-service credentials; embedded gateways use
 // the service credentials.
 package com.fghbuild.gomode.voice
@@ -26,6 +28,7 @@ import com.fghbuild.gomode.data.SavedVoiceSetup
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.data.SpeakingVoiceOwner
 import com.fghbuild.gomode.data.SpeechStage
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -39,12 +42,13 @@ import com.fghbuild.gomode.service.serviceOrigin
 import com.fghbuild.voicegateway.sdk.v2.ApiClient
 import com.fghbuild.voicegateway.sdk.v2.SpeechConfig
 import com.fghbuild.voicegateway.sdk.v2.SpeechLocation
-import com.fghbuild.voicegateway.sdk.v2.SpeechModel
+import com.fghbuild.voicegateway.sdk.v2.Voice
 import com.fghbuild.voicegateway.sdk.v2.VoiceChoice
 import com.fghbuild.voicegateway.sdk.v2.VoiceChoicesResp
 import com.fghbuild.voicegateway.sdk.v2.VoiceTransport
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.util.Locale
 
 // Keep these messages aligned with gatewayHTTPError in web/src/VoiceSession.ts.
 internal fun gatewayHTTPError(
@@ -183,14 +187,42 @@ internal data class GatewayVoiceChoices(
         }
     }
 
-    /** The saved speaking voice while [choice] offers it; empty selects the provider default. */
+    /**
+     * The speaking voices gateway speech offers with [choice] and [synthesisModelID] in a
+     * [languageTag] session, or null when [speech] runs on the device.
+     */
+    fun speakingVoices(
+        choice: VoiceChoice,
+        speech: SpeechStageLocation,
+        synthesisModelID: String?,
+        languageTag: String,
+    ): SpeakingVoices? {
+        if (speech != SpeechStageLocation.GATEWAY) return null
+        if (choice.composable != true) {
+            return SpeakingVoices.of(SpeakingVoiceOwner.Choice(choice.id), sessionVoices(choice.voices, languageTag))
+        }
+        val model = catalog.synthesisModels.orEmpty().firstOrNull { it.id == synthesisModelID } ?: return null
+        return SpeakingVoices.of(SpeakingVoiceOwner.SynthesisModel(model.id), sessionVoices(model.voices, languageTag))
+    }
+
+    /** The speaking voices of [setup] in the saved voice language. */
+    fun speakingVoices(
+        settings: SettingsState,
+        setup: ResolvedVoiceSetup,
+    ): SpeakingVoices? = speakingVoices(setup.choice, setup.speech, setup.synthesisModelID, settings.voiceLanguageTag)
+
+    /** The saved speaking voice while [voices] offers it; empty selects the provider default. */
     fun speakingVoice(
         settings: SettingsState,
-        choice: VoiceChoice,
+        voices: SpeakingVoices?,
     ): String {
-        if (settings.voiceSetup.effectiveSpeech != SpeechStageLocation.GATEWAY) return ""
-        val saved = settings.speakingVoices[gatewayURL]?.get(choice.id).orEmpty()
-        return saved.takeIf { it in choice.voices.orEmpty() }.orEmpty()
+        val owner = voices?.owner ?: return ""
+        val saved =
+            when (owner) {
+                is SpeakingVoiceOwner.Choice -> settings.speakingVoices
+                is SpeakingVoiceOwner.SynthesisModel -> settings.synthesisVoices
+            }[gatewayURL]?.get(owner.id).orEmpty()
+        return saved.takeIf { it in voices.names }.orEmpty()
     }
 
     /** Resolves the session selection, or checks that a pinned one is still available. */
@@ -203,7 +235,7 @@ internal data class GatewayVoiceChoices(
             return GatewayVoiceSelection(
                 gatewayURL = gatewayURL,
                 choiceID = setup.choice.id,
-                voiceName = speakingVoice(settings, setup.choice),
+                voiceName = speakingVoice(settings, speakingVoices(settings, setup)),
                 recognition = setup.recognition,
                 speech = setup.speech,
                 recognitionModelID = setup.recognitionModelID,
@@ -222,13 +254,14 @@ internal data class GatewayVoiceChoices(
             } ?: throw VoiceSetupException("Session voice choice is unavailable. Start a new voice session.")
         val removedModel =
             listOf(
-                catalog.recognitionModels to pinned.recognitionModelID,
-                catalog.synthesisModels to pinned.synthesisModelID,
-            ).any { (models, id) -> id != null && models.orEmpty().none { it.id == id } }
+                catalog.recognitionModels.orEmpty().map { it.id } to pinned.recognitionModelID,
+                catalog.synthesisModels.orEmpty().map { it.id } to pinned.synthesisModelID,
+            ).any { (ids, id) -> id != null && id !in ids }
         if (removedModel) {
             throw VoiceSetupException("Session speech model is unavailable. Start a new voice session.")
         }
-        val voices = if (pinned.speech == SpeechStageLocation.GATEWAY) choice.voices.orEmpty() else emptyList()
+        val voices =
+            speakingVoices(choice, pinned.speech, pinned.synthesisModelID, settings.voiceLanguageTag)?.names.orEmpty()
         if (pinned.voiceName.isNotEmpty() && pinned.voiceName !in voices) {
             throw VoiceSetupException("Session speaking voice is unavailable. Start a new voice session.")
         }
@@ -260,13 +293,17 @@ internal data class GatewayVoiceChoices(
             choice = choice,
             recognitionModelID =
                 if (composable && recognition == SpeechStageLocation.GATEWAY) {
-                    resolveSpeechModel(catalog.recognitionModels.orEmpty(), saved, SpeechStage.RECOGNITION)
+                    resolveSpeechModel(
+                        catalog.recognitionModels.orEmpty().map { it.id },
+                        saved,
+                        SpeechStage.RECOGNITION,
+                    )
                 } else {
                     null
                 },
             synthesisModelID =
                 if (composable && speech == SpeechStageLocation.GATEWAY) {
-                    resolveSpeechModel(catalog.synthesisModels.orEmpty(), saved, SpeechStage.SYNTHESIS)
+                    resolveSpeechModel(catalog.synthesisModels.orEmpty().map { it.id }, saved, SpeechStage.SYNTHESIS)
                 } else {
                     null
                 },
@@ -405,14 +442,32 @@ internal fun wireLocation(location: SpeechStageLocation): SpeechLocation =
         SpeechStageLocation.GATEWAY -> SpeechLocation.Gateway
     }
 
+/** The names of [voices] a [languageTag] session offers: those without a language or of its base language. */
+internal fun sessionVoices(
+    voices: List<Voice>?,
+    languageTag: String,
+): List<Voice> {
+    val language = baseLanguage(languageTag)
+    return voices.orEmpty().filter { voice ->
+        voice.language.let { it.isNullOrEmpty() || baseLanguage(it) == language }
+    }
+}
+
+/**
+ * The ISO 639 base language of a BCP 47 tag, or empty for an invalid one. Runtimes on OpenJDK before
+ * 17 report deprecated codes, such as "in" for "id"; mapping the catalog code and the session tag
+ * alike keeps them comparable there too.
+ */
+private fun baseLanguage(tag: String): String = Locale.forLanguageTag(tag).language
+
 /** The saved model while listed; otherwise the first listed model. */
 internal fun resolveSpeechModel(
-    models: List<SpeechModel>,
+    modelIDs: List<String>,
     saved: GatewayVoiceSetup,
     stage: SpeechStage,
 ): String {
     val label = if (stage == SpeechStage.RECOGNITION) "recognition" else "speech"
-    return (models.firstOrNull { it.id == saved.modelID(stage) } ?: models.firstOrNull())?.id
+    return (modelIDs.firstOrNull { it == saved.modelID(stage) } ?: modelIDs.firstOrNull())
         ?: throw VoiceSetupException(
             "The gateway has no $label models. Choose Local for $label, or an all-in-one model in Settings.",
             stage,
@@ -456,14 +511,25 @@ private fun validateVoiceChoices(catalog: VoiceChoicesResp) {
             .map { it.transport }
             .toSet()
             .size != catalog.defaults.orEmpty().size
+    val models =
+        listOf(
+            catalog.recognitionModels.orEmpty().map { it.id to it.label },
+            catalog.synthesisModels.orEmpty().map { it.id to it.label },
+        )
     val invalidModels =
-        listOf(catalog.recognitionModels.orEmpty(), catalog.synthesisModels.orEmpty()).any { models ->
-            models.any { it.id.isBlank() || it.label.isBlank() } || models.map { it.id }.toSet().size != models.size
+        models.any { stage ->
+            stage.any { (id, label) -> id.isBlank() || label.isBlank() } ||
+                stage.map { it.first }.toSet().size != stage.size
         }
+    // Defaults are either one language-free voice or at most one voice per language.
     val invalidVoices =
-        catalog.choices.orEmpty().any { choice ->
-            val voices = choice.voices.orEmpty()
-            voices.any { it.isBlank() } || voices.toSet().size != voices.size
+        (catalog.choices.orEmpty().map { it.voices } + catalog.synthesisModels.orEmpty().map { it.voices }).any {
+            val voices = it.orEmpty()
+            val defaults = voices.filter { voice -> voice.default == true }.map { voice -> voice.language.orEmpty() }
+            voices.any { voice -> voice.name.isBlank() || voice.language?.let(::baseLanguage)?.isEmpty() == true } ||
+                voices.map { voice -> voice.name }.toSet().size != voices.size ||
+                defaults.map(::baseLanguage).toSet().size != defaults.size ||
+                ("" in defaults && defaults.size > 1)
         }
     val invalidSpeechModes =
         catalog.choices.orEmpty().any { choice ->
@@ -496,6 +562,21 @@ internal fun requireLoadedVoiceSettings(settings: SettingsState) {
         SettingsLoadState.Loading -> throw VoiceSetupException("Saved settings are still loading")
         SettingsLoadState.Ready -> Unit
         is SettingsLoadState.Failed -> throw VoiceSetupException(state.message)
+    }
+}
+
+/** The speaking voices gateway speech offers, and the owner that saves the selection. */
+internal data class SpeakingVoices(
+    val owner: SpeakingVoiceOwner,
+    val names: List<String>,
+    /** The voice the gateway speaks with when the session names none, or empty when the provider picks. */
+    val defaultName: String,
+) {
+    companion object {
+        fun of(
+            owner: SpeakingVoiceOwner,
+            voices: List<Voice>,
+        ) = SpeakingVoices(owner, voices.map { it.name }, voices.firstOrNull { it.default == true }?.name.orEmpty())
     }
 }
 

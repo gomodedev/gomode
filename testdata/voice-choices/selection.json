@@ -3,17 +3,57 @@
     { "name": "omitted catalog", "catalog": {}, "voice": "" },
     { "name": "null catalog", "catalog": { "voices": null }, "voice": "" },
     { "name": "empty catalog", "catalog": { "voices": [] }, "voice": "" },
-    { "name": "catalog without preference", "catalog": { "voices": ["Kore", "Orus"] }, "voice": "" },
-    { "name": "saved provider default", "catalog": { "voices": ["Kore", "Orus"] }, "savedVoice": "", "voice": "" },
-    { "name": "saved named voice", "catalog": { "voices": ["Kore", "Orus"] }, "savedVoice": "Kore", "voice": "Kore" },
-    { "name": "removed named voice", "catalog": { "voices": ["Orus"] }, "savedVoice": "Kore", "voice": "" },
+    { "name": "catalog without preference", "catalog": { "voices": [{ "name": "Kore" }, { "name": "Orus" }] }, "voice": "" },
+    { "name": "saved provider default", "catalog": { "voices": [{ "name": "Kore" }, { "name": "Orus" }] }, "savedVoice": "", "voice": "" },
+    { "name": "saved named voice", "catalog": { "voices": [{ "name": "Kore" }, { "name": "Orus" }] }, "savedVoice": "Kore", "voice": "Kore" },
+    { "name": "removed named voice", "catalog": { "voices": [{ "name": "Orus" }] }, "savedVoice": "Kore", "voice": "" },
     { "name": "omitted catalog ignores saved voice", "catalog": {}, "savedVoice": "Kore", "voice": "" },
     { "name": "empty catalog ignores saved voice", "catalog": { "voices": [] }, "savedVoice": "Kore", "voice": "" },
-    { "name": "client speech ignores saved voice", "catalog": { "voices": ["Orus"] }, "savedVoice": "Kore", "mode": "text", "voice": "" },
-    { "name": "duplicate names", "catalog": { "voices": ["Kore", "Kore"] }, "error": "catalog" },
-    { "name": "empty name", "catalog": { "voices": [""] }, "error": "catalog" },
-    { "name": "blank name", "catalog": { "voices": [" "] }, "error": "catalog" },
-    { "name": "non-string name", "catalog": { "voices": [42] }, "error": "catalog" },
+    {
+      "name": "saved voice of the session language",
+      "catalog": { "voices": [{ "name": "Kore" }, { "name": "French", "language": "fr" }] },
+      "languageTag": "fr-CA",
+      "savedVoice": "French",
+      "voice": "French"
+    },
+    {
+      "name": "saved voice of another language",
+      "catalog": { "voices": [{ "name": "Kore" }, { "name": "French", "language": "fr" }] },
+      "languageTag": "en-US",
+      "savedVoice": "French",
+      "voice": ""
+    },
+    {
+      "name": "voice without a language in any session",
+      "catalog": { "voices": [{ "name": "Kore" }, { "name": "French", "language": "fr" }] },
+      "languageTag": "fr-CA",
+      "savedVoice": "Kore",
+      "voice": "Kore"
+    },
+    {
+      "name": "saved voice of a language whose code Java deprecates",
+      "catalog": { "voices": [{ "name": "Kore" }, { "name": "Indonesian", "language": "id" }] },
+      "languageTag": "id-ID",
+      "savedVoice": "Indonesian",
+      "voice": "Indonesian"
+    },
+    { "name": "client speech ignores saved voice", "catalog": { "voices": [{ "name": "Orus" }] }, "savedVoice": "Kore", "mode": "text", "voice": "" },
+    { "name": "duplicate names", "catalog": { "voices": [{ "name": "Kore" }, { "name": "Kore" }] }, "error": "catalog" },
+    { "name": "empty name", "catalog": { "voices": [{ "name": "" }] }, "error": "catalog" },
+    { "name": "blank name", "catalog": { "voices": [{ "name": " " }] }, "error": "catalog" },
+    { "name": "non-string name", "catalog": { "voices": [{ "name": 42 }] }, "error": "catalog" },
+    { "name": "bare name", "catalog": { "voices": ["Kore"] }, "error": "catalog" },
+    {
+      "name": "two defaults of one language",
+      "catalog": { "voices": [{ "name": "French", "language": "fr", "default": true }, { "name": "Gilles", "language": "fr", "default": true }] },
+      "error": "catalog"
+    },
+    {
+      "name": "language-free default beside a language default",
+      "catalog": { "voices": [{ "name": "Kore", "default": true }, { "name": "French", "language": "fr", "default": true }] },
+      "error": "catalog"
+    },
+    { "name": "non-string language", "catalog": { "voices": [{ "name": "Kore", "language": 1 }] }, "error": "catalog" },
     { "name": "non-array catalog", "catalog": { "voices": "Kore" }, "error": "catalog" }
   ],
   "recovery": [

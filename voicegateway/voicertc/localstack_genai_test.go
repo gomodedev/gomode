@@ -198,12 +198,13 @@ func (a *scriptedASR) transcribe(ctx context.Context, _ string, _ []byte) (strin
 // session-owned while speech and generation are superseded.
 type interruptibleSpeech struct {
 	anyLanguage
+	noVoiceSelection
 	started chan struct{}
 	stopped chan struct{}
 	once    sync.Once
 }
 
-func (s *interruptibleSpeech) synthesize(ctx context.Context, _, _ string) iter.Seq2[[]byte, error] {
+func (s *interruptibleSpeech) synthesize(ctx context.Context, _, _, _ string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		hold := false
 		s.once.Do(func() { hold = true })

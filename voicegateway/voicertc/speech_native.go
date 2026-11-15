@@ -4,6 +4,7 @@ package voicertc
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/maruel/genai"
@@ -185,35 +187,71 @@ func (a *audioChatASRAdapter) transcribe(ctx context.Context, _ string, pcm []by
 	return strings.TrimSpace(res.String()), nil
 }
 
-// llamaTTSAdapter synthesizes through llama-server's /v1/audio/speech. A
-// non-empty lang is a fixed SpeechRequest.Lang and the only session language
-// the adapter accepts; staged LFM3 sessions fix "en". model names the
-// configured model in errors.
+// llamaTTSAdapter synthesizes through llama-server's /v1/audio/speech, sending
+// the session language as SpeechRequest.Lang. A non-empty lang is instead a
+// fixed SpeechRequest.Lang and the only session language the adapter accepts;
+// staged LFM3 sessions fix "en", which declares that model English only.
+// Otherwise llamaTTSLanguages declares the accepted languages. model names the
+// configured model in errors and selects its language declaration.
 //
-// TODO: Send the session language as SpeechRequest.Lang when lang is empty;
-// staged LFM3 keeps its fixed English. llama-server b12110
-// passes "lang" to the model's "tts" chat template. LFM3-Audio's template maps
-// 20 lowercase codes, such as "fr" and "en-gb", to a language name and uses any
-// other value verbatim; without one it speaks American English. Not measured.
+// In llama.cpp v1.0.0 (tools/server/server-context.cpp handle_tts_impl),
+// "lang" renders the model's "tts" chat template and reaches the model's
+// audio pipeline (tools/mtmd/mtmd-helper-gen.cpp).
 type llamaTTSAdapter struct {
+	noVoiceSelection
 	client *llamacpp.Client
 	model  string
 	voice  string
 	lang   string
 }
 
+// llamaTTSLanguages declares the session languages of llama.cpp TTS models by
+// Hugging Face repository, from llama.cpp v1.0.0 tools/tts/README.md and the
+// sources it describes. nil accepts any language.
+//
+// Qwen3-TTS maps 10 codes to <|codec_language_*|> tokens and fails generation
+// for any other language (mtmd-helper-gen.cpp tts_lang_codes and
+// qwen3tts_gen_audio_pipeline::set_input). LFM3-Audio's template names 18
+// codes and passes any other value verbatim as the language name
+// (common/chat.cpp lfm3_language_name), which nothing documents the model
+// speaking.
+//
+// An unlisted model accepts every language because llama.cpp does not report
+// one: Pocket TTS speaks the language of its weights, Soprano English, and
+// Drama 3 the language of the text, and all three ignore "lang". Chatterbox
+// Multilingual, whose "lang" prefixes the text, needs classifier-free guidance
+// that llama-server does not run yet. The model, not the adapter, owns the
+// language of these.
+func llamaTTSLanguages(model string) []string {
+	switch modelRepository(model) {
+	case "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF":
+		return []string{"de", "en", "es", "fr", "it", "ja", "ko", "pt", "ru", "zh"}
+	case "LiquidAI/LFM3-Audio-2B-GGUF":
+		return []string{"ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "it", "ja", "ko", "nl", "pl", "pt", "sv", "tr", "zh"}
+	default:
+		return nil
+	}
+}
+
 func (a *llamaTTSAdapter) checkLanguage(lang string) error {
-	if a.lang != "" && lang != a.lang {
+	if a.lang != "" {
+		if lang != a.lang {
+			return newUnsupportedLanguageError(a.model, lang)
+		}
+		return nil
+	}
+	if languages := llamaTTSLanguages(a.model); languages != nil && !slices.Contains(languages, lang) {
 		return newUnsupportedLanguageError(a.model, lang)
 	}
 	return nil
 }
 
-func (a *llamaTTSAdapter) synthesize(ctx context.Context, _, text string) iter.Seq2[[]byte, error] {
+func (a *llamaTTSAdapter) synthesize(ctx context.Context, lang, _, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		res, err := a.client.SpeechStreamRaw(ctx, &llamacpp.SpeechRequest{Input: text, Voice: a.voice, Lang: a.lang, ResponseFormat: llamacpp.SpeechPCM, Stream: true}) //nolint:bodyclose // Iteration owns and closes the native body below.
+		req := &llamacpp.SpeechRequest{Input: text, Voice: a.voice, Lang: cmp.Or(a.lang, lang), ResponseFormat: llamacpp.SpeechPCM, Stream: true}
+		res, err := a.client.SpeechStreamRaw(ctx, req) //nolint:bodyclose // Iteration owns and closes the native body below.
 		if err != nil {
 			yield(nil, err)
 			return
@@ -237,25 +275,31 @@ func (a *llamaTTSAdapter) synthesize(ctx context.Context, _, text string) iter.S
 	}
 }
 
-// geminiTTSAdapter synthesizes through a Gemini speech model.
+// geminiTTSAdapter synthesizes through a Gemini speech model, sending the
+// session language as InteractionSpeechConfig.Language ("The language of the
+// speech" in googleapis/go-genai interactions/models/interactions
+// speechconfig.go) beside the configured voice.
 //
-// TODO: Send the session language as InteractionSpeechConfig.Language in
-// GenerationConfig.SpeechConfig, and declare the model's languages with a
-// checkLanguage replacing anyLanguage; today the request sets only Voice, and
-// only when one is configured. Not measured.
+// Every session language passes setup: Gemini's speech generation guide
+// (https://ai.google.dev/gemini-api/docs/speech-generation, "Supported
+// languages") says the models detect the input language and lists over 100
+// by name only, with no codes to declare, and states no outcome for an
+// unsupported one.
 type geminiTTSAdapter struct {
 	anyLanguage
+	noVoiceSelection
 	client *gemini.Client
 	voice  string
 }
 
-func (a *geminiTTSAdapter) synthesize(ctx context.Context, _, text string) iter.Seq2[[]byte, error] {
+func (a *geminiTTSAdapter) synthesize(ctx context.Context, lang, _, text string) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		req := &gemini.InteractionRequest{Model: a.client.ModelID(), Store: new(false), Input: []gemini.InteractionContent{{Type: gemini.InteractionText, Text: text}}, ResponseFormat: &gemini.InteractionResponseFormat{Type: gemini.InteractionAudio, MIMEType: "audio/l16", SampleRate: 24000}}
-		if a.voice != "" {
-			req.GenerationConfig = &gemini.InteractionGenerationConfig{SpeechConfig: []gemini.InteractionSpeechConfig{{Voice: a.voice}}}
+		req := &gemini.InteractionRequest{
+			Model: a.client.ModelID(), Store: new(false), Input: []gemini.InteractionContent{{Type: gemini.InteractionText, Text: text}},
+			ResponseFormat:   &gemini.InteractionResponseFormat{Type: gemini.InteractionAudio, MIMEType: "audio/l16", SampleRate: 24000},
+			GenerationConfig: &gemini.InteractionGenerationConfig{SpeechConfig: []gemini.InteractionSpeechConfig{{Voice: a.voice, Language: lang}}},
 		}
 		events, finish := a.client.InteractionStreamRaw(ctx, req)
 		seen := false

@@ -336,7 +336,7 @@ class VoiceSettingsTest {
         composeRule.waitUntil { repository.settings.value.voiceSetup.deviceSpeechRate == 1.25f }
         composeRule.onNodeWithTag("gomode-device-speech-rate").assertTextContains("1.25×")
         // After a save, reselecting the current speed closes the menu without saving.
-        composeRule.onNodeWithTag("gomode-device-speech-rate").performClick()
+        composeRule.onNodeWithTag("gomode-device-speech-rate").performScrollTo().performClick()
         composeRule.onNodeWithTag("gomode-device-speech-rate-1.25").assertIsSelected().performClick()
         composeRule.onNodeWithTag("gomode-device-speech-rates").assertDoesNotExist()
         val reopened = SettingsRepository(store)

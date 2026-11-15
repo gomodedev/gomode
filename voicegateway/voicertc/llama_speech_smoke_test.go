@@ -40,7 +40,7 @@ func TestSmokeLlamaSpeech(t *testing.T) {
 	})
 	start := time.Now()
 	var pcm []byte
-	for chunk, err := range runtime.tts.synthesize(t.Context(), "en", "I love bananas.") {
+	for chunk, err := range runtime.tts.synthesize(t.Context(), "en", "", "I love bananas.") {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +106,7 @@ func TestSmokeLlamaSpeech(t *testing.T) {
 	}
 	start = time.Now()
 	var bytes int
-	for chunk, err := range runtime.tts.synthesize(t.Context(), "en", reply.String()) {
+	for chunk, err := range runtime.tts.synthesize(t.Context(), "en", "", reply.String()) {
 		if err != nil {
 			t.Fatal(err)
 		}

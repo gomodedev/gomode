@@ -55,7 +55,19 @@ func (b *realtimeBridgeBackend) providerName() string {
 	}
 }
 
-func (b *realtimeBridgeBackend) voices(ctx context.Context) ([]string, error) {
+// voices lists the model's voices from genai's scoreboard. Each speaks every
+// language the model does, so none carries a language: Gemini Live native
+// audio "automatically choose[s] the appropriate language"
+// (https://aistudio.google.com/docs/live-api/capabilities, "Change voice and
+// language"), and OpenAI voices speak the language of the input text
+// (https://developers.openai.com/api/docs/guides/text-to-speech, "Supported
+// languages").
+//
+// A session that names no voice sends none, so the provider's default speaks.
+// OpenAI Realtime documents "alloy" as the default of audio.output.voice
+// (https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets/methods/create);
+// Gemini Live documents no default, so its list marks none.
+func (b *realtimeBridgeBackend) voices(ctx context.Context) ([]voicev2.Voice, error) {
 	p, err := b.newProvider(ctx)
 	if err != nil {
 		return nil, err
@@ -67,7 +79,12 @@ func (b *realtimeBridgeBackend) voices(ctx context.Context) ([]string, error) {
 	for i := range score.Realtime {
 		r := &score.Realtime[i]
 		if r.Realtime != nil && slices.Contains(r.Models, b.model) {
-			return r.Realtime.Voices, nil
+			openai := b.provider == "openai" || b.provider == "openairesponses"
+			voices := make([]voicev2.Voice, len(r.Realtime.Voices))
+			for i, name := range r.Realtime.Voices {
+				voices[i] = voicev2.Voice{Name: name, Default: openai && name == "alloy"}
+			}
+			return voices, nil
 		}
 	}
 	return nil, nil

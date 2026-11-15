@@ -681,6 +681,28 @@ object VoiceTransportSerializer : KSerializer<VoiceTransport> {
     }
 }
 
+/** Voice is one selectable voice of a voice choice or synthesis model. */
+@Serializable
+data class Voice(
+    /** Name is the SessionSetup.voice.name that selects this voice. */
+    val name: String,
+    /**
+     * Language is the ISO 639-1 code of the only language the voice speaks,
+     * such as "fr". Clients offer the voice only in sessions whose language
+     * tag has that base subtag, and session.setup rejects it in another.
+     * Empty means the voice speaks every language the model does.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val language: String? = null,
+    /**
+     * Default marks the voice a session speaks with when SessionSetup.voice.name
+     * is empty and the session language is one the voice speaks. A list has
+     * either one default without a language or at most one default per
+     * language; clients reject a list that mixes both. A list without a
+     * default leaves the choice to the provider.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val default: Boolean? = null,
+)
+
 /**
  * SpeechConfig selects recognition and synthesis independently. Empty fields use
  * transport defaults: WebRTC uses each configured gateway stage; text uses client
@@ -700,8 +722,11 @@ data class VoiceChoice(
     val id: String,
     val label: String,
     val transports: List<VoiceTransport>?,
-    /** Voices lists supported audio voice names. Omitted when the choice does not offer voice selection. */
-    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val voices: List<String>? = null,
+    /**
+     * Voices lists the selectable voices. Omitted when the choice does not
+     * offer voice selection.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val voices: List<Voice>? = null,
     /**
      * SpeechModes lists supported input/output ownership combinations.
      * Missing metadata from older gateways means transport defaults only.
@@ -724,15 +749,37 @@ data class VoiceChoiceDefault(
     val id: String,
 )
 
-/** SpeechModel identifies one configured speech stage without exposing endpoints or credentials. */
+/**
+ * RecognitionModel identifies one configured recognition stage without
+ * exposing endpoints or credentials.
+ */
 @Serializable
-data class SpeechModel(
+data class RecognitionModel(
     /**
      * ID is the operator-configured id; it stays the same while the stage's
      * settings change.
      */
     val id: String,
     val label: String,
+)
+
+/**
+ * SynthesisModel identifies one configured synthesis stage without exposing
+ * endpoints or credentials.
+ */
+@Serializable
+data class SynthesisModel(
+    /**
+     * ID is the operator-configured id; it stays the same while the stage's
+     * settings change.
+     */
+    val id: String,
+    val label: String,
+    /**
+     * Voices lists the selectable voices. Omitted when the stage offers no
+     * voice selection.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val voices: List<Voice>? = null,
 )
 
 /**
@@ -745,9 +792,9 @@ data class VoiceChoicesResp(
     /** Defaults holds one entry per offered transport, ordered by transport name. */
     val defaults: List<VoiceChoiceDefault>?,
     /** RecognitionModels lists gateway recognition stages in preference order. */
-    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val recognitionModels: List<SpeechModel>? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val recognitionModels: List<RecognitionModel>? = null,
     /** SynthesisModels lists gateway synthesis stages in preference order. */
-    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val synthesisModels: List<SpeechModel>? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val synthesisModels: List<SynthesisModel>? = null,
     /**
      * STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
      * its ICE servers. Omitted means none: the client gathers host candidates
@@ -906,7 +953,12 @@ data class MessageEnvelope(
 /** VoiceConfig describes provider-neutral voice preferences. */
 @Serializable
 data class VoiceConfig(
-    /** Name is the requested provider-specific voice name. Empty uses the provider default. */
+    /**
+     * Name is the requested provider-specific voice name. Empty uses the
+     * provider default, or for a synthesis stage that advertises voices, its
+     * configured voice when that voice speaks the session language and its
+     * first voice of the session language otherwise.
+     */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val name: String? = null,
     /**
      * Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA".

@@ -223,6 +223,27 @@ export type VoiceTransport =
 export const VoiceTransportText = "text";
 export const VoiceTransportWebRTC = "webrtc";
 
+/** Voice is one selectable voice of a voice choice or synthesis model. */
+export interface Voice {
+  /** Name is the SessionSetup.voice.name that selects this voice. */
+  name: string;
+  /**
+   * Language is the ISO 639-1 code of the only language the voice speaks,
+   * such as "fr". Clients offer the voice only in sessions whose language
+   * tag has that base subtag, and session.setup rejects it in another.
+   * Empty means the voice speaks every language the model does.
+   */
+  language?: string;
+  /**
+   * Default marks the voice a session speaks with when SessionSetup.voice.name
+   * is empty and the session language is one the voice speaks. A list has
+   * either one default without a language or at most one default per
+   * language; clients reject a list that mixes both. A list without a
+   * default leaves the choice to the provider.
+   */
+  default?: boolean;
+}
+
 /**
  * SpeechConfig selects recognition and synthesis independently. Empty fields use
  * transport defaults: WebRTC uses each configured gateway stage; text uses client
@@ -243,8 +264,11 @@ export interface VoiceChoice {
   id: string;
   label: string;
   transports: VoiceTransport[] | null;
-  /** Voices lists supported audio voice names. Omitted when the choice does not offer voice selection. */
-  voices?: string[];
+  /**
+   * Voices lists the selectable voices. Omitted when the choice does not
+   * offer voice selection.
+   */
+  voices?: Voice[];
   /**
    * SpeechModes lists supported input/output ownership combinations.
    * Missing metadata from older gateways means transport defaults only.
@@ -266,14 +290,35 @@ export interface VoiceChoiceDefault {
   id: string;
 }
 
-/** SpeechModel identifies one configured speech stage without exposing endpoints or credentials. */
-export interface SpeechModel {
+/**
+ * RecognitionModel identifies one configured recognition stage without
+ * exposing endpoints or credentials.
+ */
+export interface RecognitionModel {
   /**
    * ID is the operator-configured id; it stays the same while the stage's
    * settings change.
    */
   id: string;
   label: string;
+}
+
+/**
+ * SynthesisModel identifies one configured synthesis stage without exposing
+ * endpoints or credentials.
+ */
+export interface SynthesisModel {
+  /**
+   * ID is the operator-configured id; it stays the same while the stage's
+   * settings change.
+   */
+  id: string;
+  label: string;
+  /**
+   * Voices lists the selectable voices. Omitted when the stage offers no
+   * voice selection.
+   */
+  voices?: Voice[];
 }
 
 /**
@@ -285,9 +330,9 @@ export interface VoiceChoicesResp {
   /** Defaults holds one entry per offered transport, ordered by transport name. */
   defaults: VoiceChoiceDefault[] | null;
   /** RecognitionModels lists gateway recognition stages in preference order. */
-  recognitionModels?: SpeechModel[];
+  recognitionModels?: RecognitionModel[];
   /** SynthesisModels lists gateway synthesis stages in preference order. */
-  synthesisModels?: SpeechModel[];
+  synthesisModels?: SynthesisModel[];
   /**
    * STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
    * its ICE servers. Omitted means none: the client gathers host candidates
@@ -439,7 +484,12 @@ export interface MessageEnvelope {
 
 /** VoiceConfig describes provider-neutral voice preferences. */
 export interface VoiceConfig {
-  /** Name is the requested provider-specific voice name. Empty uses the provider default. */
+  /**
+   * Name is the requested provider-specific voice name. Empty uses the
+   * provider default, or for a synthesis stage that advertises voices, its
+   * configured voice when that voice speaks the session language and its
+   * first voice of the session language otherwise.
+   */
   name?: string;
   /**
    * Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA".

@@ -43,7 +43,7 @@ func TestPublishedVoiceContract(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			expected := `{"choices":[{"id":"live","label":"Live","transports":["webrtc"],"voices":["Kore","Orus"]},{"id":"remote","label":"Remote","transports":["text","webrtc"]}],"defaults":[{"transport":"text","id":"remote"},{"transport":"webrtc","id":"live"}]}`
+			expected := `{"choices":[{"id":"live","label":"Live","transports":["webrtc"],"voices":[{"name":"Kore"},{"name":"Orus"}]},{"id":"remote","label":"Remote","transports":["text","webrtc"]}],"defaults":[{"transport":"text","id":"remote"},{"transport":"webrtc","id":"live"}]}`
 			if version == "v1" {
 				expected = `{"choices":[{"id":"live","label":"Live","transports":["webrtc"],"voices":["Kore","Orus"],"defaultVoice":"Kore"},{"id":"remote","label":"Remote","transports":["text","webrtc"]}],"defaultChoiceID":"live"}`
 				var old voicev1.VoiceChoicesResp

@@ -456,20 +456,33 @@ class SettingsRepositoryTest {
                 repository.settings.value.speakingVoices
                     .isEmpty(),
             )
-            repository.updateSpeakingVoice("https://first.example/", "live", "Kore") { it }
-            repository.updateSpeakingVoice("https://first.example", "other", "Orus") { it }
-            repository.updateSpeakingVoice("https://second.example", "live", "Puck") { it }
+            repository.updateSpeakingVoice("https://first.example/", SpeakingVoiceOwner.Choice("live"), "Kore") { it }
+            repository.updateSpeakingVoice("https://first.example", SpeakingVoiceOwner.Choice("other"), "Orus") { it }
+            repository.updateSpeakingVoice("https://second.example", SpeakingVoiceOwner.Choice("live"), "Puck") { it }
             val restored = SettingsRepository(store).awaitSettings("restored voices") { it.speakingVoices.size == 2 }
             assertEquals("Kore", restored.speakingVoices["https://first.example"]?.get("live"))
             assertEquals("Orus", restored.speakingVoices["https://first.example"]?.get("other"))
             assertEquals("Puck", restored.speakingVoices["https://second.example"]?.get("live"))
             assertEquals("live", restored.gatewayVoiceSetups["https://first.example"]?.followedChoiceID)
-            repository.updateSpeakingVoice("https://first.example", "live", "") { it }
+            repository.updateSpeakingVoice("https://first.example", SpeakingVoiceOwner.Choice("live"), "") { it }
             val providerDefault =
                 SettingsRepository(store).awaitSettings("provider default") {
                     it.speakingVoices["https://first.example"]?.get("live") == ""
                 }
             assertEquals("", providerDefault.speakingVoices["https://first.example"]?.get("live"))
+            // A synthesis model's voice has its own namespace, even when its ID matches a choice's.
+            repository.updateSpeakingVoice(
+                "https://first.example",
+                SpeakingVoiceOwner.SynthesisModel("live"),
+                "French",
+            ) {
+                it
+            }
+            val synthesis =
+                SettingsRepository(store).awaitSettings("synthesis voice") {
+                    it.synthesisVoices["https://first.example"]?.get("live") == "French"
+                }
+            assertEquals("", synthesis.speakingVoices["https://first.example"]?.get("live"))
         }
 
     @Test

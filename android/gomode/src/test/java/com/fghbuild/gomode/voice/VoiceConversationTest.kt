@@ -7,6 +7,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SpeakingVoiceOwner
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -28,6 +29,8 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -343,7 +346,7 @@ class VoiceConversationTest {
                                     "/api/voicegateway/v2/voice/choices" -> {
                                         MockResponse().setBody(
                                             """{"choices":[{"id":"live","label":"Live","transports":["webrtc"],
-                            "voices":${voices.get()}}],"defaults":[{"transport":"webrtc","id":"live"}]}""",
+                            "voices":${wireVoices(voices.get())}}],"defaults":[{"transport":"webrtc","id":"live"}]}""",
                                         )
                                     }
 
@@ -357,7 +360,7 @@ class VoiceConversationTest {
                     val repository = SettingsRepository(MemoryPreferences())
                     val id = repository.addService("Gateway", gateway)
                     repository.settings.first { it.activeServiceId == id }
-                    repository.updateSpeakingVoice(gateway, "live", voice) { it }
+                    repository.updateSpeakingVoice(gateway, SpeakingVoiceOwner.Choice("live"), voice) { it }
                     repository.settings.first { it.speakingVoices[gateway]?.get("live") == voice }
                     val key = ServiceShellKey(id, gateway)
                     val page = ServiceShellSession(key) {}.also { authenticate(it, "initial") }
@@ -452,7 +455,7 @@ class VoiceConversationTest {
                                     check(releaseChoices.await(10, TimeUnit.SECONDS))
                                     MockResponse().setBody(
                                         """{"choices":[{"id":"live","label":"Live","transports":["webrtc"],
-                            "voices":["Orus","Kore"]}],"defaults":[{"transport":"webrtc","id":"live"}]}""",
+                            "voices":[{"name":"Orus"},{"name":"Kore"}]}],"defaults":[{"transport":"webrtc","id":"live"}]}""",
                                     )
                                 }
 
@@ -466,7 +469,13 @@ class VoiceConversationTest {
                 val destinationID = repository.addService("Tools only", "https://tools.invalid")
                 val sponsorID = repository.addService("Gateway sponsor", server.url("/").toString())
                 repository.settings.first { it.activeServiceId == sponsorID }
-                repository.updateSpeakingVoice(server.url("/").toString().trimEnd('/'), "live", "Orus") { it }
+                repository.updateSpeakingVoice(
+                    server.url("/").toString().trimEnd('/'),
+                    SpeakingVoiceOwner.Choice("live"),
+                    "Orus",
+                ) {
+                    it
+                }
                 repository.settings.first {
                     it.speakingVoices[server.url("/").toString().trimEnd('/')]?.get("live") == "Orus"
                 }
@@ -491,7 +500,11 @@ class VoiceConversationTest {
                     assertTrue(setup.tools.any { it.name == "dispatch_service_tool" })
                     assertTrue(setup.tools.none { it.name == "product_alias" })
                     assertTrue(setup.serviceContextText.contains(destinationID))
-                    repository.updateSpeakingVoice(setup.gatewayEndpointURL, "live", "Kore") { it }
+                    repository.updateSpeakingVoice(
+                        setup.gatewayEndpointURL,
+                        SpeakingVoiceOwner.Choice("live"),
+                        "Kore",
+                    ) { it }
                     repository.settings.first { it.speakingVoices[setup.gatewayEndpointURL]?.get("live") == "Kore" }
                     owner.begin(true)
                     val recovery = owner.prepare(pinnedVoice = null)
@@ -740,6 +753,14 @@ class VoiceConversationTest {
         entry.updateLoad(WebShellLoadState.Ready)
         completeFrontendPreparation(entry)
     }
+
+    // The shared recovery rows list voice names; the catalog carries voice objects.
+    private fun wireVoices(names: JsonElement): String =
+        if (names is JsonArray) {
+            JsonArray(names.map { JsonObject(mapOf("name" to it)) }).toString()
+        } else {
+            names.toString()
+        }
 
     private class MemoryPreferences : DataStore<Preferences> {
         private val writeMutex = Mutex()

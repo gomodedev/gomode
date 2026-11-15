@@ -471,7 +471,7 @@ func (b *choiceBridge) VoiceChoices() voicev2.VoiceChoicesResp {
 		return *b.choices
 	}
 	return voicev2.VoiceChoicesResp{Choices: []voicev2.VoiceChoice{
-		{ID: "live", Label: "Live", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportWebRTC}, Voices: []string{"Kore", "Orus"}},
+		{ID: "live", Label: "Live", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportWebRTC}, Voices: []voicev2.Voice{{Name: "Kore"}, {Name: "Orus"}}},
 		{ID: "remote", Label: "Remote", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText, voicev2.VoiceTransportWebRTC}},
 	}, Defaults: []voicev2.VoiceChoiceDefault{
 		{Transport: voicev2.VoiceTransportText, ID: "remote"},
@@ -528,7 +528,7 @@ func TestVoiceChoices(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				catalog := voicev2.VoiceChoicesResp{Choices: []voicev2.VoiceChoice{{ID: "stack", Label: "Stack", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText, voicev2.VoiceTransportWebRTC}, SpeechModes: slices.Clone(all), Composable: true}}, RecognitionModels: []voicev2.SpeechModel{{ID: "asr", Label: "Recognition"}}, SynthesisModels: []voicev2.SpeechModel{{ID: "tts", Label: "Speech"}}, STUNServers: []string{"stun:stun.example:3478"}}
+				catalog := voicev2.VoiceChoicesResp{Choices: []voicev2.VoiceChoice{{ID: "stack", Label: "Stack", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText, voicev2.VoiceTransportWebRTC}, SpeechModes: slices.Clone(all), Composable: true}}, RecognitionModels: []voicev2.RecognitionModel{{ID: "asr", Label: "Recognition"}}, SynthesisModels: []voicev2.SynthesisModel{{ID: "tts", Label: "Speech"}}, STUNServers: []string{"stun:stun.example:3478"}}
 				b := &choiceBridge{choices: &catalog}
 				var media MediaBridge
 				if tc.media {
@@ -552,7 +552,7 @@ func TestVoiceChoices(t *testing.T) {
 					t.Fatal("HTTP projection lost composition support")
 				}
 				if tc.media {
-					if !slices.Equal(got.RecognitionModels, catalog.RecognitionModels) || !slices.Equal(got.SynthesisModels, catalog.SynthesisModels) {
+					if !reflect.DeepEqual(got.RecognitionModels, catalog.RecognitionModels) || !reflect.DeepEqual(got.SynthesisModels, catalog.SynthesisModels) {
 						t.Fatal("HTTP projection lost speech catalogs")
 					}
 					if !slices.Equal(got.STUNServers, catalog.STUNServers) {
@@ -571,7 +571,7 @@ func TestVoiceChoices(t *testing.T) {
 		t.Parallel()
 		catalog := voicev2.VoiceChoicesResp{
 			Choices: []voicev2.VoiceChoice{
-				{ID: "live", Label: "Realtime", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportWebRTC}, Voices: []string{"Kore"}, SpeechModes: []voicev2.SpeechConfig{{Input: voicev2.SpeechLocationGateway, Output: voicev2.SpeechLocationGateway}}},
+				{ID: "live", Label: "Realtime", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportWebRTC}, Voices: []voicev2.Voice{{Name: "Kore"}}, SpeechModes: []voicev2.SpeechConfig{{Input: voicev2.SpeechLocationGateway, Output: voicev2.SpeechLocationGateway}}},
 				{ID: "chat", Label: "Chat", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText}, SpeechModes: []voicev2.SpeechConfig{{Input: voicev2.SpeechLocationClient, Output: voicev2.SpeechLocationClient}}},
 				{ID: "stack", Label: "Local stack", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportText, voicev2.VoiceTransportWebRTC}, SpeechModes: []voicev2.SpeechConfig{
 					{Input: voicev2.SpeechLocationGateway, Output: voicev2.SpeechLocationGateway},
@@ -616,7 +616,7 @@ func TestVoiceChoices(t *testing.T) {
 	if w.Code != 200 || len(choices.Choices) != 2 || choices.DefaultChoiceID(voicev2.VoiceTransportWebRTC) != "live" || choices.DefaultChoiceID(voicev2.VoiceTransportText) != "remote" {
 		t.Fatalf("choices: %d %s", w.Code, w.Body)
 	}
-	if ch := choices.Choices[0]; len(ch.Voices) != 2 || ch.Voices[0] != "Kore" {
+	if ch := choices.Choices[0]; len(ch.Voices) != 2 || ch.Voices[0] != (voicev2.Voice{Name: "Kore"}) {
 		t.Fatalf("audio metadata lost in HTTP composition: %+v", ch)
 	}
 	if ch := choices.Choices[1]; len(ch.Voices) != 0 {

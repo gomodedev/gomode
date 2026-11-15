@@ -6,7 +6,8 @@
 // need no loaded service. GATEWAY_VOICE_SETUPS holds, per normalized gateway URL, one choice per
 // mode and the recognition and synthesis model IDs, so a mode switch restores the other mode's
 // selection. LOCAL_LLM_MODEL names the local model variant. SPEAKING_VOICES stays keyed by gateway
-// and choice. SavedVoiceSetup edits the three voice setup keys in one write.
+// and choice, and SYNTHESIS_VOICES by gateway and synthesis model. SavedVoiceSetup edits the three
+// voice setup keys in one write.
 //
 // The FOLLOW_GATEWAY mode runs gateway recognition and speech with the followed choice, or the
 // gateway's WebRTC default. GatewayVoiceChoices resolves it to all-in-one for a native audio choice
@@ -323,6 +324,22 @@ sealed interface SettingsLoadState {
     ) : SettingsLoadState
 }
 
+/**
+ * What a saved gateway speaking voice belongs to: a choice, or the synthesis model that a composable
+ * choice speaks through.
+ */
+sealed interface SpeakingVoiceOwner {
+    val id: String
+
+    data class Choice(
+        override val id: String,
+    ) : SpeakingVoiceOwner
+
+    data class SynthesisModel(
+        override val id: String,
+    ) : SpeakingVoiceOwner
+}
+
 data class SettingsState(
     val activeServiceURL: String = "",
     val haloAddress: String? = null,
@@ -338,6 +355,8 @@ data class SettingsState(
     /** Saved selections per normalized gateway URL. */
     val gatewayVoiceSetups: Map<String, GatewayVoiceSetup> = emptyMap(),
     val speakingVoices: Map<String, Map<String, String>> = emptyMap(),
+    /** Saved voices per normalized gateway URL and synthesis model ID. */
+    val synthesisVoices: Map<String, Map<String, String>> = emptyMap(),
     val carCallerSlots: Map<String, Int> = emptyMap(),
     val showServiceOnLockScreen: Boolean = false,
     val loadState: SettingsLoadState = SettingsLoadState.Loading,
@@ -357,6 +376,7 @@ class SettingsRepository(
         val HALO_ADDRESS = stringPreferencesKey("HALO_ADDRESS")
         val HALO_AUTO_CONNECT = booleanPreferencesKey("HALO_AUTO_CONNECT")
         val SPEAKING_VOICES = stringPreferencesKey("SPEAKING_VOICES")
+        val SYNTHESIS_VOICES = stringPreferencesKey("SYNTHESIS_VOICES")
         val VOICE_SETUP = stringPreferencesKey("VOICE_SETUP")
         val GATEWAY_VOICE_SETUPS = stringPreferencesKey("GATEWAY_VOICE_SETUPS")
         val LEGACY_VOICE_CHOICES = stringPreferencesKey("VOICE_CHOICES")
@@ -382,7 +402,8 @@ class SettingsRepository(
                     loadState = SettingsLoadState.Ready,
                     voiceSetup = decodeVoiceSetup(prefs),
                     gatewayVoiceSetups = decodeGatewayVoiceSetups(prefs),
-                    speakingVoices = decodeSpeakingVoices(prefs),
+                    speakingVoices = decodeVoices(prefs, Keys.SPEAKING_VOICES),
+                    synthesisVoices = decodeVoices(prefs, Keys.SYNTHESIS_VOICES),
                     carCallerSlots = decodeCarCallerSlots(prefs),
                     showServiceOnLockScreen = prefs[Keys.SHOW_SERVICE_ON_LOCK_SCREEN] ?: false,
                     haloAddress = prefs[Keys.HALO_ADDRESS],
@@ -550,26 +571,34 @@ class SettingsRepository(
         dataStore.edit { prefs -> prefs[Keys.VOICE_AUDIO_DEVICE_TYPE] = type }
     }
 
-    /** Saves [voiceName] for [choiceID] with the voice setup [transform] yields, in one write. */
+    /** Saves [voiceName] for [owner] with the voice setup [transform] yields, in one write. */
     suspend fun updateSpeakingVoice(
         gatewayURL: String,
-        choiceID: String,
+        owner: SpeakingVoiceOwner,
         voiceName: String,
         transform: (SavedVoiceSetup) -> SavedVoiceSetup,
     ) {
-        require(choiceID.isNotBlank() && (voiceName.isEmpty() || voiceName.isNotBlank())) { "Select a speaking voice" }
+        require(owner.id.isNotBlank() && (voiceName.isEmpty() || voiceName.isNotBlank())) { "Select a speaking voice" }
         val gateway = normalizeURL(gatewayURL)
         require(gateway.isNotEmpty()) { "Voice gateway is unknown" }
+        val key =
+            when (owner) {
+                is SpeakingVoiceOwner.Choice -> Keys.SPEAKING_VOICES
+                is SpeakingVoiceOwner.SynthesisModel -> Keys.SYNTHESIS_VOICES
+            }
         dataStore.edit { prefs ->
             editSavedVoiceSetup(prefs, gateway, transform)
-            val saved = decodeSpeakingVoices(prefs)
-            val choices = saved[gateway].orEmpty() + (choiceID to voiceName)
-            prefs[Keys.SPEAKING_VOICES] = json.encodeToString(saved + (gateway to choices))
+            val saved = decodeVoices(prefs, key)
+            val owners = saved[gateway].orEmpty() + (owner.id to voiceName)
+            prefs[key] = json.encodeToString(saved + (gateway to owners))
         }
     }
 
-    private fun decodeSpeakingVoices(prefs: Preferences): Map<String, Map<String, String>> =
-        prefs[Keys.SPEAKING_VOICES]?.let { json.decodeFromString<Map<String, Map<String, String>>>(it) } ?: emptyMap()
+    private fun decodeVoices(
+        prefs: Preferences,
+        key: Preferences.Key<String>,
+    ): Map<String, Map<String, String>> =
+        prefs[key]?.let { json.decodeFromString<Map<String, Map<String, String>>>(it) } ?: emptyMap()
 
     // This app-local registry retains removed IDs so service edits cannot retarget
     // saved contacts. Exhaustion only disables fixed-server contacts; services and
