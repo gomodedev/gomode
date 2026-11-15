@@ -24,6 +24,7 @@ import (
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/llamacpp"
 	"github.com/maruel/genai/scoreboard"
+	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/whistle"
 
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
@@ -495,6 +496,89 @@ func TestLiveASR(t *testing.T) {
 			if err := s.turns.Wait(); err != nil {
 				t.Fatal(err)
 			}
+		})
+		t.Run("nemospeech", func(t *testing.T) {
+			t.Parallel()
+			t.Run("streaming", func(t *testing.T) {
+				t.Parallel()
+				// The peer follows NeMo-Speech.cpp's realtime protocol: JSON
+				// control messages and binary PCM frames.
+				remote := peer(t, func(ctx context.Context, ws *websocket.Conn) {
+					writeGeminiFixture(t, ctx, ws, `{"type":"session.created"}`)
+					update := readGeminiFixture(t, ctx, ws)
+					if session, _ := update["session"].(map[string]any); session["language"] != "fr-FR" || session["sample_rate"] != float64(micSampleRate) {
+						t.Errorf("session.update %v, want fr-FR at %d Hz", update, micSampleRate)
+					}
+					writeGeminiFixture(t, ctx, ws, `{"type":"session.updated"}`)
+					if typ, _, err := ws.Read(ctx); err != nil || typ != websocket.MessageBinary {
+						t.Errorf("first input %v, %v; want binary audio", typ, err)
+						return
+					}
+					writeGeminiFixture(t, ctx, ws, `{"type":"conversation.item.input_audio_transcription.delta","delta":"Bonjour"}`)
+					for {
+						typ, data, err := ws.Read(ctx)
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						if typ == websocket.MessageText && strings.Contains(string(data), "input_audio_buffer.commit") {
+							break
+						}
+					}
+					writeGeminiFixture(t, ctx, ws, `{"type":"conversation.item.input_audio_transcription.completed","transcript":"Bonjour tout le monde."}`)
+					writeGeminiFixture(t, ctx, ws, `{"type":"input_audio_buffer.committed"}`)
+					_, _, _ = ws.Read(ctx)
+				})
+				c, err := nemospeech.New(http.DefaultClient, remote, nemospeech.NemotronASR)
+				if err != nil {
+					t.Fatal(err)
+				}
+				s, sink, _ := newLiveTestSession(t, newLiveASR(c, string(nemospeech.NemotronASR)), "fr")
+				startSpeech(t, s)
+				waitLiveDraft(t, sink, "Bonjour")
+				endSpeech(t, s)
+				waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "Bonjour tout le monde.", 1)
+				if err := s.turns.Wait(); err != nil {
+					t.Fatal(err)
+				}
+			})
+			t.Run("final only", func(t *testing.T) {
+				t.Parallel()
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/v1/audio/transcriptions" {
+						t.Errorf("unexpected request %s", r.URL.Path)
+					}
+					form, err := r.MultipartReader()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					var fields []string
+					for part, err := form.NextPart(); err == nil; part, err = form.NextPart() {
+						fields = append(fields, part.FormName())
+					}
+					// Parakeet TDT detects the language; none is sent.
+					if !slices.Equal(fields, []string{"file", "response_format"}) {
+						t.Errorf("form fields %q, want audio without a language", fields)
+					}
+					_, _ = io.WriteString(w, `{"text":" Bonjour. "}`)
+				}))
+				t.Cleanup(srv.Close)
+				c, err := nemospeech.New(srv.Client(), srv.URL, nemospeech.ParakeetTDT)
+				if err != nil {
+					t.Fatal(err)
+				}
+				s, sink, _ := newLiveTestSession(t, newLiveASR(c, string(nemospeech.ParakeetTDT)), "fr")
+				startSpeech(t, s)
+				endSpeech(t, s)
+				waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "Bonjour.", 1)
+				if err := s.turns.Wait(); err != nil {
+					t.Fatal(err)
+				}
+				if drafts := liveTexts(t, sink, voicev2.MessageKindTranscriptDraft); len(drafts) != 0 {
+					t.Errorf("final-only session published drafts %q", drafts)
+				}
+			})
 		})
 		t.Run("gemini", func(t *testing.T) {
 			t.Parallel()

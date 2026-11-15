@@ -218,6 +218,43 @@ func (s *interruptibleSpeech) synthesize(ctx context.Context, _, _ string) iter.
 	}
 }
 
+func TestNemoSpeechEndpoint(t *testing.T) {
+	t.Run("managed server starts when a session selects it", func(t *testing.T) {
+		// Without a user cache directory, a managed start fails before it
+		// downloads anything, which makes each attempt observable offline.
+		for _, name := range []string{"HOME", "XDG_CACHE_HOME", "LocalAppData"} {
+			t.Setenv(name, "")
+		}
+		p := newLocalStackPool(testRuntime)
+		p.recognition = []voicegateway.ASRConfig{{ID: "parakeet", Engine: voicegateway.ASREngineNemoSpeech, Model: "parakeet-tdt"}}
+		b := p.llmBackend(poolTestConfig("llm").LLM)
+		t.Cleanup(func() {
+			if err := b.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		text, err := b.newTextSession(t.Context(), "text", &captureSink{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := text.acceptClientMessage(t.Context(), mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})); err != nil {
+			t.Fatalf("client speech session: %v", err)
+		}
+		if err := text.close(); err != nil {
+			t.Fatal(err)
+		}
+		s, err := b.connect(t.Context(), "audio", &captureSink{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.close() })
+		setup := voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, RecognitionModelID: "parakeet", Speech: &voicev2.SpeechConfig{Input: voicev2.SpeechLocationGateway, Output: voicev2.SpeechLocationClient}}
+		if err := s.acceptClientMessage(t.Context(), mustJSON(t, setup)); err == nil || !strings.Contains(err.Error(), "get user cache dir") {
+			t.Fatalf("selecting session = %v, want the managed NeMo-Speech.cpp start to fail on the cache directory", err)
+		}
+	})
+}
+
 func TestLocalStackChronologicalTransport(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{"text", "voice"} {

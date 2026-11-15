@@ -26,6 +26,7 @@ import (
 	"github.com/maruel/genai/providers/deepseek"
 	"github.com/maruel/genai/providers/openrouter"
 	"github.com/maruel/genai/scoreboard"
+	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/whistle"
 
 	"github.com/maruel/gomode/voicegateway"
@@ -2590,31 +2591,46 @@ func testLocalStackSessionLanguage(t *testing.T) {
 		t.Parallel()
 		t.Run("rejected at connect", func(t *testing.T) {
 			t.Parallel()
-			c, err := whistle.New(http.DefaultClient, "http://127.0.0.1:1", "")
+			whistleASR, err := whistle.New(http.DefaultClient, "http://127.0.0.1:1", "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			sink := &captureSink{}
-			runtime := &localStackRuntime{liveASR: newLiveASR(c, c.ModelID()), llm: echoLLM{}}
-			s := runtime.newSession(t.Context(), "language", sink, true)
-			t.Cleanup(func() { _ = s.close() })
-			if err := setup(t, s, "ja-JP"); err != nil {
+			parakeet, err := nemospeech.New(http.DefaultClient, "http://127.0.0.1:1", nemospeech.ParakeetCTC)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
-				t.Fatal(err)
-			}
-			waitForKind(t, sink, voicev2.MessageKindError)
-			var msg voicev2.Error
-			kinds := sink.kinds()
-			sink.mu.Lock()
-			raw := sink.msgs[slices.Index(kinds, voicev2.MessageKindError)]
-			sink.mu.Unlock()
-			if err := json.Unmarshal(raw, &msg); err != nil {
-				t.Fatal(err)
-			}
-			if msg.Message != "asr: Cactus-Compute/whistle does not support Japanese" || !msg.Recoverable {
-				t.Fatalf("client error %+v, want a recoverable error naming the model and language", msg)
+			for _, tc := range []struct {
+				provider   genai.Provider
+				lang, want string
+			}{
+				{whistleASR, "ja-JP", "asr: Cactus-Compute/whistle does not support Japanese"},
+				{parakeet, "fr-FR", "asr: parakeet-ctc does not support French"},
+			} {
+				t.Run(tc.provider.Name(), func(t *testing.T) {
+					t.Parallel()
+					sink := &captureSink{}
+					runtime := &localStackRuntime{liveASR: newLiveASR(tc.provider, tc.provider.ModelID()), llm: echoLLM{}}
+					s := runtime.newSession(t.Context(), "language", sink, true)
+					t.Cleanup(func() { _ = s.close() })
+					if err := setup(t, s, tc.lang); err != nil {
+						t.Fatal(err)
+					}
+					if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
+						t.Fatal(err)
+					}
+					waitForKind(t, sink, voicev2.MessageKindError)
+					var msg voicev2.Error
+					kinds := sink.kinds()
+					sink.mu.Lock()
+					raw := sink.msgs[slices.Index(kinds, voicev2.MessageKindError)]
+					sink.mu.Unlock()
+					if err := json.Unmarshal(raw, &msg); err != nil {
+						t.Fatal(err)
+					}
+					if msg.Message != tc.want || !msg.Recoverable {
+						t.Fatalf("client error %+v, want a recoverable %q", msg, tc.want)
+					}
+				})
 			}
 		})
 	})

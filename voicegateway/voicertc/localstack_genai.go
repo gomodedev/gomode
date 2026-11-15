@@ -22,6 +22,8 @@ import (
 
 	"github.com/maruel/genaipy/providers/kittentts"
 	"github.com/maruel/genaipy/providers/kittentts/kittenttssrv"
+	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/nemospeech/nemospeechsrv"
 	"github.com/maruel/genaipy/providers/whistle"
 	"github.com/maruel/genaipy/providers/whistle/whistlesrv"
 
@@ -112,6 +114,13 @@ func localStackModelsForConfigWithStarter(
 			}
 			asr.runtime = srv
 			liveASR = newLiveASR(c, c.ModelID())
+		case voicegateway.ASREngineNemoSpeech:
+			var err error
+			asr, err = nemoSpeechEndpoint(ctx, cfg.ASR.Remote, nemospeech.Model(cfg.ASR.Model))
+			if err != nil {
+				return localStackModels{}, errors.Join(err, llm.runtime.Close())
+			}
+			liveASR = newLiveASR(asr.provider, cfg.ASR.Model)
 		default:
 			var err error
 			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, start)
@@ -188,6 +197,66 @@ func localStackModelsForConfigWithStarter(
 		tts:     tts,
 		runtime: joinClosers(runtime, ttsRuntime),
 	}, nil
+}
+
+// nemoSpeechEndpoint recognizes with model on the NeMo-Speech.cpp server at
+// remote. Without remote, it installs the pinned NeMo-Speech.cpp release into
+// the gateway cache and starts a dedicated loopback server, which downloads the
+// model into NeMo-Speech.cpp's own cache ($NEMO_SPEECH_MODEL_DIR, else
+// $XDG_CACHE_HOME/nemo-speech/models); its runtime closes the server.
+//
+// Sessions are genai transcription sessions over nemospeech.Client. Nemotron
+// and Parakeet CTC stream the server's partials as drafts; Parakeet TDT buffers
+// the utterance until Commit and yields only the final transcript. The client
+// has no qualified scoreboard, so liveASR sends the session language: Nemotron
+// is forced to the closest of its 32 locales, the others detect the language,
+// and every model rejects a language it does not support at connect.
+//
+// Measured on 2026-11-15 with TestSmokeLiveASR on the managed NeMo-Speech.cpp
+// 0.3.0 Linux x86-64 CPU build with q8_0 models, in two runs: English and
+// French sentences from gemini-3.8-flash-lite-tts, paced at real time, in
+// English and French sessions. Each final transcript arrived 3.3 to 3.9 s
+// after the utterance started (3.5 to 6.3 s for parakeet-ctc).
+//
+//   - nemotron-3.5 streamed 14 to 17 drafts, the first after one or two
+//     words, and transcribed matching sessions' words exactly, without final
+//     punctuation. Forced to en-US, French speech stayed French without
+//     accents ("reserver"). Forced to fr-FR, English speech returned "" with
+//     no drafts in one run and the exact English words in the other.
+//   - nemotron-en streamed 15 drafts and transcribed English words exactly;
+//     French speech in an English session returned "" in both runs.
+//   - parakeet-ctc streamed 4 drafts and transcribed English words exactly,
+//     lowercase without punctuation; French speech in an English session
+//     became different English-sounding fragments in each run ("thevoutre
+//     reserv in table poreaux soir", "j wouldre reser vent table or do as
+//     war").
+//   - parakeet-tdt yielded no drafts and transcribed each sentence exactly in
+//     its spoken language, with punctuation, in either session.
+//   - French sessions with nemotron-en or parakeet-ctc failed each utterance
+//     with "<model> does not support French".
+func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Model) (localStackEndpoint, error) {
+	var runtime io.Closer
+	if remote == "" {
+		cacheBase, err := os.UserCacheDir()
+		if err != nil {
+			return localStackEndpoint{}, fmt.Errorf("get user cache dir: %w", err)
+		}
+		exe, err := nemospeechsrv.Download(ctx, filepath.Join(cacheBase, "gomode", "nemo-speech"), "")
+		if err != nil {
+			return localStackEndpoint{}, fmt.Errorf("install NeMo-Speech.cpp: %w", err)
+		}
+		slog.InfoContext(ctx, "voicertc: starting managed NeMo-Speech.cpp", "model", model, "version", nemospeechsrv.Version)
+		srv, err := nemospeechsrv.New(ctx, exe, model)
+		if err != nil {
+			return localStackEndpoint{}, fmt.Errorf("start managed NeMo-Speech.cpp: %w", err)
+		}
+		remote, runtime = srv.URL(), srv
+	}
+	c, err := nemospeech.New(http.DefaultClient, remote, model)
+	if err != nil {
+		return localStackEndpoint{}, errors.Join(err, joinClosers(runtime).Close())
+	}
+	return localStackEndpoint{provider: c, runtime: joinClosers(c, runtime)}, nil
 }
 
 // resolveLocalStackEndpoint wires one local stack adapter to its configured

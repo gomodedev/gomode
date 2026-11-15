@@ -16,6 +16,7 @@ package voicertc
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -470,22 +471,20 @@ func smokeGatewayCall(ctx context.Context, method, url, token string, in, out an
 // isolateSmokeHost gives the test its own home, cache, configuration, data,
 // and state directories. Managed runtimes, uv, and the gateway then never read
 // or write host files such as the voice gateway configuration or runtime caches.
-// Only the Hugging Face cache stays shared, through HF_HOME, so runs reuse
-// multi-gigabyte model downloads.
+// Only the Hugging Face and NeMo-Speech.cpp model caches stay shared, through
+// HF_HOME and NEMO_SPEECH_MODEL_DIR, so runs reuse multi-gigabyte model
+// downloads.
 func isolateSmokeHost(t *testing.T) {
-	hfHome := os.Getenv("HF_HOME")
-	if hfHome == "" {
-		cache := os.Getenv("XDG_CACHE_HOME")
-		if cache == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				t.Fatal(err)
-			}
-			cache = filepath.Join(home, ".cache")
+	cache := os.Getenv("XDG_CACHE_HOME")
+	if cache == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
 		}
-		hfHome = filepath.Join(cache, "huggingface")
+		cache = filepath.Join(home, ".cache")
 	}
-	t.Setenv("HF_HOME", hfHome)
+	t.Setenv("HF_HOME", cmp.Or(os.Getenv("HF_HOME"), filepath.Join(cache, "huggingface")))
+	t.Setenv("NEMO_SPEECH_MODEL_DIR", cmp.Or(os.Getenv("NEMO_SPEECH_MODEL_DIR"), filepath.Join(cache, "nemo-speech", "models")))
 	root := t.TempDir()
 	for _, name := range []string{"HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
 		dir := filepath.Join(root, strings.ToLower(name))

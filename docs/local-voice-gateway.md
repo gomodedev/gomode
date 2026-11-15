@@ -25,7 +25,7 @@ for this stack.
 | Candidate | Route | Constraint |
 | --- | --- | --- |
 | Qwen3-ASR-0.6B | Managed through genai's llama.cpp provider; batch per utterance. | llama.cpp calls audio support experimental. Validate transcripts on a real Mac before replacing it. |
-| Parakeet TDT 0.6B v3 | genaipy's unreleased `nemospeech` runs a prebuilt [NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) release, Metal on Apple Silicon; no gateway engine uses it yet. | 600M parameters; batch only, while Nemotron 3.5 streams on the same runtime. |
+| Parakeet TDT 0.6B v3 | The `nemospeech` engine runs genaipy's prebuilt [NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) release, Metal on Apple Silicon. | 600M parameters; batch only, while Nemotron 3.5 streams on the same runtime. |
 | [Parakeet Redux](https://huggingface.co/moondream/parakeet-redux) | 207 MB 1.58-bit variant of v3. | Modest English/noise WER regression; wait for its fast path before depending on it. |
 | [Phonon-2](https://www.fermionresearch.com/research/phonon-2/) | English-only 2.1-bit Parakeet derivative; HTTP transcription route. | Each streaming partial re-decodes the buffered phrase, and a CPU fixture held about 1.5 GiB resident. |
 | Whistle | Shipped as an opt-in engine for completed clips. | The native runtime ships as a prebuilt binary with no source, which blocks auditing and source builds. |

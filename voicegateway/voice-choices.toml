@@ -253,6 +253,24 @@ model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
 context_size = 32768
 streaming = true
 
+# NVIDIA NeMo-Speech.cpp: the gateway installs its pinned release and starts a
+# server per model, which downloads the model into $NEMO_SPEECH_MODEL_DIR, else
+# ~/.cache/nemo-speech/models. Set remote to use a running server that loaded
+# the model. Models: parakeet-tdt (25 European languages, final transcript
+# only), nemotron-3.5 (32 locales, drafts while speaking), and the English-only
+# nemotron-en and parakeet-ctc (drafts while speaking).
+[[asr]]
+id = "parakeet-tdt"
+label = "Parakeet TDT"
+engine = "nemospeech"
+model = "parakeet-tdt"
+
+[[asr]]
+id = "nemotron"
+label = "Nemotron 3.5"
+engine = "nemospeech"
+model = "nemotron-3.5"
+
 [[asr]]
 id = "gemini-transcribe-live"
 label = "Gemini Live Transcribe"

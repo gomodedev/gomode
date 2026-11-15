@@ -1663,16 +1663,39 @@ voice = "Luna"
 
 func testValidateASR(t *testing.T) {
 	t.Parallel()
-	for _, cfg := range []ASRConfig{{Engine: ASREngineWhistle}, {Engine: ASREngineWhistle, Model: "/tmp/whistle.cact"}} {
-		if err := validateASR(cfg); err != nil {
-			t.Fatal(err)
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, cfg := range []ASRConfig{
+			{Engine: ASREngineWhistle},
+			{Engine: ASREngineWhistle, Model: "/tmp/whistle.cact"},
+			{Engine: ASREngineNemoSpeech, Model: "nemotron-3.5"},
+			{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080"},
+		} {
+			if err := validateASR(cfg); err != nil {
+				t.Errorf("%+v: %v", cfg, err)
+			}
 		}
-	}
-	for _, cfg := range []ASRConfig{{Engine: ASREngineWhistle, Remote: "http://localhost:8000"}, {Engine: ASREngineWhistle, Provider: "llamacpp"}} {
-		if err := validateASR(cfg); err == nil {
-			t.Fatal("accepted incompatible Whistle config")
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			cfg  ASRConfig
+			want string
+		}{
+			{ASRConfig{Engine: ASREngineWhistle, Remote: "http://localhost:8000"}, "provider and remote must be empty"},
+			{ASRConfig{Engine: ASREngineWhistle, Provider: "llamacpp"}, "provider and remote must be empty"},
+			{ASRConfig{Engine: ASREngineNemoSpeech}, `voice.asr.model "" is not a NeMo-Speech model`},
+			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "nvidia/parakeet-tdt-0.6b-v3"}, "is not a NeMo-Speech model"},
+			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Provider: "llamacpp"}, "voice.asr.provider is only used with the genai engine"},
+			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080/v1"}, "voice.asr.remote must not contain a path"},
+			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", ContextSize: 32768}, "voice.asr.context_size requires a managed llama.cpp server"},
+			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "nemotron-3.5", Streaming: true}, "voice.asr.streaming requires"},
+		} {
+			if err := validateASR(tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%+v: %v, want %q", tc.cfg, err, tc.want)
+			}
 		}
-	}
+	})
 }
 
 func testResolvedConfigChoices(t *testing.T) {

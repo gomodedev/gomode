@@ -27,6 +27,7 @@ import (
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/openairesponses"
 	"github.com/maruel/genai/providers/openrouter"
+	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/maruel/gomode"
@@ -879,7 +880,8 @@ func (c *PipelineConfig) validate() error {
 
 // ASRConfig configures a speech-to-text adapter.
 //
-// Provider and Remote are used only by the genai engine.
+// Provider is used only by the genai engine, and Remote only by the genai and
+// nemospeech engines.
 type ASRConfig struct {
 	ID    string `toml:"id"`
 	Label string `toml:"label"`
@@ -907,6 +909,13 @@ const (
 	// Model optionally names local .cact weights; empty downloads the dedicated
 	// Whistle model. Provider and Remote must be empty.
 	ASREngineWhistle ASREngine = "whistle"
+	// ASREngineNemoSpeech runs NVIDIA NeMo-Speech.cpp. Model is required and
+	// names a nemospeech.Model: nemotron-3.5, nemotron-en, parakeet-ctc or
+	// parakeet-tdt. Without Remote, the gateway installs the pinned release and
+	// starts a dedicated server, which downloads the model into NeMo-Speech.cpp's
+	// own cache; Remote selects an operator-owned server that loaded Model.
+	// Provider must be empty.
+	ASREngineNemoSpeech ASREngine = "nemospeech"
 )
 
 // TTSConfig selects a speech synthesis engine.
@@ -958,6 +967,16 @@ func validateASREngine(c ASRConfig) error {
 			return errors.New("voice.asr.whistle is managed locally; provider and remote must be empty")
 		}
 		return nil
+	case ASREngineNemoSpeech:
+		if c.Provider != "" {
+			return errors.New("voice.asr.provider is only used with the genai engine")
+		}
+		switch nemospeech.Model(c.Model) {
+		case nemospeech.NemotronASR, nemospeech.NemotronASREnglish, nemospeech.ParakeetCTC, nemospeech.ParakeetTDT:
+		default:
+			return fmt.Errorf("voice.asr.model %q is not a NeMo-Speech model: use nemotron-3.5, nemotron-en, parakeet-ctc or parakeet-tdt", c.Model)
+		}
+		return validateURL("voice.asr.remote", c.Remote, false)
 	default:
 		return fmt.Errorf("voice.asr.engine %q is not supported", c.Engine)
 	}
