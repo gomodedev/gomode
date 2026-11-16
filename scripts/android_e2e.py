@@ -154,7 +154,7 @@ def require_emulator(adb: str, serial: str) -> None:
         raise RuntimeError("Android tests require an emulator without a secure credential; device was not changed")
 
 
-def prepare_apks(adb: str, serial: str, telecom: bool) -> None:
+def prepare_apks(adb: str, serial: str, telecom: bool, verbose: bool) -> None:
     """Build before mutation; install each APK independently and retain completed installs on failure for retry."""
     sdk_script = pathlib.Path(__file__).with_name("android_sdk.py")
     subprocess.run([sys.executable, str(sdk_script), "check"], check=True)
@@ -164,7 +164,8 @@ def prepare_apks(adb: str, serial: str, telecom: bool) -> None:
     gradle_env = {**os.environ, "ANDROID_HOME": sdk[1], "ANDROID_SDK_ROOT": sdk[1], "ANDROID_SERIAL": serial}
     modules = ["gomode", "car-dial-fixture"] if telecom else ["gomode"]
     tasks = [f":{module}:{task}" for module in modules for task in ("assembleDebug", "assembleDebugAndroidTest")]
-    subprocess.run(["./gradlew", *tasks, "--quiet"], cwd=ROOT / "android", env=gradle_env, check=True)
+    log = "--console=plain" if verbose else "--quiet"
+    subprocess.run(["./gradlew", *tasks, log], cwd=ROOT / "android", env=gradle_env, check=True)
     # Release the build heap before WebView/voice/Telecom launch their processes.
     subprocess.run(["./gradlew", "--stop"], cwd=ROOT / "android", env=gradle_env, check=True)
     for module in modules:
@@ -441,7 +442,7 @@ def run_capture_tests(port: int, arguments: dict[str, str], serial: str) -> int:
     """Build and run explicit documentation captures on their hosted fixture."""
     adb = adb_path()
     RESULTS.mkdir(parents=True, exist_ok=True)
-    prepare_apks(adb, serial, False)
+    prepare_apks(adb, serial, False, False)
     with forward_ports(adb, serial, [port]):
         result = run_suite(
             adb, serial, "captures", APP_RUNNER, {"baseUrl": f"http://localhost:{port}", **arguments}, False
@@ -463,6 +464,7 @@ def main() -> int:
         help="focus a class/method (app unless --module telecom)",
     )
     parser.add_argument("--ci", action="store_true", help="skip @LocalEmulatorOnly variants to fit slower CI runners")
+    parser.add_argument("--verbose", action="store_true", help="log every Gradle task and its outcome")
     args = parser.parse_args()
     module = args.module or ("app" if args.test_class else None)
     adb = adb_path()
@@ -477,7 +479,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, exit_on_signal)
     RESULTS.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    prepare_apks(adb, serial, module != "app")
+    prepare_apks(adb, serial, module != "app", args.verbose)
     selection = {"class": args.test_class} if args.test_class else {}
     app_excluded = [*EXCLUDED, APP_LOCAL_ONLY] if args.ci else EXCLUDED
     telecom_excluded = {"notAnnotation": TELECOM_LOCAL_ONLY} if args.ci else {}

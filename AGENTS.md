@@ -30,6 +30,9 @@ Automatic Android checks in `fix`, `verify`, and `test` compare against upstream
 locally or `ANDROID_CHECK_BASE` when supplied. Without a usable base they run
 unconditionally. The platform-neutral CI job sets `ANDROID_CHECKS=false` because
 the dedicated Android job runs the explicit checks.
+Gradle runs with `--quiet`. `ANDROID_VERBOSE=true` makes Gradle in `fix`,
+`verify`, `test`, `build`, and the `android-*` targets log each task and its
+outcome; set it for logs kept as gate evidence.
 
 Mandatory: Run `make git-hooks` to install git hooks before making any change.
 

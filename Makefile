@@ -20,6 +20,19 @@ ANDROID_TEST_TASKS := \
 	:gomode:createDebugUnitTestCoverageReport :halo-sdk:createDebugUnitTestCoverageReport \
 	:car-dial-fixture:assembleDebug :car-dial-fixture:assembleDebugAndroidTest
 
+# ANDROID_VERBOSE=true replaces Gradle's --quiet with a plain log of every task
+# and its outcome, so gate logs show which Android checks ran.
+ANDROID_VERBOSE ?= false
+ifeq ($(ANDROID_VERBOSE),true)
+GRADLE_LOG_ARGS := --console=plain
+E2E_LOG_ARGS := --verbose
+else ifeq ($(ANDROID_VERBOSE),false)
+GRADLE_LOG_ARGS := --quiet
+E2E_LOG_ARGS :=
+else
+$(error ANDROID_VERBOSE must be true or false)
+endif
+
 # Keep Java processes scoped to each build, including Gradle launched by Python helpers.
 # Compile Kotlin inside Gradle's single-use JVM so it cannot leave a compiler daemon.
 export GRADLE_OPTS := $(GRADLE_OPTS) -Dorg.gradle.daemon=false -Dorg.gradle.project.kotlin.compiler.execution.strategy=in-process
@@ -47,6 +60,8 @@ help:
 	@printf '  %-27s - %s\n' 'make screenshots-update' 'Capture and publish repeatable native Android scenes'
 	@printf '  %-27s - %s\n' 'make git-hooks' 'Install versioned Git hooks'
 	@printf '  %-27s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
+	@echo ''
+	@echo 'Set ANDROID_VERBOSE=true to log each Gradle task and its outcome.'
 
 fix: node_modules/.modules.yaml
 	@go run ./internal/cmd/gen-sdk
@@ -59,7 +74,7 @@ fix: node_modules/.modules.yaml
 	@uv run --locked ruff check --quiet --fix scripts
 	@uv run --locked ruff format scripts >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
-	@./scripts/android-checks.sh :gomode:ktlintFormat :halo-sdk:ktlintFormat :car-dial-fixture:ktlintFormat --quiet
+	@./scripts/android-checks.sh :gomode:ktlintFormat :halo-sdk:ktlintFormat :car-dial-fixture:ktlintFormat $(GRADLE_LOG_ARGS)
 	@pnpm exec node scripts/build_frontend.mjs --write
 	@uv run --locked python scripts/update_agents_file_index.py
 
@@ -75,7 +90,7 @@ verify: node_modules/.modules.yaml
 		'uv run --locked ruff check --quiet scripts && uv run --locked ruff format --check --quiet scripts && uv run --locked python scripts/android_paths.py >/dev/null && uv run --locked python scripts/generate_thinking_score.py --check' \
 		'files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files' \
 		'uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/update_agents_file_index.py --check && git diff --check' \
-		'./scripts/android-checks.sh $(ANDROID_LINT_TASKS) --quiet'
+		'./scripts/android-checks.sh $(ANDROID_LINT_TASKS) $(GRADLE_LOG_ARGS)'
 
 git-hooks:
 	@./scripts/install-git-hooks.sh
@@ -88,7 +103,7 @@ test: node_modules/.modules.yaml
 		'go test ./...' \
 		'pnpm exec node --test --test-reporter=./scripts/quiet-test-reporter.mjs scripts/browser_integration.test.mjs scripts/build_frontend.test.mjs scripts/css_module_types.test.mjs scripts/voice_preview.test.mjs' \
 		'NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./web/tests/setup-dom.ts "frontend/src/**/*.test.tsx" "web/src/**/*.test.ts" "web/src/**/*.test.tsx"'
-	@./scripts/android-checks.sh $(ANDROID_TEST_TASKS) --quiet
+	@./scripts/android-checks.sh $(ANDROID_TEST_TASKS) $(GRADLE_LOG_ARGS)
 
 frontend-build: node_modules/.modules.yaml
 	@pnpm exec node scripts/css_module_types.mjs --source-path web/src --write
@@ -98,7 +113,7 @@ frontend-build: node_modules/.modules.yaml
 build: android-sdk node_modules/.modules.yaml frontend-build
 	@pnpm exec node scripts/css_module_types.mjs --source-path web/src
 	@go build ./...
-	@cd ./android && ./gradlew :gomode:assembleDebug :halo-sdk:assembleDebug :gomode-sdk:assemble :mcp-sdk:assemble :oauth-sdk:assemble :voicegateway-sdk:assemble --quiet
+	@cd ./android && ./gradlew :gomode:assembleDebug :halo-sdk:assembleDebug :gomode-sdk:assemble :mcp-sdk:assemble :oauth-sdk:assemble :voicegateway-sdk:assemble $(GRADLE_LOG_ARGS)
 
 # Benchmarks exercise the Go request paths; the browser package has no benchmark suite.
 benchmark:
@@ -116,10 +131,10 @@ upgrade:
 	@cd ./android && ./gradlew --no-daemon dependencyUpdates -Drevision=release
 
 android-lint: android-sdk
-	@cd ./android && ./gradlew $(ANDROID_LINT_TASKS) --quiet
+	@cd ./android && ./gradlew $(ANDROID_LINT_TASKS) $(GRADLE_LOG_ARGS)
 
 android-test: android-sdk
-	@cd ./android && ./gradlew $(ANDROID_TEST_TASKS) --quiet
+	@cd ./android && ./gradlew $(ANDROID_TEST_TASKS) $(GRADLE_LOG_ARGS)
 
 # Installs the Android SDK packages required by the app build.
 android-sdk:
@@ -135,18 +150,18 @@ android-stop-emulator:
 
 # Builds, installs, and launches the app on a connected device.
 android-push: android-sdk
-	@cd ./android && ./gradlew :gomode:assembleDebug --quiet
+	@cd ./android && ./gradlew :gomode:assembleDebug $(GRADLE_LOG_ARGS)
 	@uv run --locked python scripts/android_push.py
 
 # Slow: runs all model-free app and independent Telecom tests on an emulator.
 android-e2e:
 	@uv run --locked python scripts/android_start_emulator.py --auto-reuse
-	@uv run --locked python scripts/android_e2e.py
+	@uv run --locked python scripts/android_e2e.py $(E2E_LOG_ARGS)
 
 # Slow: runs the CI subset of model-free emulator tests, one case per mechanism.
 android-e2e-ci:
 	@uv run --locked python scripts/android_start_emulator.py --auto-reuse
-	@uv run --locked python scripts/android_e2e.py --ci
+	@uv run --locked python scripts/android_e2e.py --ci $(E2E_LOG_ARGS)
 
 # Slow: runs the real app on the emulator twice, requires matching passes, and
 # publishes lossless WebP files.
