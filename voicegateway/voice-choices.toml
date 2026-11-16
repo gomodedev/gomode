@@ -218,7 +218,7 @@ model = "unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q4_K_XL"
 context_size = 131072
 effort = "low"
 
-# Reusable ASR/LLM/TTS stages. A fully local stack needs uv on the gateway PATH.
+# Reusable ASR/LLM/TTS stages.
 # Define each stage once and compose named choices with [[voice]].
 # Each named LLM can use independently selected gateway or browser speech.
 [[llm]]
