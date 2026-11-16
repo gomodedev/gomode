@@ -71,16 +71,14 @@ func TestSmokeLiveASR(t *testing.T) {
 		// mismatched models: the session language is forced on them, which
 		// degrades other speech, or they transcribe English only.
 		mismatched bool
-		// englishOnly models fail each utterance of a French session at connect.
-		englishOnly bool
 	}{
 		{model: "gemini-3.5-transcribe-live", endpoint: resolve("gemini", "gemini-3.5-transcribe-live")},
 		{model: "gpt-live-transcribe", endpoint: resolve("openai", "gpt-live-transcribe")},
 		{model: "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M", endpoint: resolve("llamacpp", "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M")},
 		{model: "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M", endpoint: resolve("llamacpp", "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M")},
 		{model: string(nemospeech.NemotronASR), endpoint: nemo(nemospeech.NemotronASR), mismatched: true},
-		{model: string(nemospeech.NemotronASREnglish), endpoint: nemo(nemospeech.NemotronASREnglish), mismatched: true, englishOnly: true},
-		{model: string(nemospeech.ParakeetCTC), endpoint: nemo(nemospeech.ParakeetCTC), mismatched: true, englishOnly: true},
+		{model: string(nemospeech.NemotronASREnglish), endpoint: nemo(nemospeech.NemotronASREnglish), mismatched: true},
+		{model: string(nemospeech.ParakeetCTC), endpoint: nemo(nemospeech.ParakeetCTC), mismatched: true},
 		{model: string(nemospeech.ParakeetTDT), endpoint: nemo(nemospeech.ParakeetTDT), finalOnly: true},
 	} {
 		t.Run(row.model, func(t *testing.T) {
@@ -113,13 +111,6 @@ func TestSmokeLiveASR(t *testing.T) {
 				t.Run(tc.speech+" speech in "+tc.session, func(t *testing.T) {
 					start := time.Now()
 					drafts, final, failed := smokeLiveUtterance(t, a, tc.session, heard(speech[tc.speech]))
-					if row.englishOnly && tc.session == "fr" {
-						if want := "asr: " + row.model + " does not support French"; failed != want {
-							t.Fatalf("utterance error %q, want %q", failed, want)
-						}
-						t.Logf("%s speech, %s session: rejected at connect: %s", tc.speech, tc.session, failed)
-						return
-					}
 					if failed != "" {
 						t.Fatalf("utterance failed: %s", failed)
 					}

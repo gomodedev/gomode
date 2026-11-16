@@ -68,9 +68,6 @@ data and authorization policy stay in the hosts.
   before claiming that mute-once ends with audible playback.
 - Preserve uncommitted service URL drafts when calls or notification navigation leave Settings.
 - mddb workspace search stays in mddb's `docs/PLAN_MDDB.md`.
-- Whistle's and NeMo-Speech's languages live only in genaipy, so an
-  unsupported language fails each utterance instead of session setup; gomode
-  repeats NeMo-Speech's model set.
 - Concurrent first sessions run `nemospeechsrv.Download` into the same cache
   unserialized. The NeMo engine has no GPU backend setting.
 - The local-stack pool keeps handing out a stack whose managed worker crashed

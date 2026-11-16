@@ -12,6 +12,7 @@ import (
 	"iter"
 	"log/slog"
 	"math"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -67,8 +68,12 @@ func newUnsupportedLanguageError(model, lang string) *unsupportedLanguageError {
 }
 
 // modelRepository returns the Hugging Face repository of an "Author/Repo/File"
-// or "Author/Repo:Quant" model, and any other model unchanged.
+// or "Author/Repo:Quant" model, the file name of an absolute local path, and
+// any other model unchanged.
 func modelRepository(model string) string {
+	if filepath.IsAbs(model) {
+		return filepath.Base(model)
+	}
 	if parts := strings.SplitN(model, "/", 3); len(parts) == 3 {
 		return parts[0] + "/" + parts[1]
 	}

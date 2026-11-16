@@ -14,6 +14,8 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/scoreboard"
+	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/whistle"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/maruel/gomode/voicegateway"
@@ -49,10 +51,10 @@ type liveASR struct {
 	// declaration. A managed llama.cpp provider reports no ModelID.
 	model string
 	// languages are the ISO 639 base languages the model accepts at
-	// session.setup; nil accepts any. With inputLanguage, the provider then
-	// rejects an unsupported language at connect. Without it, as on llama.cpp,
-	// the model detects the language and nothing checks it, so a llama.cpp
-	// live model is checked only through its liveASRLanguages row.
+	// session.setup; nil accepts any. With inputLanguage, a provider without
+	// a declaration rejects an unsupported language at connect. Without it, as
+	// on llama.cpp, the model detects the language and nothing checks it, so a
+	// llama.cpp live model is checked only through its liveASRLanguages row.
 	languages []string
 	// inputLanguage sends the session language as
 	// genai.RealtimeOptionAudio.InputLanguage.
@@ -73,8 +75,7 @@ type liveASR struct {
 // types, and its Voxtral Realtime row records it. A connect rejection cannot
 // decide instead, since Whistle and the OpenAI and Mistral clients use the same
 // rejection for one unsupported language. A provider without a qualified
-// transcription session, such as Whistle, receives the language; its connect
-// rejection then names an unsupported one.
+// transcription session, such as Whistle, receives the language.
 //
 // The rate comes from voicegateway.TranscriptionSampleRate. A provider without
 // a qualified transcription session, such as Whistle or NeMo-Speech, receives
@@ -89,18 +90,26 @@ func newLiveASR(p genai.Provider, model string) *liveASR {
 	if rate == 0 {
 		rate = micSampleRate
 	}
-	return &liveASR{provider: p, model: model, languages: liveASRLanguages(model), inputLanguage: !declined, rate: rate}
+	return &liveASR{provider: p, model: model, languages: liveASRLanguages(p, model), inputLanguage: !declined, rate: rate}
 }
 
-// liveASRLanguages declares the session languages of live models that receive
-// none, by Hugging Face repository. nil accepts any language: an unlisted
-// llama.cpp model is treated as detecting every language.
+// liveASRLanguages declares the session languages of model on p. Whistle and
+// NeMo-Speech export theirs. llama.cpp models, which receive none, are declared
+// by Hugging Face repository. nil accepts any language: an unlisted llama.cpp
+// model is treated as detecting every language, and other providers reject an
+// unsupported one at connect.
 //
 // Voxtral Realtime detects the 13 languages its model card lists
 // (https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602).
 // LFM3-Audio translates non-English speech into English on this path, as
 // measured on liveASR, so it supports English only.
-func liveASRLanguages(model string) []string {
+func liveASRLanguages(p genai.Provider, model string) []string {
+	switch c := p.(type) {
+	case *whistle.Client:
+		return whistle.Languages
+	case *nemospeech.Client:
+		return nemospeech.Model(c.ModelID()).Languages()
+	}
 	switch modelRepository(model) {
 	case "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF":
 		return []string{"ar", "de", "en", "es", "fr", "hi", "it", "ja", "ko", "nl", "pt", "ru", "zh"}

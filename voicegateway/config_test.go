@@ -25,6 +25,7 @@ import (
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/openairesponses"
 	"github.com/maruel/genai/providers/openrouter"
+	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -1688,12 +1689,15 @@ func testValidateASR(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		for _, cfg := range []ASRConfig{
-			{Engine: ASREngineWhistle},
-			{Engine: ASREngineWhistle, Model: "/tmp/whistle.cact"},
-			{Engine: ASREngineNemoSpeech, Model: "nemotron-3.5"},
-			{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080"},
-		} {
+		cfgs := make([]ASRConfig, 0, 3+len(nemospeech.Models))
+		cfgs = append(cfgs,
+			ASRConfig{Engine: ASREngineWhistle},
+			ASRConfig{Engine: ASREngineWhistle, Model: "/tmp/whistle.cact"},
+			ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080"})
+		for _, m := range nemospeech.Models {
+			cfgs = append(cfgs, ASRConfig{Engine: ASREngineNemoSpeech, Model: string(m)})
+		}
+		for _, cfg := range cfgs {
 			if err := validateASR(cfg); err != nil {
 				t.Errorf("%+v: %v", cfg, err)
 			}

@@ -275,7 +275,7 @@ func TestLiveASR(t *testing.T) {
 				{"ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M", "fr"},
 				{"LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M", "en"},
 				// Without a declaration, the provider rejects at connect.
-				{"Cactus-Compute/whistle", "ja"},
+				{"gpt-live-transcribe", "ja"},
 			} {
 				if err := newLiveASR(p, tc.model).checkLanguage(tc.lang); err != nil {
 					t.Errorf("%s %s: %v", tc.model, tc.lang, err)

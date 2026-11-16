@@ -92,13 +92,12 @@ func localStackModelsForConfigWithStarter(
 			// telemetry. Needle downloads a prebuilt native engine and weights
 			// into its own cache, rather than building the runtime from source.
 			// Its sessions buffer the utterance until Commit and yield only the
-			// final transcript, with automatic language detection; the provider
-			// rejects a session language outside the languages it declares when
-			// an utterance connects. The worker normalizes 16 kHz PCM to float
-			// samples, serializes native calls, and splits utterances into
-			// consecutive 30-second windows; words crossing a window boundary
-			// may lose accuracy. Cancellation preserves the model for subsequent
-			// requests.
+			// final transcript, with automatic language detection; session.setup
+			// rejects a language outside whistle.Languages. The worker
+			// normalizes 16 kHz PCM to float samples, serializes native calls,
+			// and splits utterances into consecutive 30-second windows; words
+			// crossing a window boundary may lose accuracy. Cancellation
+			// preserves the model for subsequent requests.
 			reportStartupStage(ctx, "Server is starting Whistle "+cfg.ASR.Model+"…")
 			srv, err := whistlesrv.New(ctx, cfg.ASR.Model)
 			if err != nil {
@@ -178,8 +177,8 @@ func localStackModelsForConfigWithStarter(
 // and Parakeet CTC stream the server's partials as drafts; Parakeet TDT buffers
 // the utterance until Commit and yields only the final transcript. The client
 // has no qualified scoreboard, so liveASR sends the session language: Nemotron
-// is forced to the closest of its 32 locales, the others detect the language,
-// and every model rejects a language it does not support at connect.
+// is forced to the closest of its 32 locales and the others detect the
+// language. session.setup rejects a language outside nemospeech.Model.Languages.
 //
 // Measured on 2026-11-15 with TestSmokeLiveASR on the managed NeMo-Speech.cpp
 // 0.3.0 Linux x86-64 CPU build with q8_0 models, in two runs: English and
@@ -201,8 +200,6 @@ func localStackModelsForConfigWithStarter(
 //     war").
 //   - parakeet-tdt yielded no drafts and transcribed each sentence exactly in
 //     its spoken language, with punctuation, in either session.
-//   - French sessions with nemotron-en or parakeet-ctc failed each utterance
-//     with "<model> does not support French".
 func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Model) (localStackEndpoint, error) {
 	var runtime io.Closer
 	if remote == "" {

@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/deepseek"
+	"github.com/maruel/genai/providers/mistral"
 	"github.com/maruel/genai/providers/openrouter"
 	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/nemospeech"
@@ -2519,46 +2521,34 @@ func testLocalStackSessionLanguage(t *testing.T) {
 		t.Parallel()
 		t.Run("rejected at connect", func(t *testing.T) {
 			t.Parallel()
-			whistleASR, err := whistle.New(http.DefaultClient, "http://127.0.0.1:1", "")
+			// Mistral declares no languages and rejects one without an
+			// ISO 639-1 code before dialing.
+			p, err := mistral.New(t.Context(), genai.ProviderOptionAPIKey("test-key"), genai.ProviderOptionModel("voxtral-mini-transcribe-realtime-3"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			parakeet, err := nemospeech.New(http.DefaultClient, "http://127.0.0.1:1", nemospeech.ParakeetCTC)
-			if err != nil {
+			sink := &captureSink{}
+			runtime := &localStackRuntime{liveASR: newLiveASR(p, p.ModelID()), llm: echoLLM{}}
+			s := runtime.newSession(t.Context(), "language", sink, true)
+			t.Cleanup(func() { _ = s.close() })
+			if err := setup(t, s, "fil-PH"); err != nil {
 				t.Fatal(err)
 			}
-			for _, tc := range []struct {
-				provider   genai.Provider
-				lang, want string
-			}{
-				{whistleASR, "ja-JP", "asr: Cactus-Compute/whistle does not support Japanese"},
-				{parakeet, "fr-FR", "asr: parakeet-ctc does not support French"},
-			} {
-				t.Run(tc.provider.Name(), func(t *testing.T) {
-					t.Parallel()
-					sink := &captureSink{}
-					runtime := &localStackRuntime{liveASR: newLiveASR(tc.provider, tc.provider.ModelID()), llm: echoLLM{}}
-					s := runtime.newSession(t.Context(), "language", sink, true)
-					t.Cleanup(func() { _ = s.close() })
-					if err := setup(t, s, tc.lang); err != nil {
-						t.Fatal(err)
-					}
-					if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
-						t.Fatal(err)
-					}
-					waitForKind(t, sink, voicev2.MessageKindError)
-					var msg voicev2.Error
-					kinds := sink.kinds()
-					sink.mu.Lock()
-					raw := sink.msgs[slices.Index(kinds, voicev2.MessageKindError)]
-					sink.mu.Unlock()
-					if err := json.Unmarshal(raw, &msg); err != nil {
-						t.Fatal(err)
-					}
-					if msg.Message != tc.want || !msg.Recoverable {
-						t.Fatalf("client error %+v, want a recoverable %q", msg, tc.want)
-					}
-				})
+			if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
+				t.Fatal(err)
+			}
+			waitForKind(t, sink, voicev2.MessageKindError)
+			var msg voicev2.Error
+			kinds := sink.kinds()
+			sink.mu.Lock()
+			raw := sink.msgs[slices.Index(kinds, voicev2.MessageKindError)]
+			sink.mu.Unlock()
+			if err := json.Unmarshal(raw, &msg); err != nil {
+				t.Fatal(err)
+			}
+			const want = "asr: voxtral-mini-transcribe-realtime-3 does not support Filipino"
+			if msg.Message != want || !msg.Recoverable {
+				t.Fatalf("client error %+v, want a recoverable %q", msg, want)
 			}
 		})
 		t.Run("rejected at setup", func(t *testing.T) {
@@ -2568,17 +2558,37 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				t.Fatal(err)
 			}
 			qwen := &llamaTTSAdapter{model: "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF:Q8_0"}
+			whistleASR, err := whistle.New(http.DefaultClient, "http://127.0.0.1:1", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			localWhistle, err := whistle.New(http.DefaultClient, "http://127.0.0.1:1", filepath.Join(t.TempDir(), "whistle.cact"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			nemotronEN, err := nemospeech.New(http.DefaultClient, "http://127.0.0.1:1", nemospeech.NemotronASREnglish)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, tc := range []struct {
+				asr              genai.Provider
 				tts              ttsAdapter
 				tag, voice, want string
 			}{
-				{kitten, "fr-FR", "Luna", "KittenML/kitten-tts-2 voice Luna does not speak French"},
-				{kitten, "el-GR", "", "KittenML/kitten-tts-2 does not support Greek"},
-				{qwen, "el-GR", "", "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF does not support Greek"},
+				{nil, kitten, "fr-FR", "Luna", "KittenML/kitten-tts-2 voice Luna does not speak French"},
+				{nil, kitten, "el-GR", "", "KittenML/kitten-tts-2 does not support Greek"},
+				{nil, qwen, "el-GR", "", "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF does not support Greek"},
+				{whistleASR, nil, "ja-JP", "", "Cactus-Compute/whistle does not support Japanese"},
+				{localWhistle, nil, "ja-JP", "", "whistle.cact does not support Japanese"},
+				{nemotronEN, nil, "fr-FR", "", "nemotron-en does not support French"},
 			} {
 				t.Run(tc.want, func(t *testing.T) {
 					t.Parallel()
-					s := (&localStackRuntime{llm: echoLLM{}, tts: tc.tts}).newSession(t.Context(), "voice", &captureSink{}, false)
+					runtime := &localStackRuntime{llm: echoLLM{}, tts: tc.tts}
+					if tc.asr != nil {
+						runtime.liveASR = newLiveASR(tc.asr, tc.asr.ModelID())
+					}
+					s := runtime.newSession(t.Context(), "voice", &captureSink{}, false)
 					t.Cleanup(func() { _ = s.close() })
 					setup := voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: tc.voice, Language: tc.tag}}
 					if err := s.acceptClientMessage(t.Context(), mustJSON(t, setup)); err == nil || err.Error() != tc.want {

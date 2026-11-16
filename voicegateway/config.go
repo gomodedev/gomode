@@ -932,11 +932,10 @@ const (
 	// Whistle model. Provider and Remote must be empty.
 	ASREngineWhistle ASREngine = "whistle"
 	// ASREngineNemoSpeech runs NVIDIA NeMo-Speech.cpp. Model is required and
-	// names a nemospeech.Model: nemotron-3.5, nemotron-en, parakeet-ctc or
-	// parakeet-tdt. Without Remote, the gateway installs the pinned release and
-	// starts a dedicated server, which downloads the model into NeMo-Speech.cpp's
-	// own cache; Remote selects an operator-owned server that loaded Model.
-	// Provider must be empty.
+	// is one of nemospeech.Models. Without Remote, the gateway installs the
+	// pinned release and starts a dedicated server, which downloads the model
+	// into NeMo-Speech.cpp's own cache; Remote selects an operator-owned server
+	// that loaded Model. Provider must be empty.
 	ASREngineNemoSpeech ASREngine = "nemospeech"
 )
 
@@ -1054,10 +1053,8 @@ func validateASREngine(c ASRConfig) error {
 		if c.Provider != "" {
 			return errors.New("voice.asr.provider is only used with the genai engine")
 		}
-		switch nemospeech.Model(c.Model) {
-		case nemospeech.NemotronASR, nemospeech.NemotronASREnglish, nemospeech.ParakeetCTC, nemospeech.ParakeetTDT:
-		default:
-			return fmt.Errorf("voice.asr.model %q is not a NeMo-Speech model: use nemotron-3.5, nemotron-en, parakeet-ctc or parakeet-tdt", c.Model)
+		if !slices.Contains(nemospeech.Models, nemospeech.Model(c.Model)) {
+			return fmt.Errorf("voice.asr.model %q is not a NeMo-Speech model: use one of %q", c.Model, nemospeech.Models)
 		}
 		return validateURL("voice.asr.remote", c.Remote, false)
 	default:
