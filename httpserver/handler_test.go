@@ -20,7 +20,7 @@ import (
 func TestNewHandler(t *testing.T) {
 	t.Parallel()
 	t.Run("client metadata", func(t *testing.T) {
-		h, err := newGatewayHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := newGatewayHandler(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if got := httpserver.ClientIP(r.Context()); got != "192.0.2.10" {
 				t.Errorf("client context = %q", got)
 			}
@@ -28,19 +28,13 @@ func TestNewHandler(t *testing.T) {
 				t.Error("transport peer changed")
 			}
 		}), "", []string{"127.0.0.1/32"})
-		if err != nil {
-			t.Fatal(err)
-		}
 		r := httptest.NewRequestWithContext(t.Context(), "GET", "http://voice.example/", http.NoBody)
 		r.RemoteAddr = "127.0.0.1:123"
 		r.Header.Set("X-Forwarded-For", "192.0.2.10")
 		h.ServeHTTP(httptest.NewRecorder(), r)
 	})
 	t.Run("authority", func(t *testing.T) {
-		h, err := newGatewayHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), "https://Voice.Example:443/", []string{"127.0.0.1/32"})
-		if err != nil {
-			t.Fatal(err)
-		}
+		h := newGatewayHandler(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), "https://Voice.Example:443/", []string{"127.0.0.1/32"})
 		for _, tc := range []struct {
 			host   string
 			status int
@@ -58,11 +52,11 @@ func TestNewHandler(t *testing.T) {
 		if h, err := httpserver.NewHandler(http.NotFoundHandler(), httpserver.Options{}); err == nil || err.Error() != "logger is required" || h != nil {
 			t.Fatalf("nil logger: handler=%v, err=%v", h, err)
 		}
-		if _, err := newGatewayHandler(http.NotFoundHandler(), "https://user:secret@voice.example", nil); err == nil || strings.Contains(err.Error(), "secret") {
+		if _, err := httpserver.NewHostPolicy(httpserver.HostPolicyOptions{ExternalURL: "https://user:secret@voice.example"}); err == nil || strings.Contains(err.Error(), "secret") { //nolint:gosec // The fixture credential proves redaction.
 			t.Errorf("invalid origin error = %v", err)
 		}
 
-		if _, err := newGatewayHandler(http.NotFoundHandler(), "", []string{"127.0.0.1"}); err == nil {
+		if _, err := httpserver.ParseTrustedProxies([]string{"127.0.0.1"}); err == nil {
 			t.Error("accepted non-CIDR proxy")
 		}
 	})
@@ -177,17 +171,20 @@ func TestNewHandler(t *testing.T) {
 	})
 }
 
-func newGatewayHandler(next http.Handler, origin string, proxies []string) (http.Handler, error) {
+func newGatewayHandler(t *testing.T, next http.Handler, origin string, proxies []string) http.Handler {
 	prefixes, err := httpserver.ParseTrustedProxies(proxies)
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 	opts := httpserver.Options{Logger: slog.New(slog.DiscardHandler), TrustedProxies: prefixes}
 	if origin != "" {
-		opts.Hosts, err = httpserver.NewHostPolicy(httpserver.HostPolicyOptions{ExternalURL: origin})
-		if err != nil {
-			return nil, err
+		if opts.Hosts, err = httpserver.NewHostPolicy(httpserver.HostPolicyOptions{ExternalURL: origin}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	return httpserver.NewHandler(next, opts)
+	h, err := httpserver.NewHandler(next, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
 }

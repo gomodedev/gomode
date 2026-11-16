@@ -1238,7 +1238,8 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		br, err := newTestBridgeWithBackend(ctx, b, 0, t.TempDir())
+		// CloseAll closes b only once the bridge exists.
+		br, err := newBridgeWithBackendAndTimeout(ctx, b, 0, t.TempDir(), 5*time.Millisecond)
 		if err != nil {
 			t.Fatal(errors.Join(err, b.Close()))
 		}

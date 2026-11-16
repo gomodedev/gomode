@@ -37,8 +37,14 @@ import (
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
-func newTestBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort int, activityLogDir string) (*Bridge, error) {
-	return newBridgeWithBackendAndTimeout(ctx, backend, udpPort, activityLogDir, 5*time.Millisecond)
+// newTestBridge returns a bridge on an ephemeral UDP port that skips UPnP
+// discovery quickly.
+func newTestBridge(ctx context.Context, t *testing.T, backend backendConnector) *Bridge {
+	b, err := newBridgeWithBackendAndTimeout(ctx, backend, 0, t.TempDir(), 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 type blockingCloseSession struct {
@@ -387,10 +393,7 @@ func TestBackendConnector(t *testing.T) {
 	t.Run("NewBridgeWithBackend", func(t *testing.T) {
 		t.Parallel()
 		backend := &fakeBackendConnector{}
-		b, err := newTestBridgeWithBackend(t.Context(), backend, 0, t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
+		b := newTestBridge(t.Context(), t, backend)
 		b.CloseAll(t.Context())
 		if !backend.closed {
 			t.Fatal("backend was not closed by CloseAll")
@@ -469,10 +472,7 @@ func TestBrowserOpusDTX(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	t.Cleanup(cancel)
-	b, err := newTestBridgeWithBackend(ctx, &fakeBackendConnector{}, 0, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := newTestBridge(ctx, t, &fakeBackendConnector{})
 	t.Cleanup(func() { b.CloseAll(ctx) })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -759,10 +759,7 @@ func testBridgeChoiceRuntime(t *testing.T) {
 	second := &fakeBackendConnector{}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	t.Cleanup(cancel)
-	b, err := newTestBridgeWithBackend(ctx, first, 0, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := newTestBridge(ctx, t, first)
 	var firstID, secondID string
 	t.Cleanup(func() {
 		b.CloseAll(ctx)
@@ -810,10 +807,7 @@ type voiceRTCMessage struct {
 type voiceRTCOffer func(ctx context.Context, sdp string) (sdpAnswer, sessionID string, err error)
 
 func newVoiceRTCTestSession(ctx context.Context, t *testing.T, b backendConnector) *voiceRTCTestSession {
-	br, err := newTestBridgeWithBackend(ctx, b, 0, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	br := newTestBridge(ctx, t, b)
 	t.Cleanup(func() { br.CloseAll(ctx) })
 	return connectVoiceRTCClient(ctx, t, br.HandleOffer, &voicev2.SessionSetup{
 		Kind:  voicev2.MessageKindSessionSetup,
@@ -1401,10 +1395,7 @@ func TestBridge(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				b, err := newTestBridgeWithBackend(t.Context(), tc.backend, 0, t.TempDir())
-				if err != nil {
-					t.Fatal(err)
-				}
+				b := newTestBridge(t.Context(), t, tc.backend)
 				t.Cleanup(func() { b.CloseAll(t.Context()) })
 				first := b.VoiceChoices()
 				ch := first.Choices[0]
@@ -1447,10 +1438,7 @@ func TestBridge(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			t.Cleanup(cancel)
-			b, err := newTestBridgeWithBackend(ctx, &fakeBackendConnector{}, 0, t.TempDir())
-			if err != nil {
-				t.Fatal(err)
-			}
+			b := newTestBridge(ctx, t, &fakeBackendConnector{})
 			t.Cleanup(func() { b.CloseAll(ctx) })
 			for _, pt := range []webrtc.PayloadType{109, 111} {
 				m := &webrtc.MediaEngine{}

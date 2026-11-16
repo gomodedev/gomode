@@ -348,10 +348,7 @@ context_size = 32768`
 		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := loadResolvedConfig(path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		cfg := loadResolvedConfig(t, path)
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -385,10 +382,7 @@ llm = [
 			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := loadResolvedConfig(path)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadResolvedConfig(t, path)
 			if err := cfg.Validate(); err != nil {
 				t.Fatal(err)
 			}
@@ -434,10 +428,7 @@ tts = "speech"
 `), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := loadResolvedConfig(path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		cfg := loadResolvedConfig(t, path)
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -478,10 +469,7 @@ tts = "speech"
 					if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 						t.Fatal(err)
 					}
-					cfg, err := loadResolvedConfig(path)
-					if err != nil {
-						t.Fatal(err)
-					}
+					cfg := loadResolvedConfig(t, path)
 					if err := cfg.Validate(); err != nil {
 						t.Fatal(err)
 					}
@@ -534,16 +522,16 @@ engine = "kittentts"
 model = "KittenML/kitten-tts-2"
 voice = "Bella"
 `
-		load := func(t *testing.T, data string) (ResolvedConfig, error) {
-			path := filepath.Join(t.TempDir(), "config.toml")
-			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-				t.Fatal(err)
+		load := func(data string) (ResolvedConfig, error) {
+			cfg, err := parseConfig([]byte(data), "config.toml")
+			if err != nil {
+				return ResolvedConfig{}, err
 			}
-			return loadResolvedConfig(path)
+			return cfg.Resolve()
 		}
 		t.Run("declaration order", func(t *testing.T) {
 			t.Setenv("GOMODE_NAMED_STAGE_TEST_KEY", "test-key")
-			cfg, err := load(t, definitions+`[[asr]]
+			cfg, err := load(definitions + `[[asr]]
 id = "alternate"
 provider = "llamacpp"
 remote = "http://localhost:8082"
@@ -563,7 +551,7 @@ model = "alternate-recognition"`)
 			t.Setenv("GOMODE_NAMED_STAGE_TEST_KEY", "test-key")
 			loadLive := func(provider string) (ResolvedConfig, error) {
 				data := strings.Replace(definitions, `provider = "llamacpp"`, `provider = "`+provider+`"`, 1)
-				cfg, err := load(t, data+`[[voice]]
+				cfg, err := load(data + `[[voice]]
 id = "live-speech"
 label = "Live speech"
 asr = "recognition"
@@ -618,7 +606,7 @@ asr = "local_asr"
 llm = "local"
 tts = "local_tts"`
 			t.Run("valid", func(t *testing.T) {
-				cfg, err := load(t, managed)
+				cfg, err := load(managed)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -632,7 +620,7 @@ tts = "local_tts"`
 			})
 			t.Run("error", func(t *testing.T) {
 				remote := strings.Replace(definitions, `effort = "low"`, "effort = \"low\"\ncontext_size = 4096", 1)
-				if _, err := load(t, remote); err == nil || !strings.Contains(err.Error(), "chat.context_size requires a managed llama.cpp server") {
+				if _, err := load(remote); err == nil || !strings.Contains(err.Error(), "chat.context_size requires a managed llama.cpp server") {
 					t.Fatalf("remote context size: %v", err)
 				}
 				for _, tc := range []struct{ old, want string }{
@@ -640,11 +628,11 @@ tts = "local_tts"`
 					{"context_size = 8192\n", "voice.asr.context_size is required"},
 					{"context_size = 16384\n", "voice.tts.context_size is required"},
 				} {
-					if _, err := load(t, strings.Replace(managed, tc.old, "", 1)); err == nil || !strings.Contains(err.Error(), tc.want) {
+					if _, err := load(strings.Replace(managed, tc.old, "", 1)); err == nil || !strings.Contains(err.Error(), tc.want) {
 						t.Fatalf("%s: %v", tc.want, err)
 					}
 				}
-				if _, err := load(t, strings.Replace(managed, "context_size = 131072", "context_size = 262145", 1)); err == nil || !strings.Contains(err.Error(), "context_size must be between 512 and 262144") {
+				if _, err := load(strings.Replace(managed, "context_size = 131072", "context_size = 262145", 1)); err == nil || !strings.Contains(err.Error(), "context_size must be between 512 and 262144") {
 					t.Fatalf("oversized context: %v", err)
 				}
 				// recognition is a remote server and speech uses kittentts.
@@ -653,7 +641,7 @@ tts = "local_tts"`
 					{`engine = "kittentts"`, "voice.tts.context_size requires a managed llama.cpp server"},
 				} {
 					data := strings.Replace(definitions, tc.old, tc.old+"\ncontext_size = 4096", 1)
-					if _, err := load(t, data); err == nil || !strings.Contains(err.Error(), tc.want) {
+					if _, err := load(data); err == nil || !strings.Contains(err.Error(), tc.want) {
 						t.Fatalf("%s: %v", tc.want, err)
 					}
 				}
@@ -664,7 +652,7 @@ tts = "local_tts"`
 			data := strings.ReplaceAll(definitions, `engine = "kittentts"`, `provider = "llamacpp"
 context_size = 32768`)
 			data = strings.ReplaceAll(data, "voice = \"Luna\"\n", "")
-			cfg, err := load(t, data+`[[voice]]
+			cfg, err := load(data + `[[voice]]
 id = "provider-speech"
 label = "Provider speech"
 asr = "recognition"
@@ -697,7 +685,7 @@ asr = "recognition"
 llm = "reasoning"
 tts = "alternative"
 `
-			cfg, err := load(t, data)
+			cfg, err := load(data)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -718,7 +706,7 @@ tts = "alternative"
 			if !slices.Equal(labels, []string{"Client speech", "Gateway speech", "Alternative speech"}) {
 				t.Fatalf("choice order = %v", labels)
 			}
-			changed, err := load(t, strings.ReplaceAll(data, `model = "reasoning"`, `model = "different-model"`))
+			changed, err := load(strings.ReplaceAll(data, `model = "reasoning"`, `model = "different-model"`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -756,13 +744,13 @@ id = "voice"
 label = "Voice"`, `unknown llm ""`},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					if _, err := load(t, definitions+tc.data); err == nil || !strings.Contains(err.Error(), tc.want) {
+					if _, err := load(definitions + tc.data); err == nil || !strings.Contains(err.Error(), tc.want) {
 						t.Fatalf("load error = %v, want %q", err, tc.want)
 					}
 				})
 			}
 			t.Run("invalid stage", func(t *testing.T) {
-				_, err := load(t, strings.ReplaceAll(definitions, `engine = "kittentts"`, `engine = "unsupported"`)+`[[voice]]
+				_, err := load(strings.ReplaceAll(definitions, `engine = "kittentts"`, `engine = "unsupported"`) + `[[voice]]
 id = "voice"
 label = "Voice"
 asr = "recognition"
@@ -806,10 +794,7 @@ tts = "speech"
 		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := loadResolvedConfig(path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		cfg := loadResolvedConfig(t, path)
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -832,10 +817,7 @@ openrouter_sort = "latency"
 				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				cfg, err := loadResolvedConfig(path)
-				if err != nil {
-					t.Fatal(err)
-				}
+				cfg := loadResolvedConfig(t, path)
 				if err := cfg.Validate(); err != nil {
 					t.Fatal(err)
 				}
@@ -846,20 +828,13 @@ openrouter_sort = "latency"
 		}
 	})
 	t.Run("syntax error location", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "config.toml")
-		if err := os.WriteFile(path, []byte("[server]\nhttp = ':3479'\n[realtime]]\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		_, err := loadResolvedConfig(path)
-		if err == nil || !strings.HasPrefix(err.Error(), "parse "+path+":3:11: ") {
+		_, err := parseConfig([]byte("[server]\nhttp = ':3479'\n[realtime]]\n"), "config.toml")
+		if err == nil || !strings.HasPrefix(err.Error(), "parse config.toml:3:11: ") {
 			t.Fatalf("syntax error = %v", err)
 		}
 	})
 	t.Run("embedded choices", func(t *testing.T) {
-		cfg, err := loadResolvedConfig(ConfigFileName)
-		if err != nil {
-			t.Fatal(err)
-		}
+		cfg := loadResolvedConfig(t, ConfigFileName)
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -1140,10 +1115,7 @@ voice = "female"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadResolvedConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadResolvedConfig(t, path)
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -1600,10 +1572,7 @@ func testResolvedConfigAvailableAuthentication(t *testing.T) {
 			previousLogger := slog.Default()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(previousLogger) })
-			cfg, err := loadResolvedConfig(ConfigFileName)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadResolvedConfig(t, ConfigFileName)
 			var luna []LLMConfig
 			for _, choice := range cfg.LLM {
 				if choice.Provider == "openai" && choice.Model == "gpt-6-luna" {
@@ -1669,10 +1638,7 @@ voice = "Luna"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadResolvedConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadResolvedConfig(t, path)
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -1944,14 +1910,18 @@ func testStandaloneConfig() configFile {
 }
 
 // loadResolvedConfig parses and resolves the voice declarations in path.
-func loadResolvedConfig(path string) (ResolvedConfig, error) {
+func loadResolvedConfig(t *testing.T, path string) ResolvedConfig {
 	data, err := os.ReadFile(path) //nolint:gosec // Tests pass fixture paths they own.
 	if err != nil {
-		return ResolvedConfig{}, err
+		t.Fatal(err)
 	}
 	cfg, err := parseConfig(data, path)
 	if err != nil {
-		return ResolvedConfig{}, err
+		t.Fatal(err)
 	}
-	return cfg.Resolve()
+	out, err := cfg.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

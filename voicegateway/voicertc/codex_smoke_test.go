@@ -23,10 +23,7 @@ import (
 func TestSmokeCodexSubscriptionTextSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	t.Cleanup(cancel)
-	cfg, err := loadSmokeConfig("../../contrib/config.toml")
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadSmokeConfig(t, "../../contrib/config.toml")
 	var selected []voicegateway.LLMConfig
 	for _, choice := range cfg.LLM {
 		if choice.Provider == "openai" && choice.Auth == openairesponses.AuthCodex && choice.Model == "gpt-6-luna" {
@@ -143,10 +140,7 @@ func TestSmokeCodexSubscriptionTextSession(t *testing.T) {
 // TestSmokeChatTokenUsage checks real provider counts on the transport shared by
 // browser and Android speech, independently of the provider's text fragments.
 func TestSmokeChatTokenUsage(t *testing.T) {
-	cfg, err := loadSmokeConfig("../../contrib/config.toml")
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadSmokeConfig(t, "../../contrib/config.toml")
 	for _, choice := range cfg.LLM {
 		key := map[string]string{"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY", "xiaomi": "XIAOMI_API_KEY"}[choice.Provider]
 		if choice.Auth != "" || key == "" || os.Getenv(key) == "" {
@@ -201,10 +195,14 @@ func TestSmokeChatTokenUsage(t *testing.T) {
 	}
 }
 
-func loadSmokeConfig(path string) (voicegateway.ResolvedConfig, error) {
+func loadSmokeConfig(t *testing.T, path string) voicegateway.ResolvedConfig {
 	cfg, err := voicegateway.LoadConfig(path)
 	if err != nil {
-		return voicegateway.ResolvedConfig{}, err
+		t.Fatal(err)
 	}
-	return cfg.Resolve()
+	out, err := cfg.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

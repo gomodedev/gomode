@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -35,10 +34,7 @@ func TestSmokeLlamaRealtimeGateway(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	t.Cleanup(cancel)
-	pcm, err := generateSmokeAudio(ctx, cacheRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pcm := generateSmokeAudio(ctx, t, cacheRoot)
 	if len(pcm) == 0 || len(pcm) > 15*32000 {
 		t.Fatal("generated audio must be <=15 seconds of mono16k PCM16LE")
 	}
@@ -167,14 +163,14 @@ func realtimeSmokeMessages(msgs [][]byte) string {
 	return strings.Join(parts, "\n")
 }
 
-func generateSmokeAudio(ctx context.Context, cacheRoot string) ([]byte, error) {
+func generateSmokeAudio(ctx context.Context, t *testing.T, cacheRoot string) []byte {
 	cache := filepath.Join(cacheRoot, "gomode", "llama-tts")
 	if err := os.MkdirAll(cache, 0o750); err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 	exe, err := llamacppsrv.DownloadTTSVersion(ctx, cache, llamacppsrv.Version)
 	if err != nil {
-		return nil, fmt.Errorf("download llama-tts: %w", err)
+		t.Fatalf("download llama-tts: %v", err)
 	}
 	path := filepath.Join(cacheRoot, "gomode", "lfm3_set_volume_24k.wav")
 	cmd := exec.CommandContext(ctx, exe, //nolint:gosec // Test-owned llama-tts executable.
@@ -186,26 +182,23 @@ func generateSmokeAudio(ctx context.Context, cacheRoot string) ([]byte, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("llama-tts: %w", err)
+		t.Fatalf("llama-tts: %v", err)
 	}
-	pcm, rate, err := readPCM16WAV(path)
-	if err != nil {
-		return nil, err
-	}
+	pcm, rate := readPCM16WAV(t, path)
 	if rate != micSampleRate {
 		pcm = resamplePCM16(pcm, rate, micSampleRate)
 	}
-	return pcm, nil
+	return pcm
 }
 
 // readPCM16WAV reads the mono PCM16LE data chunk and returns its sample rate.
-func readPCM16WAV(path string) ([]byte, int, error) {
+func readPCM16WAV(t *testing.T, path string) ([]byte, int) {
 	raw, err := os.ReadFile(path) //nolint:gosec // Test-owned generated fixture.
 	if err != nil {
-		return nil, 0, err
+		t.Fatal(err)
 	}
 	if len(raw) < 12 || string(raw[:4]) != "RIFF" || string(raw[8:12]) != "WAVE" {
-		return nil, 0, fmt.Errorf("%s: not a WAV file", path)
+		t.Fatalf("%s: not a WAV file", path)
 	}
 	rate := 0
 	for off := 12; off+8 <= len(raw); {
@@ -213,23 +206,24 @@ func readPCM16WAV(path string) ([]byte, int, error) {
 		size := int(binary.LittleEndian.Uint32(raw[off+4 : off+8]))
 		off += 8
 		if off+size > len(raw) {
-			return nil, 0, fmt.Errorf("%s: truncated %s chunk", path, id)
+			t.Fatalf("%s: truncated %s chunk", path, id)
 		}
 		if id == "fmt " {
 			if size < 16 || binary.LittleEndian.Uint16(raw[off:]) != 1 || binary.LittleEndian.Uint16(raw[off+2:]) != 1 || binary.LittleEndian.Uint16(raw[off+14:]) != 16 {
-				return nil, 0, fmt.Errorf("%s: want mono PCM16LE", path)
+				t.Fatalf("%s: want mono PCM16LE", path)
 			}
 			rate = int(binary.LittleEndian.Uint32(raw[off+4:]))
 		}
 		if id == "data" {
 			if size%2 != 0 {
-				return nil, 0, fmt.Errorf("%s: odd PCM16 data length", path)
+				t.Fatalf("%s: odd PCM16 data length", path)
 			}
-			return raw[off : off+size], rate, nil
+			return raw[off : off+size], rate
 		}
 		off += size + size%2
 	}
-	return nil, 0, fmt.Errorf("%s: missing data chunk", path)
+	t.Fatalf("%s: missing data chunk", path)
+	return nil, 0
 }
 
 // resamplePCM16 linearly resamples complete mono PCM16LE samples.

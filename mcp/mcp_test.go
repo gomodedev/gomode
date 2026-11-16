@@ -862,29 +862,20 @@ func openSubscriptionStream(t *testing.T, h *Handler, uri string, catalog bool) 
 }
 
 func readSSEMessage(t *testing.T, r *bufio.Reader) JSONRPCNotification {
-	msg, err := readSSEMessageNoFatal(r)
-	if err != nil {
-		t.Fatalf("read SSE: %v", err)
-	}
-	return msg
-}
-
-func readSSEMessageNoFatal(r *bufio.Reader) (JSONRPCNotification, error) {
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
-			return JSONRPCNotification{}, err
+			t.Fatalf("read SSE: %v", err)
 		}
-		line = strings.TrimSpace(line)
-		data, ok := strings.CutPrefix(line, "data: ")
+		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
 		if !ok {
 			continue
 		}
 		var msg JSONRPCNotification
 		if err := json.Unmarshal([]byte(data), &msg); err != nil {
-			return JSONRPCNotification{}, fmt.Errorf("decode SSE data: %w", err)
+			t.Fatalf("read SSE: decode data: %v", err)
 		}
-		return msg, nil
+		return msg
 	}
 }
 

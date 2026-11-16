@@ -79,13 +79,20 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 			tts = adapter
 
 			const smokeSentence = "I love bananas"
-			chunks, firstAudioLatency, synthesisLatency, err := collectTimedTTSChunks(t.Context(), adapter.synthesizer, smokeSentence)
-			t.Logf("KittenTTS first-audio latency: %s", firstAudioLatency)
-			t.Logf("KittenTTS synthesis latency: %s", synthesisLatency)
-			if err != nil {
-				t.Fatal(err)
+			synthesis := time.Now()
+			var pcm []byte
+			first := true
+			for chunk, err := range adapter.synthesizer.Synthesize(t.Context(), kittentts.Voice{}, smokeSentence) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if first {
+					first = false
+					t.Logf("KittenTTS first-audio latency: %s", smokeElapsed(synthesis))
+				}
+				pcm = append(pcm, chunk...)
 			}
-			pcm := bytes.Join(chunks, nil)
+			t.Logf("KittenTTS synthesis latency: %s", smokeElapsed(synthesis))
 			if len(pcm) < backendOutputSampleRate {
 				t.Fatalf("TTS PCM length = %d bytes, want at least %d", len(pcm), backendOutputSampleRate)
 			}
@@ -264,11 +271,16 @@ func TestSmokeVoiceGatewayToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(errors.Join(err, worker.Close()))
 	}
-	chunks, _, _, err := collectTimedTTSChunks(ctx, tts, "Set a timer for five minutes.")
-	if err := errors.Join(err, worker.Close()); err != nil {
+	var speech []byte
+	for chunk, err := range tts.Synthesize(ctx, kittentts.Voice{}, "Set a timer for five minutes.") {
+		if err != nil {
+			t.Fatal(errors.Join(err, worker.Close()))
+		}
+		speech = append(speech, chunk...)
+	}
+	if err := worker.Close(); err != nil {
 		t.Fatal(err)
 	}
-	speech := bytes.Join(chunks, nil)
 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -512,11 +524,15 @@ func smokeElapsed(start time.Time) time.Duration {
 	return time.Since(start).Round(time.Millisecond)
 }
 
-func genStreamResult(ctx context.Context, provider genai.Provider, messages genai.Messages, options ...genai.GenOption) (genai.Result, error) {
-	fragments, finish := provider.GenStream(ctx, messages, options...)
+func genStreamResult(t *testing.T, provider genai.Provider, messages genai.Messages, options ...genai.GenOption) genai.Result {
+	fragments, finish := provider.GenStream(t.Context(), messages, options...)
 	for range fragments {
 	}
-	return finish()
+	res, err := finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
 }
 
 func verifyManagedLLMToolCall(t *testing.T, provider genai.Provider) {
@@ -539,11 +555,8 @@ func verifyManagedLLMToolCall(t *testing.T, provider genai.Provider) {
 		messages = append(messages, genai.NewTextMessage("Call tasks_list now with limit 1."))
 
 		toolCall := time.Now()
-		res, err := genStreamResult(t.Context(), provider, messages, options...)
+		res := genStreamResult(t, provider, messages, options...)
 		t.Logf("Gemma forced tool-call latency: %s", smokeElapsed(toolCall))
-		if err != nil {
-			t.Fatal(err)
-		}
 		call, ok := firstGenAIToolCall(&res.Message)
 		if !ok {
 			t.Fatalf("Gemma response = %#v, want tool call", res.Message)
@@ -573,11 +586,8 @@ func verifyManagedLLMToolCall(t *testing.T, provider genai.Provider) {
 		}}})
 		toolOptions.Force = genai.ToolCallAny
 		toolResult := time.Now()
-		followup, err := genStreamResult(t.Context(), provider, messages, options...)
+		followup := genStreamResult(t, provider, messages, options...)
 		t.Logf("Gemma after tool-result latency: %s", smokeElapsed(toolResult))
-		if err != nil {
-			t.Fatal(err)
-		}
 		if call, ok := firstGenAIToolCall(&followup.Message); ok {
 			t.Fatalf("follow-up tool call = %+v, want text", call)
 		}
@@ -604,22 +614,6 @@ func genAIText(msg *genai.Message) string {
 		text.WriteString(msg.Replies[i].Text)
 	}
 	return text.String()
-}
-
-func collectTimedTTSChunks(ctx context.Context, tts *kittentts.Client, text string) ([][]byte, time.Duration, time.Duration, error) {
-	start := time.Now()
-	var firstChunkLatency time.Duration
-	var chunks [][]byte
-	for pcm, err := range tts.Synthesize(ctx, kittentts.Voice{}, text) {
-		if err != nil {
-			return nil, firstChunkLatency, time.Since(start).Round(time.Millisecond), err
-		}
-		if len(chunks) == 0 {
-			firstChunkLatency = time.Since(start).Round(time.Millisecond)
-		}
-		chunks = append(chunks, pcm)
-	}
-	return chunks, firstChunkLatency, time.Since(start).Round(time.Millisecond), nil
 }
 
 func writePCM24MicAudio(ctx context.Context, t *testing.T, track *webrtc.TrackLocalStaticSample, pcm []byte) {
