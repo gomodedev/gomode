@@ -2479,12 +2479,15 @@ func testLocalStackSessionLanguage(t *testing.T) {
 		}
 		t.Run("voice", func(t *testing.T) {
 			t.Parallel()
-			for _, tc := range []struct{ tag, voice, want string }{
-				{"en-US", "", `{"text":"echo: Hello.","voice":"Luna","language":"en"}`},
-				{"fr-FR", "", `{"text":"echo: Hello.","voice":"French","language":"fr"}`},
-				{"fr-FR", "FrenchWaiter", `{"text":"echo: Hello.","voice":"FrenchWaiter","language":"fr"}`},
+			for _, tc := range []struct{ model, configured, tag, voice, want string }{
+				{"KittenML/kitten-tts-2", "Luna", "en-US", "", `{"text":"echo: Hello.","voice":"Luna","language":"en"}`},
+				{"KittenML/kitten-tts-2", "Luna", "fr-FR", "", `{"text":"echo: Hello.","voice":"French","language":"fr"}`},
+				{"KittenML/kitten-tts-2", "Luna", "fr-FR", "FrenchWaiter", `{"text":"echo: Hello.","voice":"FrenchWaiter","language":"fr"}`},
+				// Mini's language model is selected by the language, not the voice.
+				{"KittenML/kitten-tts-2-mini", "Eleanor", "en-US", "", `{"text":"echo: Hello.","voice":"Eleanor","language":"en"}`},
+				{"KittenML/kitten-tts-2-mini", "Eleanor", "de-DE", "", `{"text":"echo: Hello.","voice":"Felix","language":"de"}`},
 			} {
-				t.Run(tc.tag+"/"+tc.voice, func(t *testing.T) {
+				t.Run(tc.model+"/"+tc.tag+"/"+tc.voice, func(t *testing.T) {
 					t.Parallel()
 					requests := make(chan string, 1)
 					worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2493,7 +2496,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 						w.Header().Set("Content-Type", "audio/pcm")
 					}))
 					t.Cleanup(worker.Close)
-					tts, err := newKittenTTSAdapter(worker.URL, "KittenML/kitten-tts-2", "Luna")
+					tts, err := newKittenTTSAdapter(worker.URL, tc.model, tc.configured)
 					if err != nil {
 						t.Fatal(err)
 					}

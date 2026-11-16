@@ -144,9 +144,9 @@ tts = "speech"
 				{"unused invalid synthesis", func(c *Config) {
 					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Provider: "gemini"})
 				}, "voice.tts.model is required"},
-				{"language-selected KittenTTS 2", func(c *Config) {
-					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Engine: TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2-nano", Voice: "Eleanor"})
-				}, `voice.tts.model: KittenTTS model "KittenML/kitten-tts-2-nano" is not supported`},
+				{"unsupported KittenTTS model", func(c *Config) {
+					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Engine: TTSEngineKittenTTS, Model: "KittenML/kitten-tts-mini-0.8", Voice: "Jasper"})
+				}, `voice.tts.model: KittenTTS model "KittenML/kitten-tts-mini-0.8" is not supported`},
 				{"unknown KittenTTS voice", func(c *Config) {
 					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Engine: TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2", Voice: "Nobody"})
 				}, `voice.tts.voice "Nobody" is not a KittenML/kitten-tts-2 voice`},

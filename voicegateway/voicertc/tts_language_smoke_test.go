@@ -15,9 +15,10 @@ import (
 )
 
 // TestSmokeTTSLanguage synthesizes a French sentence in a French session with
-// KittenTTS 2, whose voice the session language selects, and both Gemini TTS
-// tiers, which receive the language, then transcribes each through NeMo
-// Parakeet TDT in French. GEMINI_API_KEY is required; the models download on first use.
+// KittenTTS 2 and its mini model, whose voice the session language selects,
+// and both Gemini TTS tiers, which receive the language, then transcribes each
+// through NeMo Parakeet TDT in French. GEMINI_API_KEY is required; the models
+// download on first use.
 func TestSmokeTTSLanguage(t *testing.T) {
 	isolateSmokeHost(t)
 	const text = "Je voudrais réserver une table pour deux ce soir."
@@ -35,23 +36,9 @@ func TestSmokeTTSLanguage(t *testing.T) {
 		name string
 		tts  func(t *testing.T) ttsAdapter
 	}{
-		{"KittenML/kitten-tts-2", func(t *testing.T) ttsAdapter {
-			srv, err := kittenttssrv.New(t.Context(), kittenttssrv.Config{Model: "KittenML/kitten-tts-2"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := srv.Close(); err != nil {
-					t.Error(err)
-				}
-			})
-			// The configured English voice does not serve a French session.
-			a, err := newKittenTTSAdapter(srv.URL(), "KittenML/kitten-tts-2", "Jasper")
-			if err != nil {
-				t.Fatal(err)
-			}
-			return a
-		}},
+		// The configured English voices do not serve a French session.
+		{"KittenML/kitten-tts-2", kittenSmokeTTS("KittenML/kitten-tts-2", "Jasper")},
+		{"KittenML/kitten-tts-2-mini", kittenSmokeTTS("KittenML/kitten-tts-2-mini", "Eleanor")},
 		{"gemini-3.8-flash-lite-tts", geminiSmokeTTS("gemini-3.8-flash-lite-tts")},
 		{"gemini-3.8-flash-tts", geminiSmokeTTS("gemini-3.8-flash-tts")},
 	} {
@@ -96,5 +83,26 @@ func geminiSmokeTTS(model string) func(t *testing.T) ttsAdapter {
 			}
 		})
 		return &geminiTTSAdapter{client: c, voice: "Kore"}
+	}
+}
+
+// kittenSmokeTTS synthesizes through a managed KittenTTS worker that loaded
+// model, configured with voice.
+func kittenSmokeTTS(model, voice string) func(t *testing.T) ttsAdapter {
+	return func(t *testing.T) ttsAdapter {
+		srv, err := kittenttssrv.New(t.Context(), kittenttssrv.Config{Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := srv.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		a, err := newKittenTTSAdapter(srv.URL(), model, voice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
 	}
 }

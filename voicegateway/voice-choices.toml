@@ -232,13 +232,20 @@ effort = "low"
 
 # Each KittenTTS voice speaks one language. voice serves sessions in its
 # language; other sessions use the voice the client picks, by default the
-# first voice of the session language.
+# first voice of the session language. The ONNX mini model runs on CPU.
 [[tts]]
 id = "kitten"
 label = "Kitten TTS 1.7B"
 engine = "kittentts"
 model = "KittenML/kitten-tts-2"
 voice = "Luna"
+
+[[tts]]
+id = "kitten-mini"
+label = "Kitten TTS mini 82M"
+engine = "kittentts"
+model = "KittenML/kitten-tts-2-mini"
+voice = "Eleanor"
 
 # Recognition streams each utterance through a live transcription session:
 # engine nemospeech or whistle, or a genai provider whose scoreboard qualifies

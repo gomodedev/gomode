@@ -429,12 +429,13 @@ func localStackLlamaCacheDir() (string, error) {
 	return filepath.Join(cacheBase, "gomode", "llama-server"), nil
 }
 
-// kittenTTSAdapter speaks through KittenTTS, whose voice carries the language:
-// the model has no language argument. A session language is supported when a
-// voice speaks it. A session without a requested voice uses the configured
-// voice when it speaks the session language, and otherwise the first voice
-// that does. genaipy receives the language beside the voice and disables
-// English text normalization for other languages.
+// kittenTTSAdapter speaks through KittenTTS, whose voices each speak one
+// language. A session language is supported when a voice speaks it. A session
+// without a requested voice uses the configured voice when it speaks the
+// session language, and otherwise the first voice that does. genaipy receives
+// the language beside the voice: KittenTTS 2 disables English text
+// normalization for other languages, and nano, pico and mini select their
+// language model with it.
 //
 // Measured with genaipy v0.1.2, which normalized every language as English:
 // the English voice Luna read a 4 s French request intelligibly, as Whisper
