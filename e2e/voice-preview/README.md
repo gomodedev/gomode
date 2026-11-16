@@ -245,6 +245,7 @@ In another terminal, use an isolated `agent-browser` session:
 
 ```bash
 agent-browser --session voice-reference open http://127.0.0.1:4179/
+agent-browser --session voice-reference eval 'localStorage.clear()'
 agent-browser --session voice-reference set viewport 390 844
 agent-browser --session voice-reference reload
 agent-browser --session voice-reference screenshot /tmp/gomode-voice-mobile.png
@@ -266,6 +267,7 @@ Refresh the microphone-denied reference at 320 × 740 with the same preview:
 
 ```bash
 agent-browser --session voice-denied --init-script e2e/voice-preview/microphone-denied.js open http://127.0.0.1:4179/
+agent-browser --session voice-denied eval 'localStorage.clear()'
 agent-browser --session voice-denied set viewport 320 740
 agent-browser --session voice-denied reload
 agent-browser --session voice-denied click '[aria-label="End voice session"]'
@@ -286,6 +288,7 @@ overlay alone:
 
 ```bash
 agent-browser --session voice-settings open 'http://127.0.0.1:4179/?state=idle'
+agent-browser --session voice-settings eval 'localStorage.clear()'
 agent-browser --session voice-settings set viewport 411 1700 1.75
 agent-browser --session voice-settings reload
 agent-browser --session voice-settings click '[aria-label="Voice settings"]'
@@ -297,6 +300,11 @@ agent-browser --session voice-settings set viewport 1280 1400
 agent-browser --session voice-settings screenshot '[role="region"][aria-label="Voice assistant"]' /tmp/gomode-voice-web-desktop-settings.png
 agent-browser --session voice-settings close
 ```
+
+Each procedure clears the preview origin's saved settings first, so an earlier
+session's language or setup does not leak into the capture. The preview serves a
+fixed browser voice list, so the speaking voice picker does not depend on when
+the browser loads its own voices.
 
 Wait for the complete conversation before each capture. Reload at the target
 viewport so the initial transcript position matches the reference. Stop the

@@ -34,6 +34,19 @@ window.fetch = (input, init) =>
           )
     : originalFetch(input, init);
 
+// Installed voices vary by platform and load after the first paint, which made captures depend on timing.
+// A fixed catalog covers each shipped translation; en-GB's long names exercise the picker's widest option.
+// The preview never reaches speech playback, so these plain objects never become an utterance's voice.
+const fixtureVoices = [
+  { name: "Google Deutsch", lang: "de-DE" },
+  { name: "Google US English", lang: "en-US" },
+  { name: "Google UK English Female", lang: "en-GB" },
+  { name: "Google UK English Male", lang: "en-GB" },
+  { name: "Google español", lang: "es-ES" },
+  { name: "Google français", lang: "fr-FR" },
+].map((voice): SpeechSynthesisVoice => ({ ...voice, voiceURI: voice.name, localService: false, default: false }));
+if ("speechSynthesis" in window) window.speechSynthesis.getVoices = () => fixtureVoices;
+
 const state = new URLSearchParams(location.search).get("state");
 // ?state=locked starts a session after discovery, so settings show loaded choices locked.
 const idle = state === "idle" || state === "locked";

@@ -46,9 +46,27 @@ STATUS_BAR_MAXIMUM_CHANNEL_DELTA = 2
 STATUS_BAR_MAXIMUM_CHANGED_PIXEL_FRACTION = 0.01
 
 
+# The emulator can drop offline for seconds, failing a command midway; an interrupted pull reports only
+# its progress line. Every command here is idempotent, so a dropped device is awaited and the command rerun.
+ADB_ATTEMPTS = 3
+
+
 def adb_command(adb: str, serial: str, *arguments: str) -> str:
-    result = subprocess.run([adb, "-s", serial, *arguments], check=True, capture_output=True, text=True, timeout=30)
-    return result.stdout.strip()
+    """Run an idempotent adb command, rerunning it when the device dropped offline."""
+    for attempt in range(1, ADB_ATTEMPTS + 1):
+        try:
+            result = subprocess.run(
+                [adb, "-s", serial, *arguments], check=True, capture_output=True, text=True, timeout=30
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError:
+            state = subprocess.run(
+                [adb, "-s", serial, "get-state"], check=False, capture_output=True, text=True, timeout=30
+            )
+            if attempt == ADB_ATTEMPTS or state.stdout.strip() == "device":
+                raise
+        subprocess.run([adb, "-s", serial, "wait-for-device"], check=True, capture_output=True, timeout=60)
+    raise AssertionError("unreachable")
 
 
 def wait_for_capture_services(adb: str, serial: str) -> tuple[str, str]:
@@ -79,13 +97,6 @@ def wait_for_capture_services(adb: str, serial: str) -> tuple[str, str]:
             pass
         time.sleep(0.1)
     raise RuntimeError("Emulator SystemUI and overlay services did not become ready")
-
-
-def broadcast_demo(adb: str, serial: str, command: str, **options: str) -> None:
-    arguments = ["shell", "am", "broadcast", "-a", "com.android.systemui.demo", "-e", "command", command]
-    for key, value in options.items():
-        arguments.extend(("-e", key, value))
-    adb_command(adb, serial, *arguments)
 
 
 def render(directory: pathlib.Path, serial: str, adb: str, hidden_icons: str) -> None:
@@ -234,6 +245,27 @@ def validate_previous_android_images(directory: pathlib.Path) -> None:
     validate_android_images(directory, None)
 
 
+def restore_emulator(adb: str, serial: str, settings: dict[str, dict[str, str]]) -> None:
+    """Exit SystemUI demo and restore saved settings, attempting every step before reporting failures.
+
+    A demo left active makes the next capture refuse to start.
+    """
+    demo_exit = ("shell", "am", "broadcast", "-a", "com.android.systemui.demo", "-e", "command", "exit")
+    steps: list[tuple[str, tuple[str, ...]]] = [("exit SystemUI demo", demo_exit)]
+    for namespace, values in settings.items():
+        for key, value in values.items():
+            command = ("delete", namespace, key) if value == "null" else ("put", namespace, key, value)
+            steps.append((f"restore {namespace} {key}", ("shell", "settings", *command)))
+    failures = []
+    for name, arguments in steps:
+        try:
+            adb_command(adb, serial, *arguments)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            failures.append(f"{name}: {error}")
+    if failures:
+        raise RuntimeError("Emulator restoration incomplete; " + "; ".join(failures))
+
+
 def main() -> int:
     argparse.ArgumentParser(description=__doc__).parse_args()
     for executable in ("ffmpeg", "ffprobe"):
@@ -319,17 +351,7 @@ def _capture() -> int:
                 validate_previous_android_images,
             )
     finally:
-        broadcast_demo(adb, serial, "exit")
-        for key, value in original_secure.items():
-            if value == "null":
-                adb_command(adb, serial, "shell", "settings", "delete", "secure", key)
-            else:
-                adb_command(adb, serial, "shell", "settings", "put", "secure", key, value)
-        for key, value in original.items():
-            if value == "null":
-                adb_command(adb, serial, "shell", "settings", "delete", "global", key)
-            else:
-                adb_command(adb, serial, "shell", "settings", "put", "global", key, value)
+        restore_emulator(adb, serial, {"secure": original_secure, "global": original})
     print(f"Android screenshots update completed in {time.monotonic() - started:.2f}s")
     return 0
 
