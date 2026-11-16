@@ -443,7 +443,7 @@ func TestBackendConnector(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = activityLog.close() })
-		sess := &session{id: "test-session", activityLog: activityLog, cancel: func() {}}
+		sess := &session{id: "test-session", activityLog: activityLog, cancel: func(error) {}}
 		backend := &fakeBackendConnector{}
 		backendSession, err := backend.connect(t.Context(), sess.id, sess)
 		if err != nil {
@@ -1806,8 +1806,8 @@ func TestBridge(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				blocked := &blockingCloseSession{entered: make(chan struct{}), release: make(chan struct{})}
 				t.Cleanup(func() { close(blocked.release) })
-				ctx, cancel := context.WithCancel(t.Context())
-				t.Cleanup(cancel)
+				ctx, cancel := context.WithCancelCause(t.Context())
+				t.Cleanup(func() { cancel(nil) })
 				b := &Bridge{sessions: make(map[string]*session)}
 				sess := &session{id: "first", cancel: cancel, backend: blocked}
 				b.registerSession(ctx, sess)
@@ -1818,6 +1818,9 @@ func TestBridge(t *testing.T) {
 				}
 				if b.HasSession(sess.id) {
 					t.Fatal("closing session remains active")
+				}
+				if got := context.Cause(ctx); got == nil || got.Error() != "closed by API request" {
+					t.Fatalf("cause = %v, want the API close", got)
 				}
 			})
 		})
@@ -1897,8 +1900,8 @@ func TestBridge(t *testing.T) {
 				textCtx:  textCtx, textCancel: textCancel,
 				sessions: make(map[string]*session),
 			}
-			ctx, cancel := context.WithCancel(t.Context())
-			t.Cleanup(cancel)
+			ctx, cancel := context.WithCancelCause(t.Context())
+			t.Cleanup(func() { cancel(nil) })
 			b.registerSession(ctx, &session{id: "first", cancel: cancel, backend: blocked})
 			var wg sync.WaitGroup
 			t.Cleanup(func() {
@@ -1960,8 +1963,8 @@ func TestBridge(t *testing.T) {
 			sessions:   make(map[string]*session),
 		}
 		for _, id := range []string{"first", "second"} {
-			ctx, cancel := context.WithCancel(t.Context())
-			t.Cleanup(cancel)
+			ctx, cancel := context.WithCancelCause(t.Context())
+			t.Cleanup(func() { cancel(nil) })
 			b.registerSession(ctx, &session{id: id, cancel: cancel})
 		}
 		closed := make(map[string]int)
@@ -2023,11 +2026,11 @@ func TestSession(t *testing.T) {
 			t.Fatal(err)
 		}
 		synctest.Test(t, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancelCause(t.Context())
 			s := &session{audioTrack: track, activityLog: log, cancel: cancel}
 			var workers sync.WaitGroup
 			workers.Go(func() { s.audioSendLoop(ctx, enc) })
-			t.Cleanup(func() { cancel(); workers.Wait() })
+			t.Cleanup(func() { cancel(nil); workers.Wait() })
 			synctest.Wait()
 			s.addAssistantSpeechPCM(make([]byte, 2*backendOutputFrameBytes+2))
 			s.finishAssistantSpeech()

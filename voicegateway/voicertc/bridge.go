@@ -60,6 +60,8 @@ const (
 	backendOutputFrameBytes = backendOutputSampleRate * 2 * int(frameDuration/time.Millisecond) / 1000 // 960 bytes
 )
 
+var errSessionLifetime = errors.New("session lifetime reached")
+
 // opusReceiveCodec asks the client's encoder for inband FEC and discontinuous
 // transmission on the mobile uplink. Both are RFC 7587 fmtp parameters:
 // https://datatracker.ietf.org/doc/html/rfc7587#section-7.1
@@ -352,7 +354,11 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 		return "", "", fmt.Errorf("create peer connection: %w", err)
 	}
 
-	sessionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionLifetime)
+	// Every cancellation names its cause; cleanup logs it so a session's end is
+	// attributable without debug logging.
+	lifetimeCtx, stopLifetime := context.WithTimeoutCause(context.WithoutCancel(ctx), sessionLifetime, errSessionLifetime)
+	sessionCtx, cancel := context.WithCancelCause(lifetimeCtx)
+	context.AfterFunc(sessionCtx, stopLifetime)
 	sess := &session{
 		protocol:            voiceapi.SessionProtocolFromContext(ctx),
 		id:                  generateSessionID(),
@@ -368,14 +374,14 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 	activityLog, err := openActivityLog(b.activityLogDir, sess.id)
 	if err != nil {
 		_ = pc.Close()
-		cancel()
+		cancel(err)
 		return "", "", err
 	}
 	sess.activityLog = activityLog
 	registered := false
 	defer func() {
 		if !registered {
-			sess.cancel()
+			sess.cancel(errors.New("session setup failed"))
 			sess.close()
 		}
 	}()
@@ -433,7 +439,7 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 			if err != nil {
 				slog.ErrorContext(sessionCtx, "voicertc: backend connect failed", "session", sess.id, "err", err)
 				sess.sendGatewayError(sessionCtx, "backend: "+err.Error())
-				cancel()
+				cancel(fmt.Errorf("backend connect: %w", err))
 				return
 			}
 			sess.mu.Lock()
@@ -476,7 +482,7 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 			}
 			if err != nil {
 				if errors.Is(err, errSessionClosed) {
-					cancel()
+					cancel(err)
 					return
 				}
 				slog.WarnContext(sessionCtx, "voicertc: gateway client message failed", "session", sess.id, "err", err)
@@ -488,7 +494,7 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 		dc.OnClose(func() {
 			slog.InfoContext(sessionCtx, "voicertc: data channel closed", "session", sess.id)
 			sess.setDataChannelState(dc.ReadyState().String())
-			cancel()
+			cancel(errors.New("data channel closed"))
 		})
 	})
 
@@ -499,7 +505,7 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 		//exhaustive:ignore
 		switch state {
 		case webrtc.ICEConnectionStateFailed, webrtc.ICEConnectionStateDisconnected, webrtc.ICEConnectionStateClosed:
-			cancel()
+			cancel(fmt.Errorf("ICE connection %s", state))
 		default:
 		}
 	})
@@ -621,7 +627,7 @@ func (b *Bridge) Close(sessionID string) {
 	sess := b.sessions[sessionID]
 	if sess != nil && !sess.stopping {
 		sess.stopping = true
-		sess.cancel()
+		sess.cancel(errors.New("closed by API request"))
 	} else {
 		sess = nil
 	}
@@ -643,7 +649,7 @@ func (b *Bridge) CloseAll(ctx context.Context) {
 	for _, s := range b.sessions {
 		sessions = append(sessions, s)
 		s.stopping = true
-		s.cancel()
+		s.cancel(errors.New("voice gateway shutting down"))
 	}
 	b.sessionsMu.Unlock()
 	waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -751,9 +757,6 @@ func (b *Bridge) registerSession(ctx context.Context, sess *session) bool {
 	b.sessions[sess.id] = sess
 	sess.cleanup.Go(func() {
 		<-ctx.Done()
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			slog.InfoContext(ctx, "voicertc: session lifetime reached", "session", sess.id)
-		}
 		b.sessionsMu.Lock()
 		sess.stopping = true
 		callback := b.onSessionClosed
@@ -762,7 +765,7 @@ func (b *Bridge) registerSession(ctx context.Context, sess *session) bool {
 		if callback != nil {
 			callback(sess.id)
 		}
-		slog.InfoContext(ctx, "voicertc: session cleaned up", "session", sess.id)
+		slog.InfoContext(ctx, "voicertc: session cleaned up", "session", sess.id, "cause", context.Cause(ctx))
 		b.sessionsMu.Lock()
 		delete(b.sessions, sess.id)
 		close(sess.cleanupDone)
@@ -896,7 +899,7 @@ type session struct {
 	pendingTrack         *webrtc.TrackRemote // set by OnTrack, consumed after backend setupComplete
 	backendSetupComplete bool
 	audioOutputStarted   bool
-	cancel               context.CancelFunc
+	cancel               context.CancelCauseFunc
 	iceConnectionState   voicev2.VoiceRTCICEConnectionState
 	iceGatheringState    voicev2.VoiceRTCICEGatheringState
 	peerConnectionState  voicev2.VoiceRTCConnectionState
@@ -930,7 +933,7 @@ func (s *session) waitCleanup(ctx context.Context) bool {
 }
 
 func (s *session) cancelSession() {
-	s.cancel()
+	s.cancel(errors.New("backend ended the session"))
 }
 
 func (s *session) startWorker(f func()) {
@@ -1183,7 +1186,7 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 						// a delivery failure means the client is gone.
 						s.audioMu.Unlock()
 						slog.WarnContext(ctx, "voicertc: playback event delivery failed", "session", s.id, "err", err)
-						s.cancel()
+						s.cancel(fmt.Errorf("deliver playback event: %w", err))
 						return
 					}
 				}
@@ -1220,7 +1223,7 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 				Duration: frameDuration,
 			}); err != nil {
 				slog.DebugContext(ctx, "voicertc: rtp write failed", "session", s.id, "err", err)
-				s.cancel()
+				s.cancel(fmt.Errorf("write RTP: %w", err))
 				return
 			}
 		}
@@ -1260,7 +1263,7 @@ func (s *session) reportUnrecordedError(ctx context.Context, message string) {
 	})); err != nil {
 		slog.WarnContext(ctx, "voicertc: deliver gateway error failed", "session", s.id, "err", err)
 	}
-	s.cancel()
+	s.cancel(errors.New(message))
 }
 
 func buildVoiceRTCDiagnostics(sessionID string, server *voicev2.VoiceRTCServerDiagnostics, client *voicev2.VoiceRTCClientDiagnostics) voicev2.VoiceRTCDiagnosticsResp {
