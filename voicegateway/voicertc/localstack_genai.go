@@ -303,6 +303,22 @@ func (m multiCloser) Close() error {
 	return errors.Join(errs...)
 }
 
+// managedServers lists the managed server processes c owns, such as
+// llama-server or the genaipy speech workers.
+func managedServers(c io.Closer) []genai.Server {
+	switch c := c.(type) {
+	case multiCloser:
+		servers := make([]genai.Server, 0, len(c))
+		for _, e := range c {
+			servers = append(servers, managedServers(e)...)
+		}
+		return servers
+	case genai.Server:
+		return []genai.Server{c}
+	}
+	return nil
+}
+
 func pingLocalStackProvider(ctx context.Context, p genai.Provider) error {
 	pinger, ok := p.(genai.ProviderPing)
 	if !ok {

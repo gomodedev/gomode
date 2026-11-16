@@ -176,6 +176,88 @@ func TestLocalStackPool(t *testing.T) {
 			}
 		})
 	})
+	t.Run("worker exit replaces the stack", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			p := newLocalStackPool(testRuntime)
+			b := p.backend(poolTestConfig("crash"))
+			t.Cleanup(func() { _ = b.Close() })
+			l := stackVariant(t, b, clientSpeechConfig())
+			first := &captureSink{}
+			worker := &fakeServer{done: make(chan struct{})}
+			// The surviving worker stops only after the session learned why.
+			var notifiedFirst atomic.Bool
+			survivor := &fakeServer{done: make(chan struct{}), stopping: func() { notifiedFirst.Store(first.wasCanceled()) }}
+			crashed := &localStackRuntime{llm: echoLLM{}, runtime: joinClosers(worker, survivor)}
+			var logs bytes.Buffer
+			l.log = slog.New(slog.NewJSONHandler(&logs, nil))
+			p.mu.Lock()
+			l.cancel = func() {}
+			l.watchLocked(crashed, managedServers(crashed.runtime))
+			p.mu.Unlock()
+			setup := mustGatewayServerMessage(&voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
+			s, err := b.newTextSession(t.Context(), "first", first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.acceptClientMessage(t.Context(), setup); err != nil {
+				t.Fatal(err)
+			}
+			worker.exit(errors.New("signal: killed"))
+			synctest.Wait()
+			if l.loaded != nil {
+				t.Fatal("crashed stack stayed loaded")
+			}
+			select {
+			case <-survivor.Done():
+			default:
+				t.Fatal("surviving worker kept running")
+			}
+			if !notifiedFirst.Load() {
+				t.Fatal("surviving worker stopped before the attached session ended")
+			}
+			var record struct {
+				Message string `json:"msg"`
+				Err     string `json:"err"`
+			}
+			dec := json.NewDecoder(&logs)
+			if err := dec.Decode(&record); err != nil {
+				t.Fatal(err)
+			}
+			if record.Message != "voicertc: local stack worker exited" || record.Err != "signal: killed" || dec.More() {
+				t.Fatalf("crash log = %+v, more=%v", record, dec.More())
+			}
+			var report voicev2.Error
+			first.mu.Lock()
+			err = json.Unmarshal(first.msgs[len(first.msgs)-1], &report)
+			first.mu.Unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Kind != voicev2.MessageKindError || report.Message != "local stack: model worker exited unexpectedly" || report.Recoverable || !first.wasCanceled() {
+				t.Fatalf("attached session got %+v, canceled=%v", report, first.wasCanceled())
+			}
+			next, err := b.newTextSession(t.Context(), "next", &captureSink{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := next.acceptClientMessage(t.Context(), setup); err != nil {
+				t.Fatal(err)
+			}
+			if l.loaded == nil || l.loaded == crashed {
+				t.Fatal("next session did not load a fresh stack")
+			}
+			if err := s.close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := next.close(); err != nil {
+				t.Fatal(err)
+			}
+			if l.users != 0 || l.timer == nil {
+				t.Fatal("closing both sessions did not leave the fresh stack idle")
+			}
+		})
+	})
 	t.Run("progress names the loading step at once and repeats it", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
@@ -670,61 +752,58 @@ func TestLocalStackBackend(t *testing.T) {
 	t.Run("mixed sessions share bounded residency", func(t *testing.T) {
 		t.Parallel()
 		// The remote llama.cpp synthesis stage is pinged and tokenized when it
-		// loads. Closing each connection leaves no network reader in the
-		// synctest bubble.
-		health := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// loads. The test runs outside a synctest bubble because it dials.
+		health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/tokenize" {
 				_, _ = io.WriteString(w, `{"tokens":[]}`)
 				return
 			}
 			_, _ = io.WriteString(w, `{"status":"ok"}`)
 		}))
-		health.Config.SetKeepAlivesEnabled(false)
-		health.Start()
 		t.Cleanup(health.Close)
-		synctest.Test(t, func(t *testing.T) {
-			cfg := poolTestConfig("mixed")
-			cfg.TextOnly = false
-			cfg.ASR = voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "asr"}
-			cfg.TTS = voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: health.URL, Model: "tts", Voice: "voice"}
-			p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
-			b := p.backend(cfg)
-			t.Cleanup(func() { _ = b.Close() })
-			a, err := b.connect(t.Context(), "input", &captureSink{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := a.acceptClientMessage(t.Context(), mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Speech: &voicev2.SpeechConfig{Input: voicev2.SpeechLocationGateway, Output: voicev2.SpeechLocationClient}})); err != nil {
-				t.Fatal(err)
-			}
-			c, err := b.connect(t.Context(), "output", &captureSink{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan error, 1)
-			go func() {
-				done <- c.acceptClientMessage(t.Context(), mustGatewayServerMessage(&voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Speech: &voicev2.SpeechConfig{Input: voicev2.SpeechLocationClient, Output: voicev2.SpeechLocationGateway}}))
-			}()
-			synctest.Wait()
-			select {
-			case err := <-done:
-				t.Fatalf("second mode bypassed pinned capacity: %v", err)
-			default:
-			}
-			if err := a.close(); err != nil {
-				t.Fatal(err)
-			}
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			active := c.(*negotiatedStackSession).session.(*leasedLocalStackSession).backendSession.(*localStackSession)
-			if !active.clientInput || active.clientOutput || active.liveASR != nil || active.tts == nil {
-				t.Fatal("second session inherited the first session's stages")
-			}
-			if err := c.close(); err != nil {
-				t.Fatal(err)
-			}
-		})
+		cfg := poolTestConfig("mixed")
+		cfg.TextOnly = false
+		cfg.ASR = voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "asr"}
+		cfg.TTS = voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: health.URL, Model: "tts", Voice: "voice"}
+		p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
+		b := p.backend(cfg)
+		t.Cleanup(func() { _ = b.Close() })
+		a, err := b.connect(t.Context(), "input", &captureSink{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.acceptClientMessage(t.Context(), mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Speech: &voicev2.SpeechConfig{Input: voicev2.SpeechLocationGateway, Output: voicev2.SpeechLocationClient}})); err != nil {
+			t.Fatal(err)
+		}
+		sink := &barrierSink{messages: make(chan []byte, 16)}
+		c, err := b.connect(t.Context(), "output", sink)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- c.acceptClientMessage(t.Context(), mustGatewayServerMessage(&voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Speech: &voicev2.SpeechConfig{Input: voicev2.SpeechLocationClient, Output: voicev2.SpeechLocationGateway}}))
+		}()
+		var status voicev2.SessionStatus
+		if err := json.Unmarshal(<-sink.messages, &status); err != nil {
+			t.Fatal(err)
+		}
+		if status.Message != "Server is waiting for a free voice model slot…" {
+			t.Fatalf("second mode bypassed pinned capacity: %+v", status)
+		}
+		if err := a.close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		active := c.(*negotiatedStackSession).session.(*leasedLocalStackSession).backendSession.(*localStackSession)
+		if !active.clientInput || active.clientOutput || active.liveASR != nil || active.tts == nil {
+			t.Fatal("second session inherited the first session's stages")
+		}
+		if err := c.close(); err != nil {
+			t.Fatal(err)
+		}
 	})
 }
 
@@ -1058,4 +1137,43 @@ type failingStop struct{ backendConnector }
 
 func (f failingStop) Close() error {
 	return errors.Join(f.backendConnector.Close(), errors.New("exit status 1"))
+}
+
+// fakeServer is a managed server process that exits when the test crashes it
+// or when Close stops it.
+type fakeServer struct {
+	done     chan struct{}
+	err      error // Written before done closes.
+	stopping func()
+}
+
+// exit ends the process with err.
+func (s *fakeServer) exit(err error) {
+	s.err = err
+	close(s.done)
+}
+
+func (s *fakeServer) Close() error {
+	select {
+	case <-s.done:
+	default:
+		if s.stopping != nil {
+			s.stopping()
+		}
+		s.exit(nil)
+	}
+	return s.err
+}
+
+func (s *fakeServer) URL() string { return "http://127.0.0.1:1" }
+
+func (s *fakeServer) Done() <-chan struct{} { return s.done }
+
+func (s *fakeServer) Err() error {
+	select {
+	case <-s.done:
+		return s.err
+	default:
+		return nil
+	}
 }

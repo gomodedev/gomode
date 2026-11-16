@@ -68,11 +68,7 @@ data and authorization policy stay in the hosts.
   before claiming that mute-once ends with audible playback.
 - Preserve uncommitted service URL drafts when calls or notification navigation leave Settings.
 - mddb workspace search stays in mddb's `docs/PLAN_MDDB.md`.
-- Concurrent first sessions run `nemospeechsrv.Download` into the same cache
-  unserialized. The NeMo engine has no GPU backend setting.
-- The local-stack pool keeps handing out a stack whose managed worker crashed
-  until the stack goes idle.
-- KittenTTS downloads Hugging Face main, not the revision its voice table cites.
+- The NeMo engine has no GPU backend setting.
 - genai's scoreboard could own each provider's default voice; gomode marks
   OpenAI Realtime's `alloy` itself.
 - Android voice transport coverage stays in

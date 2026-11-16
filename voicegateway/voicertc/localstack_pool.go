@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maruel/genai"
+
 	"github.com/maruel/gomode/voicegateway"
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
@@ -30,20 +32,30 @@ type lazyLocalStack struct {
 	cfg  voicegateway.Choice
 	log  *slog.Logger
 
+	// workers joins the goroutines watching loaded stacks' managed workers.
+	workers sync.WaitGroup
+
 	// All mutable state belongs to pool.mu. Loading reserves capacity before
 	// releasing the lock so concurrent cold choices cannot exceed the limit.
-	loaded     backendConnector
-	loading    chan struct{}
-	stage      string // current startup step while loading
-	unloading  chan struct{}
-	cancel     context.CancelFunc
-	users      int
+	loaded    backendConnector
+	loading   chan struct{}
+	stage     string // current startup step while loading
+	unloading chan struct{}
+	cancel    context.CancelFunc
+	// users counts unreleased acquisitions, including sessions of a stack
+	// unloaded after its worker exited, until they close.
+	users int
+	// leases are the sessions on loaded, which a worker exit ends.
+	leases     []*leasedLocalStackSession
 	idleSince  time.Time
 	timer      *time.Timer
 	closed     bool
 	owner      *localStackBackend
 	references int
 }
+
+// errWorkerExited ends sessions whose stack lost a managed worker.
+var errWorkerExited = errors.New("local stack: model worker exited unexpectedly")
 
 func newLocalStackPool(limits voicegateway.RuntimeConfig) *localStackPool {
 	return &localStackPool{limits: limits, changed: make(chan struct{})}
@@ -315,8 +327,9 @@ func (p *localStackPool) notifyLocked() {
 }
 
 // unloadLocked closes clients before their managed processes and only then
-// releases capacity. External server processes are never owned here.
-func (l *lazyLocalStack) unloadLocked() error {
+// releases capacity. External server processes are never owned here. After a
+// worker exited, attached sessions end before the surviving workers stop.
+func (l *lazyLocalStack) unloadLocked(exited bool) error {
 	if l.timer != nil {
 		l.timer.Stop()
 		l.timer = nil
@@ -325,14 +338,27 @@ func (l *lazyLocalStack) unloadLocked() error {
 	l.loaded = nil
 	l.cancel = nil
 	l.unloading = make(chan struct{})
+	var ended []*leasedLocalStackSession
+	if exited {
+		ended, l.leases = l.leases, nil
+	}
 	// Keep capacity reserved during shutdown, but let other choices report
 	// progress and release sessions while processes are being reaped.
 	l.pool.mu.Unlock()
+	for _, s := range ended {
+		s.sink.sendGatewayError(s.ctx, errWorkerExited.Error())
+		s.sink.cancelSession()
+	}
+	// Close reports the worker's exit, joined with any failure to stop the
+	// others.
 	err := b.Close()
 	cancel()
-	if err != nil {
+	switch {
+	case exited:
+		l.log.Error("voicertc: local stack worker exited", "err", err)
+	case err != nil:
 		l.log.Error("voicertc: stop local stack", "err", err)
-	} else {
+	default:
 		l.log.Info("voicertc: local stack stopped")
 	}
 	l.pool.mu.Lock()
@@ -380,7 +406,7 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 				// unloadLocked logs a failed stop. The evicted processes are reaped
 				// and the slot released either way, so the failure belongs to the
 				// evicted choice, not to this session.
-				_ = oldest.unloadLocked()
+				_ = oldest.unloadLocked(false)
 				p.mu.Unlock()
 				continue
 			}
@@ -395,19 +421,20 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 			p.mu.Unlock()
 			l.log.InfoContext(ctx, "voicertc: starting local stack")
 			var b backendConnector
+			var servers []genai.Server
 			var err error
 			switch cfg := l.cfg.(type) {
 			case *voicegateway.PipelineConfig:
 				var runtime *localStackRuntime
 				runtime, err = localStackRuntimeForConfig(runCtx, cfg)
 				if runtime != nil {
-					b = runtime
+					b, servers = runtime, managedServers(runtime.runtime)
 				}
 			case *voicegateway.RealtimeConfig:
 				var runtime *llamaRealtimeBackend
 				runtime, err = newLlamaRealtimeBackend(runCtx, *cfg)
 				if runtime != nil {
-					b = runtime
+					b, servers = runtime, managedServers(runtime.runtime)
 				}
 			}
 			stop()
@@ -431,8 +458,8 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 				l.cancel = nil
 			} else {
 				l.log.InfoContext(ctx, "voicertc: local stack started")
-				l.loaded = b
-				l.users = 1
+				l.users++
+				l.watchLocked(b, servers)
 			}
 			close(l.loading)
 			l.loading = nil
@@ -456,14 +483,14 @@ func (l *lazyLocalStack) release() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	l.users--
-	if l.users == 0 && !l.closed {
+	if l.users == 0 && !l.closed && l.loaded != nil {
 		l.idleSince = time.Now()
 		since := l.idleSince
 		l.timer = time.AfterFunc(time.Duration(p.limits.IdleTimeoutSeconds)*time.Second, func() {
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			if l.loaded != nil && l.users == 0 && l.idleSince.Equal(since) {
-				if err := l.unloadLocked(); err != nil {
+				if err := l.unloadLocked(false); err != nil {
 					slog.Error("voicertc: unload idle local stack", "err", err)
 				}
 			}
@@ -489,12 +516,40 @@ func (l *lazyLocalStack) close() error {
 		<-done
 		p.mu.Lock()
 	}
-	defer p.mu.Unlock()
 	p.notifyLocked()
+	var err error
 	if l.loaded != nil {
-		return l.unloadLocked()
+		err = l.unloadLocked(false)
 	}
-	return nil
+	p.mu.Unlock()
+	// Unloading stopped every worker, so each watcher returns.
+	l.workers.Wait()
+	return err
+}
+
+// watchLocked publishes b as loaded and unloads it as soon as one of its
+// managed servers exits.
+func (l *lazyLocalStack) watchLocked(b backendConnector, servers []genai.Server) {
+	l.loaded = b
+	for _, srv := range servers {
+		l.workers.Go(func() {
+			<-srv.Done()
+			l.workerExited(b)
+		})
+	}
+}
+
+// workerExited unloads b if it is still loaded and ends its sessions. A
+// requested unload clears loaded before stopping the workers, so their exits
+// are ignored. The next session loads a fresh stack.
+func (l *lazyLocalStack) workerExited(b backendConnector) {
+	p := l.pool
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if l.loaded == b {
+		// unloadLocked logs the exit.
+		_ = l.unloadLocked(true)
+	}
 }
 
 func (l *lazyLocalStack) connect(ctx context.Context, id string, sink backendSink, text bool) (backendSession, error) {
@@ -534,7 +589,23 @@ func (l *lazyLocalStack) connect(ctx context.Context, id string, sink backendSin
 			return nil, err
 		}
 	}
-	return &leasedLocalStackSession{backendSession: s, stack: l}, nil
+	// An acquired stack unloads before its lease only when closed or when a
+	// worker exited.
+	lease := &leasedLocalStackSession{backendSession: s, stack: l, ctx: ctx, sink: sink}
+	l.pool.mu.Lock()
+	attached, closed := l.loaded == b, l.closed
+	if attached {
+		l.leases = append(l.leases, lease)
+	}
+	l.pool.mu.Unlock()
+	switch {
+	case attached:
+		return lease, nil
+	case closed:
+		return nil, errors.Join(errors.New("local stack is closed"), lease.close())
+	default:
+		return nil, errors.Join(errWorkerExited, lease.close())
+	}
 }
 
 // reportStartupProgress sends the current startup step as soon as it changes,
@@ -614,10 +685,16 @@ func (l *lazyLocalStack) setStage(message string) {
 type leasedLocalStackSession struct {
 	backendSession
 	stack *lazyLocalStack
+	ctx   context.Context //nolint:containedctx // A worker exit reports through the session's own lifetime.
+	sink  backendSink
 }
 
 func (s *leasedLocalStackSession) close() error {
 	err := s.backendSession.close()
-	s.stack.release()
+	l := s.stack
+	l.pool.mu.Lock()
+	l.leases = slices.DeleteFunc(l.leases, func(e *leasedLocalStackSession) bool { return e == s })
+	l.pool.mu.Unlock()
+	l.release()
 	return err
 }
