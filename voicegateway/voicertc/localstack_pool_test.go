@@ -176,6 +176,51 @@ func TestLocalStackPool(t *testing.T) {
 			}
 		})
 	})
+	t.Run("progress names the loading step at once and repeats it", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			p := newLocalStackPool(testRuntime)
+			a := p.backend(poolTestConfig("one"))
+			l := stackVariant(t, a, clientSpeechConfig())
+			// Hold the stack in its loading state, as acquire does while starting.
+			p.mu.Lock()
+			l.loading = make(chan struct{})
+			p.mu.Unlock()
+			t.Cleanup(func() {
+				p.mu.Lock()
+				close(l.loading)
+				l.loading = nil
+				p.mu.Unlock()
+				_ = a.Close()
+			})
+			sink := &barrierSink{messages: make(chan []byte, 10)}
+			acquired := make(chan struct{})
+			finished := make(chan error, 1)
+			go func() { finished <- l.reportStartupProgress(t.Context(), sink, acquired) }()
+			next := func() string {
+				var msg voicev2.SessionStatus
+				if err := json.Unmarshal(<-sink.messages, &msg); err != nil {
+					t.Fatal(err)
+				}
+				return msg.Message
+			}
+			if got := next(); got != "Loading local stack…" {
+				t.Fatalf("initial progress = %q", got)
+			}
+			start := time.Now()
+			reportStartupStage(context.WithValue(t.Context(), startupStageKey{}, l.setStage), "Preparing llama.cpp v1…")
+			if got := next(); got != "Preparing llama.cpp v1…" || time.Since(start) != 0 {
+				t.Fatalf("stage = %q after %s, want it at once", got, time.Since(start))
+			}
+			if got := next(); got != "Preparing llama.cpp v1…" || time.Since(start) != 5*time.Second {
+				t.Fatalf("heartbeat = %q after %s, want the stage after 5s", got, time.Since(start))
+			}
+			close(acquired)
+			if err := <-finished; err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
 	t.Run("text disconnect cancels cold startup", func(t *testing.T) {
 		t.Parallel()
 		for _, action := range []string{"disconnect", "overflow", "overflow-disconnect", "session.close"} {

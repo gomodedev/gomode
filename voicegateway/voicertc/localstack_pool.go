@@ -34,6 +34,7 @@ type lazyLocalStack struct {
 	// releasing the lock so concurrent cold choices cannot exceed the limit.
 	loaded     backendConnector
 	loading    chan struct{}
+	stage      string // current startup step while loading
 	unloading  chan struct{}
 	cancel     context.CancelFunc
 	users      int
@@ -388,6 +389,7 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 			// startup still aborts downloads/workers; successful acquisition
 			// transfers cancellation ownership to this cache entry.
 			runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+			runCtx = context.WithValue(runCtx, startupStageKey{}, l.setStage)
 			l.cancel = cancel
 			stop := context.AfterFunc(ctx, cancel)
 			p.mu.Unlock()
@@ -434,6 +436,7 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 			}
 			close(l.loading)
 			l.loading = nil
+			l.stage = ""
 			p.notifyLocked()
 			p.mu.Unlock()
 			return b, err
@@ -534,13 +537,19 @@ func (l *lazyLocalStack) connect(ctx context.Context, id string, sink backendSin
 	return &leasedLocalStackSession{backendSession: s, stack: l}, nil
 }
 
+// reportStartupProgress sends the current startup step as soon as it changes,
+// and repeats it every 5 seconds so clients keep extending their setup deadline.
 func (l *lazyLocalStack) reportStartupProgress(ctx context.Context, sink backendSink, done <-chan struct{}) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	sent, heartbeat := "", true
 	for {
 		l.pool.mu.Lock()
 		cached := l.loaded != nil
 		message := "Loading local stack…"
+		if l.loading != nil && l.stage != "" {
+			message = l.stage
+		}
 		count, idle := 0, false
 		if !cached && l.loading == nil {
 			for _, e := range l.pool.entries {
@@ -553,10 +562,11 @@ func (l *lazyLocalStack) reportStartupProgress(ctx context.Context, sink backend
 				message = "Waiting for an available local stack…"
 			}
 		}
+		changed := l.pool.changed
 		l.pool.mu.Unlock()
 		// A cached observation is not a lease. Keep watching until acquire
 		// finishes: an idle timer or competing choice can evict it meanwhile.
-		if !cached {
+		if !cached && (heartbeat || message != sent) {
 			if err := sink.sendGatewayMessage(ctx, mustGatewayServerMessage(&voicev2.SessionStatus{
 				Kind: voicev2.MessageKindSessionStatus, Message: message,
 			})); err != nil {
@@ -565,14 +575,39 @@ func (l *lazyLocalStack) reportStartupProgress(ctx context.Context, sink backend
 				}
 				return nil
 			}
+			sent = message
 		}
+		heartbeat = false
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-done:
 			return nil
+		case <-changed:
 		case <-ticker.C:
+			heartbeat = true
 		}
+	}
+}
+
+// startupStageKey carries a loading stack's setStage to the code that
+// downloads and starts its runtimes.
+type startupStageKey struct{}
+
+// reportStartupStage names the current startup step for every session waiting
+// on the loading stack. Outside a stack load it does nothing.
+func reportStartupStage(ctx context.Context, message string) {
+	if set, ok := ctx.Value(startupStageKey{}).(func(string)); ok {
+		set(message)
+	}
+}
+
+func (l *lazyLocalStack) setStage(message string) {
+	l.pool.mu.Lock()
+	defer l.pool.mu.Unlock()
+	if l.loading != nil {
+		l.stage = message
+		l.pool.notifyLocked()
 	}
 }
 

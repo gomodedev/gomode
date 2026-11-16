@@ -59,10 +59,12 @@ func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfi
 		if err != nil {
 			return nil, err
 		}
+		reportStartupStage(ctx, "Preparing llama.cpp "+llamacppsrv.Version+"…")
 		exe, err := llamacppsrv.DownloadVersion(ctx, cache, llamacppsrv.Version)
 		if err != nil {
 			return nil, fmt.Errorf("download realtime runtime: %w", err)
 		}
+		reportStartupStage(ctx, "Downloading or loading "+cfg.Model+"…")
 		server, err := llamacppsrv.New(ctx, exe, &llamacppsrv.Config{
 			HostPort:    "127.0.0.1:0",
 			Threads:     cfg.Threads,

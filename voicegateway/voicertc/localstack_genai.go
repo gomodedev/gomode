@@ -104,6 +104,7 @@ func localStackModelsForConfigWithStarter(
 			// consecutive 30-second windows; words crossing a window boundary
 			// may lose accuracy. Cancellation preserves the model for subsequent
 			// requests.
+			reportStartupStage(ctx, "Starting Whistle "+cfg.ASR.Model+"…")
 			srv, err := whistlesrv.New(ctx, cfg.ASR.Model)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
@@ -166,6 +167,7 @@ func localStackModelsForConfigWithStarter(
 		case voicegateway.TTSEngineKittenTTS:
 			// genaipy owns Python setup and caches. Cancellation preserves its
 			// worker for later fragments; runtime eviction closes the process.
+			reportStartupStage(ctx, "Starting KittenTTS "+cfg.TTS.Model+"…")
 			srv, err := kittenttssrv.New(ctx, kittenttssrv.Config{Model: cfg.TTS.Model})
 			if err != nil {
 				return localStackModels{}, errors.Join(err, runtime.Close())
@@ -228,11 +230,13 @@ func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Mod
 		if err != nil {
 			return localStackEndpoint{}, fmt.Errorf("get user cache dir: %w", err)
 		}
+		reportStartupStage(ctx, "Preparing NeMo-Speech.cpp "+nemospeechsrv.Version+"…")
 		exe, err := nemospeechsrv.Download(ctx, filepath.Join(cacheBase, "gomode", "nemo-speech"), "")
 		if err != nil {
 			return localStackEndpoint{}, fmt.Errorf("install NeMo-Speech.cpp: %w", err)
 		}
 		slog.InfoContext(ctx, "voicertc: starting managed NeMo-Speech.cpp", "model", model, "version", nemospeechsrv.Version)
+		reportStartupStage(ctx, "Downloading or loading "+string(model)+"…")
 		srv, err := nemospeechsrv.New(ctx, exe, model)
 		if err != nil {
 			return localStackEndpoint{}, fmt.Errorf("start managed NeMo-Speech.cpp: %w", err)
@@ -357,6 +361,7 @@ func startManagedLlamaServer(ctx context.Context, model string, contextSize int)
 	if err := os.MkdirAll(cache, 0o750); err != nil {
 		return nil, fmt.Errorf("create llama.cpp cache dir: %w", err)
 	}
+	reportStartupStage(ctx, "Preparing llama.cpp "+version+"…")
 	exe, err := managedLlamaRelease.executable(ctx, cache, version)
 	if err != nil {
 		return nil, err
@@ -369,6 +374,8 @@ func startManagedLlamaServer(ctx context.Context, model string, contextSize int)
 	// through one slot.
 	args := []string{"-hf", model, "--no-warmup", "--no-log-timestamps"}
 	slog.InfoContext(ctx, "voicertc: starting managed llama.cpp", "model", model, "version", version, "hostPort", hostPort, "context_size", contextSize)
+	// llama-server downloads a missing model before loading it.
+	reportStartupStage(ctx, "Downloading or loading "+model+"…")
 	logger := slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)
 	srv, err := llamacppsrv.New(ctx, exe, &llamacppsrv.Config{HostPort: hostPort, Slots: 1, ContextSize: contextSize, Args: args, LogOutput: logger.Writer()})
 	if err != nil {
