@@ -2789,6 +2789,12 @@ export class VoiceSession {
         this._recoveryContext = "";
       }
       this._flushPendingNotifications(true);
+      // The gateway reports idle only when a turn ends, so browser recognition
+      // starts here unless the flush asked the model to respond.
+      if (this.state.speechInput === "client" && !this._speakerActive) {
+        this._browserTurnIdle = true;
+        this._drainBrowserTurn();
+      }
       // Audio capture is handled via WebRTC RTP tracks; no separate audio setup needed.
       return;
     }
