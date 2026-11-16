@@ -20,7 +20,6 @@ export const voiceMessages: VoiceMessages = {
   endSessionToChange: "Beenden Sie die Sprachsitzung, um die Spracheinstellungen zu ändern.",
   speakingVoice: "Sprechstimme",
   speakingSpeed: "Sprechgeschwindigkeit",
-  speakingSpeedNormal: "1× (Normal)",
   speakingVoiceDefault: "Anbieterstandard",
   speakingVoiceNamedDefault: "Standard ({voice})",
   browserVoiceDefault: "Browserstandard",

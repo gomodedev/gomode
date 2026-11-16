@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -52,6 +53,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -322,6 +324,9 @@ private fun SectionHeading(text: String) {
     )
 }
 
+// A tag such as "zh-Hans-CN" fits; the bound follows the field's text size, so enlarged text does not clip.
+private const val VOICE_LANGUAGE_CHARACTERS = 8
+
 private const val VOICE_LANGUAGE_HINT = "Applies to recognition, speech, and replies."
 
 @Composable
@@ -329,6 +334,11 @@ private fun VoiceLanguageSetting(
     edits: SettingsEdits,
     enabled: Boolean,
 ) {
+    val maxWidth =
+        with(LocalDensity.current) {
+            MaterialTheme.typography.bodyLarge.fontSize
+                .toDp()
+        } * VOICE_LANGUAGE_CHARACTERS
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Voice language", style = MaterialTheme.typography.labelLarge)
         OutlinedTextField(
@@ -336,6 +346,7 @@ private fun VoiceLanguageSetting(
             onValueChange = { edits.language = it },
             modifier =
                 Modifier
+                    .widthIn(max = maxWidth)
                     .fillMaxWidth()
                     // The label and hint render outside the field; its semantics carry them.
                     .semantics { contentDescription = "Voice language. $VOICE_LANGUAGE_HINT" }

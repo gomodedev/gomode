@@ -1,4 +1,4 @@
-// Captures real native service, voice settings, Halo, and a host-neutral demonstration frontend.
+// Captures real native service, voice settings and pickers, Halo, and a host-neutral demonstration frontend.
 package com.fghbuild.gomode
 
 import android.Manifest
@@ -115,6 +115,29 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         composeRule.onNodeWithTag("gomode-show-usage-stats").performScrollTo()
         composeRule.onNode(hasText("Voice") and isHeading()).performScrollTo()
         capture(device, directory, "voice-settings")
+
+        // The open speed menu matches its fitted field: every item and the current item's check fit.
+        composeRule.onNodeWithTag("gomode-device-speech-rate").performScrollTo().performClick()
+        waitForTag("gomode-device-speech-rates")
+        capture(device, directory, "voice-settings-speed-menu")
+        device.pressBack()
+        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
+            composeRule.onAllNodesWithTag("gomode-device-speech-rates").fetchSemanticsNodes().isEmpty()
+        }
+
+        // An all-in-one model lists its own voices, which fit a narrow picker.
+        composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").performScrollTo().performClick()
+        composeRule.onNodeWithTag("gomode-voice-choice-native").performScrollTo().performClick()
+        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
+            composeRule
+                .onAllNodes(hasTestTag("gomode-speaking-voice") and isEnabled())
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        composeRule.runOnUiThread { composeRule.activity.currentFocus?.clearFocus() }
+        composeRule.onNodeWithTag("gomode-show-usage-stats").performScrollTo()
+        composeRule.onNode(hasText("Voice") and isHeading()).performScrollTo()
+        capture(device, directory, "voice-settings-all-in-one")
 
         composeRule.onNodeWithTag("gomode-manage-halo").performScrollTo().performClick()
         waitForTag("gomode-halo-screen")

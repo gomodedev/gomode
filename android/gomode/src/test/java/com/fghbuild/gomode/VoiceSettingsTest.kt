@@ -293,7 +293,7 @@ class VoiceSettingsTest {
                 hasAnyAncestor(hasTestTag("gomode-language-model")) and isSelected(),
             ).assertCountEquals(0)
         chosen("gomode-speech").assertTextContains("Local")
-        composeRule.onNodeWithTag("gomode-device-speech-rate").performScrollTo().assertTextContains("1× (Normal)")
+        composeRule.onNodeWithTag("gomode-device-speech-rate").performScrollTo().assertTextContains("1×")
         assertEquals(VoiceSetupMode.FOLLOW_GATEWAY, repository.settings.value.voiceSetup.mode)
         composeRule.onNodeWithTag("gomode-speech-device").performScrollTo().assertIsSelected()
         composeRule.onNodeWithTag("gomode-speech-device").performScrollTo().performClick()
@@ -325,7 +325,7 @@ class VoiceSettingsTest {
         composeRule
             .onNodeWithTag("gomode-device-speech-rate")
             .performScrollTo()
-            .assertTextContains("1× (Normal)")
+            .assertTextContains("1×")
             .performClick()
         composeRule.onNodeWithTag("gomode-device-speech-rate-1.0").assertIsSelected()
         // A held write keeps the picker disabled while it saves, as a slow disk does.

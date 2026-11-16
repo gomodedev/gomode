@@ -1,9 +1,13 @@
-// Outlined dropdown setting with its label above, a checked current item, a hint, and the error it owns.
+// Outlined dropdown setting with its label above, a checked current item, and the error it owns.
+//
+// The field fits its widest item, so short choices such as speeds or voice names do not stretch across the
+// column; a label wider than the column wraps.
 package com.fghbuild.gomode.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenuItem
@@ -22,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
@@ -29,37 +34,22 @@ import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-/** Items of an open [SettingsPicker] menu; selecting one closes it. */
-internal class SettingsPickerMenu(
-    private val close: () -> Unit,
-) {
-    /** A choice; the current one carries a trailing check and reselecting it saves nothing. */
-    @Composable
-    fun Item(
-        text: String,
-        selected: Boolean,
-        tag: String,
-        enabled: Boolean = true,
-        onSelect: () -> Unit,
-    ) {
-        DropdownMenuItem(
-            text = { Text(text) },
-            onClick = {
-                close()
-                if (!selected) onSelect()
-            },
-            enabled = enabled,
-            // A trailing check marks the current item without shifting item labels.
-            trailingIcon = { if (selected) Icon(Icons.Default.Check, contentDescription = null) },
-            modifier = Modifier.semantics { this.selected = selected }.testTag(tag),
-        )
-    }
-}
+/** A [SettingsPicker] choice; the current one carries a trailing check and reselecting it saves nothing. */
+internal class SettingsPickerItem(
+    val text: String,
+    val selected: Boolean,
+    val tag: String,
+    val onSelect: () -> Unit,
+)
+
+// The outlined field's 16 dp start padding, plus the trailing icon's 48 dp slot and its 16 dp end padding.
+private val PICKER_CHROME_WIDTH = 80.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,14 +61,18 @@ internal fun SettingsPicker(
     menuTag: String,
     error: String?,
     errorTag: String,
-    /** Guidance below the field, styled like the web's hints and tagged "[tag]-hint". */
-    hint: String? = null,
-    items: @Composable SettingsPickerMenu.() -> Unit,
+    items: List<SettingsPickerItem>,
 ) {
-    // Disabling closes the menu; the menu's items close the same state object the field opens.
-    val open = remember(enabled) { mutableStateOf(false) }
-    var expanded by open
-    val menu = remember(open) { SettingsPickerMenu { open.value = false } }
+    // Disabling closes the menu.
+    var expanded by remember(enabled) { mutableStateOf(false) }
+    val textStyle = MaterialTheme.typography.bodyLarge
+    val measurer = rememberTextMeasurer()
+    val texts = items.map { it.text } + value
+    val widestText =
+        remember(texts, textStyle, measurer) {
+            texts.maxOf { measurer.measure(it, textStyle, maxLines = 1).size.width }
+        }
+    val fitWidth = with(LocalDensity.current) { widestText.toDp() } + PICKER_CHROME_WIDTH
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, style = MaterialTheme.typography.labelLarge)
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = enabled && it }) {
@@ -87,15 +81,18 @@ internal fun SettingsPicker(
                 onValueChange = {},
                 readOnly = true,
                 enabled = enabled,
+                textStyle = textStyle,
                 isError = error != null,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
                 modifier =
                     Modifier
                         .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled)
+                        // Bound before filling: an exact incoming width would override the bound.
+                        .widthIn(max = fitWidth)
                         .fillMaxWidth()
-                        // The label, hint, and error render outside the field; its semantics carry them.
+                        // The label and error render outside the field; its semantics carry them.
                         .semantics {
-                            contentDescription = listOfNotNull(label, hint).joinToString(". ")
+                            contentDescription = label
                             error?.let { this.error(it) }
                         }.testTag(tag),
             )
@@ -105,16 +102,19 @@ internal fun SettingsPicker(
                 // Menus open a popup window, which does not inherit the screen's flag.
                 modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag(menuTag),
             ) {
-                menu.items()
+                items.forEach { item ->
+                    DropdownMenuItem(
+                        text = { Text(item.text) },
+                        onClick = {
+                            expanded = false
+                            if (!item.selected) item.onSelect()
+                        },
+                        // A trailing check marks the current item without shifting item labels.
+                        trailingIcon = { if (item.selected) Icon(Icons.Default.Check, contentDescription = null) },
+                        modifier = Modifier.semantics { selected = item.selected }.testTag(item.tag),
+                    )
+                }
             }
-        }
-        hint?.let {
-            Text(
-                it,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.semantics { hideFromAccessibility() }.testTag("$tag-hint"),
-            )
         }
         error?.let {
             Text(

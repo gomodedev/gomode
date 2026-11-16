@@ -188,7 +188,7 @@ class VoiceChoicesSettingsTest {
                 chosen("gomode-recognition").assertTextContains("Local")
                 chosen("gomode-language-model").assertTextContains("Gateway LLM")
                 chosen("gomode-speech").assertTextContains("Local")
-                stage("gomode-device-speech-rate").assertTextContains("1× (Normal)")
+                stage("gomode-device-speech-rate").assertTextContains("1×")
                 composeRule.onNodeWithTag("gomode-speaking-voice").assertDoesNotExist()
 
                 // Gateway recognition with device speech.

@@ -4,8 +4,7 @@ package com.fghbuild.gomode.ui.settings
 import androidx.compose.runtime.Composable
 import com.fghbuild.gomode.data.DEVICE_SPEECH_RATES
 
-internal fun deviceSpeechRateLabel(rate: Float): String =
-    if (rate == 1f) "1× (Normal)" else "${rate.toString().removeSuffix(".0")}×"
+internal fun deviceSpeechRateLabel(rate: Float): String = "${rate.toString().removeSuffix(".0")}×"
 
 @Composable
 internal fun DeviceSpeechRateSetting(
@@ -22,11 +21,13 @@ internal fun DeviceSpeechRateSetting(
         menuTag = "gomode-device-speech-rates",
         error = saver.error,
         errorTag = "gomode-device-speech-rate-error",
-    ) {
-        DEVICE_SPEECH_RATES.forEach { choice ->
-            Item(deviceSpeechRateLabel(choice), selected = choice == rate, tag = "gomode-device-speech-rate-$choice") {
-                saver.launch { save(choice) }
-            }
-        }
-    }
+        items =
+            DEVICE_SPEECH_RATES.map { choice ->
+                SettingsPickerItem(
+                    deviceSpeechRateLabel(choice),
+                    selected = choice == rate,
+                    tag = "gomode-device-speech-rate-$choice",
+                ) { saver.launch { save(choice) } }
+            },
+    )
 }

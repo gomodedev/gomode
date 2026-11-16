@@ -19,7 +19,6 @@ export const voiceMessages: VoiceMessages = {
   endSessionToChange: "Finalice la sesión de voz para cambiar los ajustes de voz.",
   speakingVoice: "Voz de síntesis",
   speakingSpeed: "Velocidad de voz",
-  speakingSpeedNormal: "1× (Normal)",
   speakingVoiceDefault: "Predeterminada del proveedor",
   speakingVoiceNamedDefault: "Predeterminada ({voice})",
   browserVoiceDefault: "Predeterminada del navegador",

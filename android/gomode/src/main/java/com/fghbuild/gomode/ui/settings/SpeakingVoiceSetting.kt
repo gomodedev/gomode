@@ -34,15 +34,13 @@ internal fun SpeakingVoiceSetting(
         menuTag = "gomode-speaking-voices",
         error = saver.error,
         errorTag = "gomode-speaking-voice-save-error",
-    ) {
-        (listOf("") + voices.names).forEach { name ->
-            Item(
-                text = name.ifEmpty { defaultLabel },
-                selected = name == selected,
-                tag = if (name.isEmpty()) "gomode-speaking-voice-default" else "gomode-speaking-voice-$name",
-            ) {
-                saver.launch { save(voices.owner, name) }
-            }
-        }
-    }
+        items =
+            (listOf("") + voices.names).map { name ->
+                SettingsPickerItem(
+                    text = name.ifEmpty { defaultLabel },
+                    selected = name == selected,
+                    tag = if (name.isEmpty()) "gomode-speaking-voice-default" else "gomode-speaking-voice-$name",
+                ) { saver.launch { save(voices.owner, name) } }
+            },
+    )
 }

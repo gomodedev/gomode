@@ -376,7 +376,7 @@ export default function VoiceSettings(props: {
             {(errorId) => (
               <input
                 id={languageId}
-                class={styles.textField}
+                class={`${styles.textField} ${styles.languageField}`}
                 type="text"
                 disabled={active()}
                 value={tag()}
@@ -454,11 +454,7 @@ export default function VoiceSettings(props: {
                     }}
                     aria-describedby={errorId()}
                   >
-                    <For each={BROWSER_SPEECH_RATES}>
-                      {(rate) => (
-                        <option value={rate}>{rate === 1 ? messages().speakingSpeedNormal : `${rate}×`}</option>
-                      )}
-                    </For>
+                    <For each={BROWSER_SPEECH_RATES}>{(rate) => <option value={rate}>{`${rate}×`}</option>}</For>
                   </select>
                 </Picker>
               )}

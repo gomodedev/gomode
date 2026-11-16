@@ -15,7 +15,6 @@ export const defaultVoiceSettingsMessages = {
   endSessionToChange: "End the voice session to change voice settings.",
   speakingVoice: "Speaking voice",
   speakingSpeed: "Speaking speed",
-  speakingSpeedNormal: "1× (Normal)",
   speakingVoiceDefault: "Provider default",
   // {voice} names the voice the gateway uses when none is chosen.
   speakingVoiceNamedDefault: "Default ({voice})",

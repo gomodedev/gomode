@@ -44,20 +44,24 @@ internal fun DeviceSpeakingVoiceSetting(
         menuTag = "gomode-device-speaking-voices",
         error = saver.error,
         errorTag = "gomode-device-speaking-voice-error",
-    ) {
-        Item(LOCAL_DEFAULT, selected = effective.isEmpty(), tag = "gomode-device-speaking-voice-default") {
-            saver.launch { save("") }
-        }
-        voices.orEmpty().forEach { voice ->
-            Item(
-                voiceLabel(voice),
-                selected = voice.name == effective,
-                tag = "gomode-device-speaking-voice-${voice.name}",
-            ) {
-                saver.launch { save(voice.name) }
-            }
-        }
-    }
+        items =
+            listOf(
+                SettingsPickerItem(
+                    LOCAL_DEFAULT,
+                    selected = effective.isEmpty(),
+                    tag = "gomode-device-speaking-voice-default",
+                ) {
+                    saver.launch { save("") }
+                },
+            ) +
+                voices.orEmpty().map { voice ->
+                    SettingsPickerItem(
+                        voiceLabel(voice),
+                        selected = voice.name == effective,
+                        tag = "gomode-device-speaking-voice-${voice.name}",
+                    ) { saver.launch { save(voice.name) } }
+                },
+    )
 }
 
 private fun voiceLabel(voice: Voice): String = "${voice.name} (${voice.locale.toLanguageTag()})"

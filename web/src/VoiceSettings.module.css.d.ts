@@ -13,6 +13,7 @@ declare const classes: {
   readonly "heading": string;
   readonly "hint": string;
   readonly "label": string;
+  readonly "languageField": string;
   readonly "notice": string;
   readonly "picker": string;
   readonly "pickerArrow": string;

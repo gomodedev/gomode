@@ -35,6 +35,8 @@ SCENARIOS = (
     "hosted-service",
     "service-editor",
     "voice-settings",
+    "voice-settings-all-in-one",
+    "voice-settings-speed-menu",
 )
 EXPECTED_FILES = frozenset(f"{name}.webp" for name in SCENARIOS)
 # The owned API35 stock emulator at 280dpi insets the SystemUI status bar by 42px.

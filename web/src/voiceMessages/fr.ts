@@ -20,7 +20,6 @@ export const voiceMessages: VoiceMessages = {
   endSessionToChange: "Terminez la session vocale pour modifier les paramètres vocaux.",
   speakingVoice: "Voix de synthèse",
   speakingSpeed: "Vitesse de parole",
-  speakingSpeedNormal: "1× (Normale)",
   speakingVoiceDefault: "Par défaut du fournisseur",
   speakingVoiceNamedDefault: "Par défaut ({voice})",
   browserVoiceDefault: "Par défaut du navigateur",
