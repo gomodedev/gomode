@@ -1,0 +1,12 @@
+[
+  {"from":"client","message":{"kind":"session.setup","voice":{"language":""},"tools":null,"context":{}}},
+  {"from":"gateway","message":{"kind":"session.ready"}},
+  {"from":"client","message":{"kind":"user.message","text":"Hello"}},
+  {"from":"gateway","message":{"kind":"turn.status","state":"thinking"}},
+  {"from":"gateway","message":{"kind":"assistant.text.delta","text":"Ready.","responseID":"response-1"}},
+  {"from":"gateway","message":{"kind":"turn.status","state":"idle"}},
+  {"from":"client","message":{"generate":true,"kind":"context.update","context":{"text":"Build is waiting"}}},
+  {"from":"gateway","message":{"kind":"turn.status","state":"thinking"}},
+  {"from":"gateway","message":{"kind":"assistant.text.delta","text":"Ready.","responseID":"response-2"}},
+  {"from":"gateway","message":{"kind":"turn.status","state":"idle"}}
+]

@@ -23,8 +23,13 @@ export class FakeRecognition implements BrowserRecognition {
   start(): void {
     if (FakeRecognition.signalsStart) this.onstart?.();
   }
+  // Browsers report an aborted session asynchronously, then end it.
   abort(): void {
     this.aborted = true;
+    queueMicrotask(() => {
+      this.onerror?.({ error: "aborted" });
+      this.onend?.();
+    });
   }
   end(): void {
     this.onend?.();

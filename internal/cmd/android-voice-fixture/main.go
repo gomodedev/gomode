@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
 	"github.com/maruel/gomode"
+	"github.com/maruel/gomode/internal/voicetest"
 	"github.com/maruel/gomode/mcp"
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
@@ -311,16 +313,13 @@ func (f *fixture) handleTextSession(w http.ResponseWriter, r *http.Request) {
 			f.mu.Lock()
 			f.stats.TextSetups++
 			f.mu.Unlock()
-			if !writeMessage(ctx, f.log, conn, voicev2.SessionReady{Kind: voicev2.MessageKindSessionReady}) {
-				return
+			for _, reply := range voicetest.GatewayReplies(env.Kind) {
+				if !writeMessage(ctx, f.log, conn, reply) {
+					return
+				}
 			}
 		case voicev2.MessageKindUserMessage:
-			replies := []any{
-				voicev2.TurnStatus{Kind: voicev2.MessageKindTurnStatus, State: voicev2.TurnStateThinking},
-				voicev2.AssistantTextDelta{Kind: voicev2.MessageKindAssistantTextDelta, Text: "Ready."},
-				voicev2.TurnStatus{Kind: voicev2.MessageKindTurnStatus, State: voicev2.TurnStateIdle},
-			}
-			for _, reply := range replies {
+			for _, reply := range voicetest.GatewayReplies(env.Kind) {
 				if !writeMessage(ctx, f.log, conn, reply) {
 					return
 				}

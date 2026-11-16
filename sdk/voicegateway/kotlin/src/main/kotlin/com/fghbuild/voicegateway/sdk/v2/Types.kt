@@ -1082,7 +1082,13 @@ data class SessionClose(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val reason: String? = null,
 )
 
-/** SessionReady is a gateway message that reports the session is ready. */
+/**
+ * SessionReady is a gateway message that reports the session is ready.
+ *
+ * The gateway sends it before any turn and does not follow it with
+ * turn.status idle: clients that capture speech start listening on
+ * session.ready unless they request a response first.
+ */
 @Serializable
 data class SessionReady(
     /** Kind is "session.ready". */

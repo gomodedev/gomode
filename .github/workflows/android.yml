@@ -9,14 +9,14 @@ on:
       - android/**
       - assets/**
       - e2e/**
+      - internal/cmd/android-voice-fixture/**
+      - internal/voicetest/**
       - pyproject.toml
       - scripts/android*
       - scripts/run-concurrently.sh
       - sdk/**
-      - testdata/service-items/**
-      - testdata/speech-text/**
-      - testdata/voice-choices/**
       - uv.lock
+      - web/testdata/**
   pull_request:
     paths: *android_paths
   workflow_dispatch:

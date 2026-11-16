@@ -605,7 +605,13 @@ export interface SessionClose {
   reason?: string;
 }
 
-/** SessionReady is a gateway message that reports the session is ready. */
+/**
+ * SessionReady is a gateway message that reports the session is ready.
+ *
+ * The gateway sends it before any turn and does not follow it with
+ * turn.status idle: clients that capture speech start listening on
+ * session.ready unless they request a response first.
+ */
 export interface SessionReady {
   /** Kind is "session.ready". */
   kind: MessageKind;

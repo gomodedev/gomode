@@ -89,6 +89,8 @@ const ICE_GATHERING_TIMEOUT_MS = 10000;
 const ICE_HOST_CANDIDATE_GRACE_MS = 1000;
 const ICE_DISCONNECTED_GRACE_MS = 5000;
 const MAX_RECONNECT_ATTEMPTS = 3;
+/** Max time (ms) an idle browser-speech session may go without listening. */
+const BROWSER_LISTENING_STALL_MS = 10000;
 const HANG_UP_TOOL_NAME = "hang_up";
 const MUTE_TOOL_NAME = "mute";
 /** Conservative data-channel/model-safe bound for a recovery context update. */
@@ -958,6 +960,8 @@ export class VoiceSession {
   /** The <audio> element playing remote RTP audio, stored so we can call setSinkId(). */
   /** True while the model is speaking — injected text is buffered and flushed after the turn ends. */
   private _speakerActive = false;
+  /** Ends a browser-speech session that stays idle without listening; see _browserListeningStalled. */
+  private _listeningWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
   private _pendingNotifications: Array<{ text: string; generate: boolean }> = [];
   private _pendingServiceContext: string | null = null;
@@ -2674,7 +2678,37 @@ export class VoiceSession {
           !state.speaking &&
           !microphoneMuted(state),
       );
+      if (!this._browserListeningStalled()) {
+        if (this._listeningWatchdog !== null) clearTimeout(this._listeningWatchdog);
+        this._listeningWatchdog = null;
+      } else
+        this._listeningWatchdog ??= setTimeout(() => {
+          this._listeningWatchdog = null;
+          if (this._browserListeningStalled())
+            this._setError("Browser speech stopped listening. Retry or use gateway recognition.");
+        }, BROWSER_LISTENING_STALL_MS);
     });
+  }
+
+  /**
+   * Whether an unmuted, idle browser-speech session is neither listening nor
+   * speaking. Recognition restarts and gateway turn starts take well under
+   * BROWSER_LISTENING_STALL_MS; text sessions run on the local stack, which
+   * reports thinking as soon as a turn starts. Lasting, it means no code path
+   * will start recognition, which would otherwise leave the call silent.
+   */
+  private _browserListeningStalled(): boolean {
+    const state = this.state;
+    return (
+      this.transport === "text" &&
+      state.connected &&
+      this._connection?.recovering !== true &&
+      !microphoneMuted(state) &&
+      state.turnState === TurnStateIdle &&
+      state.activeTool === null &&
+      !state.listening &&
+      !state.speaking
+    );
   }
 
   // -----------------------------------------------------------------------

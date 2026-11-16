@@ -15,7 +15,7 @@ package com.fghbuild.gomode.voice
 // emphasis stays literal, intraword operators/identifiers survive, and _name_ is
 // emphasis (escape it or use code for a literal). No whole reply/line is buffered.
 // An unfinished destination is omitted through newline/end; nesting is capped at 32.
-// Keep equivalent to web/src/SpeechTextFilter.ts and testdata/speech-text/golden.json.
+// Keep equivalent to web/src/SpeechTextFilter.ts and web/testdata/speech-text/golden.json.
 internal class SpeechTextFilter {
     private var pending = ""
     private var lineStart = true

@@ -405,7 +405,7 @@ describe("voice choices", () => {
   });
 
   const fixtures = JSON.parse(
-    readFileSync(new URL("../../testdata/voice-choices/selection.json", import.meta.url), "utf8"),
+    readFileSync(new URL("../testdata/voice-choices/selection.json", import.meta.url), "utf8"),
   ) as {
     selection: Array<{
       name: string;

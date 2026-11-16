@@ -3570,7 +3570,7 @@ describe("VoiceSession", () => {
   });
 
   const recoveryFixtures = JSON.parse(
-    readFileSync(new URL("../../testdata/voice-choices/selection.json", import.meta.url), "utf8"),
+    readFileSync(new URL("../testdata/voice-choices/selection.json", import.meta.url), "utf8"),
   ) as {
     recovery: Array<{
       name: string;

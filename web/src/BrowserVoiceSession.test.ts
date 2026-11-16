@@ -1,5 +1,6 @@
 // Tests browser-speech voice sessions over the authenticated text gateway transport.
 
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ok } from "node:assert/strict";
 import { expect, vi } from "../tests/expect";
@@ -290,10 +291,11 @@ it("ends text voice visibly when a tool result cannot be sent", async () => {
   expect(callTool).toHaveBeenCalledOnce();
 });
 
-// Ready starts recognition; a gateway turn aborts it and the browser ends it.
-function startTurn(socket: FakeWebSocket): void {
+// Ready starts recognition; a gateway turn aborts it, and the browser ends it
+// after the message task.
+async function startTurn(socket: FakeWebSocket): Promise<void> {
   socket.message({ kind: "turn.status", state: "thinking" });
-  FakeRecognition.instances.at(-1)?.end();
+  await Promise.resolve();
 }
 
 function finishTurn(socket: FakeWebSocket, text: string): void {
@@ -334,6 +336,65 @@ describe("provider reasoning", () => {
 });
 
 describe("browser voice sessions", () => {
+  it("completes the text session recorded from the gateway", async () => {
+    const steps = JSON.parse(
+      readFileSync(new URL("../../internal/voicetest/testdata/text_session.json", import.meta.url), "utf8"),
+    ) as Array<{ from: "client" | "gateway"; message: { kind: string; text?: string; context?: { text: string } } }>;
+    await session.connect();
+    const socket = FakeWebSocket.instances.at(-1);
+    ok(socket);
+    socket.open();
+    for (const { from, message } of steps) {
+      if (from === "gateway") {
+        socket.message(message);
+        // Each WebSocket message is a separate task.
+        await Promise.resolve();
+        continue;
+      }
+      if (session.state.speaking) fakeSynthesis.complete();
+      if (message.kind === "session.setup") {
+        expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toMatchObject({ kind: "session.setup" });
+        continue;
+      }
+      expect(session.state.listening).toBe(true);
+      if (message.kind === "user.message") {
+        const recognition = FakeRecognition.instances.at(-1);
+        ok(recognition);
+        recognition.result([[message.text ?? "", true]]);
+        recognition.end();
+      } else if (message.kind === "context.update") session.injectText(message.context?.text ?? "", true);
+      else throw new Error(`Unhandled recorded client message ${message.kind}`);
+      expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toEqual(message);
+    }
+    fakeSynthesis.complete();
+    expect(session.state.error).toBeNull();
+    expect(session.state.listening).toBe(true);
+    expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual(
+      steps.flatMap(({ message }) => (message.kind === "assistant.text.delta" ? [message.text] : [])),
+    );
+  });
+
+  it("keeps listening while idle and ends a session whose gateway never answers", async () => {
+    vi.useFakeTimers();
+    const socket = await readySocket();
+    // Recognition cycles every 30 seconds of silence without a stall. Step the
+    // clock: one long advance skips timers that recognition callbacks schedule.
+    for (let i = 0; i < 60; i++) await vi.advanceTimersByTimeAsync(1_000);
+    expect(FakeRecognition.instances).toHaveLength(2);
+    expect(session.state.error).toBeNull();
+    expect(session.state.listening).toBe(true);
+    const recognition = FakeRecognition.instances.at(-1);
+    ok(recognition);
+    recognition.result([["Hello", true]]);
+    recognition.end();
+    expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toEqual({ kind: "user.message", text: "Hello" });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(session.state.connected).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(session.state.connected).toBe(false);
+    expect(session.state.error).toBe("Browser speech stopped listening. Retry or use gateway recognition.");
+  });
+
   it("listens once ready unless the ready flush asks for a reply", async () => {
     await readySocket();
     expect(session.state.listening).toBe(true);
@@ -483,7 +544,7 @@ describe("browser voice sessions", () => {
 
   it("does not start playback if enabling recognition tears down the session", async () => {
     const socket = await readySocket();
-    startTurn(socket);
+    await startTurn(socket);
     vi.spyOn(FakeRecognition.prototype, "start").mockImplementationOnce(() => {
       throw new Error("Recognition unavailable");
     });
@@ -498,7 +559,7 @@ describe("browser voice sessions", () => {
     vi.useFakeTimers();
     Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Chrome Android" });
     const socket = await readySocket();
-    startTurn(socket);
+    await startTurn(socket);
     socket.message({ kind: "assistant.text.delta", text: "First. Queued. " });
     const original = FakeRecognition.instances.at(-1);
     ok(original);
@@ -548,7 +609,7 @@ describe("browser voice sessions", () => {
 
   it("streams ordered sentences before idle, preserves decimals and finalizes text before playback drains", async () => {
     const socket = await readySocket();
-    startTurn(socket);
+    await startTurn(socket);
     session.setMicrophoneMode("muteOnce");
     const chunks = ["The value is 3.", "14. ", '"Next?', '" ', "Final tail"];
     socket.message({ kind: "assistant.text.delta", text: chunks[0] });
@@ -590,7 +651,7 @@ describe("browser voice sessions", () => {
 
   it("keeps capture through playback gaps, pauses for tool waits, and buffers notifications until playback drains", async () => {
     const socket = await readySocket();
-    startTurn(socket);
+    await startTurn(socket);
     session.injectText("Notification", true);
     expect(socket.sent.some((text) => text.includes("Notification"))).toBe(false);
     socket.message({ kind: "assistant.text.delta", text: "One. " });
@@ -696,7 +757,7 @@ describe("browser voice sessions", () => {
 
   it("buffers a long reply and reads every sentence in order before reopening mute-once capture", async () => {
     const socket = await readySocket();
-    startTurn(socket);
+    await startTurn(socket);
     session.setMicrophoneMode("muteOnce");
     session.injectText("Notification");
     const sentences = Array.from({ length: 200 }, (_, index) => `Sentence ${index} ${"word ".repeat(20)}ends.`);
@@ -897,7 +958,7 @@ describe("browser voice sessions", () => {
   it("plays thinking feedback through tool waits and stops for turn end, mute, interruption and teardown", async () => {
     const socket = await readySocket();
     expect(earcon.prepare).toHaveBeenCalledOnce();
-    startTurn(socket);
+    await startTurn(socket);
     expect(earcon.setThinking).toHaveBeenLastCalledWith(true);
     // An incomplete sentence still needs thinking feedback during tool waits.
     socket.message({ kind: "assistant.text.delta", text: "Working on it" });
@@ -1095,7 +1156,7 @@ describe("browser voice sessions", () => {
   it("listens during playback and keeps one copy of user text", async () => {
     const socket = await readySocket();
     expect(session.state.listening).toBe(true);
-    startTurn(socket);
+    await startTurn(socket);
     finishTurn(socket, "Ready");
     expect(session.state.speaking).toBe(true);
     expect(session.state.listening).toBe(true);
@@ -1124,7 +1185,7 @@ describe("browser voice sessions", () => {
   it("returns mute once to listening after playback and speaks even while fully muted", async () => {
     const socket = await readySocket();
     session.setMicrophoneMode("muteOnce");
-    FakeRecognition.instances.at(-1)?.end();
+    await Promise.resolve();
     expect(session.state.listening).toBe(false);
     finishTurn(socket, "First reply");
     expect(session.state.listening).toBe(false);
@@ -1233,7 +1294,7 @@ describe("browser voice sessions", () => {
   it("drains and resets streamed speech after a recoverable turn failure without voicing diagnostics", async () => {
     const socket = await readySocket();
     session.setMicrophoneMode("muteOnce");
-    startTurn(socket);
+    await startTurn(socket);
     const raw = "First. Queued. tail **unfinished";
     socket.message({ kind: "assistant.text.delta", text: raw });
     const first = fakeSynthesis.spoken[0];

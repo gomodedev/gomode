@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +22,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/maruel/gomode/internal/voicetest"
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
@@ -80,6 +84,91 @@ func TestServeTextSessionCloseLogging(t *testing.T) { //nolint:paralleltest // T
 				t.Fatalf("disconnect log = %t, want %t; logs: %s", got, tc.wantLog, logs.String())
 			}
 		})
+	}
+}
+
+var update = flag.Bool("update", false, "rewrite internal/voicetest/testdata/text_session.json")
+
+// TestServeTextSessionTrace records a production text session for the client
+// tests and fixtures that replay internal/voicetest/testdata/text_session.json.
+func TestServeTextSessionTrace(t *testing.T) {
+	t.Parallel()
+	conv := &fakeConversation{userStep: fakeLLMStep{deltas: []string{"Ready."}, reply: llmReply{text: "Ready."}}}
+	conn := dialTextSession(t, newTestTextBridge(t, fixedConversationLLM{conv: conv}))
+	ctx := t.Context()
+	var got []voicetest.Step
+	responseIDs := map[string]string{}
+	for _, msg := range []any{
+		voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup},
+		voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: "Hello"},
+		voicev2.ContextUpdate{Kind: voicev2.MessageKindContextUpdate, Context: voicev2.Context{Text: "Build is waiting"}, Generate: true},
+	} {
+		writeMessage(t, ctx, conn, msg)
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, voicetest.Step{From: voicetest.Client, Message: data})
+		// Each client message ends at readiness or at the turn it starts.
+		for done := false; !done; {
+			kind, data := readMessage(t, ctx, conn)
+			switch kind {
+			case voicev2.MessageKindSessionReady:
+				done = true
+			case voicev2.MessageKindTurnStatus:
+				var status voicev2.TurnStatus
+				if err := json.Unmarshal(data, &status); err != nil {
+					t.Fatal(err)
+				}
+				done = status.State == voicev2.TurnStateIdle
+			case voicev2.MessageKindAssistantTextDelta:
+				// Response IDs are random; keep only their identity.
+				var delta voicev2.AssistantTextDelta
+				if err := json.Unmarshal(data, &delta); err != nil {
+					t.Fatal(err)
+				}
+				id, ok := responseIDs[delta.ResponseID]
+				if !ok {
+					id = fmt.Sprintf("response-%d", len(responseIDs)+1)
+					responseIDs[delta.ResponseID] = id
+				}
+				delta.ResponseID = id
+				if data, err = json.Marshal(delta); err != nil {
+					t.Fatal(err)
+				}
+			default:
+			}
+			got = append(got, voicetest.Step{From: voicetest.Gateway, Message: data})
+		}
+	}
+	var b bytes.Buffer
+	b.WriteString("[\n")
+	for i, s := range got {
+		line, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.WriteString("  ")
+		b.Write(line)
+		if i < len(got)-1 {
+			b.WriteString(",")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("]\n")
+	const path = "../../internal/voicetest/testdata/text_session.json"
+	if *update {
+		if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := b.String(); got != string(want) {
+		t.Fatalf("text session differs from %s; rerun with -update and review the diff\nwant:\n%s\ngot:\n%s", path, want, got)
 	}
 }
 

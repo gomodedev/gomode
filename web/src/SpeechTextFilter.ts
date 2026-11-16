@@ -14,7 +14,7 @@
 // emphasis stays literal, intraword operators/identifiers survive, and _name_ is
 // emphasis (escape it or use code for a literal). No whole reply/line is buffered.
 // An unfinished destination is omitted through newline/end; nesting is capped at 32.
-// Keep equivalent to Android SpeechTextFilter and testdata/speech-text/golden.json.
+// Keep equivalent to Android SpeechTextFilter and web/testdata/speech-text/golden.json.
 const EMPHASIS_LOOKAHEAD = 256;
 const WORD = /^[\p{L}\p{N}\p{M}\uD800-\uDFFF]$/u;
 const ASCII_PUNCTUATION = /^[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]$/;

@@ -6,7 +6,7 @@ import { equal } from "node:assert/strict";
 import { SpeechTextFilter } from "./SpeechTextFilter";
 
 const cases = JSON.parse(
-  readFileSync(new URL("../../testdata/speech-text/golden.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../testdata/speech-text/golden.json", import.meta.url), "utf8"),
 ) as Array<{
   name: string;
   input: string;
