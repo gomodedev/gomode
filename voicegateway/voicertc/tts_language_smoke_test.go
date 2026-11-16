@@ -15,9 +15,9 @@ import (
 )
 
 // TestSmokeTTSLanguage synthesizes a French sentence in a French session with
-// KittenTTS 2, whose voice the session language selects, and Gemini TTS, which
-// receives the language, then transcribes each through NeMo Parakeet TDT in
-// French. GEMINI_API_KEY is required; the models download on first use.
+// KittenTTS 2, whose voice the session language selects, and both Gemini TTS
+// tiers, which receive the language, then transcribes each through NeMo
+// Parakeet TDT in French. GEMINI_API_KEY is required; the models download on first use.
 func TestSmokeTTSLanguage(t *testing.T) {
 	isolateSmokeHost(t)
 	const text = "Je voudrais réserver une table pour deux ce soir."
@@ -52,18 +52,8 @@ func TestSmokeTTSLanguage(t *testing.T) {
 			}
 			return a
 		}},
-		{"gemini-3.8-flash-lite-tts", func(t *testing.T) ttsAdapter {
-			c, err := gemini.New(t.Context(), genai.ProviderOptionModel("gemini-3.8-flash-lite-tts"), genai.ProviderOptionModalities{genai.ModalityAudio})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := c.Close(); err != nil {
-					t.Error(err)
-				}
-			})
-			return &geminiTTSAdapter{client: c, voice: "Kore"}
-		}},
+		{"gemini-3.8-flash-lite-tts", geminiSmokeTTS("gemini-3.8-flash-lite-tts")},
+		{"gemini-3.8-flash-tts", geminiSmokeTTS("gemini-3.8-flash-tts")},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			tts := row.tts(t)
@@ -90,5 +80,21 @@ func TestSmokeTTSLanguage(t *testing.T) {
 				t.Errorf("transcript %q lacks %q", final, "table")
 			}
 		})
+	}
+}
+
+// geminiSmokeTTS synthesizes through Gemini TTS model with the Kore voice.
+func geminiSmokeTTS(model string) func(t *testing.T) ttsAdapter {
+	return func(t *testing.T) ttsAdapter {
+		c, err := gemini.New(t.Context(), genai.ProviderOptionModel(model), genai.ProviderOptionModalities{genai.ModalityAudio})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := c.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		return &geminiTTSAdapter{client: c, voice: "Kore"}
 	}
 }

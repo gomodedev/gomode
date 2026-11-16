@@ -235,7 +235,7 @@ effort = "low"
 # first voice of the session language.
 [[tts]]
 id = "kitten"
-label = "Kitten TTS"
+label = "Kitten TTS 1.7B"
 engine = "kittentts"
 model = "KittenML/kitten-tts-2"
 voice = "Luna"
@@ -246,7 +246,7 @@ voice = "Luna"
 # Provider speech uses its native endpoint. Omit remote to start a managed model.
 [[asr]]
 id = "voxtral"
-label = "Voxtral Realtime"
+label = "Voxtral 4B"
 provider = "llamacpp"
 model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
 context_size = 32768
@@ -259,39 +259,48 @@ context_size = 32768
 # nemotron-en and parakeet-ctc (drafts while speaking).
 [[asr]]
 id = "parakeet-tdt"
-label = "Parakeet TDT"
+label = "Parakeet TDT 0.6B"
 engine = "nemospeech"
 model = "parakeet-tdt"
 
 [[asr]]
 id = "nemotron"
-label = "Nemotron 3.5"
+label = "Nemotron 3.5 0.6B"
 engine = "nemospeech"
 model = "nemotron-3.5"
 
 [[asr]]
 id = "gemini-transcribe-live"
-label = "Gemini Live Transcribe"
+label = "Gemini Transcribe"
 provider = "gemini"
 model = "gemini-3.5-transcribe-live"
 
 # OPENAI_API_KEY authenticates recognition; the session runs at 24 kHz.
 [[asr]]
 id = "openai-transcribe-live"
-label = "OpenAI Live Transcribe"
+label = "GPT Transcribe"
 provider = "openai"
 model = "gpt-live-transcribe"
 
+# GEMINI_API_KEY authenticates these independent speech stages. Google
+# publishes no parameter counts; Flash Lite is the smaller tier.
 [[tts]]
 id = "gemini-tts"
-label = "Gemini TTS"
+label = "Gemini Flash Lite TTS"
 provider = "gemini"
 model = "gemini-3.8-flash-lite-tts"
 voice = "Kore"
-# GEMINI_API_KEY authenticates these independent speech stages.
+
+[[tts]]
+id = "gemini-flash-tts"
+label = "Gemini Flash TTS"
+provider = "gemini"
+model = "gemini-3.8-flash-tts"
+voice = "Kore"
+
 [[tts]]
 id = "lfm3"
-label = "LFM3 TTS"
+label = "LFM3 TTS 2B"
 provider = "llamacpp"
 model = "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M"
 voice = "female"
