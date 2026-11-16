@@ -389,6 +389,29 @@ func TestLocalStackPool(t *testing.T) {
 			stackVariant(t, b, clientSpeechConfig()).release()
 		})
 	})
+	t.Run("failed stop of an evicted choice keeps the new session", func(t *testing.T) {
+		t.Parallel()
+		p := newLocalStackPool(testRuntime)
+		a, b := p.backend(poolTestConfig("one")), p.backend(poolTestConfig("two"))
+		t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
+		evicted := stackVariant(t, a, clientSpeechConfig())
+		loaded, err := evicted.acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		evicted.release()
+		p.mu.Lock()
+		evicted.loaded = failingStop{loaded}
+		p.mu.Unlock()
+		next := stackVariant(t, b, clientSpeechConfig())
+		if _, err := next.acquire(t.Context()); err != nil {
+			t.Fatalf("acquire after a failed eviction = %v", err)
+		}
+		if evicted.loaded != nil {
+			t.Fatal("evicted stack retained its slot")
+		}
+		next.release()
+	})
 	t.Run("cancel capacity wait", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
@@ -960,4 +983,11 @@ func TestIndependentSpeechStages(t *testing.T) {
 			}
 		}
 	})
+}
+
+// failingStop reports the exit status Windows gives a killed managed server.
+type failingStop struct{ backendConnector }
+
+func (f failingStop) Close() error {
+	return errors.Join(f.backendConnector.Close(), errors.New("exit status 1"))
 }

@@ -376,10 +376,10 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 		}
 		if l.loading == nil && l.unloading == nil && (count < p.limits.MaxInstances || oldest != nil) {
 			if count >= p.limits.MaxInstances {
-				if err := oldest.unloadLocked(); err != nil {
-					p.mu.Unlock()
-					return nil, err
-				}
+				// unloadLocked logs a failed stop. The evicted processes are reaped
+				// and the slot released either way, so the failure belongs to the
+				// evicted choice, not to this session.
+				_ = oldest.unloadLocked()
 				p.mu.Unlock()
 				continue
 			}
