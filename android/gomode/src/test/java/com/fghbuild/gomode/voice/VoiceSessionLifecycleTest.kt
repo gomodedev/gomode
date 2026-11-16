@@ -93,6 +93,20 @@ class VoiceSessionLifecycleTest {
     }
 
     @Test
+    fun failureSurvivesDisconnectUntilDismissed() {
+        val session = createCloudSession(SettingsRepository(InMemoryPreferencesDataStore()))
+        try {
+            session.setError("session: download canceled")
+            session.disconnect()
+            assertEquals("session: download canceled", session.state.value.error)
+            session.dismissError()
+            assertNull(session.state.value.error)
+        } finally {
+            session.close()
+        }
+    }
+
+    @Test
     fun offlineRecoveryReleasesTransportWithoutSpendingRetriesAndHangupCancelsIt() =
         runTest {
             Dispatchers.setMain(StandardTestDispatcher(testScheduler))

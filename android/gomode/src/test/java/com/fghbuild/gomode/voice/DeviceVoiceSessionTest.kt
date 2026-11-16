@@ -1520,7 +1520,7 @@ class DeviceVoiceSessionTest {
         )
 
     @Test
-    fun `gateway error remains visible after idle and socket closure`() =
+    fun `gateway error remains visible after idle, socket closure, and disconnect until dismissed`() =
         runTest {
             val speech = FakeSpeech()
             val socket = FakeWebSocket()
@@ -1547,6 +1547,8 @@ class DeviceVoiceSessionTest {
             val recorded = awaitRecordedError("llm: out of memory")
             assertEquals(VoiceErrorPhase.CALL, recorded.phase)
             session.disconnect()
+            assertEquals("llm: out of memory", session.state.value.error)
+            session.dismissError()
             assertEquals(null, session.state.value.error)
             assertEquals("llm: out of memory", recorded.message)
             session.close()

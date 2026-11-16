@@ -42,6 +42,9 @@ internal interface VoiceSessionController {
 
     fun setError(message: String)
 
+    /** dismissError hides the current failure; [VoiceErrorLog] keeps it reviewable in settings. */
+    fun dismissError()
+
     /** close ends the session and releases resources the controller owns. */
     fun close()
 }

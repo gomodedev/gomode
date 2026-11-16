@@ -184,6 +184,7 @@ class VoicePanelTest {
                                 serviceReconnect = null,
                                 onCycleApp = {},
                                 canCycleApps = false,
+                                onDismissError = {},
                                 showUsageStats = showStats.value,
                                 modifier = Modifier.testTag("voice-panel"),
                             )
@@ -296,6 +297,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                     )
                 }
             }
@@ -410,6 +412,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                         modifier = Modifier.width(280.dp),
                         speechRecovery = {
                             SpeechLanguageRecovery(
@@ -468,6 +471,7 @@ class VoicePanelTest {
                         serviceReconnect = reconnect.value,
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                         modifier = Modifier.width(280.dp),
                     )
                 }
@@ -514,6 +518,7 @@ class VoicePanelTest {
                         serviceReconnect = ServiceReconnectDetail("Tasks", "MCP subscription stream ended"),
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                         modifier = Modifier.width(280.dp),
                     )
                 }
@@ -555,6 +560,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         {},
                         false,
+                        {},
                     )
                 }
             }
@@ -598,6 +604,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                         modifier = Modifier.width(280.dp),
                         microphoneRecovery = recovery.value,
                     )
@@ -637,6 +644,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                     )
                 }
             }
@@ -717,6 +725,7 @@ class VoicePanelTest {
                                 serviceReconnect = null,
                                 onCycleApp = { switches++ },
                                 canCycleApps = true,
+                                onDismissError = {},
                             )
                         }
                     }
@@ -867,6 +876,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = true,
+                        onDismissError = {},
                     )
                 }
             }
@@ -950,6 +960,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     {},
                     true,
+                    {},
                 )
             }
         }
@@ -992,6 +1003,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                 )
             }
         }
@@ -1010,16 +1022,15 @@ class VoicePanelTest {
     }
 
     @Test
-    fun longErrorUsesThePanelWidthBelowThePersistentToolbar() {
+    fun longErrorUsesThePanelWidthBelowThePersistentToolbarUntilDismissed() {
+        val error = mutableStateOf<String?>(VOICE_TOOL_RESULT_DELIVERY_ERROR)
         composeRule.setContent {
             val density = LocalDensity.current.density
             CompositionLocalProvider(LocalDensity provides Density(density, 2f)) {
                 MaterialTheme {
                     Box(Modifier.width(320.dp)) {
                         VoicePanel(
-                            VoiceState(
-                                error = VOICE_TOOL_RESULT_DELIVERY_ERROR,
-                            ),
+                            VoiceState(error = error.value),
                             true,
                             {},
                             {},
@@ -1029,6 +1040,7 @@ class VoicePanelTest {
                             serviceReconnect = null,
                             onCycleApp = {},
                             canCycleApps = false,
+                            onDismissError = { error.value = null },
                         )
                     }
                 }
@@ -1041,11 +1053,18 @@ class VoicePanelTest {
                 .onNodeWithContentDescription("Settings", useUnmergedTree = true)
                 .fetchSemanticsNode()
                 .boundsInRoot
+        val dismiss = composeRule.onNodeWithTag("gomode-voice-error-dismiss").fetchSemanticsNode().boundsInRoot
+        val connect = composeRule.onNodeWithTag("gomode-voice-connect").fetchSemanticsNode().boundsInRoot
         assertEquals(settingsBounds.left, message.left, 1f)
-        assertEquals(actions.right, message.right, 1f)
+        assertTrue(message.right <= dismiss.left)
+        assertEquals(connect.left, dismiss.left, 1f)
+        assertEquals(connect.right, dismiss.right, 1f)
         assertTrue(actions.bottom <= message.top)
         composeRule.onNodeWithContentDescription("Connect voice assistant").assertIsDisplayed()
         capture("delivery-error-large-text")
+        composeRule.onNodeWithContentDescription("Dismiss error").performClick()
+        composeRule.onNodeWithTag("gomode-voice-error").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Connect voice assistant").assertIsDisplayed()
     }
 
     @Test
@@ -1067,6 +1086,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = { cycles++ },
                     canCycleApps = canCycle.value,
+                    onDismissError = {},
                 )
             }
         }
@@ -1109,6 +1129,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                 )
             }
         }
@@ -1153,6 +1174,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                 )
             }
         }
@@ -1270,6 +1292,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                 )
             }
         }
@@ -1322,6 +1345,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                     modifier = Modifier.testTag("voice-panel"),
                     showUsageStats = true,
                 )
@@ -1397,6 +1421,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                 )
             }
         }
@@ -1452,6 +1477,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                     )
                 }
             }
@@ -1509,6 +1535,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                 )
             }
         }
@@ -1572,6 +1599,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
+                        onDismissError = {},
                     )
                 }
             }
@@ -1685,6 +1713,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                     showUsageStats = true,
                 )
             }
@@ -1717,6 +1746,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
+                    onDismissError = {},
                 )
             }
         }

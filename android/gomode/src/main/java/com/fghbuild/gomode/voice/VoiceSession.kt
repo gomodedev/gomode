@@ -403,6 +403,10 @@ internal class VoiceSession(
         }
     }
 
+    override fun dismissError() {
+        _state.update { it.copy(error = null) }
+    }
+
     /** Retains a failure next to the engine and phase that produced it. */
     private fun recordFailure(message: String) {
         errorLog.record(
@@ -1231,9 +1235,12 @@ internal class VoiceSession(
         rtcSessionID = null
         voiceTokenEndpointURL = null
         sessionTools = emptyList()
-        // Preserve transcript so the user can review it after disconnecting.
+        // Preserve transcript so the user can review it after disconnecting. A failure stays
+        // until the user dismisses it or starts again, whatever ends the session.
         _state.value =
             VoiceState(
+                error = _state.value.error,
+                errorId = _state.value.errorId,
                 transcript =
                     _state.value.transcript.map {
                         it.copy(final = true)

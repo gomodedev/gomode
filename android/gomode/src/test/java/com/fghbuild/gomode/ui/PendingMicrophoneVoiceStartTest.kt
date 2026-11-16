@@ -201,6 +201,8 @@ class PendingMicrophoneVoiceStartTest {
 
         override fun setError(message: String) = Unit
 
+        override fun dismissError() = Unit
+
         override fun close() = Unit
     }
 }

@@ -1304,9 +1304,12 @@ internal class DeviceVoiceSession(
         callController.endLocal()
         foreground.stop()
         otherSetup = null
-        // Preserve transcript so the user can review it after disconnecting.
+        // Preserve transcript so the user can review it after disconnecting. A failure stays
+        // until the user dismisses it or starts again, whatever ends the session.
         _state.value =
             VoiceState(
+                error = _state.value.error,
+                errorId = _state.value.errorId,
                 usage = _state.value.usage,
                 toolHistory = _state.value.toolHistory,
                 transcript =
@@ -1314,6 +1317,10 @@ internal class DeviceVoiceSession(
                         .withoutUserDraft()
                         .map { it.copy(final = true) },
             ).withCallAudio(callController.audioState.value)
+    }
+
+    override fun dismissError() {
+        _state.update { it.copy(error = null) }
     }
 
     override fun setError(message: String) {

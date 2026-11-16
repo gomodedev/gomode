@@ -158,6 +158,7 @@ fun VoicePanel(
     serviceReconnect: ServiceReconnectDetail?,
     onCycleApp: () -> Unit,
     canCycleApps: Boolean,
+    onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
     microphoneRecovery: MicrophonePermissionRecovery? = null,
     speechRecovery: (@Composable () -> Unit)? = null,
@@ -258,16 +259,7 @@ fun VoicePanel(
             }
             when {
                 voiceState.error != null -> {
-                    Text(
-                        text = voiceState.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = contentInset, vertical = 8.dp)
-                                .testTag("gomode-voice-error-message"),
-                    )
+                    VoiceError(voiceState.error, onDismissError, contentInset)
                 }
 
                 voiceState.connectStatus != null -> {
@@ -289,6 +281,30 @@ fun VoicePanel(
             if (showUsage && showUsageStats && (active || transcriptExpanded)) {
                 UsagePanel(voiceState.usage)
             }
+        }
+    }
+}
+
+// A failure stays until dismissed or replaced by a new start; the dismiss target
+// shares the toolbar's trailing column.
+@Composable
+private fun VoiceError(
+    message: String,
+    onDismiss: () -> Unit,
+    contentInset: Dp,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = contentInset).testTag("gomode-voice-error"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f).padding(vertical = 8.dp).testTag("gomode-voice-error-message"),
+        )
+        IconButton(onClick = onDismiss, modifier = Modifier.testTag("gomode-voice-error-dismiss")) {
+            Icon(Icons.Default.Close, contentDescription = "Dismiss error")
         }
     }
 }

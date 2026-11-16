@@ -768,6 +768,10 @@ internal fun GoModeApp(
                         }
                     },
                     canCycleApps = settings.services.size > 1,
+                    onDismissError = {
+                        if (carVoiceState.status == CarDialStatus.FAILED) carVoiceOwner.cancel()
+                        voiceSession.dismissError()
+                    },
                     serviceReconnect =
                         serviceMonitorState.retryReason?.let {
                             ServiceReconnectDetail(
