@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"log/slog"
 	"slices"
+	"strings"
 
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/llamacpp"
@@ -20,46 +22,74 @@ import (
 // the session language as SpeechRequest.Lang. A non-empty lang is instead a
 // fixed SpeechRequest.Lang and the only session language the adapter accepts;
 // staged LFM3 sessions fix "en", which declares that model English only.
-// Otherwise llamaTTSLanguages declares the accepted languages. model names the
-// configured model in errors and selects its language declaration.
+// Otherwise languages lists the accepted languages, nil for any. model names
+// the configured model in errors.
 //
 // In llama.cpp v1.0.0 (tools/server/server-context.cpp handle_tts_impl),
 // "lang" renders the model's "tts" chat template and reaches the model's
 // audio pipeline (tools/mtmd/mtmd-helper-gen.cpp).
 type llamaTTSAdapter struct {
 	noVoiceSelection
-	client *llamacpp.Client
-	model  string
-	voice  string
-	lang   string
+	client    *llamacpp.Client
+	model     string
+	voice     string
+	lang      string
+	languages []string
 }
 
-// llamaTTSLanguages declares the session languages of llama.cpp TTS models by
-// Hugging Face repository, from llama.cpp v1.0.0 tools/tts/README.md and the
-// sources it describes. nil accepts any language.
+// newLlamaTTSAdapter declares the session languages of the model c serves.
 //
-// Qwen3-TTS maps 10 codes to <|codec_language_*|> tokens and fails generation
-// for any other language (mtmd-helper-gen.cpp tts_lang_codes and
-// qwen3tts_gen_audio_pipeline::set_input). LFM3-Audio's template names 18
-// codes and passes any other value verbatim as the language name
-// (common/chat.cpp lfm3_language_name), which nothing documents the model
-// speaking.
+// Qwen3-TTS resolves "lang" through tts_lang_codes to a <|codec_language_*|>
+// control token of its vocabulary and fails generation when the token is
+// absent (llama.cpp v1.0.0 tools/mtmd/mtmd-helper-gen.cpp
+// qwen3tts_gen_audio_pipeline::set_input). No other pipeline reads these
+// tokens, and llama-server reports neither the GGUF architecture nor the
+// pipeline type, so the vocabulary identifies any Qwen3-TTS build, local or
+// remote, and the tokens it holds are its languages.
 //
-// An unlisted model accepts every language because llama.cpp does not report
+// LFM3-Audio's "tts" chat template (tokenizer.chat_template.tts in its GGUF)
+// names 18 languages by code and passes any other value verbatim as the
+// language name, which nothing documents the model speaking. llama-server
+// does not expose that template, so the Hugging Face repository identifies
+// the model.
+//
+// Any other model accepts every language because llama.cpp does not report
 // one: Pocket TTS speaks the language of its weights, Soprano English, and
-// Drama 3 the language of the text, and all three ignore "lang". Chatterbox
-// Multilingual, whose "lang" prefixes the text, needs classifier-free guidance
-// that llama-server does not run yet. The model, not the adapter, owns the
-// language of these.
-func llamaTTSLanguages(model string) []string {
-	switch modelRepository(model) {
-	case "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF":
-		return []string{"de", "en", "es", "fr", "it", "ja", "ko", "pt", "ru", "zh"}
-	case "LiquidAI/LFM3-Audio-2B-GGUF":
-		return []string{"ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "it", "ja", "ko", "nl", "pl", "pt", "sv", "tr", "zh"}
-	default:
-		return nil
+// Drama 3 the language of the text, and all three ignore "lang" (llama.cpp
+// v1.0.0 tools/tts/README.md). Chatterbox Multilingual, whose "lang" prefixes
+// the text, needs classifier-free guidance that llama-server does not run
+// yet. The model, not the adapter, owns the language of these.
+func newLlamaTTSAdapter(ctx context.Context, c *llamacpp.Client, model, voice string) (*llamaTTSAdapter, error) {
+	var content strings.Builder
+	for _, name := range qwen3TTSLanguages {
+		content.WriteString(qwen3TTSLanguageToken(name))
 	}
+	var res llamacpp.TokenizeResponse
+	if err := c.TokenizeRaw(ctx, &llamacpp.TokenizeRequest{Content: content.String(), WithPieces: true}, &res); err != nil {
+		return nil, fmt.Errorf("tokenize %s language tokens: %w", modelRepository(model), err)
+	}
+	var languages []string
+	for code, name := range qwen3TTSLanguages {
+		if slices.ContainsFunc(res.Tokens, func(t llamacpp.Token) bool { return t.Piece == qwen3TTSLanguageToken(name) }) {
+			languages = append(languages, code)
+		}
+	}
+	if languages == nil && modelRepository(model) == "LiquidAI/LFM3-Audio-2B-GGUF" {
+		languages = []string{"ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "it", "ja", "ko", "nl", "pl", "pt", "sv", "tr", "zh"}
+	}
+	return &llamaTTSAdapter{client: c, model: model, voice: voice, languages: languages}, nil
+}
+
+// qwen3TTSLanguages maps session languages to Qwen3-TTS language token names
+// (llama.cpp v1.0.0 tools/mtmd/mtmd-helper-gen.cpp tts_lang_codes).
+var qwen3TTSLanguages = map[string]string{
+	"de": "german", "en": "english", "es": "spanish", "fr": "french", "it": "italian",
+	"ja": "japanese", "ko": "korean", "pt": "portuguese", "ru": "russian", "zh": "chinese",
+}
+
+// qwen3TTSLanguageToken is the vocabulary entry of a Qwen3-TTS language name.
+func qwen3TTSLanguageToken(name string) string {
+	return "<|codec_language_" + name + "|>"
 }
 
 func (a *llamaTTSAdapter) checkLanguage(lang string) error {
@@ -69,7 +99,7 @@ func (a *llamaTTSAdapter) checkLanguage(lang string) error {
 		}
 		return nil
 	}
-	if languages := llamaTTSLanguages(a.model); languages != nil && !slices.Contains(languages, lang) {
+	if a.languages != nil && !slices.Contains(a.languages, lang) {
 		return newUnsupportedLanguageError(a.model, lang)
 	}
 	return nil

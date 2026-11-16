@@ -137,7 +137,11 @@ func localStackModelsForConfigWithStarter(
 			}
 			switch p := endpoint.provider.(type) {
 			case *llamacpp.Client:
-				tts = &llamaTTSAdapter{client: p, model: cfg.TTS.Model, voice: cfg.TTS.Voice}
+				a, err := newLlamaTTSAdapter(ctx, p, cfg.TTS.Model, cfg.TTS.Voice)
+				if err != nil {
+					return localStackModels{}, errors.Join(err, endpoint.runtime.Close(), runtime.Close())
+				}
+				tts = a
 			case *gemini.Client:
 				tts = &geminiTTSAdapter{client: p, voice: cfg.TTS.Voice}
 			default:

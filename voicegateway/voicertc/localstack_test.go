@@ -25,6 +25,7 @@ import (
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/deepseek"
+	"github.com/maruel/genai/providers/llamacpp"
 	"github.com/maruel/genai/providers/mistral"
 	"github.com/maruel/genai/providers/openrouter"
 	"github.com/maruel/genai/scoreboard"
@@ -1301,6 +1302,13 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 	t.Run("configured models", func(t *testing.T) {
 		t.Parallel()
 		remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/tokenize" {
+				// A vocabulary without Qwen3-TTS language tokens.
+				if _, err := io.WriteString(w, `{"tokens":[{"id":1,"piece":"<|"}]}`); err != nil {
+					t.Error(err)
+				}
+				return
+			}
 			if r.URL.Path != "/v1/audio/speech" {
 				t.Errorf("unexpected request %s", r.URL.Path)
 			}
@@ -2507,6 +2515,15 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				})
 			}
 		})
+		t.Run("Qwen3-TTS from another repository", func(t *testing.T) {
+			t.Parallel()
+			runtime := &localStackRuntime{llm: echoLLM{}, tts: newQwen3TTSFake(t, "someone/Qwen3-TTS-Finetune-GGUF:Q8_0")}
+			s := runtime.newSession(t.Context(), "language", &captureSink{}, false)
+			t.Cleanup(func() { _ = s.close() })
+			if err := setup(t, s, "fr-FR"); err != nil {
+				t.Fatal(err)
+			}
+		})
 		t.Run("client synthesis skips the gateway voice", func(t *testing.T) {
 			t.Parallel()
 			runtime := &localStackRuntime{llm: echoLLM{}, tts: &llamaTTSAdapter{model: "LiquidAI/LFM3-Audio-2B-GGUF", lang: "en"}}
@@ -2557,7 +2574,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			qwen := &llamaTTSAdapter{model: "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF:Q8_0"}
+			qwen := newQwen3TTSFake(t, filepath.Join(t.TempDir(), "speech.gguf"))
 			whistleASR, err := whistle.New(http.DefaultClient, "http://127.0.0.1:1", "")
 			if err != nil {
 				t.Fatal(err)
@@ -2577,7 +2594,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 			}{
 				{nil, kitten, "fr-FR", "Luna", "KittenML/kitten-tts-2 voice Luna does not speak French"},
 				{nil, kitten, "el-GR", "", "KittenML/kitten-tts-2 does not support Greek"},
-				{nil, qwen, "el-GR", "", "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF does not support Greek"},
+				{nil, qwen, "el-GR", "", "speech.gguf does not support Greek"},
 				{whistleASR, nil, "ja-JP", "", "Cactus-Compute/whistle does not support Japanese"},
 				{localWhistle, nil, "ja-JP", "", "whistle.cact does not support Japanese"},
 				{nemotronEN, nil, "fr-FR", "", "nemotron-en does not support French"},
@@ -2598,6 +2615,49 @@ func testLocalStackSessionLanguage(t *testing.T) {
 			}
 		})
 	})
+}
+
+// newQwen3TTSFake declares the languages of model, served by a llama-server
+// whose vocabulary holds the English and French Qwen3-TTS language tokens.
+func newQwen3TTSFake(t *testing.T, model string) *llamaTTSAdapter {
+	const prefix = "<|codec_language_"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in llamacpp.TokenizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || r.URL.Path != "/tokenize" || !in.WithPieces {
+			t.Errorf("tokenize request %s %+v: %v", r.URL.Path, in, err)
+			return
+		}
+		type token struct {
+			ID    int    `json:"id"`
+			Piece string `json:"piece"`
+		}
+		var tokens []token
+		for name := range strings.SplitSeq(strings.TrimPrefix(in.Content, prefix), prefix) {
+			if name == "english|>" || name == "french|>" {
+				tokens = append(tokens, token{1, prefix + name})
+			} else {
+				tokens = append(tokens, token{2, "<|"}, token{3, "codec_language_" + name})
+			}
+		}
+		if err := json.NewEncoder(w).Encode(map[string][]token{"tokens": tokens}); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	p, err := llamacpp.New(t.Context(), genai.ProviderOptionRemote(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := p.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	a, err := newLlamaTTSAdapter(t.Context(), p, model, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
 }
 
 // languageTTS records the language its synthesis calls receive.

@@ -594,6 +594,13 @@ func TestLocalStackBackend(t *testing.T) {
 		p := newLocalStackPool(testRuntime)
 		b := p.backend(cfg)
 		t.Cleanup(func() { _ = b.Close() })
+		// The TTS adapter reads the vocabulary of its server at startup.
+		tts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if _, err := io.WriteString(w, `{"tokens":[]}`); err != nil {
+				t.Error(err)
+			}
+		}))
+		t.Cleanup(tts.Close)
 		for _, tc := range []struct {
 			mode   voicev2.SpeechConfig
 			models []string
@@ -615,7 +622,7 @@ func TestLocalStackBackend(t *testing.T) {
 			var started []string
 			models, err := localStackModelsForConfigWithStarter(t.Context(), variant, func(_ context.Context, model string, _ int) (managedLlamaServer, error) {
 				started = append(started, model)
-				return &fakeManagedLlamaServer{url: "http://localhost:1"}, nil
+				return &fakeManagedLlamaServer{url: tts.URL}, nil
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -662,9 +669,14 @@ func TestLocalStackBackend(t *testing.T) {
 	})
 	t.Run("mixed sessions share bounded residency", func(t *testing.T) {
 		t.Parallel()
-		// The remote llama.cpp synthesis stage is pinged when it loads. Closing
-		// each connection leaves no network reader in the synctest bubble.
-		health := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// The remote llama.cpp synthesis stage is pinged and tokenized when it
+		// loads. Closing each connection leaves no network reader in the
+		// synctest bubble.
+		health := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/tokenize" {
+				_, _ = io.WriteString(w, `{"tokens":[]}`)
+				return
+			}
 			_, _ = io.WriteString(w, `{"status":"ok"}`)
 		}))
 		health.Config.SetKeepAlivesEnabled(false)

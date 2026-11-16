@@ -72,7 +72,6 @@ data and authorization policy stay in the hosts.
   unserialized. The NeMo engine has no GPU backend setting.
 - The local-stack pool keeps handing out a stack whose managed worker crashed
   until the stack goes idle.
-- Only `ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF` declares Qwen3-TTS languages.
 - KittenTTS downloads Hugging Face main, not the revision its voice table cites.
 - genai's scoreboard could own each provider's default voice; gomode marks
   OpenAI Realtime's `alloy` itself.
