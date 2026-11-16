@@ -813,17 +813,19 @@ public struct MessageEnvelope: Codable {
 
 /// VoiceConfig describes provider-neutral voice preferences.
 public struct VoiceConfig: Codable {
-    /// Name is the requested provider-specific voice name. Empty uses the
-    /// provider default, or for a synthesis stage that advertises voices, its
-    /// configured voice when that voice speaks the session language and its
-    /// first voice of the session language otherwise.
+    /// Name is the requested voice name from the catalog's voices. Empty uses
+    /// the voice the catalog marks default for the session language, else the
+    /// configured voice, else the provider default. A voice of another language
+    /// fails session setup.
     public let name: String?
     /// Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA".
-    /// Empty defaults to "en-US". Invalid tags fail session setup. The gateway
-    /// instructs the assistant to use this language and supplies recognition hints
-    /// where supported. Speech models determine available languages and accents;
-    /// streaming llama.cpp ASR receives the base language, while other local
-    /// server ASR/TTS adapters do not expose per-session language controls.
+    /// Empty defaults to "en-US"; an invalid tag fails session setup. A session
+    /// speaks one language, and the assistant replies in it. Synthesis and
+    /// streaming recognition models that take a language receive it, recognition
+    /// as a hint or forced; other models ignore it. A model that declares its
+    /// languages fails session setup for another one. A model whose server
+    /// rejects the language fails when its connection starts: at session setup
+    /// for realtime choices, and at each utterance for live recognition.
     public let language: String
 
     public init(name: String? = nil, language: String) {
