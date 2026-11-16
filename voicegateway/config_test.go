@@ -911,7 +911,7 @@ public_key = %q
 		if _, err := cfg.Resolve(); err != nil {
 			t.Fatal(err)
 		}
-		if (cfg.Server.HTTP != ":4444" || cfg.Server.WebRTCUDPPort != 4445 || cfg.Server.ExternalURL != "https://voice.example" || !cfg.Server.DebugFrontend || len(cfg.Server.TrustedProxies) != 1 || cfg.Debug.Trace != "gateway.trace") || len(cfg.Config.Realtime) != 1 || cfg.Config.Realtime[0].Model != "gemini-live-test" || cfg.TrustedIssuers[0].Service != "example" {
+		if (cfg.Server.HTTP != ":4444" || cfg.Server.UDPPort != 4445 || cfg.Server.ExternalURL != "https://voice.example" || !cfg.Server.DebugFrontend || len(cfg.Server.TrustedProxies) != 1 || cfg.Debug.Trace != "gateway.trace") || len(cfg.Config.Realtime) != 1 || cfg.Config.Realtime[0].Model != "gemini-live-test" || cfg.TrustedIssuers[0].Service != "example" {
 			t.Fatalf("config = %+v", cfg)
 		}
 	})
@@ -988,7 +988,7 @@ public_key = %q
 			name, settings string
 			want           []string
 		}{
-			{name: "omitted keeps the default", want: DefaultSTUNServers},
+			{name: "omitted keeps the default", want: NewWebRTCConfig().STUNServers},
 			{name: "empty disables STUN", settings: "stun_servers = []", want: []string{}},
 			{name: "explicit", settings: `stun_servers = ["stun:stun.example:3478", "stuns:stun.example", "stun:[2001:db8::1]:3478"]`, want: []string{"stun:stun.example:3478", "stuns:stun.example", "stun:[2001:db8::1]:3478"}},
 		} {
@@ -1011,7 +1011,7 @@ public_key = %q
 		}
 		t.Run("invalid", func(t *testing.T) {
 			for _, raw := range []string{"turn:relay.example:3478", "stun.example:3478", "stun:", "stun:host:0", "stun:host:x", "stun://host"} {
-				cfg := ServerConfig{STUNServers: []string{raw}}
+				cfg := ServerConfig{WebRTCConfig: WebRTCConfig{STUNServers: []string{raw}}}
 				if err := cfg.Validate(); err == nil || !strings.HasPrefix(err.Error(), "server.stun_servers[0]: ") {
 					t.Errorf("%q: error = %v", raw, err)
 				}
@@ -1842,18 +1842,10 @@ func TestConfigFile(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
-	t.Run("allows disabled webrtc port", func(t *testing.T) {
-		t.Parallel()
-		cfg := testStandaloneConfig()
-		cfg.Server.WebRTCUDPPort = -1
-		if _, err := cfg.Resolve(); err != nil {
-			t.Fatal(err)
-		}
-	})
 	t.Run("rejects invalid webrtc port", func(t *testing.T) {
 		t.Parallel()
 		cfg := testStandaloneConfig()
-		cfg.Server.WebRTCUDPPort = -2
+		cfg.Server.UDPPort = -1
 		_, err := cfg.Resolve()
 		if err == nil {
 			t.Fatal("expected error")

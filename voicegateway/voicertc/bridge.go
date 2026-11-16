@@ -108,21 +108,17 @@ type Bridge struct {
 //
 // Credentials use each provider's native environment variables or, for OpenAI
 // Codex authentication, the file-backed Codex login. Configured choices share
-// the UDP listener selected by server.WebRTCUDPPort (-1 disables WebRTC) and
-// advertise server.STUNServers to clients.
+// the UDP listener on webrtc.UDPPort and advertise webrtc.STUNServers to
+// clients; the caller validates webrtc with its configuration.
 //
 // Choice discovery and transport setup happen during construction. Managed local
 // model runtimes load on first use through the shared capacity and idle-eviction
 // pool. A construction failure closes all backends already initialized.
-func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, server voicegateway.ServerConfig, activityLogDir string) (*Bridge, error) {
-	return newBridgeWithTimeout(ctx, cfg, server, activityLogDir, defaultUPnPSSDPTimeout)
+func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, webrtc voicegateway.WebRTCConfig, activityLogDir string) (*Bridge, error) {
+	return newBridgeWithTimeout(ctx, cfg, webrtc, activityLogDir, defaultUPnPSSDPTimeout)
 }
 
-func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig, server voicegateway.ServerConfig, activityLogDir string, upnpSSDPTimeout time.Duration) (*Bridge, error) {
-	if err := server.Validate(); err != nil {
-		return nil, err
-	}
-	udpPort := server.WebRTCUDPPort
+func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig, webrtc voicegateway.WebRTCConfig, activityLogDir string, upnpSSDPTimeout time.Duration) (*Bridge, error) {
 	if activityLogDir == "" {
 		return nil, errors.New("voice activity log directory is required")
 	}
@@ -133,7 +129,7 @@ func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig,
 	pool := newLocalStackPool(cfg.Runtime)
 	pool.recognition, pool.synthesis = slices.Clone(cfg.Recognition), slices.Clone(cfg.Synthesis)
 	backends := make(map[string]backendConnector, count)
-	advertised := voicev2.VoiceChoicesResp{Choices: make([]voicev2.VoiceChoice, 0, count), STUNServers: slices.Clone(server.STUNServers)}
+	advertised := voicev2.VoiceChoicesResp{Choices: make([]voicev2.VoiceChoice, 0, count), STUNServers: slices.Clone(webrtc.STUNServers)}
 	for _, a := range cfg.Recognition {
 		advertised.RecognitionModels = append(advertised.RecognitionModels, voicev2.RecognitionModel{ID: a.ID, Label: cmp.Or(a.Label, a.Model, string(a.Engine))})
 	}
@@ -187,7 +183,7 @@ func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig,
 		}
 	}
 	advertised.Defaults = voicev2.DefaultChoices(advertised.Choices, preferred)
-	b, err := newBridgeWithBackendAndTimeout(ctx, backends[defaultID], udpPort, activityLogDir, upnpSSDPTimeout)
+	b, err := newBridgeWithBackendAndTimeout(ctx, backends[defaultID], webrtc.UDPPort, activityLogDir, upnpSSDPTimeout)
 	if err != nil {
 		return nil, errors.Join(err, cleanup())
 	}

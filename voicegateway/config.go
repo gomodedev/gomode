@@ -56,10 +56,10 @@ import (
 // startup. It restarts or reloads when ConfigFileName appears, changes, or
 // disappears. Before creating the bridge it calls
 // Available, checks caller cancellation, and validates the filtered result; an
-// empty catalog prevents startup. It passes the resolved configuration and its
-// own UDP port, validated with ServerConfig.Validate, to voicertc.NewBridge. The
-// host owns its listener, deployment mode, authentication, session admission,
-// and the private directory and lifetime of transcript activity logs.
+// empty catalog prevents startup. It passes the resolved configuration and a
+// validated WebRTCConfig to voicertc.NewBridge. The host owns its listener,
+// deployment mode, authentication, session admission, and the private
+// directory and lifetime of transcript activity logs.
 type Config struct {
 	Runtime  RuntimeConfig    `toml:"local_stack_runtime"`
 	Realtime []RealtimeConfig `toml:"realtime"`
@@ -585,7 +585,7 @@ func LoadConfig(path string) (configFile, error) {
 	if err != nil {
 		return configFile{}, fmt.Errorf("read config: %w", err)
 	}
-	cfg := configFile{AutoUpdate: autoupdate.DefaultSchedule, Server: ServerConfig{HTTP: ":3479", STUNServers: slices.Clone(DefaultSTUNServers)}}
+	cfg := configFile{AutoUpdate: autoupdate.DefaultSchedule, Server: ServerConfig{HTTP: ":3479", WebRTCConfig: NewWebRTCConfig()}}
 	dec := toml.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
@@ -760,29 +760,18 @@ type DebugConfig struct {
 // ServerConfig configures gateway listeners, HTTP policies and standalone logging.
 type ServerConfig struct {
 	geoip.Config
+	WebRTCConfig
 	HTTP string `toml:"http"`
 	// ExternalURL is the expected public HTTP(S) origin. Empty accepts the request authority.
 	ExternalURL string `toml:"external_url"`
 	// TrustedProxies lists direct proxy CIDRs allowed to supply client IP headers.
 	TrustedProxies []string `toml:"trusted_proxies"`
 	// DebugFrontend enables the unauthenticated live-test UI on the API listener.
-	DebugFrontend bool `toml:"debug_frontend"`
-	WebRTCUDPPort int  `toml:"webrtc_udp_port"`
-	// STUNServers lists the stun: or stuns: URLs WebRTC clients use to learn
-	// their public address. The gateway advertises them in its voice choices
-	// and runs no STUN itself. Empty means clients gather host candidates only,
-	// which suffices when clients can reach the gateway's advertised UDP
-	// endpoint: the gateway learns each client's address from its checks.
-	STUNServers []string   `toml:"stun_servers"`
-	LogLevel    slog.Level `toml:"log_level"`
+	DebugFrontend bool       `toml:"debug_frontend"`
+	LogLevel      slog.Level `toml:"log_level"`
 }
 
-// DefaultSTUNServers is the standalone gateway's STUN list when its config
-// omits server.stun_servers.
-var DefaultSTUNServers = []string{"stun:stun.l.google.com:19302"}
-
-// Validate checks HTTP policies and the WebRTC port, where -1 disables media
-// transport. The caller owns listener requirements and may bind its own server.
+// Validate checks HTTP policies and the WebRTC listener.
 func (c *ServerConfig) Validate() error {
 	if err := c.Config.Validate(); err != nil {
 		return fmt.Errorf("server.%w", err)
@@ -795,12 +784,42 @@ func (c *ServerConfig) Validate() error {
 	if _, err := httpserver.ParseTrustedProxies(c.TrustedProxies); err != nil {
 		return fmt.Errorf("server.trusted_proxies: %w", err)
 	}
-	if c.WebRTCUDPPort < -1 || c.WebRTCUDPPort > 65535 {
-		return fmt.Errorf("server.webrtc_udp_port must be between -1 and 65535, got %d", c.WebRTCUDPPort)
+	if err := c.WebRTCConfig.Validate(); err != nil {
+		return fmt.Errorf("server.%w", err)
+	}
+	return nil
+}
+
+// WebRTCConfig configures the gateway's WebRTC media listener and the STUN
+// servers its clients use. The standalone gateway reads it from [server]; a
+// host embeds it in its own TOML section, starting from NewWebRTCConfig so an
+// omitted key keeps its default.
+type WebRTCConfig struct {
+	// UDPPort is the ICE UDP mux port; 0 selects an ephemeral port.
+	UDPPort int `toml:"webrtc_udp_port"`
+	// STUNServers lists the stun: or stuns: URLs WebRTC clients use to learn
+	// their public address. The gateway advertises them in its voice choices
+	// and runs no STUN itself. Empty means clients gather host candidates only,
+	// which suffices when clients can reach the gateway's advertised UDP
+	// endpoint: the gateway learns each client's address from its checks.
+	STUNServers []string `toml:"stun_servers"`
+}
+
+// NewWebRTCConfig returns the defaults: an ephemeral port and Google's public
+// STUN server.
+func NewWebRTCConfig() WebRTCConfig {
+	return WebRTCConfig{STUNServers: []string{"stun:stun.l.google.com:19302"}}
+}
+
+// Validate checks the port range and STUN URLs. Errors name the TOML keys
+// without a section; callers prefix their section.
+func (c *WebRTCConfig) Validate() error {
+	if c.UDPPort < 0 || c.UDPPort > 65535 {
+		return fmt.Errorf("webrtc_udp_port must be between 0 and 65535, got %d", c.UDPPort)
 	}
 	for i, raw := range c.STUNServers {
 		if err := validateSTUNURL(raw); err != nil {
-			return fmt.Errorf("server.stun_servers[%d]: %w", i, err)
+			return fmt.Errorf("stun_servers[%d]: %w", i, err)
 		}
 	}
 	return nil

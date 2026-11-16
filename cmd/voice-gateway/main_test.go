@@ -272,18 +272,6 @@ func TestMainImpl(t *testing.T) {
 	}
 	t.Parallel()
 	// Each invocation owns the process-wide named Windows shutdown event.
-	t.Run("rejects disabled webrtc port", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "config.toml")
-		if err := os.WriteFile(path, []byte("[server]\nwebrtc_udp_port = -1\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		err := mainImpl([]string{
-			"-config", path,
-		})
-		if err == nil || !strings.Contains(err.Error(), "cannot be -1 for standalone") {
-			t.Fatalf("disabled standalone transport = %v", err)
-		}
-	})
 	t.Run("trace flushes on startup failure", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "config.toml")

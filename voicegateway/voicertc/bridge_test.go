@@ -145,18 +145,10 @@ func TestNewBridge(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Run("configured choices", testBridgeConfiguredChoices)
 	cfg := &voicegateway.ResolvedConfig{Runtime: testRuntime, Realtime: []voicegateway.RealtimeConfig{{ID: "gemini", Label: "Gemini", ModelConfig: voicegateway.ModelConfig{Provider: "gemini", Model: "gemini-3.8-live"}}}}
-	t.Run("invalid listener", func(t *testing.T) {
-		t.Parallel()
-		for _, port := range []int{-2, 65536} {
-			if _, err := NewBridge(t.Context(), cfg, voicegateway.ServerConfig{WebRTCUDPPort: port}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "server.webrtc_udp_port") {
-				t.Fatalf("port %d: %v", port, err)
-			}
-		}
-	})
 	t.Run("NewBridge", func(t *testing.T) {
 		t.Parallel()
 		stun := []string{"stun:stun.example:3478"}
-		b, err := newBridgeWithTimeout(t.Context(), cfg, voicegateway.ServerConfig{STUNServers: stun}, t.TempDir(), 5*time.Millisecond)
+		b, err := newBridgeWithTimeout(t.Context(), cfg, voicegateway.WebRTCConfig{STUNServers: stun}, t.TempDir(), 5*time.Millisecond)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,16 +157,10 @@ func TestNewBridge(t *testing.T) {
 			t.Fatalf("advertised STUN servers = %q, want %q", got, stun)
 		}
 	})
-	t.Run("invalid STUN server", func(t *testing.T) {
-		t.Parallel()
-		if _, err := NewBridge(t.Context(), cfg, voicegateway.ServerConfig{STUNServers: []string{"turn:relay.example"}}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "server.stun_servers[0]") {
-			t.Fatalf("invalid STUN server: %v", err)
-		}
-	})
 
 	t.Run("PeerConnection", func(t *testing.T) {
 		t.Parallel()
-		b, err := newBridgeWithTimeout(t.Context(), cfg, voicegateway.ServerConfig{}, t.TempDir(), 5*time.Millisecond)
+		b, err := newBridgeWithTimeout(t.Context(), cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1327,7 +1313,7 @@ func TestBridge(t *testing.T) {
 				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "recognition"}},
 				Pipelines:   []voicegateway.PipelineConfig{{ID: "preset", Label: "Preset", ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-recognition"}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-llm"}}}},
 			}
-			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.ServerConfig{}, t.TempDir(), 5*time.Millisecond)
+			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1354,7 +1340,7 @@ func TestBridge(t *testing.T) {
 					{ID: "kitten", Engine: voicegateway.TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2", Voice: "Luna"},
 				},
 			}
-			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.ServerConfig{}, t.TempDir(), 5*time.Millisecond)
+			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2162,7 +2148,7 @@ func testBridgeConfiguredChoices(t *testing.T) {
 		},
 		LLM: []voicegateway.LLMConfig{{ID: "chat", Label: "Chat", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "https://example.com/v1/chat/completions", Model: "model-a"}}},
 	}
-	bridge, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.ServerConfig{}, t.TempDir(), 5*time.Millisecond)
+	bridge, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

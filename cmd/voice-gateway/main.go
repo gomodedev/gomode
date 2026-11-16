@@ -111,9 +111,6 @@ func mainImpl(args []string) (err error) {
 		return err
 	}
 	logLevel.Set(cfg.Server.LogLevel)
-	if err := validateStandaloneConfig(&cfg.Server); err != nil {
-		return err
-	}
 	resolved, err := cfg.Resolve()
 	if err != nil {
 		return fmt.Errorf("resolve configuration in %s: %w", filepath.Dir(*configPath), err)
@@ -165,7 +162,7 @@ func mainImpl(args []string) (err error) {
 	}
 	defer func() { err = errors.Join(err, watcher.Close()) }()
 
-	bridge, err := voicertc.NewBridge(ctx, &resolved, cfg.Server, cacheDir)
+	bridge, err := voicertc.NewBridge(ctx, &resolved, cfg.Server.WebRTCConfig, cacheDir)
 	if err != nil {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
@@ -234,7 +231,7 @@ func mainImpl(args []string) (err error) {
 			}
 		})
 	}
-	log.InfoContext(ctx, "voice-gateway", "http", cfg.Server.HTTP, "udp", cfg.Server.WebRTCUDPPort, "config", *configPath)
+	log.InfoContext(ctx, "voice-gateway", "http", cfg.Server.HTTP, "udp", cfg.Server.UDPPort, "config", *configPath)
 	// Serve takes ownership of the listener, including error paths.
 	listener := apiListener
 	apiListener = nil
@@ -260,13 +257,6 @@ func serveHTTP(ctx context.Context, cancel context.CancelCauseFunc, server *http
 	}
 	wg.Wait()
 	return errors.Join(serveErr, shutdownErr, context.Cause(ctx))
-}
-
-func validateStandaloneConfig(cfg *voicegateway.ServerConfig) error {
-	if cfg.WebRTCUDPPort < 0 {
-		return errors.New("server.webrtc_udp_port cannot be -1 for standalone voice-gateway")
-	}
-	return nil
 }
 
 func initLogging(path string, level *slog.LevelVar) (*slog.Logger, error) {
