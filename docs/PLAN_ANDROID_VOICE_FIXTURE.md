@@ -2,7 +2,7 @@
 
 The controlled fixture drives same-origin text and WebRTC sessions in the default
 model-free Android suite and CI. Extend it to cover an external gateway with
-service authorization and additional text conversation frames.
+service authorization and more text conversation frames.
 
 ## Phase 1 — gateway-auth: The fixture exercises the external gateway path
 
@@ -18,8 +18,8 @@ service authorization and additional text conversation frames.
 ## Phase 2 — conversation-frames: The fixture drives a real conversation
 
 - **Depends on:** gateway-auth
-- **Scope:** The fixture's text session and the instrumented test: a second user
-  message, a tool call round trip against a declared tool, and a gateway `error`
-  frame.
+- **Scope:** The fixture's text session and an instrumented test: a second user
+  message and a gateway `error` frame. Fixture tool calls already round-trip
+  through `/fixture/tool` in `CarDialInterceptionTest`.
 - **Verify:** Each case asserts the session's observed state, such as transcript
-  entries, the active tool, or the error text, rather than that the app survived.
+  entries or the error text, rather than that the app survived.

@@ -437,7 +437,7 @@ VoiceConfig describes provider-neutral voice preferences.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `name` | `string` | Name is the requested voice name from the catalog's voices. Empty uses the voice the catalog marks default for the session language, else the configured voice, else the provider default. A voice of another language fails session setup. |  |
-| `language` | `string` | Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA". Empty defaults to "en-US"; an invalid tag fails session setup. A session speaks one language, and the assistant replies in it. Synthesis and streaming recognition models that take a language receive it, recognition as a hint or forced; other models ignore it. A model that declares its languages fails session setup for another one. A model whose server rejects the language fails when its connection starts: at session setup for realtime choices, and at each utterance for live recognition. | yes |
+| `language` | `string` | Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA". Empty defaults to "en-US"; an invalid tag fails session setup. A session speaks one language, and the assistant replies in it. Synthesis and recognition models that take a language receive it, recognition as a hint or forced; other models ignore it. A model that declares its languages fails session setup for another one. A model whose server rejects the language fails when its connection starts: at session setup for realtime choices, and at each utterance for recognition. | yes |
 
 ### ToolDeclaration
 

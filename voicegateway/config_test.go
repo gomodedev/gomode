@@ -60,12 +60,12 @@ provider = "deepseek"
 model = "reasoning-a"
 [[voice-gateway.asr]]
 id = "recognition"
-provider = "groq"
-model = "whisper-large-v3-turbo"
+provider = "mistral"
+model = "voxtral-mini-transcribe-realtime-3"
 [[voice-gateway.asr]]
 id = "alternate"
-provider = "groq"
-model = "whisper-large-v3"
+provider = "mistral"
+model = "voxtral-mini-transcribe-realtime-latest"
 [[voice-gateway.tts]]
 id = "speech"
 provider = "gemini"
@@ -104,7 +104,7 @@ tts = "speech"
 			if len(resolved.Recognition) != 2 || len(resolved.Synthesis) != 2 || len(resolved.Pipelines) != 1 {
 				t.Fatalf("resolved stages = %+v", resolved)
 			}
-			if resolved.Recognition[0].Model != "whisper-large-v3-turbo" || resolved.Recognition[1].Model != "whisper-large-v3" {
+			if resolved.Recognition[0].Model != "voxtral-mini-transcribe-realtime-3" || resolved.Recognition[1].Model != "voxtral-mini-transcribe-realtime-latest" {
 				t.Fatalf("host recognition order = %+v", resolved.Recognition)
 			}
 			if resolved.Synthesis[0].Voice != "Kore" || resolved.Synthesis[1].Voice != "Orus" {
@@ -138,7 +138,7 @@ tts = "speech"
 				{"unknown language model", func(c *Config) { c.Voice[0].LLM = "missing" }, `unknown llm "missing"`},
 				{"unknown synthesis", func(c *Config) { c.Voice[0].TTS = "missing" }, `unknown tts "missing"`},
 				{"unused invalid recognition", func(c *Config) {
-					c.ASR = append(c.ASR, ASRConfig{ID: "unused", Provider: "groq"})
+					c.ASR = append(c.ASR, ASRConfig{ID: "unused", Provider: "mistral"})
 				}, "voice.asr.model is required"},
 				{"unused invalid synthesis", func(c *Config) {
 					c.TTS = append(c.TTS, TTSConfig{ID: "unused", Provider: "gemini"})
@@ -172,7 +172,7 @@ tts = "speech"
 func testConfig() Config {
 	return Config{
 		Realtime: []RealtimeConfig{{ID: "live", Label: "Live", ModelConfig: ModelConfig{Provider: "gemini", Model: "gemini-3.8-live"}}},
-		ASR:      []ASRConfig{{ID: "recognition", Provider: "groq", Model: "whisper-large-v3-turbo"}},
+		ASR:      []ASRConfig{{ID: "recognition", Provider: "mistral", Model: "voxtral-mini-transcribe-realtime-3"}},
 		LLM:      []LLMConfig{{ID: "reasoning", Label: "Reasoning", ModelConfig: ModelConfig{Provider: "deepseek", Model: "reasoning"}}},
 		TTS:      []TTSConfig{{ID: "speech", Provider: "gemini", Model: "speech", Voice: "Kore"}},
 		Voice:    []VoiceConfig{{ID: "preset", Label: "Preset", ASR: "recognition", LLM: "reasoning", TTS: "speech"}},
@@ -221,7 +221,7 @@ func testConfigIDs(t *testing.T) {
 			}
 			cfg.Realtime[0].ContextSize, cfg.Realtime[0].Label = 8192, "Renamed"
 			cfg.LLM[0].ContextSize, cfg.LLM[0].Effort = 16384, "low"
-			cfg.ASR[0].Model = "whisper-large-v3"
+			cfg.ASR[0].Model = "voxtral-mini-transcribe-realtime-latest"
 			cfg.TTS[0].Voice = "Orus"
 			after, err := cfg.Resolve()
 			if err != nil {
@@ -239,7 +239,7 @@ func testConfigIDs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p := got.Pipelines[0]; p.ASR.Model != "whisper-large-v3-turbo" || p.TTS.Voice != "Kore" {
+			if p := got.Pipelines[0]; p.ASR.Model != "voxtral-mini-transcribe-realtime-3" || p.TTS.Voice != "Kore" {
 				t.Fatalf("preset stages = %+v", p)
 			}
 		})
@@ -265,12 +265,12 @@ func testConfigIDs(t *testing.T) {
 			{"missing realtime", func(c *Config) { c.Realtime[0].ID = "" }, `realtime entry 1 ("Live"): id is required`},
 			{"missing llm", func(c *Config) { c.LLM[0].ID = "" }, `llm entry 1 ("Reasoning"): id is required`},
 			{"missing voice", func(c *Config) { c.Voice[0].ID = "" }, `voice entry 1 ("Preset"): id is required`},
-			{"missing asr", func(c *Config) { c.ASR[0].ID = "" }, `asr entry 1 ("whisper-large-v3-turbo"): id is required`},
+			{"missing asr", func(c *Config) { c.ASR[0].ID = "" }, `asr entry 1 ("voxtral-mini-transcribe-realtime-3"): id is required`},
 			{"missing tts", func(c *Config) { c.TTS[0].ID = "" }, `tts entry 1 ("speech"): id is required`},
 			{"uppercase realtime", func(c *Config) { c.Realtime[0].ID = "Live" }, `realtime entry 1 ("Live"): id "Live" ` + format},
 			{"dotted llm", func(c *Config) { c.LLM[0].ID, c.Voice[0].LLM = "z.model", "z.model" }, `llm entry 1 ("Reasoning"): id "z.model" ` + format},
 			{"spaced voice", func(c *Config) { c.Voice[0].ID = "a preset" }, `voice entry 1 ("Preset"): id "a preset" ` + format},
-			{"leading dash asr", func(c *Config) { c.ASR[0].ID, c.Voice[0].ASR = "-asr", "-asr" }, `asr entry 1 ("whisper-large-v3-turbo"): id "-asr" ` + format},
+			{"leading dash asr", func(c *Config) { c.ASR[0].ID, c.Voice[0].ASR = "-asr", "-asr" }, `asr entry 1 ("voxtral-mini-transcribe-realtime-3"): id "-asr" ` + format},
 			{"leading underscore tts", func(c *Config) { c.TTS[0].ID, c.Voice[0].TTS = "_tts", "_tts" }, `tts entry 1 ("speech"): id "_tts" ` + format},
 			{"long", func(c *Config) { c.Realtime[0].ID = strings.Repeat("x", 65) }, "is longer than 64 characters"},
 			{"duplicate realtime", func(c *Config) {
@@ -278,7 +278,7 @@ func testConfigIDs(t *testing.T) {
 			}, `realtime entry 2 ("Other"): id "live" is already used by realtime entry 1 ("Live")`},
 			{"llm shares realtime id", func(c *Config) { c.LLM[0].ID, c.Voice[0].LLM = "live", "live" }, `llm entry 1 ("Reasoning"): id "live" is already used by realtime entry 1 ("Live")`},
 			{"voice shares llm id", func(c *Config) { c.Voice[0].ID = "reasoning" }, `voice entry 1 ("Preset"): id "reasoning" is already used by llm entry 1 ("Reasoning")`},
-			{"duplicate asr", func(c *Config) { c.ASR = append(c.ASR, c.ASR[0]) }, `asr entry 2 ("whisper-large-v3-turbo"): id "recognition" is already used by asr entry 1`},
+			{"duplicate asr", func(c *Config) { c.ASR = append(c.ASR, c.ASR[0]) }, `asr entry 2 ("voxtral-mini-transcribe-realtime-3"): id "recognition" is already used by asr entry 1`},
 			{"duplicate tts", func(c *Config) { c.TTS = append(c.TTS, c.TTS[0]) }, `tts entry 2 ("speech"): id "speech" is already used by tts entry 1`},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -558,11 +558,10 @@ model = "alternate-recognition"`)
 			}
 		})
 
-		t.Run("live speech stages", func(t *testing.T) {
+		t.Run("live transcription providers", func(t *testing.T) {
 			t.Setenv("GOMODE_NAMED_STAGE_TEST_KEY", "test-key")
 			loadLive := func(provider string) (ResolvedConfig, error) {
-				data := strings.Replace(definitions, `provider = "llamacpp"`, `streaming = true
-provider = "`+provider+`"`, 1)
+				data := strings.Replace(definitions, `provider = "llamacpp"`, `provider = "`+provider+`"`, 1)
 				cfg, err := load(t, data+`[[voice]]
 id = "live-speech"
 label = "Live speech"
@@ -575,19 +574,23 @@ tts = "speech"`)
 				return cfg, err
 			}
 			t.Run("valid", func(t *testing.T) {
-				for _, provider := range []string{"llamacpp", "gemini"} {
+				for _, provider := range []string{"gemini", "llamacpp", "mistral"} {
 					cfg, err := loadLive(provider)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if len(cfg.Pipelines) != 1 || !cfg.Pipelines[0].ASR.Streaming || cfg.Pipelines[0].ASR.Provider != provider {
+					if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].ASR.Provider != provider {
 						t.Fatalf("live stage = %+v", cfg.Pipelines)
 					}
 				}
 			})
 			t.Run("error", func(t *testing.T) {
-				if _, err := loadLive("groq"); err == nil {
-					t.Fatal("upload-only Groq accepted streaming")
+				// Groq has no transcription session; OpenAI's accepts only 24 kHz.
+				for _, provider := range []string{"groq", "openai"} {
+					want := `voice.asr.provider "` + provider + `" has no live transcription session at 16000 Hz`
+					if _, err := loadLive(provider); err == nil || !strings.Contains(err.Error(), want) {
+						t.Errorf("%s recognition: %v, want %q", provider, err, want)
+					}
 				}
 			})
 		})
@@ -603,7 +606,7 @@ context_size = 131072
 [[asr]]
 id = "local_asr"
 provider = "llamacpp"
-model = "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0"
+model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
 context_size = 8192
 [[tts]]
 id = "local_tts"
@@ -784,8 +787,8 @@ model = "reasoning"
 context_size = 65536
 [[asr]]
 id = "recognition"
-provider = "groq"
-model = "whisper-large-v3-turbo"
+provider = "mistral"
+model = "voxtral-mini-transcribe-realtime-3"
 [[tts]]
 id = "speech"
 provider = "gemini"
@@ -812,7 +815,7 @@ tts = "speech"
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
 		}
-		if len(cfg.Pipelines) != 2 || cfg.Pipelines[0].TTS != (TTSConfig{}) || cfg.Pipelines[1].ASR != (ASRConfig{}) || cfg.Pipelines[0].ASR.Provider != "groq" || cfg.Pipelines[1].TTS.Provider != "gemini" {
+		if len(cfg.Pipelines) != 2 || cfg.Pipelines[0].TTS != (TTSConfig{}) || cfg.Pipelines[1].ASR != (ASRConfig{}) || cfg.Pipelines[0].ASR.Provider != "mistral" || cfg.Pipelines[1].TTS.Provider != "gemini" {
 			t.Fatalf("optional stages = %+v", cfg.Pipelines)
 		}
 	})
@@ -1127,7 +1130,7 @@ id = "recognition"
 engine = "genai"
 provider = "llamacpp"
 remote = "http://127.0.0.1:8000"
-model = "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0"
+model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
 [[tts]]
 id = "speech"
 engine = "genai"
@@ -1197,15 +1200,32 @@ func TestResolvedConfig(t *testing.T) {
 		})
 		t.Run("unused speech credentials do not hide the LLM or other stage", func(t *testing.T) {
 			t.Setenv("GEMINI_API_KEY", "")
-			previous := providers.All["groq"]
-			providers.All["groq"] = providers.Config{Factory: func(context.Context, ...genai.ProviderOption) (genai.Provider, error) {
+			previous := providers.All["mistral"]
+			providers.All["mistral"] = providers.Config{Factory: func(context.Context, ...genai.ProviderOption) (genai.Provider, error) {
 				return &availabilityProbe{}, nil
 			}}
-			t.Cleanup(func() { providers.All["groq"] = previous })
-			cfg := ResolvedConfig{Runtime: testRuntime, Pipelines: []PipelineConfig{{ID: "mixed", Label: "Mixed", LLM: LLMConfig{ModelConfig: ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "reasoning"}, ContextSize: 65536}, ASR: ASRConfig{Engine: ASREngineGenAI, Provider: "groq", Model: "whisper-large-v3-turbo"}, TTS: TTSConfig{Engine: TTSEngineGenAI, Provider: "gemini", Model: "gemini-3.8-flash-lite-tts", Voice: "Kore"}}}}
+			t.Cleanup(func() { providers.All["mistral"] = previous })
+			cfg := ResolvedConfig{Runtime: testRuntime, Pipelines: []PipelineConfig{{ID: "mixed", Label: "Mixed", LLM: LLMConfig{ModelConfig: ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "reasoning"}, ContextSize: 65536}, ASR: ASRConfig{Engine: ASREngineGenAI, Provider: "mistral", Model: "voxtral-mini-transcribe-realtime-3"}, TTS: TTSConfig{Engine: TTSEngineGenAI, Provider: "gemini", Model: "gemini-3.8-flash-lite-tts", Voice: "Kore"}}}}
 			available := cfg.Available(t.Context())
 			if len(available.Pipelines) != 1 || available.Pipelines[0].UnavailableASR || !available.Pipelines[0].UnavailableTTS {
 				t.Fatalf("available speech = %+v", available.Pipelines)
+			}
+		})
+
+		t.Run("remote with an optional API key is not probed", func(t *testing.T) {
+			previous := providers.All["ollama"]
+			entry := previous
+			entry.Factory = func(context.Context, ...genai.ProviderOption) (genai.Provider, error) {
+				return nil, errors.New("probed the default endpoint")
+			}
+			providers.All["ollama"] = entry
+			t.Cleanup(func() { providers.All["ollama"] = previous })
+			cfg := ResolvedConfig{Runtime: testRuntime, LLM: []LLMConfig{{ID: "hosted", Label: "Hosted", ModelConfig: ModelConfig{Provider: "ollama", Remote: "https://ollama.com", Model: "model"}}}}
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Available(t.Context()); len(got.LLM) != 1 {
+				t.Fatalf("available choices = %+v", got.LLM)
 			}
 		})
 
@@ -1695,7 +1715,6 @@ func testValidateASR(t *testing.T) {
 			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Provider: "llamacpp"}, "voice.asr.provider is only used with the genai engine"},
 			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080/v1"}, "voice.asr.remote must not contain a path"},
 			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", ContextSize: 32768}, "voice.asr.context_size requires a managed llama.cpp server"},
-			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "nemotron-3.5", Streaming: true}, "voice.asr.streaming requires"},
 		} {
 			if err := validateASR(tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("%+v: %v, want %q", tc.cfg, err, tc.want)
@@ -1778,7 +1797,7 @@ func testPipelineConfig() PipelineConfig {
 	return PipelineConfig{
 		ID:    "local",
 		Label: "Local",
-		ASR:   ASRConfig{Engine: ASREngineGenAI, Provider: "llamacpp", Model: "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0", ContextSize: 32768},
+		ASR:   ASRConfig{Engine: ASREngineGenAI, Provider: "llamacpp", Model: "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M", ContextSize: 32768},
 		LLM:   LLMConfig{ModelConfig: ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"}, ContextSize: 65536},
 		TTS:   TTSConfig{Engine: TTSEngineKittenTTS, Voice: "Jasper", Model: "KittenML/kitten-tts-2"},
 	}

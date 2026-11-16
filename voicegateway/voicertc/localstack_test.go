@@ -46,7 +46,7 @@ func stackVariant(t *testing.T, b *localStackBackend, speech voicev2.SpeechConfi
 }
 
 // newTestLocalStackBackend seeds a lazy choice with controlled loaded adapters.
-func newTestLocalStackBackend(t *testing.T, newVAD func() vadSegmenter, asr asrAdapter, llm llmAdapter, tts ttsAdapter) *localStackBackend {
+func newTestLocalStackBackend(t *testing.T, asr *liveASR, llm llmAdapter, tts ttsAdapter) *localStackBackend {
 	p := newLocalStackPool(testRuntime)
 	cfg := voicegateway.PipelineConfig{TextOnly: asr == nil && tts == nil}
 	if asr != nil {
@@ -58,9 +58,9 @@ func newTestLocalStackBackend(t *testing.T, newVAD func() vadSegmenter, asr asrA
 	b := p.backend(cfg)
 	for _, variant := range b.variants {
 		_, cancel := context.WithCancel(t.Context())
-		runtime := &localStackRuntime{newVAD: newVAD, llm: llm}
+		runtime := &localStackRuntime{llm: llm}
 		if variant.speech.Input == voicev2.SpeechLocationGateway {
-			runtime.asr = asr
+			runtime.liveASR = asr
 		}
 		if variant.speech.Output == voicev2.SpeechLocationGateway {
 			runtime.tts = tts
@@ -210,10 +210,7 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("tool round trip", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, placeholderLLM{}, placeholderTTS{},
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), placeholderLLM{}, placeholderTTS{})
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "turn", sink)
 		if err != nil {
@@ -273,10 +270,7 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("turn status", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, placeholderLLM{}, placeholderTTS{},
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), placeholderLLM{}, placeholderTTS{})
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "status", sink)
 		if err != nil {
@@ -298,9 +292,9 @@ func TestLocalStackSession(t *testing.T) {
 		if err := sess.acceptClientMessage(t.Context(), result); err != nil {
 			t.Fatal(err)
 		}
-		waitForTurnStates(t, sink, 3)
+		waitForTurnStates(t, sink, 4)
 
-		want := []voicev2.TurnState{voicev2.TurnStateTranscribing, voicev2.TurnStateThinking, voicev2.TurnStateIdle}
+		want := []voicev2.TurnState{voicev2.TurnStateIdle, voicev2.TurnStateTranscribing, voicev2.TurnStateThinking, voicev2.TurnStateIdle}
 		if got := sink.turnStates(); !slices.Equal(got, want) {
 			t.Fatalf("turn states = %v, want %v", got, want)
 		}
@@ -316,10 +310,7 @@ func TestLocalStackSession(t *testing.T) {
 	t.Run("superseded turn keeps newer status", func(t *testing.T) {
 		t.Parallel()
 		llm := &blockingLLM{finished: make(chan struct{}, 2)}
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, llm, placeholderTTS{},
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), llm, placeholderTTS{})
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "superseded", sink)
 		if err != nil {
@@ -354,10 +345,7 @@ func TestLocalStackSession(t *testing.T) {
 	t.Run("setup includes initial context", func(t *testing.T) {
 		t.Parallel()
 		conv := &fakeConversation{}
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, fixedConversationLLM{conv: conv}, placeholderTTS{},
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), fixedConversationLLM{conv: conv}, placeholderTTS{})
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "initial-context", sink)
 		if err != nil {
@@ -382,10 +370,7 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("user message", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, placeholderLLM{}, placeholderTTS{},
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), placeholderLLM{}, placeholderTTS{})
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "say", sink)
 		if err != nil {
@@ -427,10 +412,7 @@ func TestLocalStackSession(t *testing.T) {
 			},
 		}
 		tts := &recordingTTS{}
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, fixedConversationLLM{conv: conv}, tts,
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), fixedConversationLLM{conv: conv}, tts)
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "tool-stream", sink)
 		if err != nil {
@@ -482,10 +464,7 @@ func TestLocalStackSession(t *testing.T) {
 			},
 		}
 		tts := &recordingTTS{}
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, fixedConversationLLM{conv: conv}, tts,
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), fixedConversationLLM{conv: conv}, tts)
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "tool-chain", sink)
 		if err != nil {
@@ -605,10 +584,7 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("barge in", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			fixedASR{text: "interrupt test"}, echoLLM{}, longTTS{ms: 800},
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("interrupt test"), echoLLM{}, longTTS{ms: 800})
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "barge", sink)
 		if err != nil {
@@ -627,7 +603,7 @@ func TestLocalStackSession(t *testing.T) {
 
 		// Wait until the assistant is speaking, then barge in with new speech.
 		waitForKind(t, sink, voicev2.MessageKindSpeechStarted)
-		mustAcceptMic(t, sess, loudPCM(60))
+		mustAcceptMic(t, sess, loudPCM(120))
 
 		waitForKind(t, sink, voicev2.MessageKindInterrupted)
 		// The interrupted turn must not complete (no speech.ended afterward).
@@ -748,67 +724,65 @@ func TestLocalStackResponseCorrelation(t *testing.T) {
 			t.Fatalf("continuation totals=%+v", reports[1])
 		}
 	})
-	for _, directAudio := range []bool{false, true} {
-		t.Run(fmt.Sprintf("directAudio=%t", directAudio), func(t *testing.T) {
-			t.Parallel()
-			sink := &correlationSink{events: make(chan struct{}, 1)}
-			release := make(chan struct{})
-			runtime := &localStackRuntime{newVAD: func() vadSegmenter { return &energyVAD{} }, tts: delayedCorrelationTTS{release: release}, directAudio: directAudio}
-			s := runtime.newSession(t.Context(), "late-speech", sink, false)
-			var once sync.Once
-			t.Cleanup(func() {
-				once.Do(func() { close(release) })
-				if err := s.close(); err != nil {
-					t.Error(err)
-				}
-			})
-			ctx, cancel := context.WithCancel(t.Context())
-			step := llmStep{
-				stream: slices.Values([]llmFragment{
-					{text: "Hello."},
-					{usage: &usageObservation{provider: "test", model: "test", counts: genai.Usage{InputTokens: 12, OutputTokens: 3}}},
-				}),
-				finish: func() (llmReply, error) { return llmReply{text: "Hello."}, nil },
-			}
-			s.startAdmittedStep(ctx, &fakeConversation{}, step, cancel, false)
-			sink.waitKind(t, voicev2.MessageKindSessionUsage)
-			if slices.Contains(sink.kinds(), voicev2.MessageKindAssistantTextDelta) {
-				t.Fatal("assistant text emitted before delayed TTS produced audio")
-			}
+	t.Run("direct audio", func(t *testing.T) {
+		t.Parallel()
+		sink := &correlationSink{events: make(chan struct{}, 1)}
+		release := make(chan struct{})
+		runtime := &localStackRuntime{tts: delayedCorrelationTTS{release: release}, directAudio: true}
+		s := runtime.newSession(t.Context(), "late-speech", sink, false)
+		var once sync.Once
+		t.Cleanup(func() {
 			once.Do(func() { close(release) })
-			sink.waitKind(t, voicev2.MessageKindSpeechEnded)
-			sink.mu.Lock()
-			t.Cleanup(sink.mu.Unlock)
-			var usage voicev2.SessionUsage
-			var text voicev2.AssistantTextDelta
-			var transcript voicev2.TranscriptDelta
-			for _, data := range sink.msgs {
-				var header struct {
-					Kind voicev2.MessageKind `json:"kind"`
-				}
-				if err := json.Unmarshal(data, &header); err != nil {
-					t.Fatal(err)
-				}
-				switch header.Kind {
-				case voicev2.MessageKindSessionUsage:
-					if err := json.Unmarshal(data, &usage); err != nil {
-						t.Fatal(err)
-					}
-				case voicev2.MessageKindAssistantTextDelta:
-					if err := json.Unmarshal(data, &text); err != nil {
-						t.Fatal(err)
-					}
-				case voicev2.MessageKindTranscriptDelta:
-					if err := json.Unmarshal(data, &transcript); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			if usage.ResponseID == "" || usage.ResponseID != text.ResponseID || text.ResponseID != transcript.ResponseID || usage.ResponseUsage == nil || *usage.ResponseUsage.InputTokens != 12 {
-				t.Fatalf("usage=%+v text=%+v transcript=%+v", usage, text, transcript)
+			if err := s.close(); err != nil {
+				t.Error(err)
 			}
 		})
-	}
+		ctx, cancel := context.WithCancel(t.Context())
+		step := llmStep{
+			stream: slices.Values([]llmFragment{
+				{text: "Hello."},
+				{usage: &usageObservation{provider: "test", model: "test", counts: genai.Usage{InputTokens: 12, OutputTokens: 3}}},
+			}),
+			finish: func() (llmReply, error) { return llmReply{text: "Hello."}, nil },
+		}
+		s.startAdmittedStep(ctx, &fakeConversation{}, step, cancel, false)
+		sink.waitKind(t, voicev2.MessageKindSessionUsage)
+		if slices.Contains(sink.kinds(), voicev2.MessageKindAssistantTextDelta) {
+			t.Fatal("assistant text emitted before delayed TTS produced audio")
+		}
+		once.Do(func() { close(release) })
+		sink.waitKind(t, voicev2.MessageKindSpeechEnded)
+		sink.mu.Lock()
+		t.Cleanup(sink.mu.Unlock)
+		var usage voicev2.SessionUsage
+		var text voicev2.AssistantTextDelta
+		var transcript voicev2.TranscriptDelta
+		for _, data := range sink.msgs {
+			var header struct {
+				Kind voicev2.MessageKind `json:"kind"`
+			}
+			if err := json.Unmarshal(data, &header); err != nil {
+				t.Fatal(err)
+			}
+			switch header.Kind {
+			case voicev2.MessageKindSessionUsage:
+				if err := json.Unmarshal(data, &usage); err != nil {
+					t.Fatal(err)
+				}
+			case voicev2.MessageKindAssistantTextDelta:
+				if err := json.Unmarshal(data, &text); err != nil {
+					t.Fatal(err)
+				}
+			case voicev2.MessageKindTranscriptDelta:
+				if err := json.Unmarshal(data, &transcript); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if usage.ResponseID == "" || usage.ResponseID != text.ResponseID || text.ResponseID != transcript.ResponseID || usage.ResponseUsage == nil || *usage.ResponseUsage.InputTokens != 12 {
+			t.Fatalf("usage=%+v text=%+v transcript=%+v", usage, text, transcript)
+		}
+	})
 }
 
 // correlationSink notifies asynchronous correlation tests after recording events.
@@ -905,10 +879,7 @@ func TestLocalStackReasoning(t *testing.T) {
 
 	t.Run("spoken turn", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			placeholderASR{}, fixedConversationLLM{conv: reasoningConversation{}}, placeholderTTS{},
-		)
+		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), fixedConversationLLM{conv: reasoningConversation{}}, placeholderTTS{})
 		sink := &captureSink{}
 		sess, err := backend.connect(t.Context(), "reasoning voice", sink)
 		if err != nil {
@@ -1362,8 +1333,8 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := models.asr.(*audioChatASRAdapter); !ok {
-			t.Fatalf("asr = %T, want audioChatASRAdapter", models.asr)
+		if models.liveASR == nil {
+			t.Fatal("asr is not a live recognizer")
 		}
 		if _, ok := models.llm.(*genaiLLMAdapter); !ok {
 			t.Fatalf("llm = %T, want genaiLLMAdapter", models.llm)
@@ -1424,44 +1395,6 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 	})
 }
 
-func TestLocalStackGroqASR(t *testing.T) { //nolint:paralleltest // Replaces the process-wide Groq factory for this transport test.
-	entry := providers.All["groq"]
-	t.Cleanup(func() { providers.All["groq"] = entry })
-	configured := entry
-	configured.Factory = func(ctx context.Context, opts ...genai.ProviderOption) (genai.Provider, error) {
-		opts = append(opts, genai.ProviderOptionAPIKey("test-key"), genai.ProviderOptionTransportWrapper(func(http.RoundTripper) http.RoundTripper {
-			return groqASRTestTransport{t: t}
-		}))
-		return entry.Factory(ctx, opts...)
-	}
-	providers.All["groq"] = configured
-	cfg := voicegateway.PipelineConfig{
-		ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "groq", Model: "whisper-large-v3-turbo"},
-		LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536},
-		TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768},
-	}
-	var models []string
-	runtime, err := localStackModelsForConfigWithStarter(t.Context(), &cfg, func(_ context.Context, model string, _ int) (managedLlamaServer, error) {
-		models = append(models, model)
-		return &fakeManagedLlamaServer{url: "http://localhost:8080"}, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := runtime.runtime.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	text, err := runtime.asr.transcribe(t.Context(), "en", []byte{1, 0, 2, 0})
-	if err != nil || text != "I love bananas." {
-		t.Fatalf("mixed ASR %q, %v", text, err)
-	}
-	if !slices.Equal(models, []string{"owner/chat", "owner/tts"}) {
-		t.Fatalf("managed models %v", models)
-	}
-}
-
 func TestLocalStackGeminiSpeech(t *testing.T) { //nolint:paralleltest // Replaces the process-wide Gemini factory for this transport test.
 	entry := providers.All["gemini"]
 	t.Cleanup(func() { providers.All["gemini"] = entry })
@@ -1476,7 +1409,7 @@ func TestLocalStackGeminiSpeech(t *testing.T) { //nolint:paralleltest // Replace
 	cfg := voicegateway.PipelineConfig{
 		ID:    "gemini-speech",
 		Label: "Gemini speech with local reasoning",
-		ASR:   voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "gemini", Model: "gemini-3.5-transcribe"},
+		ASR:   voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "gemini", Model: "gemini-3.5-transcribe-live"},
 		LLM:   voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536},
 		TTS:   voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "gemini", Model: "gemini-3.8-flash-lite-tts", Voice: "Kore"},
 	}
@@ -1497,9 +1430,8 @@ func TestLocalStackGeminiSpeech(t *testing.T) { //nolint:paralleltest // Replace
 			t.Error(err)
 		}
 	})
-	text, err := runtime.asr.transcribe(t.Context(), "en", []byte{1, 0, 2, 0})
-	if err != nil || text != "I love bananas." {
-		t.Fatalf("Gemini recognition %q: %v", text, err)
+	if runtime.liveASR == nil || !runtime.liveASR.inputLanguage {
+		t.Fatal("Gemini recognition is not a live recognizer receiving the session language")
 	}
 	var pcm []byte
 	for chunk, err := range runtime.tts.synthesize(t.Context(), "en", "", "Hello.") {
@@ -1525,32 +1457,11 @@ func (tr geminiSpeechTestTransport) RoundTrip(r *http.Request) (*http.Response, 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		return nil, err
 	}
-	contentType, body := "application/json", `{"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"I love bananas."}]}]}`
-	if request.Model == "gemini-3.8-flash-lite-tts" {
-		if len(request.GenerationConfig.SpeechConfig) != 1 || request.GenerationConfig.SpeechConfig[0].Voice != "Kore" {
-			tr.t.Errorf("speech voice %+v", request.GenerationConfig)
-		}
-		contentType = "text/event-stream"
-		body = "data: {\"event_type\":\"step.delta\",\"delta\":{\"type\":\"audio\",\"data\":\"AQACAA==\",\"mime_type\":\"audio/l16\",\"sample_rate\":24000,\"channels\":1}}\n\ndata: {\"event_type\":\"interaction.completed\",\"interaction\":{\"status\":\"completed\"}}\n\n"
+	if request.Model != "gemini-3.8-flash-lite-tts" || len(request.GenerationConfig.SpeechConfig) != 1 || request.GenerationConfig.SpeechConfig[0].Voice != "Kore" {
+		tr.t.Errorf("speech request %+v", request)
 	}
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
-}
-
-type groqASRTestTransport struct{ t *testing.T }
-
-func (tr groqASRTestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.Path != "/openai/v1/audio/transcriptions" {
-		tr.t.Errorf("ASR path %q", r.URL.Path)
-	}
-	r.Body = http.MaxBytesReader(nil, r.Body, 4096)
-	if err := r.ParseMultipartForm(1024); err != nil { // #nosec G120 -- MaxBytesReader bounds this test request to 4 KiB.
-		return nil, err
-	}
-	defer func() { _ = r.MultipartForm.RemoveAll() }()
-	if r.FormValue("model") != "whisper-large-v3-turbo" {
-		tr.t.Errorf("ASR model %q", r.FormValue("model"))
-	}
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"text":"I love bananas."}`)), Request: r}, nil
+	body := "data: {\"event_type\":\"step.delta\",\"delta\":{\"type\":\"audio\",\"data\":\"AQACAA==\",\"mime_type\":\"audio/l16\",\"sample_rate\":24000,\"channels\":1}}\n\ndata: {\"event_type\":\"interaction.completed\",\"interaction\":{\"status\":\"completed\"}}\n\n"
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
 func TestLocalStackTextOnly(t *testing.T) {
@@ -1568,7 +1479,7 @@ func TestLocalStackTextOnly(t *testing.T) {
 	if len(started) != 1 || started[0] != "owner/chat" {
 		t.Fatalf("started models = %v, want only the LLM", started)
 	}
-	if models.asr != nil {
+	if models.liveASR != nil {
 		t.Fatal("text-only model setup initialized ASR")
 	}
 	if err := models.runtime.Close(); err != nil {
@@ -1741,10 +1652,7 @@ func TestVoiceRTCLocalStackPlaceholders(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			fixedASR{text: "smoke transcript"}, &smokeLLM{text: "ack"}, placeholderTTS{},
-		))
+		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("smoke transcript"), &smokeLLM{text: "ack"}, placeholderTTS{}))
 		s.writeMicAudio(ctx, t, 24)
 		data := s.waitMessage(ctx, t, voicev2.MessageKindTranscriptDelta)
 		var msg voicev2.TranscriptDelta
@@ -1760,10 +1668,7 @@ func TestVoiceRTCLocalStackPlaceholders(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			fixedASR{text: "hello"}, &smokeLLM{text: "smoke llm response"}, placeholderTTS{},
-		))
+		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("hello"), &smokeLLM{text: "smoke llm response"}, placeholderTTS{}))
 		s.writeMicAudio(ctx, t, 24)
 		data := s.waitMessage(ctx, t, voicev2.MessageKindAssistantTextDelta)
 		var msg voicev2.AssistantTextDelta
@@ -1779,10 +1684,7 @@ func TestVoiceRTCLocalStackPlaceholders(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			fixedASR{text: "hello"}, &smokeLLM{text: "smoke tts response"}, placeholderTTS{},
-		))
+		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("hello"), &smokeLLM{text: "smoke tts response"}, placeholderTTS{}))
 		s.writeMicAudio(ctx, t, 24)
 		s.waitMessage(ctx, t, voicev2.MessageKindSpeechStarted)
 		select {
@@ -1802,10 +1704,7 @@ func TestVoiceRTCLocalStackPlaceholders(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			fixedASR{text: "DTX turn"}, &smokeLLM{text: "ack"}, placeholderTTS{},
-		))
+		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("DTX turn"), &smokeLLM{text: "ack"}, placeholderTTS{}))
 		s.writeMicAudio(ctx, t, 10)
 		started := time.Now()
 		s.waitMessage(ctx, t, voicev2.MessageKindTranscriptDelta)
@@ -2385,15 +2284,6 @@ func (c *fakeConversation) toolResultIDsSnapshot() []string {
 	return slices.Clone(c.toolResultIDs)
 }
 
-type fixedASR struct {
-	anyLanguage
-	text string
-}
-
-func (a fixedASR) transcribe(context.Context, string, []byte) (string, error) {
-	return a.text, nil
-}
-
 type fakeGenAICall struct {
 	messages genai.Messages
 	opts     []genai.GenOption
@@ -2550,38 +2440,28 @@ func testLocalStackSessionLanguage(t *testing.T) {
 		for _, tc := range []struct{ tag, want string }{{"fr-CA", "fr"}, {"", "en"}} {
 			t.Run("stages/"+tc.want, func(t *testing.T) {
 				t.Parallel()
-				stages := languageStages{got: make(chan string, 16)}
-				runtime := &localStackRuntime{newVAD: func() vadSegmenter { return &energyVAD{} }, asr: stages, llm: echoLLM{}, tts: stages}
+				recognition := newFakeTranscription()
+				recognitions := make(chan *fakeTranscription, 1)
+				recognitions <- recognition
+				tts := languageTTS{got: make(chan string, 16)}
+				runtime := &localStackRuntime{liveASR: newFakeLiveASR(recognitions), llm: echoLLM{}, tts: tts}
 				s := runtime.newSession(t.Context(), "language", &captureSink{}, false)
 				t.Cleanup(func() { _ = s.close() })
 				if err := setup(t, s, tc.tag); err != nil {
 					t.Fatal(err)
 				}
-				s.startTurn(t.Context(), loudPCM(200))
-				for _, stage := range []string{"asr", "tts"} {
-					if got := next(t, stages.got); got != stage+" "+tc.want {
-						t.Fatalf("stage call %q, want %q", got, stage+" "+tc.want)
-					}
+				mustAcceptMic(t, s, loudPCM(200))
+				mustAcceptMic(t, s, silencePCM(vadSilenceHangoverMS+vadFrameMS))
+				if got := recognition.audioOption(t).InputLanguage; got != tc.want {
+					t.Fatalf("ASR language %q, want %q", got, tc.want)
+				}
+				<-recognition.committed
+				recognition.final("Hello.", true)
+				if got := next(t, tts.got); got != tc.want {
+					t.Fatalf("TTS language %q, want %q", got, tc.want)
 				}
 			})
 		}
-		t.Run("live", func(t *testing.T) {
-			t.Parallel()
-			session := newFakeTranscription()
-			sessions := make(chan *fakeTranscription, 1)
-			sessions <- session
-			s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions), llm: echoLLM{}}).newSession(t.Context(), "language", &captureSink{}, true)
-			t.Cleanup(func() { _ = s.close() })
-			if err := setup(t, s, "fr-CA"); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
-				t.Fatal(err)
-			}
-			if got := session.audioOption(t).InputLanguage; got != "fr" {
-				t.Fatalf("live ASR language %q, want fr", got)
-			}
-		})
 		t.Run("voice", func(t *testing.T) {
 			t.Parallel()
 			for _, tc := range []struct{ tag, voice, want string }{
@@ -2705,19 +2585,14 @@ func testLocalStackSessionLanguage(t *testing.T) {
 	})
 }
 
-// languageStages records the language its recognition and synthesis calls receive.
-type languageStages struct {
+// languageTTS records the language its synthesis calls receive.
+type languageTTS struct {
 	anyLanguage
 	noVoiceSelection
 	got chan string
 }
 
-func (l languageStages) transcribe(_ context.Context, lang string, _ []byte) (string, error) {
-	l.got <- "asr " + lang
-	return "Hello.", nil
-}
-
-func (l languageStages) synthesize(_ context.Context, lang, _, _ string) iter.Seq2[[]byte, error] {
-	l.got <- "tts " + lang
+func (l languageTTS) synthesize(_ context.Context, lang, _, _ string) iter.Seq2[[]byte, error] {
+	l.got <- lang
 	return func(func([]byte, error) bool) {}
 }

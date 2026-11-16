@@ -41,7 +41,7 @@ const (
 	sessionLifetime = 30 * time.Minute
 
 	// micSampleRate is the default and local-stack decoded microphone PCM rate.
-	micSampleRate = 16000
+	micSampleRate = voicegateway.MicrophoneSampleRate
 
 	// backendOutputSampleRate is the assistant PCM rate consumed by the RTP encoder.
 	backendOutputSampleRate = 24000
@@ -870,7 +870,7 @@ func backendForConfig(cfg voicegateway.Choice, pool *localStackPool) (backendCon
 			return nil, fmt.Errorf("unsupported provider %q", c.Provider)
 		}
 		key := os.Getenv(entry.APIKeyEnvVar)
-		if entry.APIKeyEnvVar != "" && key == "" {
+		if entry.APIKeyEnvVar != "" && !entry.APIKeyOptional && key == "" {
 			return nil, fmt.Errorf("%s not configured", entry.APIKeyEnvVar)
 		}
 		return &realtimeBridgeBackend{provider: c.Provider, remote: c.Remote, apiKey: key, model: c.Model, effort: c.Effort}, nil

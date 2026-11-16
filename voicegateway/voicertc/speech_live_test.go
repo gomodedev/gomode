@@ -23,6 +23,7 @@ import (
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/llamacpp"
+	"github.com/maruel/genai/providers/mistral"
 	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/whistle"
@@ -71,6 +72,49 @@ func (p *fakeTranscriber) Capabilities() genai.ProviderCapabilities {
 func (p *fakeTranscriber) Scoreboard() scoreboard.Score { return p.score }
 
 func (p *fakeTranscriber) HTTPClient() *http.Client { return nil }
+
+// fixedTranscriber is a genai provider whose transcription sessions each
+// return text as the final transcript of the committed utterance.
+type fixedTranscriber struct {
+	fakeTranscriber
+
+	text string
+}
+
+func newFixedLiveASR(text string) *liveASR {
+	return newLiveASR(&fixedTranscriber{text: text}, "fake-model")
+}
+
+func (p *fixedTranscriber) ConnectRealtime(context.Context, ...genai.RealtimeOption) (genai.RealtimeSession, error) {
+	s := newFakeTranscription()
+	close(s.connected)
+	return fixedTranscription{fakeTranscription: s, text: p.text}, nil
+}
+
+// fixedTranscription answers Commit with its final transcript and TurnDone.
+type fixedTranscription struct {
+	*fakeTranscription
+
+	text string
+}
+
+func (s fixedTranscription) Receive(ctx context.Context) iter.Seq2[genai.RealtimeEvent, error] {
+	return func(yield func(genai.RealtimeEvent, error) bool) {
+		select {
+		case <-s.committed:
+		case <-ctx.Done():
+			yield(genai.RealtimeEvent{}, ctx.Err())
+			return
+		case <-s.closed:
+			yield(genai.RealtimeEvent{}, net.ErrClosed)
+			return
+		}
+		if s.text != "" && !yield(genai.RealtimeEvent{Kind: genai.RealtimeEventTranscriptInput, Content: genai.RealtimeContent{Text: s.text, Final: true}}, nil) {
+			return
+		}
+		yield(genai.RealtimeEvent{Kind: genai.RealtimeEventTurnDone}, nil)
+	}
+}
 
 // fakeTranscription is a transcription session whose events the test supplies.
 // connected, committed and closed close at ConnectRealtime, Commit and Close.
@@ -579,6 +623,48 @@ func TestLiveASR(t *testing.T) {
 					t.Errorf("final-only session published drafts %q", drafts)
 				}
 			})
+		})
+		t.Run("mistral", func(t *testing.T) {
+			t.Parallel()
+			const session = `{"request_id":"r","model":"voxtral-mini-transcribe-realtime-3","audio_format":{"encoding":"pcm_s16le","sample_rate":16000}}`
+			remote := peer(t, func(ctx context.Context, ws *websocket.Conn) {
+				writeGeminiFixture(t, ctx, ws, `{"type":"session.created","session":`+session+`}`)
+				update := readGeminiFixture(t, ctx, ws)
+				if cfg, _ := update["session"].(map[string]any); cfg["language"] != "fr" || cfg["audio_format"].(map[string]any)["sample_rate"] != float64(micSampleRate) {
+					t.Errorf("session.update %v, want French at %d Hz", update, micSampleRate)
+				}
+				writeGeminiFixture(t, ctx, ws, `{"type":"session.updated","session":`+session+`}`)
+				for msg := readGeminiFixture(t, ctx, ws); msg != nil && msg["type"] != "input_audio.append"; msg = readGeminiFixture(t, ctx, ws) {
+				}
+				writeGeminiFixture(t, ctx, ws, `{"type":"transcription.text.delta","text":"Initial draft"}`)
+				for msg := readGeminiFixture(t, ctx, ws); msg != nil && msg["type"] != "input_audio.end"; msg = readGeminiFixture(t, ctx, ws) {
+				}
+				writeGeminiFixture(t, ctx, ws, `{"type":"transcription.done","text":"Final words."}`)
+				_, _, _ = ws.Read(ctx)
+			})
+			target, err := url.Parse(remote)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := mistral.New(t.Context(), genai.ProviderOptionAPIKey("test-key"), genai.ProviderOptionModel("voxtral-mini-transcribe-realtime-3"), genai.ProviderOptionTransportWrapper(func(next http.RoundTripper) http.RoundTripper {
+				return &geminiTestTransport{base: next, endpoint: target}
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := p.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			s, sink, _ := newLiveTestSession(t, newLiveASR(p, p.ModelID()), "fr")
+			startSpeech(t, s)
+			waitLiveDraft(t, sink, "Initial draft")
+			endSpeech(t, s)
+			waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "Final words.", 1)
+			if err := s.turns.Wait(); err != nil {
+				t.Fatal(err)
+			}
 		})
 		t.Run("gemini", func(t *testing.T) {
 			t.Parallel()

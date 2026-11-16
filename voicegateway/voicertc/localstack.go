@@ -33,25 +33,11 @@ const (
 	vadRMSThreshold      = 500.0
 	vadSilenceHangoverMS = 200
 	vadMinSpeechMS       = 100
+	// vadMaxUtteranceBytes bounds a direct-audio utterance to 30 seconds.
+	vadMaxUtteranceBytes = 30 * micSampleRate * 2
 	// ttsChunkBytes is one 20ms frame of backend PCM output, fed to the sink.
 	ttsChunkBytes = backendOutputFrameBytes
 )
-
-// vadSegmenter splits a mic PCM stream into complete utterances. push consumes a
-// chunk of S16LE mono PCM at micSampleRate and returns a completed utterance's
-// PCM when end-of-speech is detected (nil otherwise) plus whether speech is
-// currently active (used for barge-in detection).
-type vadSegmenter interface {
-	push(pcm []byte) (utterance []byte, speechActive bool)
-	reset()
-}
-
-// asrAdapter converts an utterance's PCM into final text. lang is the
-// session's ISO 639 base language; see localStackSession.language.
-type asrAdapter interface {
-	languageChecker
-	transcribe(ctx context.Context, lang string, pcm []byte) (string, error)
-}
 
 // languageChecker declares which session languages a speech stage's model
 // accepts. session.setup rejects a session language that any selected stage
@@ -61,9 +47,8 @@ type languageChecker interface {
 }
 
 // anyLanguage accepts every session language at setup. The embedding
-// adapter's comment says why: its model detects the language, its provider
-// rejects one when the stage connects with an *unsupportedLanguageError, or a
-// TODO names the missing declaration.
+// adapter's comment says why: its model detects the language, or its provider
+// rejects one when the stage connects with an *unsupportedLanguageError.
 type anyLanguage struct{}
 
 func (anyLanguage) checkLanguage(string) error { return nil }
@@ -244,9 +229,9 @@ func (b *localStackBackend) newTextSession(ctx context.Context, sessionID string
 
 // localStackRuntime owns the loaded VAD→ASR→LLM→TTS adapters and their clients.
 type localStackRuntime struct {
+	// directAudio sends each energyVAD utterance to the conversation as audio,
+	// with no recognition stage.
 	directAudio bool
-	newVAD      func() vadSegmenter
-	asr         asrAdapter
 	liveASR     *liveASR
 	llm         llmAdapter
 	tts         ttsAdapter
@@ -273,19 +258,18 @@ func (b *localStackRuntime) newSession(ctx context.Context, sessionID string, si
 		baseCtx:       sessionCtx,
 		sessionCancel: cancel,
 		turns:         turns,
-		asr:           b.asr,
 		liveASR:       b.liveASR,
 		llm:           b.llm,
 		tts:           b.tts,
-		clientInput:   b.asr == nil && b.liveASR == nil && !b.directAudio,
+		clientInput:   b.liveASR == nil && !b.directAudio,
 		clientOutput:  clientOutput || b.tts == nil,
 		directAudio:   b.directAudio,
 		outstanding:   make(map[string]sessionToolCall),
 		livePending:   make(map[string]*liveUtterance),
 		liveGate:      newRealtimeAudioGate(micSampleRate, realtimeAudioManual),
 	}
-	if !s.clientInput && b.liveASR == nil {
-		s.vad = b.newVAD()
+	if b.directAudio {
+		s.vad = &energyVAD{}
 	}
 	return s
 }
@@ -312,8 +296,7 @@ type localStackSession struct {
 
 	sessionCancel context.CancelFunc
 
-	vad     vadSegmenter
-	asr     asrAdapter
+	vad     *energyVAD
 	liveASR *liveASR
 	llm     llmAdapter
 	tts     ttsAdapter
@@ -448,13 +431,8 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 // checkLanguage applies the declarations of the stages this session runs.
 func (s *localStackSession) checkLanguage(lang string) error {
 	var stages []languageChecker
-	if !s.clientInput {
-		if s.asr != nil {
-			stages = append(stages, s.asr)
-		}
-		if s.liveASR != nil {
-			stages = append(stages, s.liveASR)
-		}
+	if !s.clientInput && s.liveASR != nil {
+		stages = append(stages, s.liveASR)
 	}
 	if !s.clientOutput && s.tts != nil {
 		stages = append(stages, s.tts)
@@ -557,6 +535,7 @@ func (s *localStackSession) startUserMessage(ctx context.Context, text string) {
 	s.startAdmittedStep(turnCtx, conv, step, cancel, true)
 }
 
+// startTurn sends a direct-audio utterance to the conversation.
 func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	s.events.Lock()
 	defer s.events.Unlock()
@@ -565,53 +544,16 @@ func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 		s.mu.Unlock()
 		return
 	}
-	if s.directAudio {
-		conv := s.conv.(*genaiConversation)
-		s.mu.Unlock()
-		turnCtx, cancel := context.WithCancel(ctx)
-		step, err := conv.userAudio(turnCtx, utterance)
-		if err != nil {
-			cancel()
-			s.reportTurnError("audio", err)
-			return
-		}
-		s.startAdmittedStep(turnCtx, conv, step, cancel, true)
+	conv := s.conv.(*genaiConversation)
+	s.mu.Unlock()
+	turnCtx, cancel := context.WithCancel(ctx)
+	step, err := conv.userAudio(turnCtx, utterance)
+	if err != nil {
+		cancel()
+		s.reportTurnError("audio", err)
 		return
 	}
-	if s.turnCancel != nil {
-		s.turnCancel()
-		s.turnCancel = nil
-	}
-	s.turnGeneration++
-	generation := s.turnGeneration
-	s.emit(&voicev2.TurnStatus{Kind: voicev2.MessageKindTurnStatus, State: voicev2.TurnStateTranscribing})
-	previous := s.transcriptionTail
-	done := make(chan struct{})
-	s.transcriptionTail = done
-	lang := s.language
-	s.turns.Go(func() error {
-		defer close(done)
-		defer s.finishTurn(generation)
-		if previous != nil {
-			select {
-			case <-previous:
-			case <-s.baseCtx.Done():
-				return nil
-			}
-		}
-		if s.baseCtx.Err() != nil {
-			return nil
-		}
-		text, err := s.asr.transcribe(s.baseCtx, lang, utterance) //nolint:contextcheck // turn goroutines run on the session lifetime context
-		if err != nil {
-			s.warnTurn(s.baseCtx, "asr", err) //nolint:contextcheck // turn goroutines run on the session lifetime context
-			return nil
-		}
-		s.emit(&voicev2.TranscriptDelta{Kind: voicev2.MessageKindTranscriptDelta, Speaker: voicev2.SpeakerUser, Text: text})
-		s.startUserMessage(ctx, text)
-		return nil
-	})
-	s.mu.Unlock()
+	s.startAdmittedStep(turnCtx, conv, step, cancel, true)
 }
 
 func (s *localStackSession) startAdmittedStep(ctx context.Context, conv llmConversation, step llmStep, cancel context.CancelFunc, reportThinking bool) {
@@ -1006,17 +948,20 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 
 // energyVAD is a simple RMS-energy voice activity detector with a silence
 // hangover. It is a placeholder until a real VAD/segmentation model is wired in.
+// An utterance beyond vadMaxUtteranceBytes retains one excess frame so its
+// consumer can reject overlong speech explicitly instead of accepting a
+// truncated command.
 type energyVAD struct {
-	// A bounded utterance retains one excess frame so its consumer can reject
-	// overlong speech explicitly instead of accepting a truncated command.
-	maxUtteranceBytes int
-	leftover          []byte
-	utterance         []byte
-	speaking          bool
-	speechMS          int
-	silenceMS         int
+	leftover  []byte
+	utterance []byte
+	speaking  bool
+	speechMS  int
+	silenceMS int
 }
 
+// push consumes S16LE mono PCM at micSampleRate. It returns a completed
+// utterance when end-of-speech is detected, and whether speech is active for
+// barge-in detection.
 func (v *energyVAD) push(pcm []byte) ([]byte, bool) {
 	v.leftover = append(v.leftover, pcm...)
 	for len(v.leftover) >= vadFrameBytes {
@@ -1026,7 +971,7 @@ func (v *energyVAD) push(pcm []byte) ([]byte, bool) {
 			v.speaking = true
 			v.speechMS += vadFrameMS
 			v.silenceMS = 0
-			if v.maxUtteranceBytes == 0 || len(v.utterance) <= v.maxUtteranceBytes {
+			if len(v.utterance) <= vadMaxUtteranceBytes {
 				v.utterance = append(v.utterance, frame...)
 			}
 			continue
@@ -1035,7 +980,7 @@ func (v *energyVAD) push(pcm []byte) ([]byte, bool) {
 			continue // drop leading silence
 		}
 		v.silenceMS += vadFrameMS
-		if v.maxUtteranceBytes == 0 || len(v.utterance) <= v.maxUtteranceBytes {
+		if len(v.utterance) <= vadMaxUtteranceBytes {
 			v.utterance = append(v.utterance, frame...)
 		}
 		if v.silenceMS >= vadSilenceHangoverMS {
@@ -1048,11 +993,6 @@ func (v *energyVAD) push(pcm []byte) ([]byte, bool) {
 		}
 	}
 	return nil, v.speaking
-}
-
-func (v *energyVAD) reset() {
-	v.leftover = nil
-	v.resetUtterance()
 }
 
 func (v *energyVAD) resetUtterance() {
@@ -1073,13 +1013,6 @@ func frameRMS(frame []byte) float64 {
 		sum += float64(sample) * float64(sample)
 	}
 	return math.Sqrt(sum / float64(n))
-}
-
-// placeholderASR returns a fixed transcript. Real ASR is wired in a later phase.
-type placeholderASR struct{ anyLanguage }
-
-func (placeholderASR) transcribe(context.Context, string, []byte) (string, error) {
-	return "(local speech input)", nil
 }
 
 // placeholderLLM calls the first declared tool once, then answers with text.

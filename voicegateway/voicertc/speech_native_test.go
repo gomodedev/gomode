@@ -12,13 +12,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"slices"
 	"testing"
 	"time"
 
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
-	"github.com/maruel/genai/providers/groq"
 	"github.com/maruel/genai/providers/llamacpp"
 )
 
@@ -212,154 +210,4 @@ func testNativeTTS(t *testing.T, provider string) {
 			t.Fatalf("cancellation %v", failure)
 		}
 	})
-}
-
-func TestGeminiASRAdapter(t *testing.T) {
-	t.Parallel()
-	t.Run("transcribe", func(t *testing.T) {
-		t.Run("error", func(t *testing.T) {
-			for name, body := range map[string]string{
-				"status":         `{"status":"cancelled"}`,
-				"provider error": `{"status":"completed","errors":[{"code":"FAILED","message":"recognition failed"}]}`,
-			} {
-				t.Run(name, func(t *testing.T) {
-					t.Parallel()
-					srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-						w.Header().Set("Content-Type", "application/json")
-						if _, err := io.WriteString(w, body); err != nil {
-							t.Error(err)
-						}
-					}))
-					t.Cleanup(srv.Close)
-					target, err := url.Parse(srv.URL)
-					if err != nil {
-						t.Fatal(err)
-					}
-					p, err := gemini.New(t.Context(), genai.ProviderOptionAPIKey("test-key"), genai.ProviderOptionModel("gemini-3.5-transcribe"), genai.ProviderOptionTransportWrapper(func(next http.RoundTripper) http.RoundTripper {
-						return &geminiTestTransport{base: next, endpoint: target}
-					}))
-					if err != nil {
-						t.Fatal(err)
-					}
-					t.Cleanup(func() {
-						if err := p.Close(); err != nil {
-							t.Error(err)
-						}
-					})
-					text, err := (&geminiASRAdapter{client: p}).transcribe(t.Context(), "en", []byte{1, 0})
-					if err == nil || text != "" {
-						t.Fatalf("failed native recognition: text %q err %v", text, err)
-					}
-				})
-			}
-		})
-	})
-}
-
-func TestGroqASRAdapter(t *testing.T) {
-	t.Parallel()
-	t.Run("transcribe", func(t *testing.T) {
-		t.Run("error", func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				if _, err := io.WriteString(w, `{}`); err != nil {
-					t.Error(err)
-				}
-			}))
-			t.Cleanup(srv.Close)
-			target, err := url.Parse(srv.URL)
-			if err != nil {
-				t.Fatal(err)
-			}
-			p, err := groq.New(t.Context(), genai.ProviderOptionAPIKey("test-key"), genai.ProviderOptionModel("whisper-large-v3"), genai.ProviderOptionTransportWrapper(func(next http.RoundTripper) http.RoundTripper {
-				return &geminiTestTransport{base: next, endpoint: target}
-			}))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := p.Close(); err != nil {
-					t.Error(err)
-				}
-			})
-			text, err := (&groqASRAdapter{client: p}).transcribe(t.Context(), "en", []byte{1, 0})
-			if err == nil || text != "" {
-				t.Fatalf("missing native text: text %q err %v", text, err)
-			}
-		})
-	})
-}
-
-func TestChatASRAdapter(t *testing.T) {
-	t.Parallel()
-	// chatRequest is the part of a chat completion request the adapters own.
-	type chatRequest struct {
-		Messages []struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
-	}
-	for _, tc := range []struct {
-		name, model, reply string
-		// roles and parts list each message's role and its content part types;
-		// a string content is the part "text".
-		roles []string
-		parts [][]string
-	}{
-		{"Qwen3-ASR", "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0", "language English<asr_text> Turn left. ", []string{"user"}, [][]string{{"input_audio"}}},
-		{"audio chat", "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M", " Turn left. ", []string{"system", "user"}, [][]string{{"text"}, {"text", "input_audio"}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := make(chan chatRequest, 1)
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req chatRequest
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					t.Error(err)
-				}
-				got <- req
-				w.Header().Set("Content-Type", "application/json")
-				reply, _ := json.Marshal(tc.reply)
-				_, _ = io.WriteString(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":`+string(reply)+`},"finish_reason":"stop"}]}`)
-			}))
-			t.Cleanup(srv.Close)
-			p, err := llamacpp.New(t.Context(), genai.ProviderOptionRemote(srv.URL))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := p.Close(); err != nil {
-					t.Error(err)
-				}
-			})
-			a := newChatASRAdapter(p, tc.model)
-			if text, err := a.transcribe(t.Context(), "en", []byte{1, 0, 2, 0}); err != nil || text != "Turn left." {
-				t.Fatalf("transcribe = %q, %v", text, err)
-			}
-			req := <-got
-			var roles []string
-			var parts [][]string
-			for _, m := range req.Messages {
-				roles = append(roles, m.Role)
-				var typed []struct {
-					Type string `json:"type"`
-				}
-				if json.Unmarshal(m.Content, &typed) != nil {
-					parts = append(parts, []string{"text"})
-					continue
-				}
-				types := make([]string, 0, len(typed))
-				for _, p := range typed {
-					types = append(types, p.Type)
-				}
-				parts = append(parts, types)
-			}
-			if !slices.Equal(roles, tc.roles) || !slices.EqualFunc(parts, tc.parts, slices.Equal) {
-				t.Errorf("messages = %v %v, want %v %v", roles, parts, tc.roles, tc.parts)
-			}
-			if text, err := a.transcribe(t.Context(), "en", nil); err != nil || text != "" {
-				t.Errorf("empty audio = %q, %v", text, err)
-			}
-		})
-	}
 }

@@ -5,10 +5,6 @@
 package voicertc
 
 import (
-	"bytes"
-	"encoding/binary"
-	"math"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,14 +12,13 @@ import (
 	"github.com/maruel/gomode/voicegateway"
 )
 
-// TestSmokeLlamaSpeech exercises separate llama.cpp ASR and TTS around the
-// production language adapter. Set GOMODE_SPEECH_SMOKE_WAV to retain the known
-// utterance WAV for subsequent provider checks.
+// TestSmokeLlamaSpeech exercises separate llama.cpp live ASR and TTS around the
+// production language adapter.
 func TestSmokeLlamaSpeech(t *testing.T) {
 	isolateSmokeHost(t)
 	cfg := voicegateway.PipelineConfig{
 		Label: "Managed llama speech",
-		ASR:   voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0", ContextSize: 32768},
+		ASR:   voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M", ContextSize: 32768},
 		LLM:   voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"}, ContextSize: 65536},
 		TTS:   voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M", Voice: "female"},
 	}
@@ -53,32 +48,12 @@ func TestSmokeLlamaSpeech(t *testing.T) {
 	if len(pcm) < 24000 || pcmS16LEEnergy(pcm) < 1000 {
 		t.Fatal("synthesis did not produce audible speech")
 	}
-	if path := os.Getenv("GOMODE_SPEECH_SMOKE_WAV"); path != "" {
-		length := uint64(len(pcm))
-		if length > math.MaxUint32-36 {
-			t.Error("speech exceeds WAV container size")
-			return
-		}
-		var wav bytes.Buffer
-		wav.WriteString("RIFF")
-		wav.Write(binary.LittleEndian.AppendUint32(nil, uint32(length)+36))
-		wav.WriteString("WAVEfmt ")
-		for _, v := range []uint32{16, 0x10001, 24000, 48000, 0x100002} {
-			wav.Write(binary.LittleEndian.AppendUint32(nil, v))
-		}
-		wav.WriteString("data")
-		wav.Write(binary.LittleEndian.AppendUint32(nil, uint32(length)))
-		wav.Write(pcm)
-		//nolint:gosec // The operator explicitly selects the smoke output path.
-		if err := os.WriteFile(path, wav.Bytes(), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	// The utterance is spoken at real time; latency includes its duration.
 	start = time.Now()
-	text, err := runtime.asr.transcribe(t.Context(), "en", downsample24to16(pcm))
+	_, text, failed := smokeLiveUtterance(t, runtime.liveASR, "en", downsample24to16(pcm))
 	t.Logf("recognition: %s, transcript %q", time.Since(start), text)
-	if err != nil {
-		t.Fatal(err)
+	if failed != "" {
+		t.Fatal(failed)
 	}
 	if smokeWords(text) != "i love bananas" {
 		t.Fatalf("unexpected transcript %q", text)

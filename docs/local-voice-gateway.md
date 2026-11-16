@@ -14,8 +14,9 @@ OpenAI Realtime, and LFM3 audio through `llamacpp-realtime`). This page covers
 the half-duplex stack, which keeps recognition, conversation, and synthesis
 separately selectable.
 
-The example stack selects managed llama.cpp Qwen3-ASR-0.6B for recognition,
+The example stack selects managed NeMo-Speech.cpp Parakeet TDT for recognition,
 managed llama.cpp Gemma-4-E2B for conversation, and CPU KittenTTS for synthesis.
+Recognition streams each utterance through a live transcription session.
 Turn taking uses a 20 ms RMS energy detector with a default 200 ms silence
 hangover. No M5 Pro measurement, listening test, or hardware acceptance exists
 for this stack.
@@ -24,16 +25,16 @@ for this stack.
 
 | Candidate | Route | Constraint |
 | --- | --- | --- |
-| Qwen3-ASR-0.6B | Managed through genai's llama.cpp provider; batch per utterance. | llama.cpp calls audio support experimental. Validate transcripts on a real Mac before replacing it. |
-| Parakeet TDT 0.6B v3 | The `nemospeech` engine runs genaipy's prebuilt [NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) release, Metal on Apple Silicon. | 600M parameters; batch only, while Nemotron 3.5 streams on the same runtime. |
+| Parakeet TDT 0.6B v3 | The `nemospeech` engine runs genaipy's prebuilt [NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) release, Metal on Apple Silicon. | 600M parameters; final transcript only, while Nemotron 3.5 streams drafts on the same runtime. |
+| [Qwen3-ASR-0.6B](https://github.com/QwenLM/Qwen3-ASR) | Its `qwen_asr` package streams through vLLM. | llama.cpp transcribes only completed utterances, which the gateway does not accept. |
 | [Parakeet Redux](https://huggingface.co/moondream/parakeet-redux) | 207 MB 1.58-bit variant of v3. | Modest English/noise WER regression; wait for its fast path before depending on it. |
 | [Phonon-2](https://www.fermionresearch.com/research/phonon-2/) | English-only 2.1-bit Parakeet derivative; HTTP transcription route. | Each streaming partial re-decodes the buffered phrase, and a CPU fixture held about 1.5 GiB resident. |
-| Whistle | Shipped as an opt-in engine for completed clips. | The native runtime ships as a prebuilt binary with no source, which blocks auditing and source builds. |
+| Whistle | Shipped as an opt-in engine; it returns only the final transcript. | The native runtime ships as a prebuilt binary with no source, which blocks auditing and source builds. |
 | [Audio8-ASR-0.1B](https://huggingface.co/Edge0/Audio8-ASR-0.1B) | ONNX CPU runner, plus a Swift/Core ML package for macOS and iOS. | Its `/asr` endpoint does not match the gateway adapters, it truncates input at 30 seconds with a 512-token cache, and the weights are noncommercial. |
 | Whisper family ([whisper.cpp](https://github.com/ggml-org/whisper.cpp), [WhisperKit](https://github.com/argmaxinc/WhisperKit), [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)) | Mature Apple Silicon routes with wide language coverage. | Windowed by nature: repeated inference on short live chunks costs latency and invites revision. |
 | [mlx-audio](https://github.com/Blaizzy/mlx-audio), [Voxtral Mini Realtime](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602), [Moonshine](https://github.com/usefulsensors/moonshine) | Apple streaming experiments, up to 13 languages. | Each adds a Python service boundary to the Go gateway. |
 
-Start on the M5 Pro with the wired Qwen3-ASR path, and score exact words on a
+Start on the M5 Pro with Parakeet TDT, and score exact words on a
 small spoken-command corpus that includes names, code terms, noise, and clipped
 utterances before swapping engines.
 

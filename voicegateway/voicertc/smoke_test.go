@@ -37,6 +37,7 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genaipy/providers/kittentts"
 	"github.com/maruel/genaipy/providers/kittentts/kittenttssrv"
+	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
@@ -55,7 +56,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 
 	var spokenPCM24 []byte
 	var tts *kittenTTSAdapter
-	var asr asrAdapter
+	var asr *liveASR
 	var llm *genaiLLMAdapter
 
 	t.Run("Audio", func(t *testing.T) {
@@ -99,25 +100,24 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 				t.Fatal("TTS did not produce ASR input")
 			}
 			startup := time.Now()
-			endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0", 32768, startManagedLlamaServer)
-			t.Logf("managed Qwen3-ASR startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
+			endpoint, err := nemoSpeechEndpoint(runtimeCtx, "", nemospeech.ParakeetTDT)
+			t.Logf("managed Parakeet TDT startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if endpoint.runtime != nil {
-				root.Cleanup(func() {
-					if err := endpoint.runtime.Close(); err != nil {
-						root.Fatal(err)
-					}
-				})
-			}
-			asr = newChatASRAdapter(endpoint.provider, "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0")
+			root.Cleanup(func() {
+				if err := endpoint.runtime.Close(); err != nil {
+					root.Fatal(err)
+				}
+			})
+			asr = newLiveASR(endpoint.provider, string(nemospeech.ParakeetTDT))
 
+			// The utterance is spoken at real time; latency includes its duration.
 			transcription := time.Now()
-			text, err := asr.transcribe(t.Context(), "en", downsample24to16(spokenPCM24))
-			t.Logf("Qwen3-ASR transcription latency: %s", smokeElapsed(transcription))
-			if err != nil {
-				t.Fatal(err)
+			_, text, failed := smokeLiveUtterance(t, asr, "en", downsample24to16(spokenPCM24))
+			t.Logf("Parakeet TDT utterance to transcript latency: %s", smokeElapsed(transcription))
+			if failed != "" {
+				t.Fatal(failed)
 			}
 			if smokeWords(text) != "i love bananas" {
 				t.Fatalf("ASR transcript = %q, want %q", text, "I love bananas")
@@ -175,10 +175,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 
 		verifyManagedLLMToolCall(t, endpoint.provider)
 
-		s := newVoiceRTCTestSession(t.Context(), t, newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			fixedASR{text: "hello"}, llm, placeholderTTS{},
-		))
+		s := newVoiceRTCTestSession(t.Context(), t, newTestLocalStackBackend(t, newFixedLiveASR("hello"), llm, placeholderTTS{}))
 		turn := time.Now()
 		s.writeMicAudio(t.Context(), t, 24)
 		data := s.waitMessage(t.Context(), t, voicev2.MessageKindAssistantTextDelta)
@@ -207,10 +204,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t,
-			func() vadSegmenter { return &energyVAD{} },
-			asr, llm, tts,
-		))
+		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, asr, llm, tts))
 		turn := time.Now()
 		writePCM24MicAudio(ctx, t, s.micTrack, spokenPCM24)
 		data := s.waitMessage(ctx, t, voicev2.MessageKindTranscriptDelta)
@@ -302,7 +296,7 @@ func TestSmokeVoiceGatewayToolCall(t *testing.T) {
 	cfg.Pipelines = []voicegateway.PipelineConfig{{
 		ID:    "local",
 		Label: "Local",
-		ASR:   voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0", ContextSize: 32768},
+		ASR:   voicegateway.ASRConfig{Engine: voicegateway.ASREngineNemoSpeech, Model: string(nemospeech.ParakeetTDT)},
 		LLM:   voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"}, ContextSize: 65536},
 		TTS:   voicegateway.TTSConfig{Engine: voicegateway.TTSEngineKittenTTS, Voice: "Jasper", Model: "KittenML/kitten-tts-2"},
 	}}

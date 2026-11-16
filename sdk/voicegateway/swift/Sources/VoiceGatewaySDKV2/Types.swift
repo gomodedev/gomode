@@ -821,11 +821,11 @@ public struct VoiceConfig: Codable {
     /// Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA".
     /// Empty defaults to "en-US"; an invalid tag fails session setup. A session
     /// speaks one language, and the assistant replies in it. Synthesis and
-    /// streaming recognition models that take a language receive it, recognition
-    /// as a hint or forced; other models ignore it. A model that declares its
+    /// recognition models that take a language receive it, recognition as a
+    /// hint or forced; other models ignore it. A model that declares its
     /// languages fails session setup for another one. A model whose server
     /// rejects the language fails when its connection starts: at session setup
-    /// for realtime choices, and at each utterance for live recognition.
+    /// for realtime choices, and at each utterance for recognition.
     public let language: String
 
     public init(name: String? = nil, language: String) {

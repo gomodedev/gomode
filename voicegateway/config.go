@@ -27,6 +27,7 @@ import (
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/openairesponses"
 	"github.com/maruel/genai/providers/openrouter"
+	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/kittentts"
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/pelletier/go-toml/v2"
@@ -310,7 +311,8 @@ func (c *TTSConfig) modelConfig() ModelConfig {
 }
 
 func (c *ModelConfig) usesDefaultProviderEndpoint() bool {
-	return !c.LlamaCPPServer && (c.Remote == "" || providers.All[c.Provider].APIKeyEnvVar != "")
+	e := providers.All[c.Provider]
+	return !c.LlamaCPPServer && (c.Remote == "" || e.APIKeyEnvVar != "" && !e.APIKeyOptional)
 }
 
 // ModelConfig selects a provider, model, and managed or remote endpoint.
@@ -903,17 +905,14 @@ func (c *PipelineConfig) validate() error {
 // Provider is used only by the genai engine, and Remote only by the genai and
 // nemospeech engines.
 type ASRConfig struct {
-	ID    string `toml:"id"`
-	Label string `toml:"label"`
-	// Streaming opens an utterance-owned live connection and displays provisional
-	// text while microphone input continues. It requires a live-ASR model.
-	Streaming bool      `toml:"streaming"`
-	Engine    ASREngine `toml:"engine"`
-	Provider  string    `toml:"provider"`
-	Remote    string    `toml:"remote"`
-	Model     string    `toml:"model"`
+	ID       string    `toml:"id"`
+	Label    string    `toml:"label"`
+	Engine   ASREngine `toml:"engine"`
+	Provider string    `toml:"provider"`
+	Remote   string    `toml:"remote"`
+	Model    string    `toml:"model"`
 	// ContextSize is the managed llama.cpp context in tokens, 512 to 262144,
-	// and is required for a managed server. Each request carries one utterance.
+	// and is required for a managed server. Each session carries one utterance.
 	ContextSize int `toml:"context_size"`
 }
 
@@ -921,9 +920,11 @@ type ASRConfig struct {
 type ASREngine string
 
 const (
-	// ASREngineGenAI uses an explicitly configured registered genai provider.
-	// Model is required. With llamacpp and no Remote, the gateway starts a
-	// dedicated managed server; other providers use their configured endpoint.
+	// ASREngineGenAI uses a genai provider's live transcription session, one
+	// per utterance. Provider's genai scoreboard must qualify a transcription
+	// session at MicrophoneSampleRate, and Model is required. With llamacpp and
+	// no Remote, the gateway starts a dedicated managed server; other providers
+	// use their configured endpoint.
 	ASREngineGenAI ASREngine = "genai"
 	// ASREngineWhistle runs the managed Cactus Whistle recognizer.
 	// Model optionally names local .cact weights; empty downloads the dedicated
@@ -974,16 +975,49 @@ func validateASR(c ASRConfig) error {
 	return errors.Join(validateASREngine(c), validateManagedContext("voice.asr", c.ContextSize, c.managedLlama()))
 }
 
-func validateASREngine(c ASRConfig) error {
-	if c.Streaming && (c.Engine != ASREngineGenAI || c.Provider != "llamacpp" && c.Provider != "gemini") {
-		return errors.New("voice.asr.streaming requires a llama.cpp or Gemini live-ASR provider")
+// MicrophoneSampleRate is the PCM rate at which local stacks decode the
+// microphone and feed recognition sessions.
+const MicrophoneSampleRate = 16000
+
+// validateLiveTranscription requires provider's genai scoreboard to qualify a
+// transcription session at MicrophoneSampleRate. The check is per provider,
+// not per model: a llama.cpp model is an arbitrary GGUF, and a cloud model
+// without a live session fails when an utterance connects. An unregistered
+// provider is reported by ModelConfig.validate.
+func validateLiveTranscription(provider string) error {
+	entry, ok := providers.All[provider]
+	if !ok || transcribesMicrophone(entry) {
+		return nil
 	}
+	var names []string
+	for name, e := range providers.All {
+		if transcribesMicrophone(e) {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return fmt.Errorf("voice.asr.provider %q has no live transcription session at %d Hz: use %s", provider, MicrophoneSampleRate, strings.Join(names, ", "))
+}
+
+// transcribesMicrophone reports whether the provider's scoreboard qualifies a
+// transcription session at MicrophoneSampleRate.
+func transcribesMicrophone(c providers.Config) bool {
+	if c.Scoreboard == nil {
+		return false
+	}
+	return slices.ContainsFunc(c.Scoreboard().Realtime, func(r scoreboard.Realtime) bool {
+		f := r.Realtime
+		return f != nil && f.Transcription != nil && f.InputSampleRate == MicrophoneSampleRate
+	})
+}
+
+func validateASREngine(c ASRConfig) error {
 	switch c.Engine {
 	case "":
 		return errors.New("voice.asr.engine is required")
 	case ASREngineGenAI:
 		model := c.modelConfig()
-		return model.validate("voice.asr")
+		return errors.Join(model.validate("voice.asr"), validateLiveTranscription(c.Provider))
 	case ASREngineWhistle:
 		if c.Provider != "" || c.Remote != "" {
 			return errors.New("voice.asr.whistle is managed locally; provider and remote must be empty")

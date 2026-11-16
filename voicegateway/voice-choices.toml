@@ -240,21 +240,16 @@ engine = "kittentts"
 model = "KittenML/kitten-tts-2"
 voice = "Luna"
 
+# Recognition streams each utterance through a live transcription session:
+# engine nemospeech or whistle, or a genai provider whose scoreboard qualifies
+# one at the gateway microphone rate.
 # Provider speech uses its native endpoint. Omit remote to start a managed model.
-[[asr]]
-id = "qwen"
-label = "Qwen3 ASR"
-provider = "llamacpp"
-model = "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0"
-context_size = 32768
-
 [[asr]]
 id = "voxtral"
 label = "Voxtral Realtime"
 provider = "llamacpp"
 model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
 context_size = 32768
-streaming = true
 
 # NVIDIA NeMo-Speech.cpp: the gateway installs its pinned release and starts a
 # server per model, which downloads the model into $NEMO_SPEECH_MODEL_DIR, else
@@ -279,19 +274,6 @@ id = "gemini-transcribe-live"
 label = "Gemini Live Transcribe"
 provider = "gemini"
 model = "gemini-3.5-transcribe-live"
-streaming = true
-
-[[asr]]
-id = "whisper"
-label = "Groq Whisper"
-provider = "groq"
-model = "whisper-large-v3-turbo"
-# GROQ_API_KEY authenticates recognition. whisper-large-v3 is also supported.
-[[asr]]
-id = "gemini-transcribe"
-label = "Gemini Transcribe"
-provider = "gemini"
-model = "gemini-3.5-transcribe"
 
 [[tts]]
 id = "gemini-tts"
@@ -311,27 +293,13 @@ context_size = 32768
 [[voice]]
 id = "llamacpp-speech-luna"
 label = "llama.cpp speech with GPT 6 Luna"
-asr = "qwen"
-llm = "gpt-luna"
-tts = "lfm3"
-
-[[voice]]
-id = "whisper-luna-local-speech"
-label = "Groq Whisper with GPT 6 Luna and local speech"
-asr = "whisper"
+asr = "voxtral"
 llm = "gpt-luna"
 tts = "lfm3"
 
 [[voice]]
 id = "gemini-speech-luna"
 label = "Gemini speech with GPT 6 Luna"
-asr = "gemini-transcribe"
-llm = "gpt-luna"
-tts = "gemini-tts"
-
-[[voice]]
-id = "whisper-luna-gemini-speech"
-label = "Groq Whisper with GPT 6 Luna and Gemini speech"
-asr = "whisper"
+asr = "gemini-transcribe-live"
 llm = "gpt-luna"
 tts = "gemini-tts"

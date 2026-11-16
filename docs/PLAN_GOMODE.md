@@ -54,12 +54,12 @@ data and authorization policy stay in the hosts.
 - **Depends on:** none
 - **Scope:** Managed ASR, LLM, and TTS runtimes, bounded assistant PCM
   backpressure, and local-stack runtime documentation. Configuration:
-  [contrib/config.toml](../contrib/config.toml); smoke runs:
+  [voice-choices.toml](../voicegateway/voice-choices.toml); smoke runs:
   [smoke_test.go](../voicegateway/voicertc/smoke_test.go).
 - **Verify:** The target-Mac smoke run completes a turn without Gemini,
   continues after a client tool, and stops speech and model work on
   interruption. TTS cannot queue audio unboundedly ahead of RTP playback.
-  Post-startup latency is recorded for the Qwen3-ASR path.
+  Post-startup latency is recorded for Parakeet TDT.
 
 ## Later
 
@@ -68,6 +68,17 @@ data and authorization policy stay in the hosts.
   before claiming that mute-once ends with audible playback.
 - Preserve uncommitted service URL drafts when calls or notification navigation leave Settings.
 - mddb workspace search stays in mddb's `docs/PLAN_MDDB.md`.
+- Whistle's and NeMo-Speech's languages live only in genaipy, so an
+  unsupported language fails each utterance instead of session setup; gomode
+  repeats NeMo-Speech's model set.
+- Concurrent first sessions run `nemospeechsrv.Download` into the same cache
+  unserialized. The NeMo engine has no GPU backend setting.
+- The local-stack pool keeps handing out a stack whose managed worker crashed
+  until the stack goes idle.
+- Only `ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF` declares Qwen3-TTS languages.
+- KittenTTS downloads Hugging Face main, not the revision its voice table cites.
+- genai's scoreboard could own each provider's default voice; gomode marks
+  OpenAI Realtime's `alloy` itself.
 - Android voice transport coverage stays in
   [PLAN_ANDROID_VOICE_FIXTURE.md](PLAN_ANDROID_VOICE_FIXTURE.md).
 - Hold/resume for Telecom calls once the gateway preserves a paused

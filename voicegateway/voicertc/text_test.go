@@ -175,7 +175,7 @@ func (c *blockingFirstConversation) addContext(string) {}
 func newTestTextBridge(t *testing.T, llm llmAdapter) *Bridge {
 	textCtx, textCancel := context.WithCancel(t.Context())
 	t.Cleanup(textCancel)
-	backend := newTestLocalStackBackend(t, nil, nil, llm, nil)
+	backend := newTestLocalStackBackend(t, nil, llm, nil)
 	choices, choiceErr := defaultBackendChoices(t.Context(), backend)
 	if choiceErr != nil {
 		t.Fatal(choiceErr)

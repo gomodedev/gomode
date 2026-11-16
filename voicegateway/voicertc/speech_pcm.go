@@ -1,4 +1,4 @@
-// Native provider PCM conversion and bounded WAV encoding for gateway speech.
+// Native provider PCM conversion for gateway speech.
 
 package voicertc
 
@@ -86,29 +86,4 @@ func normalizePCM(r io.Reader, contentType string) iter.Seq2[[]byte, error] {
 			}
 		}
 	}
-}
-
-// speechWAV encodes bounded gateway microphone audio for native file endpoints.
-func speechWAV(pcm []byte, sampleRate int) ([]byte, error) {
-	if sampleRate < 8000 || sampleRate > 192000 {
-		return nil, errors.New("speech WAV sample rate is unsupported")
-	}
-	if len(pcm)%2 != 0 || len(pcm) > 25*1024*1024-44 {
-		return nil, errors.New("speech input must contain at most 25 MiB of aligned PCM16")
-	}
-	wav := make([]byte, 44+len(pcm))
-	copy(wav, "RIFF")
-	binary.LittleEndian.PutUint32(wav[4:], uint32(len(wav)-8)) //nolint:gosec // bounded above
-	copy(wav[8:], "WAVEfmt ")
-	binary.LittleEndian.PutUint32(wav[16:], 16)
-	binary.LittleEndian.PutUint16(wav[20:], 1)
-	binary.LittleEndian.PutUint16(wav[22:], 1)
-	binary.LittleEndian.PutUint32(wav[24:], uint32(sampleRate))   //nolint:gosec // Sample rate is bounded above.
-	binary.LittleEndian.PutUint32(wav[28:], uint32(sampleRate*2)) //nolint:gosec // Sample rate is bounded above.
-	binary.LittleEndian.PutUint16(wav[32:], 2)
-	binary.LittleEndian.PutUint16(wav[34:], 16)
-	copy(wav[36:], "data")
-	binary.LittleEndian.PutUint32(wav[40:], uint32(len(pcm))) //nolint:gosec // bounded above
-	copy(wav[44:], pcm)
-	return wav, nil
 }

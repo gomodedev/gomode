@@ -520,7 +520,7 @@ func TestLocalStackBackend(t *testing.T) {
 				t.Parallel()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				t.Cleanup(cancel)
-				b := newTestLocalStackBackend(t, func() vadSegmenter { return &energyVAD{} }, fixedASR{text: "Hello"}, echoLLM{}, longTTS{ms: 1})
+				b := newTestLocalStackBackend(t, newFixedLiveASR("Hello"), echoLLM{}, longTTS{ms: 1})
 				sink := &captureSink{changed: make(chan struct{}, 1)}
 				var session backendSession
 				var err error
@@ -554,7 +554,8 @@ func TestLocalStackBackend(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				for !slices.Contains(sink.turnStates(), voicev2.TurnStateIdle) {
+				// A recognized utterance reports idle before its turn starts thinking.
+				for states := sink.turnStates(); !slices.Contains(states, voicev2.TurnStateThinking) || states[len(states)-1] != voicev2.TurnStateIdle; states = sink.turnStates() {
 					select {
 					case <-sink.changed:
 					case <-ctx.Done():
@@ -705,7 +706,7 @@ func TestLocalStackBackend(t *testing.T) {
 				t.Fatal(err)
 			}
 			active := c.(*negotiatedStackSession).session.(*leasedLocalStackSession).backendSession.(*localStackSession)
-			if !active.clientInput || active.clientOutput || active.asr != nil || active.tts == nil {
+			if !active.clientInput || active.clientOutput || active.liveASR != nil || active.tts == nil {
 				t.Fatal("second session inherited the first session's stages")
 			}
 			if err := c.close(); err != nil {
@@ -792,7 +793,7 @@ func TestNegotiatedStackSession(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		t.Cleanup(cancel)
 		conv := &blockedAdmission{entered: make(chan struct{})}
-		b := newTestLocalStackBackend(t, nil, nil, fixedConversationLLM{conv: conv}, nil)
+		b := newTestLocalStackBackend(t, nil, fixedConversationLLM{conv: conv}, nil)
 		s, err := b.newTextSession(ctx, "closing", &captureSink{})
 		if err != nil {
 			t.Fatal(err)
@@ -830,17 +831,27 @@ func TestIndependentSpeechStages(t *testing.T) {
 	t.Run("compose unbundled recognition and language models", func(t *testing.T) {
 		t.Parallel()
 		requests := make(chan string, 8)
-		// Each recognizer is a remote llama.cpp server; its requests carry no
-		// model, so the server reports its own model.
+		// Each recognizer is a remote llama.cpp server; its transcription
+		// sessions carry no model, so the server reports its own model.
 		recognizer := func(model string) string {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/health":
 					_, _ = io.WriteString(w, `{"status":"ok"}`)
-				case "/chat/completions":
+				case "/v1/realtime":
+					ws, err := websocket.Accept(w, r, nil)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer func() { _ = ws.CloseNow() }()
+					ctx := r.Context()
+					writeGeminiFixture(t, ctx, ws, `{"type":"session.created","session":{"type":"transcription","audio":{"input":{"format":{"type":"audio/pcm","rate":16000}}}}}`)
+					for msg := readGeminiFixture(t, ctx, ws); msg != nil && msg["type"] != "input_audio_buffer.commit"; msg = readGeminiFixture(t, ctx, ws) {
+					}
 					requests <- "asr:" + model
-					w.Header().Set("Content-Type", "application/json")
-					_, _ = io.WriteString(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}]}`)
+					writeGeminiFixture(t, ctx, ws, `{"type":"conversation.item.input_audio_transcription.completed","item_id":"u","transcript":"Hello"}`)
+					_, _, _ = ws.Read(ctx)
 				default:
 					t.Errorf("unexpected request %s", r.URL.Path)
 				}

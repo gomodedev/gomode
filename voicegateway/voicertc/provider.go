@@ -91,7 +91,10 @@ func (b *realtimeBridgeBackend) voices(ctx context.Context) ([]voicev2.Voice, er
 }
 
 func (b *realtimeBridgeBackend) newProvider(ctx context.Context) (genai.Provider, error) {
-	opts := []genai.ProviderOption{genai.ProviderOptionAPIKey(b.apiKey)}
+	var opts []genai.ProviderOption
+	if b.apiKey != "" {
+		opts = append(opts, genai.ProviderOptionAPIKey(b.apiKey))
+	}
 	if b.provider == "gemini" {
 		opts = append(opts, genai.ProviderOptionModalities{genai.ModalityAudio})
 	}

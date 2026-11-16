@@ -180,20 +180,6 @@ func (s *barrierSink) sendGatewayMessage(ctx context.Context, data []byte) error
 	}
 }
 
-type scriptedASR struct {
-	anyLanguage
-	texts chan string
-}
-
-func (a *scriptedASR) transcribe(ctx context.Context, _ string, _ []byte) (string, error) {
-	select {
-	case text := <-a.texts:
-		return text, nil
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-}
-
 // interruptibleSpeech holds synthesis until cancellation, proving tools remain
 // session-owned while speech and generation are superseded.
 type interruptibleSpeech struct {
@@ -301,10 +287,11 @@ func TestLocalStackChronologicalTransport(t *testing.T) {
 				}
 			})
 			a := &genaiLLMAdapter{provider: endpoint.provider}
-			asr := &scriptedASR{texts: make(chan string, 8)}
+			recognitions := make(chan *fakeTranscription, 8)
+			asr := newFakeLiveASR(recognitions)
 			speech := &interruptibleSpeech{started: make(chan struct{}), stopped: make(chan struct{})}
 			sink := &barrierSink{messages: make(chan []byte, 100)}
-			backend := newTestLocalStackBackend(t, func() vadSegmenter { return &energyVAD{} }, asr, a, speech)
+			backend := newTestLocalStackBackend(t, asr, a, speech)
 			var conn *websocket.Conn
 			var sess *localStackSession
 			if path == "text" {
@@ -373,13 +360,20 @@ func TestLocalStackChronologicalTransport(t *testing.T) {
 					send(voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: text})
 					return
 				}
-				asr.texts <- text
+				recognition := newFakeTranscription()
+				recognitions <- recognition
 				if err := sess.acceptMicPCM(ctx, loudPCM(120)); err != nil {
 					t.Fatal(err)
 				}
 				if err := sess.acceptMicPCM(ctx, silencePCM(240)); err != nil {
 					t.Fatal(err)
 				}
+				select {
+				case <-recognition.committed:
+				case <-ctx.Done():
+					t.Fatal("utterance was not committed")
+				}
+				recognition.final(text, true)
 			}
 			send(voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Context: voicev2.Context{SystemInstruction: "Follow latest intent; do not replay tools."}, Tools: []voicev2.ToolDeclaration{{Name: "task_status", Description: "Read a task state", Parameters: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"integer"}}}`)}}})
 			readKind(voicev2.MessageKindSessionReady)
@@ -651,41 +645,38 @@ func TestLocalStackASRShutdown(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
-	asr := &barrierASR{started: make(chan struct{}), stopped: make(chan struct{})}
-	backend := newTestLocalStackBackend(t, func() vadSegmenter { return &energyVAD{} }, asr, echoLLM{}, &recordingTTS{})
+	first, second := newFakeTranscription(), newFakeTranscription()
+	recognitions := make(chan *fakeTranscription, 2)
+	recognitions <- first
+	recognitions <- second
+	backend := newTestLocalStackBackend(t, newFakeLiveASR(recognitions), echoLLM{}, &recordingTTS{})
 	sink := &barrierSink{messages: make(chan []byte, 20)}
 	sess := stackVariant(t, backend, gatewaySpeechConfig()).loaded.(*localStackRuntime).newSession(ctx, "asr-shutdown", sink, false)
 	if err := sess.acceptClientMessage(ctx, mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})); err != nil {
 		t.Fatal(err)
 	}
-	sess.startTurn(ctx, []byte{1})
-	select {
-	case <-asr.started:
-	case <-ctx.Done():
-		t.Fatal("ASR did not start")
+	for _, recognition := range []*fakeTranscription{first, second} {
+		mustAcceptMic(t, sess, loudPCM(200))
+		mustAcceptMic(t, sess, silencePCM(vadSilenceHangoverMS+vadFrameMS))
+		select {
+		case <-recognition.committed:
+		case <-ctx.Done():
+			t.Fatal("utterance was not committed")
+		}
 	}
-	sess.startTurn(ctx, []byte{2}) // this ordered transcription waits behind the first
+	// The second transcript waits behind the first, which never completes.
+	second.final("Second.", true)
 	if err := sess.close(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-asr.stopped:
-	case <-ctx.Done():
-		t.Fatal("ASR waiter leaked")
+	for _, recognition := range []*fakeTranscription{first, second} {
+		select {
+		case <-recognition.closed:
+		default:
+			t.Fatal("recognition session leaked")
+		}
 	}
-	if sink.assistantText() != "" {
-		t.Fatal("shutdown utterance generated speech")
+	if sink.assistantText() != "" || kindCount(sink.kinds(), voicev2.MessageKindTranscriptDelta) != 0 {
+		t.Fatal("shutdown utterance reached the conversation")
 	}
-}
-
-type barrierASR struct {
-	anyLanguage
-	started, stopped chan struct{}
-}
-
-func (a *barrierASR) transcribe(ctx context.Context, _ string, _ []byte) (string, error) {
-	close(a.started)
-	<-ctx.Done()
-	close(a.stopped)
-	return "", ctx.Err()
 }

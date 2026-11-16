@@ -1310,8 +1310,8 @@ func TestBridge(t *testing.T) {
 			t.Parallel()
 			cfg := voicegateway.ResolvedConfig{Runtime: testRuntime,
 				LLM:         []voicegateway.LLMConfig{{ID: "llm", Label: "LLM", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "llm"}}},
-				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "recognition"}},
-				Pipelines:   []voicegateway.PipelineConfig{{ID: "preset", Label: "Preset", ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-recognition"}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-llm"}}}},
+				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "recognition"}},
+				Pipelines:   []voicegateway.PipelineConfig{{ID: "preset", Label: "Preset", ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "preset-recognition"}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-llm"}}}},
 			}
 			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
 			if err != nil {
@@ -1334,7 +1334,7 @@ func TestBridge(t *testing.T) {
 			t.Parallel()
 			cfg := voicegateway.ResolvedConfig{Runtime: testRuntime,
 				LLM:         []voicegateway.LLMConfig{{ID: "llm", Label: "LLM", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "llm"}}},
-				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "recognition"}},
+				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "recognition"}},
 				Synthesis: []voicegateway.TTSConfig{
 					{ID: "speech", Label: "Speech", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "speech", Voice: "speaker"},
 					{ID: "kitten", Engine: voicegateway.TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2", Voice: "Luna"},
@@ -1396,8 +1396,8 @@ func TestBridge(t *testing.T) {
 			{name: "OpenAI alias", backend: &realtimeBridgeBackend{provider: "openai", apiKey: "test", model: "gpt-realtime-2.1-mini"}, voice: "marin", defaultVoice: "alloy"},
 			{name: "OpenAI Responses", backend: &realtimeBridgeBackend{provider: "openairesponses", apiKey: "test", model: "gpt-realtime-2.1"}, voice: "cedar", defaultVoice: "alloy"},
 			{name: "unknown model", backend: &realtimeBridgeBackend{provider: "openai", apiKey: "test", model: "unknown"}},
-			{name: "local audio", backend: newTestLocalStackBackend(t, nil, fixedASR{text: "test"}, &smokeLLM{text: "test"}, placeholderTTS{})},
-			{name: "local text", backend: newTestLocalStackBackend(t, nil, nil, &smokeLLM{text: "test"}, nil)},
+			{name: "local audio", backend: newTestLocalStackBackend(t, newFixedLiveASR("test"), &smokeLLM{text: "test"}, placeholderTTS{})},
+			{name: "local text", backend: newTestLocalStackBackend(t, nil, &smokeLLM{text: "test"}, nil)},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -1850,7 +1850,7 @@ func TestBridge(t *testing.T) {
 			t.Parallel()
 			rec := &lifecycleRecorder{}
 			conv := &blockingTurnConversation{rec: rec, entered: make(chan struct{})}
-			backend := newTestLocalStackBackend(t, nil, nil, fixedConversationLLM{conv: conv}, nil)
+			backend := newTestLocalStackBackend(t, nil, fixedConversationLLM{conv: conv}, nil)
 			stackVariant(t, backend, clientSpeechConfig()).loaded.(*localStackRuntime).runtime = recordingBackendRuntime{rec: rec}
 			textCtx, textCancel := context.WithCancel(t.Context())
 			t.Cleanup(textCancel)

@@ -29,7 +29,6 @@ import (
 
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
-	"github.com/maruel/genai/providers/groq"
 	"github.com/maruel/genai/providers/llamacpp"
 	"github.com/maruel/genai/providers/llamacpp/llamacppsrv"
 	"github.com/maruel/genai/providers/openrouter"
@@ -51,8 +50,6 @@ func localStackRuntimeForConfig(ctx context.Context, cfg *voicegateway.PipelineC
 		return nil, err
 	}
 	b := &localStackRuntime{
-		newVAD:  func() vadSegmenter { return &energyVAD{} },
-		asr:     models.asr,
 		liveASR: models.liveASR,
 		llm:     models.llm,
 		tts:     models.tts,
@@ -62,7 +59,6 @@ func localStackRuntimeForConfig(ctx context.Context, cfg *voicegateway.PipelineC
 }
 
 type localStackModels struct {
-	asr     asrAdapter
 	liveASR *liveASR
 	llm     llmAdapter
 	tts     ttsAdapter
@@ -88,7 +84,6 @@ func localStackModelsForConfigWithStarter(
 		return localStackModels{}, err
 	}
 	var asr localStackEndpoint
-	var asrAdapter asrAdapter
 	var liveASR *liveASR
 	if !cfg.TextOnly && cfg.ASR != (voicegateway.ASRConfig{}) {
 		switch cfg.ASR.Engine {
@@ -128,21 +123,7 @@ func localStackModelsForConfigWithStarter(
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
-			if cfg.ASR.Streaming {
-				liveASR = newLiveASR(asr.provider, cfg.ASR.Model)
-			} else {
-				switch p := asr.provider.(type) {
-				case *groq.Client:
-					asrAdapter = &groqASRAdapter{client: p}
-				case *gemini.Client:
-					if strings.Contains(p.ModelID(), "-transcribe") {
-						asrAdapter = &geminiASRAdapter{client: p}
-					}
-				}
-				if asrAdapter == nil {
-					asrAdapter = newChatASRAdapter(asr.provider, cfg.ASR.Model)
-				}
-			}
+			liveASR = newLiveASR(asr.provider, cfg.ASR.Model)
 		}
 	}
 	runtime := joinClosers(asr.runtime, llm.runtime)
@@ -180,7 +161,6 @@ func localStackModelsForConfigWithStarter(
 		}
 	}
 	return localStackModels{
-		asr:     asrAdapter,
 		liveASR: liveASR,
 		llm:     &genaiLLMAdapter{provider: llm.provider, effort: cfg.LLM.Effort, openRouterSort: cfg.LLM.OpenRouterSort},
 		tts:     tts,

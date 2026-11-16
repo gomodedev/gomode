@@ -91,7 +91,6 @@ func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfi
 	if cfg.Staged {
 		b.staged = &localStackRuntime{
 			directAudio: true,
-			newVAD:      func() vadSegmenter { return &energyVAD{maxUtteranceBytes: 30 * micSampleRate * 2} },
 			llm:         &genaiLLMAdapter{provider: provider, effort: cfg.Effort, audioInput: true, maxOutputTokens: cfg.MaxOutputTokens},
 			// Staged sessions support English only: the fixed TTS language
 			// rejects any other at session.setup.
