@@ -93,6 +93,19 @@ export default tseslint.config(
     // Solid's ref={element} assigns the variable during rendering.
     rules: { "no-unassigned-vars": "off" },
   },
+  {
+    // Callers pass every argument; the boundary that owns an input resolves its default.
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            ":function > AssignmentPattern.params, TSParameterProperty > AssignmentPattern.parameter, :function > :matches(ArrayPattern, ObjectPattern, RestElement).params AssignmentPattern",
+          message: "Do not use default parameter values; pass the argument explicitly at every call site.",
+        },
+      ],
+    },
+  },
   { files: ["web/tests/**/*.{ts,tsx}"], languageOptions: { globals: { ...globals.node } } },
   { files: ["e2e/voice-preview/*.js"], languageOptions: { globals: { ...globals.browser } } },
   { files: ["scripts/*.mjs"], languageOptions: { globals: { ...globals.node } } },
