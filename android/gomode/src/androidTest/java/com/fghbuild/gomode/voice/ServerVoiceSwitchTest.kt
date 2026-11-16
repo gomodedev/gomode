@@ -130,11 +130,15 @@ class ServerVoiceSwitchTest {
                     }
                     composeRule.onNodeWithTag("gomode-voice-connect").performClick()
                     composeRule.waitUntil(30_000) {
-                        composeRule.onAllNodesWithText("Loading local stack…").fetchSemanticsNodes().isNotEmpty()
+                        composeRule
+                            .onAllNodesWithText(
+                                "Server is starting voice models…",
+                            ).fetchSemanticsNodes()
+                            .isNotEmpty()
                     }
                     composeRule.mainClock.advanceTimeBy(500)
                     composeRule.waitForIdle()
-                    composeRule.onNodeWithText("Loading local stack…").assertIsDisplayed()
+                    composeRule.onNodeWithText("Server is starting voice models…").assertIsDisplayed()
                     val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
                     val file = File(context.getExternalFilesDir(null), "loading.png")
                     val bitmap = composeRule.onRoot().captureToImage().asAndroidBitmap()
@@ -148,7 +152,11 @@ class ServerVoiceSwitchTest {
                     waitForConnected()
                     assertTrue(fixture.setupMessages.single().getBoolean("includeReasoning"))
                     composeRule.waitUntil(10_000) {
-                        composeRule.onAllNodesWithText("Loading local stack…").fetchSemanticsNodes().isEmpty()
+                        composeRule
+                            .onAllNodesWithText(
+                                "Server is starting voice models…",
+                            ).fetchSemanticsNodes()
+                            .isEmpty()
                     }
                 } finally {
                     startup.countDown()
@@ -1198,7 +1206,7 @@ class ServerVoiceSwitchTest {
                     setupMessages += message
                     sessions += ControlledTransport(send)
                     if (startupGate != null) {
-                        send("""{"kind":"session.status","message":"Loading local stack…"}""")
+                        send("""{"kind":"session.status","message":"Server is starting voice models…"}""")
                         check(startupGate.await(30, TimeUnit.SECONDS)) { "Startup progress was not acknowledged" }
                     }
                     send("""{"kind":"session.ready"}""")

@@ -546,7 +546,7 @@ func (l *lazyLocalStack) reportStartupProgress(ctx context.Context, sink backend
 	for {
 		l.pool.mu.Lock()
 		cached := l.loaded != nil
-		message := "Loading local stack…"
+		message := "Server is starting voice models…"
 		if l.loading != nil && l.stage != "" {
 			message = l.stage
 		}
@@ -559,7 +559,7 @@ func (l *lazyLocalStack) reportStartupProgress(ctx context.Context, sink backend
 				idle = idle || (e.loaded != nil && e.users == 0)
 			}
 			if count >= l.pool.limits.MaxInstances && !idle {
-				message = "Waiting for an available local stack…"
+				message = "Server is waiting for a free voice model slot…"
 			}
 		}
 		changed := l.pool.changed

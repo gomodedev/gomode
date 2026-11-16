@@ -3775,11 +3775,11 @@ describe("VoiceSession", () => {
           new MessageEvent("message", {
             data: JSON.stringify({
               kind: "session.status",
-              message: "Loading local stack…",
+              message: "Server is starting voice models…",
             }),
           }),
         );
-        expect(session.state.connectStatus).toBe("Loading local stack…");
+        expect(session.state.connectStatus).toBe("Server is starting voice models…");
         expect(session.state.connected).toBe(false);
         expect(session.state.error).toBeNull();
       }

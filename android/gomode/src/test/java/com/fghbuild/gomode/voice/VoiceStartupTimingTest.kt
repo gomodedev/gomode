@@ -25,7 +25,7 @@ class VoiceStartupTimingTest {
     fun startupHeartbeatsExtendTheCarReadinessBudgetUntilReady() =
         runTest {
             val timing = VoiceStartupTiming(VoiceStartupSource.CAR)
-            val state = MutableStateFlow(VoiceState(connectStatus = "Loading local stack…"))
+            val state = MutableStateFlow(VoiceState(connectStatus = "Server is starting voice models…"))
             val ready = async { timing.awaitConnection(state, 60_000) }
             runCurrent()
             repeat(3) {
@@ -43,7 +43,7 @@ class VoiceStartupTimingTest {
     fun startupWithoutHeartbeatsTimesOutDespiteOtherStateUpdates() =
         runTest {
             val timing = VoiceStartupTiming(VoiceStartupSource.CAR)
-            val state = MutableStateFlow(VoiceState(connectStatus = "Loading local stack…"))
+            val state = MutableStateFlow(VoiceState(connectStatus = "Server is starting voice models…"))
             val result = async { runCatching { timing.awaitConnection(state, 60_000) }.exceptionOrNull() }
             runCurrent()
             repeat(2) { i ->

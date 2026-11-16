@@ -213,8 +213,8 @@ it("shows model startup progress and times out when progress stops", async () =>
   socket.open();
   for (let i = 0; i < 5; i++) {
     vi.advanceTimersByTime(10000);
-    socket.message({ kind: "session.status", message: "Loading local stack…" });
-    expect(session.state.connectStatus).toBe("Loading local stack…");
+    socket.message({ kind: "session.status", message: "Server is starting voice models…" });
+    expect(session.state.connectStatus).toBe("Server is starting voice models…");
     expect(session.state.error).toBeNull();
     expect(session.state.connected).toBe(false);
   }
@@ -224,7 +224,7 @@ it("shows model startup progress and times out when progress stops", async () =>
 
 it("clears startup progress only when ready and ignores late progress", async () => {
   const socket = await readySocket();
-  socket.message({ kind: "session.status", message: "Loading local stack…" });
+  socket.message({ kind: "session.status", message: "Server is starting voice models…" });
   expect(session.state.connectStatus).toBeNull();
   expect(session.state.connected).toBe(true);
 });

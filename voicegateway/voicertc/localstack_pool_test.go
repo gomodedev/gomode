@@ -162,7 +162,7 @@ func TestLocalStackPool(t *testing.T) {
 			if err := json.Unmarshal(<-sink.messages, &msg); err != nil {
 				t.Fatal(err)
 			}
-			if msg.Message != "Waiting for an available local stack…" {
+			if msg.Message != "Server is waiting for a free voice model slot…" {
 				t.Fatalf("progress = %+v", msg)
 			}
 			stackVariant(t, b, clientSpeechConfig()).release()
@@ -204,7 +204,7 @@ func TestLocalStackPool(t *testing.T) {
 				}
 				return msg.Message
 			}
-			if got := next(); got != "Loading local stack…" {
+			if got := next(); got != "Server is starting voice models…" {
 				t.Fatalf("initial progress = %q", got)
 			}
 			start := time.Now()
@@ -306,7 +306,7 @@ func TestLocalStackPool(t *testing.T) {
 				if err := json.Unmarshal(<-sink.messages, &msg); err != nil {
 					t.Fatal(err)
 				}
-				if msg.Kind != voicev2.MessageKindSessionStatus || msg.Message != "Waiting for an available local stack…" {
+				if msg.Kind != voicev2.MessageKindSessionStatus || msg.Message != "Server is waiting for a free voice model slot…" {
 					t.Fatalf("status = %+v", msg)
 				}
 				if sink.isReady() {
