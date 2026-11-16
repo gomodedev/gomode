@@ -216,15 +216,8 @@ Voice is one selectable voice of a voice choice or synthesis model.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `name` | `string` | Name is the SessionSetup.voice.name that selects this voice. | yes |
-| `language` | `string` | Language is the ISO 639-1 code of the only language the voice speaks,
-such as "fr". Clients offer the voice only in sessions whose language
-tag has that base subtag, and session.setup rejects it in another.
-Empty means the voice speaks every language the model does. |  |
-| `default` | `boolean` | Default marks the voice a session speaks with when SessionSetup.voice.name
-is empty and the session language is one the voice speaks. A list has
-either one default without a language or at most one default per
-language; clients reject a list that mixes both. A list without a
-default leaves the choice to the provider. |  |
+| `language` | `string` | Language is the ISO 639-1 code of the only language the voice speaks, such as "fr". Clients offer the voice only in sessions whose language tag has that base subtag, and session.setup rejects it in another. Empty means the voice speaks every language the model does. |  |
+| `default` | `boolean` | Default marks the voice a session speaks with when SessionSetup.voice.name is empty and the session language is one the voice speaks. A list has either one default without a language or at most one default per language; clients reject a list that mixes both. A list without a default leaves the choice to the provider. |  |
 
 ### SpeechConfig
 
@@ -243,15 +236,11 @@ VoiceChoice describes a selectable backend without exposing its credentials.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `id` | `string` | ID is the operator-configured id. It stays the same while the choice's
-settings change, so clients save it; a saved id the catalog no longer
-lists falls back to the default. | yes |
+| `id` | `string` | ID is the operator-configured id. It stays the same while the choice's settings change, so clients save it; a saved id the catalog no longer lists falls back to the default. | yes |
 | `label` | `string` |  | yes |
 | `transports` | `VoiceTransport[] \| null` |  | yes |
-| `voices` | `Voice[]` | Voices lists the selectable voices. Omitted when the choice does not
-offer voice selection. |  |
-| `speechModes` | `SpeechConfig[]` | SpeechModes lists supported input/output ownership combinations.
-Missing metadata from older gateways means transport defaults only. |  |
+| `voices` | `Voice[]` | Voices lists the selectable voices. Omitted when the choice does not offer voice selection. |  |
+| `speechModes` | `SpeechConfig[]` | SpeechModes lists supported input/output ownership combinations. Missing metadata from older gateways means transport defaults only. |  |
 | `composable` | `boolean` | Composable allows independent recognition and synthesis model selections. |  |
 
 ### VoiceChoiceDefault
@@ -272,8 +261,7 @@ exposing endpoints or credentials.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `id` | `string` | ID is the operator-configured id; it stays the same while the stage's
-settings change. | yes |
+| `id` | `string` | ID is the operator-configured id; it stays the same while the stage's settings change. | yes |
 | `label` | `string` |  | yes |
 
 ### SynthesisModel
@@ -283,11 +271,9 @@ endpoints or credentials.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `id` | `string` | ID is the operator-configured id; it stays the same while the stage's
-settings change. | yes |
+| `id` | `string` | ID is the operator-configured id; it stays the same while the stage's settings change. | yes |
 | `label` | `string` |  | yes |
-| `voices` | `Voice[]` | Voices lists the selectable voices. Omitted when the stage offers no
-voice selection. |  |
+| `voices` | `Voice[]` | Voices lists the selectable voices. Omitted when the stage offers no voice selection. |  |
 
 ### VoiceChoicesResp
 
@@ -300,9 +286,7 @@ offered family.
 | `defaults` | `VoiceChoiceDefault[] \| null` | Defaults holds one entry per offered transport, ordered by transport name. | yes |
 | `recognitionModels` | `RecognitionModel[]` | RecognitionModels lists gateway recognition stages in preference order. |  |
 | `synthesisModels` | `SynthesisModel[]` | SynthesisModels lists gateway synthesis stages in preference order. |  |
-| `stunServers` | `string[]` | STUNServers lists the stun: or stuns: URLs a WebRTC client configures as
-its ICE servers. Omitted means none: the client gathers host candidates
-only and contacts no STUN server. |  |
+| `stunServers` | `string[]` | STUNServers lists the stun: or stuns: URLs a WebRTC client configures as its ICE servers. Omitted means none: the client gathers host candidates only and contacts no STUN server. |  |
 
 ### ServiceAuthorization
 
@@ -452,18 +436,8 @@ VoiceConfig describes provider-neutral voice preferences.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `name` | `string` | Name is the requested voice name from the catalog's voices. Empty uses
-the voice the catalog marks default for the session language, else the
-configured voice, else the provider default. A voice of another language
-fails session setup. |  |
-| `language` | `string` | Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA".
-Empty defaults to "en-US"; an invalid tag fails session setup. A session
-speaks one language, and the assistant replies in it. Synthesis and
-streaming recognition models that take a language receive it, recognition
-as a hint or forced; other models ignore it. A model that declares its
-languages fails session setup for another one. A model whose server
-rejects the language fails when its connection starts: at session setup
-for realtime choices, and at each utterance for live recognition. | yes |
+| `name` | `string` | Name is the requested voice name from the catalog's voices. Empty uses the voice the catalog marks default for the session language, else the configured voice, else the provider default. A voice of another language fails session setup. |  |
+| `language` | `string` | Language is the requested BCP 47 language tag, such as "en-US" or "fr-CA". Empty defaults to "en-US"; an invalid tag fails session setup. A session speaks one language, and the assistant replies in it. Synthesis and streaming recognition models that take a language receive it, recognition as a hint or forced; other models ignore it. A model that declares its languages fails session setup for another one. A model whose server rejects the language fails when its connection starts: at session setup for realtime choices, and at each utterance for live recognition. | yes |
 
 ### ToolDeclaration
 
@@ -473,8 +447,7 @@ ToolDeclaration is a provider-neutral service tool declaration.
 |-------|------|-------------|----------|
 | `name` | `string` | Name is the tool name the assistant uses in tool.call messages. | yes |
 | `description` | `string` | Description explains when and how the assistant should use the tool. | yes |
-| `parameters` | `JSONValue \| null` | Parameters is a JSON Schema object describing the tool arguments. When
-present, it must declare "type": "object". | yes |
+| `parameters` | `JSONValue \| null` | Parameters is a JSON Schema object describing the tool arguments. When present, it must declare "type": "object". | yes |
 
 ### Context
 
@@ -495,15 +468,10 @@ SessionSetup is the client message that initializes a voice session.
 | `voice` | `VoiceConfig` | Voice contains the requested voice and language. | yes |
 | `tools` | `ToolDeclaration[] \| null` | Tools declares the client-side tools the assistant may call. | yes |
 | `context` | `Context` | Context provides initial instructions or text context for the session. | yes |
-| `includeReasoning` | `boolean` | IncludeReasoning requests optional provider reasoning output for this session.
-It does not enable thinking or change reasoning effort. |  |
+| `includeReasoning` | `boolean` | IncludeReasoning requests optional provider reasoning output for this session. It does not enable thinking or change reasoning effort. |  |
 | `speech` | `SpeechConfig` | Speech selects the owner of recognition and synthesis for this session. |  |
-| `recognitionModelID` | `string` | RecognitionModelID selects a recognitionModels entry for a composable LLM.
-Omitted uses the first available entry when input is gateway-owned.
-It must be omitted for client-owned recognition and indivisible choices. |  |
-| `synthesisModelID` | `string` | SynthesisModelID selects a synthesisModels entry for a composable LLM.
-Omitted uses the first available entry when output is gateway-owned.
-It must be omitted for client-owned synthesis and indivisible choices. |  |
+| `recognitionModelID` | `string` | RecognitionModelID selects a recognitionModels entry for a composable LLM. Omitted uses the first available entry when input is gateway-owned. It must be omitted for client-owned recognition and indivisible choices. |  |
+| `synthesisModelID` | `string` | SynthesisModelID selects a synthesisModels entry for a composable LLM. Omitted uses the first available entry when output is gateway-owned. It must be omitted for client-owned synthesis and indivisible choices. |  |
 
 ### ContextUpdate
 
@@ -601,11 +569,8 @@ this is observed model usage, not a billing statement or ASR/TTS accounting.
 | `model` | `string` | Model identifies the generation model. | yes |
 | `totals` | `TokenUsage` | Totals sums all reported responses, including tool continuations. | yes |
 | `lastResponse` | `TokenUsage` | LastResponse contains the latest reported response counts, when available. |  |
-| `responseID` | `string` | ResponseID identifies the response observed by this report. It is opaque
-and unique across gateway connections. Empty means the provider did not
-supply a reliable response association. |  |
-| `responseUsage` | `TokenUsage` | ResponseUsage contains counts for ResponseID in this report only. Unlike
-LastResponse, it is never carried forward into context-only reports. |  |
+| `responseID` | `string` | ResponseID identifies the response observed by this report. It is opaque and unique across gateway connections. Empty means the provider did not supply a reliable response association. |  |
+| `responseUsage` | `TokenUsage` | ResponseUsage contains counts for ResponseID in this report only. Unlike LastResponse, it is never carried forward into context-only reports. |  |
 | `contextTokens` | `int64` | ContextTokens is the latest reported context size, never summed. |  |
 | `contextWindow` | `int64` | ContextWindow is the latest reported context capacity. |  |
 
@@ -619,9 +584,7 @@ Each fragment appends to previously emitted text; it never replaces it.
 | `kind` | `MessageKind` | Kind is "transcript.delta". | yes |
 | `speaker` | `Speaker` | Speaker identifies who produced this transcript text. | yes |
 | `text` | `string` | Text is an incremental transcript fragment. | yes |
-| `responseID` | `string` | ResponseID is the opaque gateway-scoped response identity. Assistant
-text and its usage share this value; user text and uncorrelated providers
-omit it. Separate response IDs must not be merged into one transcript entry. |  |
+| `responseID` | `string` | ResponseID is the opaque gateway-scoped response identity. Assistant text and its usage share this value; user text and uncorrelated providers omit it. Separate response IDs must not be merged into one transcript entry. |  |
 | `draft_id` | `string` | DraftID atomically replaces the matching user draft when this text commits. |  |
 
 ### TranscriptDraft
@@ -645,9 +608,7 @@ Each fragment appends to previously emitted text; it never replaces it.
 |-------|------|-------------|----------|
 | `kind` | `MessageKind` | Kind is "assistant.text.delta". | yes |
 | `text` | `string` | Text is an incremental assistant text fragment. | yes |
-| `responseID` | `string` | ResponseID is the opaque gateway-scoped response identity. Assistant
-text and its usage share this value; user text and uncorrelated providers
-omit it. Separate response IDs must not be merged into one transcript entry. |  |
+| `responseID` | `string` | ResponseID is the opaque gateway-scoped response identity. Assistant text and its usage share this value; user text and uncorrelated providers omit it. Separate response IDs must not be merged into one transcript entry. |  |
 
 ### ReasoningDelta
 
@@ -661,9 +622,7 @@ The gateway includes it in the session activity log.
 |-------|------|-------------|----------|
 | `kind` | `MessageKind` | Kind is "reasoning.delta". | yes |
 | `text` | `string` | Text is an incremental reasoning fragment. | yes |
-| `responseID` | `string` | ResponseID is the opaque gateway-scoped response identity. Assistant
-text and its usage share this value; user text and uncorrelated providers
-omit it. Separate response IDs must not be merged into one transcript entry. |  |
+| `responseID` | `string` | ResponseID is the opaque gateway-scoped response identity. Assistant text and its usage share this value; user text and uncorrelated providers omit it. Separate response IDs must not be merged into one transcript entry. |  |
 
 ### SpeechStarted
 
@@ -704,8 +663,7 @@ output and tool calls take display precedence over the reported state.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `kind` | `MessageKind` | Kind is "turn.status". | yes |
-| `state` | `TurnState` | State is the gateway work in progress; idle ends the turn, including
-one that produced no speech. | yes |
+| `state` | `TurnState` | State is the gateway work in progress; idle ends the turn, including one that produced no speech. | yes |
 
 ### Interrupted
 

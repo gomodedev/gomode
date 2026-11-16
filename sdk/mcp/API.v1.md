@@ -158,11 +158,7 @@ Capabilities describes server-supported MCP features.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `experimental` | `Extensions` | Experimental contains non-standard capabilities supported by the server. |  |
-| `logging` | `MetaObject` | DeprecatedLogging is present if the server supports sending log messages to the client.
-
-Deprecated as of protocol version 2026-07-28, but still present in that
-schema. This is native 2026-07-28 compatibility, not released-version
-compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
+| `logging` | `MetaObject` | DeprecatedLogging is present if the server supports sending log messages to the client.<br><br>Deprecated as of protocol version 2026-07-28, but still present in that schema. This is native 2026-07-28 compatibility, not released-version compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
 | `completions` | `MetaObject` | Completions is present if the server supports argument completion suggestions. |  |
 | `prompts` | `PromptsCapability` | Prompts is present if the server offers prompt templates. |  |
 | `resources` | `ResourcesCapability` | Resources is present if the server offers resources to read. |  |
@@ -203,10 +199,7 @@ ServerDiscoverResult is the result returned for a server/discover request.
 | `supportedVersions` | `string[] \| null` | SupportedVersions lists MCP protocol versions supported by this server. | yes |
 | `capabilities` | `Capabilities` | Capabilities advertises server features. | yes |
 | `serverInfo` | `Implementation` | ServerInfo describes the server software implementation. | yes |
-| `instructions` | `string` | Instructions gives natural-language guidance for using the server effectively.
-
-Clients may include it in an LLM system prompt. It should not duplicate tool
-descriptions. |  |
+| `instructions` | `string` | Instructions gives natural-language guidance for using the server effectively.<br><br>Clients may include it in an LLM system prompt. It should not duplicate tool descriptions. |  |
 | `ttlMs` | `int` | TTLMS hints how long clients may cache this response in milliseconds. | yes |
 | `cacheScope` | `CacheScope` | CacheScope indicates whether the response may be cached publicly or privately. | yes |
 
@@ -455,9 +448,7 @@ notifications/subscriptions/initial_state notification.
 |-------|------|-------------|----------|
 | `_meta` | `MetaObject` |  |  |
 | `uri` | `string` | URI is the subscribed target whose initial state was delivered. | yes |
-| `contents` | `ResourceContent[] \| null` | Contents is the resources/read result for the same target, so a client
-that applies the payload holds the post-subscription state without a
-second read. | yes |
+| `contents` | `ResourceContent[] \| null` | Contents is the resources/read result for the same target, so a client that applies the payload holds the post-subscription state without a second read. | yes |
 
 ### SamplingCapability
 
@@ -484,16 +475,8 @@ ClientCapabilities describes capabilities the client supports for a request.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `experimental` | `Extensions` | Experimental contains non-standard capabilities supported by the client. |  |
-| `roots` | `MetaObject` | DeprecatedRoots is present if the client supports listing roots.
-
-Deprecated as of protocol version 2026-07-28, but still present in that
-schema. This is native 2026-07-28 compatibility, not released-version
-compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
-| `sampling` | `SamplingCapability` | DeprecatedSampling is present if the client supports server-initiated LLM sampling.
-
-Deprecated as of protocol version 2026-07-28, but still present in that
-schema. This is native 2026-07-28 compatibility, not released-version
-compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
+| `roots` | `MetaObject` | DeprecatedRoots is present if the client supports listing roots.<br><br>Deprecated as of protocol version 2026-07-28, but still present in that schema. This is native 2026-07-28 compatibility, not released-version compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
+| `sampling` | `SamplingCapability` | DeprecatedSampling is present if the client supports server-initiated LLM sampling.<br><br>Deprecated as of protocol version 2026-07-28, but still present in that schema. This is native 2026-07-28 compatibility, not released-version compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
 | `elicitation` | `ElicitationCapability` | Elicitation is present if the client supports server-initiated user elicitation. |  |
 | `extensions` | `Extensions` | Extensions contains optional MCP extensions supported by the client. |  |
 

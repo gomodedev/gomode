@@ -42,12 +42,9 @@ whether native features are compatible before loading skill files.
 | `name` | `string` |  | yes |
 | `description` | `string` |  |  |
 | `endpoint` | `string` |  | yes |
-| `protocolVersion` | `string` | ProtocolVersion is the MCP protocol version spoken by this group endpoint.
-The shell sends it on MCP requests so each group can be checked and
-upgraded independently during protocol migrations. | yes |
+| `protocolVersion` | `string` | ProtocolVersion is the MCP protocol version spoken by this group endpoint. The shell sends it on MCP requests so each group can be checked and upgraded independently during protocol migrations. | yes |
 | `authRequired` | `boolean` |  | yes |
-| `skillUrl` | `string` | SkillURL points to the SKILL.md file whose frontmatter defines activation,
-instructions, and the MCP tool subset for this skill. |  |
+| `skillUrl` | `string` | SkillURL points to the SKILL.md file whose frontmatter defines activation, instructions, and the MCP tool subset for this skill. |  |
 
 ### VoiceGatewaySettings
 
@@ -66,9 +63,7 @@ WebShellSettings describes the hosted frontend's native-shell contract.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `bridgeVersion` | `int` | BridgeVersion is the hosted-frontend/native bridge contract version. A
-shell must reject manifests whose bridge version differs from the bridge
-version implemented by that shell. | yes |
+| `bridgeVersion` | `int` | BridgeVersion is the hosted-frontend/native bridge contract version. A shell must reject manifests whose bridge version differs from the bridge version implemented by that shell. | yes |
 | `toolGroups` | `ToolGroup[] \| null` |  | yes |
 | `voiceGateway` | `VoiceGatewaySettings` |  | yes |
 
@@ -79,10 +74,8 @@ Settings is the service compatibility document consumed by Go Mode clients.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `service` | `string` |  | yes |
-| `serviceVersion` | `string` | ServiceVersion is the host product version. It is informational and does
-not participate in Go Mode compatibility checks. |  |
-| `apiVersion` | `int` | APIVersion is the Go Mode discovery schema version. A client must reject
-manifests with an API version it does not explicitly support. | yes |
+| `serviceVersion` | `string` | ServiceVersion is the host product version. It is informational and does not participate in Go Mode compatibility checks. |  |
+| `apiVersion` | `int` | APIVersion is the Go Mode discovery schema version. A client must reject manifests with an API version it does not explicitly support. | yes |
 | `webShell` | `WebShellSettings` |  | yes |
 
 ### ResourceDependency
@@ -174,8 +167,7 @@ the user's context or location just because a skill was considered.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `locations` | `LocationActivation[]` | Locations are local physical-location and Wi-Fi hints that make this skill
-an activation candidate. |  |
+| `locations` | `LocationActivation[]` | Locations are local physical-location and Wi-Fi hints that make this skill an activation candidate. |  |
 
 ### SkillMCPServer
 
