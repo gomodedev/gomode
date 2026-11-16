@@ -20,15 +20,6 @@ type opusDecoder struct {
 	pcm []int16
 }
 
-func validOpusRate(rate int) bool {
-	switch rate {
-	case 8000, 12000, 16000, 24000, 48000:
-		return true
-	default:
-		return false
-	}
-}
-
 func newDecoder(rate int) (*opusDecoder, error) {
 	dec, err := opus.NewDecoder(rate, 1)
 	if err != nil {

@@ -40,7 +40,7 @@ const (
 	// sessionLifetime caps a session at 30 minutes. Activity does not extend it.
 	sessionLifetime = 30 * time.Minute
 
-	// micSampleRate is the default and local-stack decoded microphone PCM rate.
+	// micSampleRate is the default decoded microphone PCM rate.
 	micSampleRate = voicegateway.MicrophoneSampleRate
 
 	// backendOutputSampleRate is the assistant PCM rate consumed by the RTP encoder.

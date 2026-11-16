@@ -22,8 +22,9 @@ import (
 // TestSmokeLiveASR logs, per model, whether the session language is sent, the
 // drafts and the final transcript of English and French speech in matching
 // and mismatched sessions. Gemini TTS synthesizes the speech, so
-// GEMINI_API_KEY is required; managed llama.cpp and NeMo-Speech.cpp models
-// download on first use.
+// GEMINI_API_KEY is required, and OPENAI_API_KEY for OpenAI; managed llama.cpp
+// and NeMo-Speech.cpp models download on first use. Each model hears the
+// speech at its recognizer's rate.
 func TestSmokeLiveASR(t *testing.T) {
 	isolateSmokeHost(t)
 	tts, err := gemini.New(t.Context(), genai.ProviderOptionModel("gemini-3.8-flash-lite-tts"), genai.ProviderOptionModalities{genai.ModalityAudio})
@@ -36,7 +37,7 @@ func TestSmokeLiveASR(t *testing.T) {
 		}
 	})
 	// Both sentences contain "table", which a transcript in either language
-	// keeps.
+	// keeps. speech is 24 kHz.
 	speech := map[string][]byte{}
 	for lang, text := range map[string]string{
 		"en": "I would like to book a table for two tonight.",
@@ -49,7 +50,7 @@ func TestSmokeLiveASR(t *testing.T) {
 			}
 			pcm = append(pcm, chunk...)
 		}
-		speech[lang] = downsample24to16(pcm)
+		speech[lang] = pcm
 	}
 	resolve := func(provider, model string) func(context.Context) (localStackEndpoint, error) {
 		return func(ctx context.Context) (localStackEndpoint, error) {
@@ -74,6 +75,7 @@ func TestSmokeLiveASR(t *testing.T) {
 		englishOnly bool
 	}{
 		{model: "gemini-3.5-transcribe-live", endpoint: resolve("gemini", "gemini-3.5-transcribe-live")},
+		{model: "gpt-live-transcribe", endpoint: resolve("openai", "gpt-live-transcribe")},
 		{model: "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M", endpoint: resolve("llamacpp", "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M")},
 		{model: "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M", endpoint: resolve("llamacpp", "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M")},
 		{model: string(nemospeech.NemotronASR), endpoint: nemo(nemospeech.NemotronASR), mismatched: true},
@@ -92,6 +94,17 @@ func TestSmokeLiveASR(t *testing.T) {
 				}
 			})
 			a := newLiveASR(endpoint.provider, row.model)
+			heard := func(pcm []byte) []byte {
+				switch a.rate {
+				case backendOutputSampleRate:
+					return pcm
+				case micSampleRate:
+					return downsample24to16(pcm)
+				default:
+					t.Fatalf("no conversion to %d Hz", a.rate)
+					return nil
+				}
+			}
 			for _, tc := range []struct{ speech, session string }{{"en", "en"}, {"fr", "fr"}, {"fr", "en"}, {"en", "fr"}} {
 				if err := a.checkLanguage(tc.session); err != nil {
 					t.Logf("%s speech, %s session: rejected at setup: %v", tc.speech, tc.session, err)
@@ -99,7 +112,7 @@ func TestSmokeLiveASR(t *testing.T) {
 				}
 				t.Run(tc.speech+" speech in "+tc.session, func(t *testing.T) {
 					start := time.Now()
-					drafts, final, failed := smokeLiveUtterance(t, a, tc.session, speech[tc.speech])
+					drafts, final, failed := smokeLiveUtterance(t, a, tc.session, heard(speech[tc.speech]))
 					if row.englishOnly && tc.session == "fr" {
 						if want := "asr: " + row.model + " does not support French"; failed != want {
 							t.Fatalf("utterance error %q, want %q", failed, want)
@@ -126,7 +139,7 @@ func TestSmokeLiveASR(t *testing.T) {
 	}
 }
 
-// smokeLiveUtterance speaks pcm at real time through a live session in lang
+// smokeLiveUtterance speaks pcm at a.rate in real time through a live session in lang
 // and returns its drafts and final transcript, or the client error that
 // rejected the utterance. The session closes when t ends.
 func smokeLiveUtterance(t *testing.T, a *liveASR, lang string, pcm []byte) ([]string, string, string) {
@@ -139,7 +152,7 @@ func smokeLiveUtterance(t *testing.T, a *liveASR, lang string, pcm []byte) ([]st
 			t.Error(err)
 		}
 	})
-	const frame = micSampleRate * 2 * 20 / 1000
+	frame := a.rate * 2 * 20 / 1000
 	speak := func(pcm []byte) {
 		for len(pcm) != 0 {
 			n := min(frame, len(pcm))
@@ -151,7 +164,7 @@ func smokeLiveUtterance(t *testing.T, a *liveASR, lang string, pcm []byte) ([]st
 		}
 	}
 	speak(pcm)
-	speak(silencePCM(vadSilenceHangoverMS + 10*vadFrameMS))
+	speak(make([]byte, a.rate*2*(vadSilenceHangoverMS+10*vadFrameMS)/1000))
 	deadline := time.After(2 * time.Minute)
 	for {
 		var drafts []string

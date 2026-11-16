@@ -921,10 +921,11 @@ type ASREngine string
 
 const (
 	// ASREngineGenAI uses a genai provider's live transcription session, one
-	// per utterance. Provider's genai scoreboard must qualify a transcription
-	// session at MicrophoneSampleRate, and Model is required. With llamacpp and
-	// no Remote, the gateway starts a dedicated managed server; other providers
-	// use their configured endpoint.
+	// per utterance, fed at the rate TranscriptionSampleRate selects.
+	// Provider's genai scoreboard must qualify a transcription session at a
+	// ValidOpusRate, and Model is required. With llamacpp and no Remote, the
+	// gateway starts a dedicated managed server; other providers use their
+	// configured endpoint.
 	ASREngineGenAI ASREngine = "genai"
 	// ASREngineWhistle runs the managed Cactus Whistle recognizer.
 	// Model optionally names local .cact weights; empty downloads the dedicated
@@ -976,39 +977,65 @@ func validateASR(c ASRConfig) error {
 }
 
 // MicrophoneSampleRate is the PCM rate at which local stacks decode the
-// microphone and feed recognition sessions.
+// microphone for energy voice activity detection and direct audio, and for a
+// recognizer whose provider qualifies no transcription session rate.
 const MicrophoneSampleRate = 16000
 
+// ValidOpusRate reports whether Opus decodes natively to rate, so the gateway
+// can feed a stage at rate without resampling.
+func ValidOpusRate(rate int) bool {
+	switch rate {
+	case 8000, 12000, 16000, 24000, 48000:
+		return true
+	default:
+		return false
+	}
+}
+
+// TranscriptionSampleRate returns the input rate of the live transcription
+// session that score qualifies for model at a ValidOpusRate, or 0 when score
+// qualifies none. A row listing model wins; otherwise the provider's first
+// qualifying row stands for every model, since a llama.cpp model is an
+// arbitrary GGUF and providers fix the transcription rate in their client.
+func TranscriptionSampleRate(score scoreboard.Score, model string) int {
+	rate := 0
+	for _, r := range score.Realtime {
+		f := r.Realtime
+		if f == nil || f.Transcription == nil || !ValidOpusRate(f.InputSampleRate) {
+			continue
+		}
+		if slices.Contains(r.Models, model) {
+			return f.InputSampleRate
+		}
+		if rate == 0 {
+			rate = f.InputSampleRate
+		}
+	}
+	return rate
+}
+
 // validateLiveTranscription requires provider's genai scoreboard to qualify a
-// transcription session at MicrophoneSampleRate. The check is per provider,
-// not per model: a llama.cpp model is an arbitrary GGUF, and a cloud model
-// without a live session fails when an utterance connects. An unregistered
-// provider is reported by ModelConfig.validate.
+// transcription session at a ValidOpusRate. The check is per provider, not
+// per model: a llama.cpp model is an arbitrary GGUF, and a cloud model without
+// a live session fails when an utterance connects. An unregistered provider is
+// reported by ModelConfig.validate.
 func validateLiveTranscription(provider string) error {
 	entry, ok := providers.All[provider]
-	if !ok || transcribesMicrophone(entry) {
+	if !ok || transcribes(entry) {
 		return nil
 	}
 	var names []string
 	for name, e := range providers.All {
-		if transcribesMicrophone(e) {
+		if transcribes(e) {
 			names = append(names, name)
 		}
 	}
 	slices.Sort(names)
-	return fmt.Errorf("voice.asr.provider %q has no live transcription session at %d Hz: use %s", provider, MicrophoneSampleRate, strings.Join(names, ", "))
+	return fmt.Errorf("voice.asr.provider %q has no live transcription session at an Opus rate: use %s", provider, strings.Join(names, ", "))
 }
 
-// transcribesMicrophone reports whether the provider's scoreboard qualifies a
-// transcription session at MicrophoneSampleRate.
-func transcribesMicrophone(c providers.Config) bool {
-	if c.Scoreboard == nil {
-		return false
-	}
-	return slices.ContainsFunc(c.Scoreboard().Realtime, func(r scoreboard.Realtime) bool {
-		f := r.Realtime
-		return f != nil && f.Transcription != nil && f.InputSampleRate == MicrophoneSampleRate
-	})
+func transcribes(c providers.Config) bool {
+	return c.Scoreboard != nil && TranscriptionSampleRate(c.Scoreboard(), "") != 0
 }
 
 func validateASREngine(c ASRConfig) error {

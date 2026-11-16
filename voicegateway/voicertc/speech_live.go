@@ -15,14 +15,15 @@ import (
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/scoreboard"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/maruel/gomode/voicegateway"
 )
 
 // liveASR recognizes each utterance in its own genai transcription session,
-// opened with genai.RealtimeOptionTranscription at the capture rate. Input
-// transcript deltas and interim hypotheses become drafts while the user
-// speaks; the final transcript arrives at TurnDone. Both are trimmed. A
-// session that yields no drafts, such as Whistle's, publishes only the final
-// transcript.
+// opened with genai.RealtimeOptionTranscription at rate. Input transcript
+// deltas and interim hypotheses become drafts while the user speaks; the final
+// transcript arrives at TurnDone. Both are trimmed. A session that yields no
+// drafts, such as Whistle's, publishes only the final transcript.
 //
 // Measured on 2026-11-15 with TestSmokeLiveASR: English and French sentences
 // from gemini-3.8-flash-lite-tts, paced at real time, in English and French
@@ -37,6 +38,9 @@ import (
 //   - LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M on the same server receives no
 //     language. It transcribes English exactly and translates French speech
 //     into English ("I would like to reserve a table for two this evening.").
+//   - gpt-live-transcribe, measured on 2026-11-16 at its 24 kHz rate, receives
+//     the session language and transcribes each sentence exactly in its
+//     spoken language in either session, after 10 or 11 drafts.
 //
 // Immutable: one instance serves every session of its runtime.
 type liveASR struct {
@@ -53,6 +57,9 @@ type liveASR struct {
 	// inputLanguage sends the session language as
 	// genai.RealtimeOptionAudio.InputLanguage.
 	inputLanguage bool
+	// rate is the mono PCM16LE input rate of the transcription session. The
+	// microphone is decoded at rate, so no stage resamples.
+	rate int
 }
 
 // newLiveASR transcribes through p's transcription sessions with model.
@@ -68,13 +75,21 @@ type liveASR struct {
 // rejection for one unsupported language. A provider without a qualified
 // transcription session, such as Whistle, receives the language; its connect
 // rejection then names an unsupported one.
+//
+// The rate comes from voicegateway.TranscriptionSampleRate. A provider without
+// a qualified transcription session, such as Whistle or NeMo-Speech, receives
+// micSampleRate, which both accept.
 func newLiveASR(p genai.Provider, model string) *liveASR {
 	score := p.Scoreboard()
 	declined := slices.ContainsFunc(score.Realtime, func(r scoreboard.Realtime) bool {
 		f := r.Realtime
 		return f != nil && f.InputSampleRate != 0 && f.Transcription != nil && !f.Transcription.InputLanguage
 	})
-	return &liveASR{provider: p, model: model, languages: liveASRLanguages(model), inputLanguage: !declined}
+	rate := voicegateway.TranscriptionSampleRate(score, model)
+	if rate == 0 {
+		rate = micSampleRate
+	}
+	return &liveASR{provider: p, model: model, languages: liveASRLanguages(model), inputLanguage: !declined, rate: rate}
 }
 
 // liveASRLanguages declares the session languages of live models that receive
@@ -106,7 +121,7 @@ func (a *liveASR) checkLanguage(lang string) error {
 // transcribe recognizes u and returns its final transcript. lang is the
 // session's ISO 639 base language; see localStackSession.language.
 func (a *liveASR) transcribe(s *localStackSession, u *liveUtterance, lang string) (string, error) {
-	audio := &genai.RealtimeOptionAudio{InputFormat: genai.AudioFormat{SampleRate: micSampleRate}}
+	audio := &genai.RealtimeOptionAudio{InputFormat: genai.AudioFormat{SampleRate: a.rate}}
 	if a.inputLanguage {
 		audio.InputLanguage = lang
 	}

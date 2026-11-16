@@ -13,8 +13,9 @@ import (
 
 // At most four recognizers may be draining. realtimeAudioGate normalizes every
 // queued chunk to 20ms except the first, bounded to 200ms of preroll. Thus 512
-// queued chunks retain at most 10.42s / 333440 bytes of 16 kHz mono PCM16 per
-// utterance, including while a single-slot server drains its previous input.
+// queued chunks retain at most 10.42s of mono PCM16 at the recognizer's rate
+// per utterance, 1000320 bytes at 48 kHz, including while a single-slot server
+// drains its previous input.
 const liveASRQueueFrames = 512
 const liveASRMaxPending = 4
 
@@ -149,7 +150,7 @@ func (s *localStackSession) sendLiveAudio(ctx context.Context, u *liveUtterance,
 	for {
 		select {
 		case chunk := <-u.audio:
-			if len(chunk.pcm) == 0 || len(chunk.pcm)%2 != 0 || len(chunk.pcm) > micSampleRate*2 {
+			if len(chunk.pcm) == 0 || len(chunk.pcm)%2 != 0 || len(chunk.pcm) > s.liveASR.rate*2 {
 				return errors.New("live speech requires 1..1000ms of aligned PCM16")
 			}
 			if err := send(ctx, chunk.pcm); err != nil {

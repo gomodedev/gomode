@@ -10,9 +10,11 @@ import (
 
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/base"
+	"golang.org/x/text/language"
+
+	"github.com/maruel/gomode/voicegateway"
 	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 	"github.com/maruel/gomode/voicegateway/policy"
-	"golang.org/x/text/language"
 )
 
 var errSessionClosed = errors.New("session closed")
@@ -174,7 +176,7 @@ func genaiToolDefs(tools []voicev2.ToolDeclaration) ([]genai.ToolDef, error) {
 // caller retains ownership. Cleanup errors are returned with the format error.
 func acceptGatewayRealtimeSession(rt genai.RealtimeSession) error {
 	info := rt.Info()
-	if !validOpusRate(info.InputFormat.SampleRate) || info.OutputFormat != (genai.AudioFormat{SampleRate: backendOutputSampleRate}) {
+	if !voicegateway.ValidOpusRate(info.InputFormat.SampleRate) || info.OutputFormat != (genai.AudioFormat{SampleRate: backendOutputSampleRate}) {
 		return errors.Join(fmt.Errorf("gateway requires an Opus input rate and 24000 Hz output; provider reports input %+v and output %+v: %w", info.InputFormat, info.OutputFormat, &base.ErrNotSupported{Options: []string{"audio format"}}), rt.Close())
 	}
 	return nil

@@ -2066,10 +2066,15 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func loudPCM(ms int) []byte {
-	samples := micSampleRate * ms / 1000
+	return loudPCMAt(micSampleRate, ms)
+}
+
+// loudPCMAt is a 300 Hz tone of ms milliseconds at rate.
+func loudPCMAt(rate, ms int) []byte {
+	samples := rate * ms / 1000
 	b := make([]byte, samples*2)
 	for i := range samples {
-		v := int16(8000 * math.Sin(2*math.Pi*300*float64(i)/float64(micSampleRate)))
+		v := int16(8000 * math.Sin(2*math.Pi*300*float64(i)/float64(rate)))
 		binary.LittleEndian.PutUint16(b[i*2:], uint16(v)) //nolint:gosec // PCM int16→uint16 reinterpret
 	}
 	return b

@@ -574,7 +574,7 @@ tts = "speech"`)
 				return cfg, err
 			}
 			t.Run("valid", func(t *testing.T) {
-				for _, provider := range []string{"gemini", "llamacpp", "mistral"} {
+				for _, provider := range []string{"gemini", "llamacpp", "mistral", "openai"} {
 					cfg, err := loadLive(provider)
 					if err != nil {
 						t.Fatal(err)
@@ -585,12 +585,9 @@ tts = "speech"`)
 				}
 			})
 			t.Run("error", func(t *testing.T) {
-				// Groq has no transcription session; OpenAI's accepts only 24 kHz.
-				for _, provider := range []string{"groq", "openai"} {
-					want := `voice.asr.provider "` + provider + `" has no live transcription session at 16000 Hz`
-					if _, err := loadLive(provider); err == nil || !strings.Contains(err.Error(), want) {
-						t.Errorf("%s recognition: %v, want %q", provider, err, want)
-					}
+				want := `voice.asr.provider "groq" has no live transcription session at an Opus rate`
+				if _, err := loadLive("groq"); err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("groq recognition: %v, want %q", err, want)
 				}
 			})
 		})

@@ -266,8 +266,8 @@ func (b *localStackRuntime) newSession(ctx context.Context, sessionID string, si
 		directAudio:   b.directAudio,
 		outstanding:   make(map[string]sessionToolCall),
 		livePending:   make(map[string]*liveUtterance),
-		liveGate:      newRealtimeAudioGate(micSampleRate, realtimeAudioManual),
 	}
+	s.liveGate = newRealtimeAudioGate(s.inputSampleRate(), realtimeAudioManual)
 	if b.directAudio {
 		s.vad = &energyVAD{}
 	}
@@ -445,7 +445,12 @@ func (s *localStackSession) checkLanguage(lang string) error {
 	return nil
 }
 
+// inputSampleRate is the recognizer's rate with live recognition; the energy
+// VAD and direct audio run at micSampleRate.
 func (s *localStackSession) inputSampleRate() int {
+	if s.liveASR != nil {
+		return s.liveASR.rate
+	}
 	return micSampleRate
 }
 

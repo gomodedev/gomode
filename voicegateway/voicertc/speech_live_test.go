@@ -3,6 +3,7 @@
 package voicertc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/llamacpp"
 	"github.com/maruel/genai/providers/mistral"
+	"github.com/maruel/genai/providers/openairesponses"
 	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/whistle"
@@ -229,14 +231,15 @@ func newLiveTestSession(t *testing.T, a *liveASR, lang string) (*localStackSessi
 	return s, sink, conv
 }
 
+// startSpeech and endSpeech feed PCM at the session's microphone rate.
 func startSpeech(t *testing.T, s *localStackSession) {
-	if err := s.acceptMicPCM(t.Context(), loudPCM(200)); err != nil {
+	if err := s.acceptMicPCM(t.Context(), loudPCMAt(s.inputSampleRate(), 200)); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func endSpeech(t *testing.T, s *localStackSession) {
-	if err := s.acceptMicPCM(t.Context(), silencePCM(vadSilenceHangoverMS+vadFrameMS)); err != nil {
+	if err := s.acceptMicPCM(t.Context(), make([]byte, s.inputSampleRate()*2*(vadSilenceHangoverMS+vadFrameMS)/1000)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -664,6 +667,73 @@ func TestLiveASR(t *testing.T) {
 			waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "Final words.", 1)
 			if err := s.turns.Wait(); err != nil {
 				t.Fatal(err)
+			}
+		})
+		t.Run("openai", func(t *testing.T) {
+			t.Parallel()
+			// OpenAI's transcription session accepts only 24 kHz input.
+			const session = `{"id":"sess","type":"transcription","audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null}}}`
+			appended := make(chan []byte, 1)
+			remote := peer(t, func(ctx context.Context, ws *websocket.Conn) {
+				writeGeminiFixture(t, ctx, ws, `{"type":"session.created","session":`+session+`}`)
+				readGeminiFixture(t, ctx, ws)
+				writeGeminiFixture(t, ctx, ws, `{"type":"session.updated","session":`+session+`}`)
+				var pcm []byte
+				for {
+					_, data, err := ws.Read(ctx)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					var msg struct {
+						Type  string
+						Audio []byte
+					}
+					if err := json.Unmarshal(data, &msg); err != nil {
+						t.Error(err)
+						return
+					}
+					if msg.Type == "input_audio_buffer.commit" {
+						break
+					}
+					if len(pcm) == 0 {
+						writeGeminiFixture(t, ctx, ws, `{"type":"conversation.item.input_audio_transcription.delta","item_id":"u","delta":"Initial draft"}`)
+					}
+					pcm = append(pcm, msg.Audio...)
+				}
+				appended <- pcm
+				writeGeminiFixture(t, ctx, ws, `{"type":"conversation.item.input_audio_transcription.completed","item_id":"u","transcript":"Final words."}`)
+				_, _, _ = ws.Read(ctx)
+			})
+			target, err := url.Parse(remote)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := openairesponses.New(t.Context(), genai.ProviderOptionAPIKey("test-key"), genai.ProviderOptionModel("gpt-live-transcribe"), genai.ProviderOptionTransportWrapper(func(next http.RoundTripper) http.RoundTripper {
+				return &geminiTestTransport{base: next, endpoint: target}
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := p.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			s, sink, _ := newLiveTestSession(t, newLiveASR(p, p.ModelID()), "fr")
+			if got := s.inputSampleRate(); got != 24000 {
+				t.Fatalf("microphone rate %d Hz, want 24000", got)
+			}
+			startSpeech(t, s)
+			waitLiveDraft(t, sink, "Initial draft")
+			endSpeech(t, s)
+			waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "Final words.", 1)
+			if err := s.turns.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			// The microphone PCM reaches the session unresampled.
+			if pcm := <-appended; !bytes.HasPrefix(pcm, loudPCMAt(24000, 200)) {
+				t.Errorf("session received %d bytes that do not start with the 24 kHz speech", len(pcm))
 			}
 		})
 		t.Run("gemini", func(t *testing.T) {

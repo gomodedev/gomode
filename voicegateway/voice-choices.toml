@@ -242,7 +242,7 @@ voice = "Luna"
 
 # Recognition streams each utterance through a live transcription session:
 # engine nemospeech or whistle, or a genai provider whose scoreboard qualifies
-# one at the gateway microphone rate.
+# one at a rate Opus decodes to, such as OpenAI's 24 kHz gpt-live-transcribe.
 # Provider speech uses its native endpoint. Omit remote to start a managed model.
 [[asr]]
 id = "voxtral"
@@ -274,6 +274,13 @@ id = "gemini-transcribe-live"
 label = "Gemini Live Transcribe"
 provider = "gemini"
 model = "gemini-3.5-transcribe-live"
+
+# OPENAI_API_KEY authenticates recognition; the session runs at 24 kHz.
+[[asr]]
+id = "openai-transcribe-live"
+label = "OpenAI Live Transcribe"
+provider = "openai"
+model = "gpt-live-transcribe"
 
 [[tts]]
 id = "gemini-tts"
