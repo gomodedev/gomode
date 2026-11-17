@@ -1,7 +1,6 @@
 // Tests accumulated context changes, alert retention, and explicit native model wake-up.
 package com.fghbuild.gomode.voice
 
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

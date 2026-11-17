@@ -4,7 +4,6 @@ package com.fghbuild.gomode
 import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
-import android.content.Context
 import android.webkit.WebView
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.Lifecycle

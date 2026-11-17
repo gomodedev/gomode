@@ -7,7 +7,6 @@ import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import com.fghbuild.voicegateway.sdk.v2.ToolCall
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 
 /** User-visible engine name, shared by settings diagnostics and voice errors. */
 val VoiceLanguageModel.label: String

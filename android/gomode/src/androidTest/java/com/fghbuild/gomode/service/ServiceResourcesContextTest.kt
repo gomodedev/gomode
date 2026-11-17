@@ -1,7 +1,6 @@
 // Exercises opaque server model context and native resource ownership through actual MCP reads.
 package com.fghbuild.gomode.service
 
-import androidx.test.platform.app.InstrumentationRegistry
 import com.fghbuild.gomode.voice.McpClient
 import com.fghbuild.gomode.voice.gatewaySessionSetup
 import kotlinx.coroutines.Dispatchers
@@ -12,8 +11,6 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put

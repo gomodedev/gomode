@@ -6,9 +6,6 @@ import com.fghbuild.mcp.sdk.v1.ResourceContent
 import com.fghbuild.mcp.sdk.v1.ResourceDescriptor
 import com.fghbuild.mcp.sdk.v1.ResourcesReadResult
 import com.fghbuild.mcp.sdk.v1.ResultType
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

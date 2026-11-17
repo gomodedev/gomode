@@ -18,13 +18,11 @@ import com.fghbuild.gomode.ui.web.FrontendVoiceTools
 import com.fghbuild.gomode.ui.web.ServiceShellKey
 import com.fghbuild.gomode.ui.web.ServiceShellSession
 import com.fghbuild.gomode.ui.web.WebShellLoadState
-import com.fghbuild.gomode.voice.InvalidMcpResponse
 import com.fghbuild.gomode.voice.McpToolResult
 import com.fghbuild.gomode.voice.ServiceMcp
 import com.fghbuild.gomode.voice.ServiceMcpAuthorization
 import com.fghbuild.gomode.voice.ToolCallValidator
 import com.fghbuild.gomode.voice.prepareServiceMcp
-import com.fghbuild.mcp.sdk.v1.ResourceContent
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -46,7 +44,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject

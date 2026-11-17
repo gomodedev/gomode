@@ -1,7 +1,6 @@
 // RxAudio: reassemble or stream audio chunks from dataResponse and emit WAV bytes for PCM clips.
 package com.fghbuild.halo.msg
 
-import com.fghbuild.halo.ble.HaloDevice
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow

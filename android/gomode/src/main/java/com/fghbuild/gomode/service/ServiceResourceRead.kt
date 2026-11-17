@@ -26,9 +26,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.put
 
 // Constructed at the resource-read boundary using the actual requested URI.
 // Keep parsed authority beside the transport result so every consumer shares it.

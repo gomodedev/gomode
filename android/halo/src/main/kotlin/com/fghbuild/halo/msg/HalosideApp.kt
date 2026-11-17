@@ -12,7 +12,6 @@ package com.fghbuild.halo.msg
 
 import android.content.Context
 import com.fghbuild.halo.ble.HaloDevice
-import com.fghbuild.halo.ble.HaloDeviceType
 import java.io.IOException
 
 class HalosideApp(

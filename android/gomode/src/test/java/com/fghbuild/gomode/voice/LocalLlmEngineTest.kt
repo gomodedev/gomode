@@ -5,7 +5,6 @@ import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import com.fghbuild.voicegateway.sdk.v2.ToolCall
 import com.google.ai.edge.litertlm.Content
-import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.LiteRtLmJniException
 import com.google.ai.edge.litertlm.Message

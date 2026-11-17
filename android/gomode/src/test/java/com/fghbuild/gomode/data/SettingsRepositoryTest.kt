@@ -1,7 +1,6 @@
 // Unit tests for Go Mode service-instance settings.
 package com.fghbuild.gomode.data
 
-import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.TimeoutCancellationException

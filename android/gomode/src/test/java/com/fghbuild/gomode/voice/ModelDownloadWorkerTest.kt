@@ -10,7 +10,6 @@ import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.google.common.util.concurrent.Futures
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.runTest

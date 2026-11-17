@@ -38,7 +38,6 @@ import com.fghbuild.mcp.sdk.v1.ToolsCallParams
 import com.fghbuild.mcp.sdk.v1.ToolsListResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull

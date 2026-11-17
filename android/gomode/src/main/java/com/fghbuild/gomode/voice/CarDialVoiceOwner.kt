@@ -42,7 +42,6 @@ import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
-import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.ui.web.ServiceCallStage
 import com.fghbuild.gomode.ui.web.ServiceShellOwner

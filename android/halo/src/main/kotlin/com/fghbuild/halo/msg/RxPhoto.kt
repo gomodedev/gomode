@@ -1,7 +1,6 @@
 // RxPhoto: reassemble JPEG photo chunks from dataResponse. Emits a single-element Flow.
 package com.fghbuild.halo.msg
 
-import com.fghbuild.halo.ble.HaloDevice
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow

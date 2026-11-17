@@ -1,7 +1,6 @@
 // Tests native MCP requests, tool result normalization, and SSE configuration.
 package com.fghbuild.gomode.voice
 
-import com.fghbuild.gomode.service.readInitialServiceContext
 import com.fghbuild.mcp.sdk.v1.NotificationMethod
 import com.fghbuild.mcp.sdk.v1.RequestMeta
 import com.fghbuild.mcp.sdk.v1.ResourcesReadParams
@@ -13,8 +12,6 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
