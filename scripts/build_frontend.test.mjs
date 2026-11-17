@@ -7,7 +7,7 @@ import { brotliDecompressSync } from "node:zlib";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
 
-const dist = fileURLToPath(new URL("../frontend/dist/", import.meta.url));
+const dist = fileURLToPath(new URL("../internal/gatewayfrontend/dist/", import.meta.url));
 test("production HTML loads entry JS and all extracted CSS, including lazy voice controls", async () => {
   const html = brotliDecompressSync(await readFile(path.join(dist, "index.html.br"))).toString();
   const dom = new JSDOM(html);

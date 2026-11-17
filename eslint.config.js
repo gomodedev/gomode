@@ -12,14 +12,14 @@ export default tseslint.config(
   {
     files: [
       "e2e/voice-preview/*.tsx",
-      "frontend/src/**/*.{ts,tsx}",
+      "internal/gatewayfrontend/src/**/*.{ts,tsx}",
       "web/src/**/*.{ts,tsx}",
       "web/tests/**/*.{ts,tsx}",
     ],
     ...solid,
     languageOptions: {
       globals: { ...globals.browser },
-      parserOptions: { project: "./frontend/tsconfig.json" },
+      parserOptions: { project: "./internal/gatewayfrontend/tsconfig.json" },
     },
     rules: {
       "no-unused-vars": "off",
@@ -43,7 +43,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["e2e/voice-preview/*.tsx", "frontend/src/**/*.{ts,tsx}", "web/src/**/*.{ts,tsx}"],
+    files: ["e2e/voice-preview/*.tsx", "internal/gatewayfrontend/src/**/*.{ts,tsx}", "web/src/**/*.{ts,tsx}"],
     ignores: ["**/*.test.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "error",
@@ -109,6 +109,6 @@ export default tseslint.config(
   { files: ["web/tests/**/*.{ts,tsx}"], languageOptions: { globals: { ...globals.node } } },
   { files: ["e2e/voice-preview/*.js"], languageOptions: { globals: { ...globals.browser } } },
   { files: ["scripts/*.mjs"], languageOptions: { globals: { ...globals.node } } },
-  { ignores: ["**/*.module.css.d.ts", "android/**", "frontend/dist/**", "node_modules/**", "sdk/**"] },
+  { ignores: ["**/*.module.css.d.ts", "android/**", "internal/gatewayfrontend/dist/**", "node_modules/**", "sdk/**"] },
   prettier,
 );

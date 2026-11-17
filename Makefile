@@ -66,11 +66,11 @@ help:
 fix: node_modules/.modules.yaml
 	@go run ./internal/cmd/gen-sdk
 	@pnpm exec node scripts/css_module_types.mjs --source-path web/src --write
-	@pnpm exec node scripts/css_module_types.mjs --source-path frontend/src --write
+	@pnpm exec node scripts/css_module_types.mjs --source-path internal/gatewayfrontend/src --write
 	@go tool golangci-lint fmt
 	@go tool golangci-lint run --show-stats=false --fix ./...
-	@pnpm exec eslint e2e/voice-preview/*.js e2e/voice-preview/*.tsx frontend/src scripts/*.mjs web/src web/tests --fix
-	@pnpm exec prettier --write --log-level warn .github/workflows e2e/voice-preview eslint.config.js frontend/index.html frontend/src frontend/tsconfig.json package.json scripts/*.mjs web/src web/tests
+	@pnpm exec eslint e2e/voice-preview/*.js e2e/voice-preview/*.tsx internal/gatewayfrontend/src scripts/*.mjs web/src web/tests --fix
+	@pnpm exec prettier --write --log-level warn .github/workflows e2e/voice-preview eslint.config.js internal/gatewayfrontend/index.html internal/gatewayfrontend/src internal/gatewayfrontend/tsconfig.json package.json scripts/*.mjs web/src web/tests
 	@uv run --locked ruff check --quiet --fix scripts
 	@uv run --locked ruff format scripts >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
@@ -83,9 +83,9 @@ verify: node_modules/.modules.yaml
 		'go run ./internal/cmd/gen-sdk -check' \
 		'go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12' \
 		'go mod tidy -diff && go tool golangci-lint run ./...' \
-		'pnpm exec prettier --check --log-level warn .github/workflows e2e/voice-preview eslint.config.js frontend/index.html frontend/src frontend/tsconfig.json package.json scripts/*.mjs web/src web/tests' \
-		'pnpm exec eslint --max-warnings 0 e2e/voice-preview/*.js e2e/voice-preview/*.tsx frontend/src scripts/*.mjs web/src web/tests' \
-		'pnpm exec node scripts/css_module_types.mjs --source-path web/src && pnpm exec node scripts/css_module_types.mjs --source-path frontend/src && pnpm exec tsc --noEmit -p frontend/tsconfig.json' \
+		'pnpm exec prettier --check --log-level warn .github/workflows e2e/voice-preview eslint.config.js internal/gatewayfrontend/index.html internal/gatewayfrontend/src internal/gatewayfrontend/tsconfig.json package.json scripts/*.mjs web/src web/tests' \
+		'pnpm exec eslint --max-warnings 0 e2e/voice-preview/*.js e2e/voice-preview/*.tsx internal/gatewayfrontend/src scripts/*.mjs web/src web/tests' \
+		'pnpm exec node scripts/css_module_types.mjs --source-path web/src && pnpm exec node scripts/css_module_types.mjs --source-path internal/gatewayfrontend/src && pnpm exec tsc --noEmit -p internal/gatewayfrontend/tsconfig.json' \
 		'pnpm exec node scripts/build_frontend.mjs' \
 		'uv run --locked ruff check --quiet scripts && uv run --locked ruff format --check --quiet scripts && uv run --locked python scripts/android_paths.py >/dev/null && uv run --locked python scripts/generate_thinking_score.py --check' \
 		'files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files' \
@@ -102,12 +102,12 @@ test: node_modules/.modules.yaml
 	@./scripts/run-concurrently.sh go,browser-scripts,browser \
 		'go test ./...' \
 		'pnpm exec node --test --test-reporter=./scripts/quiet-test-reporter.mjs scripts/browser_integration.test.mjs scripts/build_frontend.test.mjs scripts/css_module_types.test.mjs scripts/voice_preview.test.mjs' \
-		'NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./web/tests/setup-dom.ts "frontend/src/**/*.test.tsx" "web/src/**/*.test.ts" "web/src/**/*.test.tsx"'
+		'NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./web/tests/setup-dom.ts "internal/gatewayfrontend/src/**/*.test.tsx" "web/src/**/*.test.ts" "web/src/**/*.test.tsx"'
 	@./scripts/android-checks.sh $(ANDROID_TEST_TASKS) $(GRADLE_LOG_ARGS)
 
 frontend-build: node_modules/.modules.yaml
 	@pnpm exec node scripts/css_module_types.mjs --source-path web/src --write
-	@pnpm exec node scripts/css_module_types.mjs --source-path frontend/src --write
+	@pnpm exec node scripts/css_module_types.mjs --source-path internal/gatewayfrontend/src --write
 	@pnpm exec node scripts/build_frontend.mjs --write
 
 build: android-sdk node_modules/.modules.yaml frontend-build

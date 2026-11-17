@@ -1,7 +1,7 @@
 // Live voice testing with a visible frontend tool result and the shared production controls.
 import { createSignal, onCleanup } from "solid-js";
-import BrowserVoiceShell from "../../web/src/BrowserVoiceShell";
-import { createFrontendPreparationClient } from "../../web/src/FrontendVoiceTools";
+import BrowserVoiceShell from "../../../web/src/BrowserVoiceShell";
+import { createFrontendPreparationClient } from "../../../web/src/FrontendVoiceTools";
 import styles from "./App.module.css";
 
 export default function App() {

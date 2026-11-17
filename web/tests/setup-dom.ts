@@ -1,5 +1,5 @@
 // Installs jsdom globals, the Solid TSX transform, and asset stubs before tests run.
-// Loaded via `node --test --import ./frontend/tests/setup-dom.ts` so every test-file child
+// Loaded via `node --test --import ./web/tests/setup-dom.ts` so every test-file child
 // process gets a DOM before module evaluation, like vitest's environment: "jsdom".
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";

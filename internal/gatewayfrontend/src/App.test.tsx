@@ -2,9 +2,9 @@
 import { afterEach, test } from "node:test";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { Route, Router } from "@solidjs/router";
-import { expect, vi } from "../../web/tests/expect";
-import { HostModeProvider } from "../../web/src/HostMode";
-import { captureFrontendVoiceTools, executeFrontendVoiceTool } from "../../web/src/FrontendVoiceTools";
+import { expect, vi } from "../../../web/tests/expect";
+import { HostModeProvider } from "../../../web/src/HostMode";
+import { captureFrontendVoiceTools, executeFrontendVoiceTool } from "../../../web/src/FrontendVoiceTools";
 import App from "./App";
 
 afterEach(() => {

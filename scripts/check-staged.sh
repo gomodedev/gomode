@@ -28,7 +28,7 @@ while IFS= read -r -d '' file; do
   case "$file" in
   *.go) go_files+=("$file") ;;
   *.sh | scripts/hooks/*) shell_files+=("$file") ;;
-  frontend/index.html | frontend/src/*.css | frontend/src/*.ts | frontend/src/*.tsx | frontend/tsconfig.json | web/src/*.css | web/src/*.ts | web/src/*.tsx | web/tests/*.ts | web/tests/*.tsx)
+  internal/gatewayfrontend/index.html | internal/gatewayfrontend/src/*.css | internal/gatewayfrontend/src/*.ts | internal/gatewayfrontend/src/*.tsx | internal/gatewayfrontend/tsconfig.json | web/src/*.css | web/src/*.ts | web/src/*.tsx | web/tests/*.ts | web/tests/*.tsx)
     format_files+=("$file")
     case "$file" in *.ts | *.tsx) eslint_files+=("$file") ;; esac
     ;;

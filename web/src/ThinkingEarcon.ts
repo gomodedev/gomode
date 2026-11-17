@@ -1,6 +1,6 @@
 // Plays the shared piano score with bounded live synthesis during half-duplex thinking turns.
 
-import score from "../../assets/thinking-score.json";
+import score from "../assets/thinking-score.json";
 import { AudioGain } from "./AudioGain";
 
 const FADE_OUT_SECONDS = 0.15;

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BEAT = 60 / 80
-OUTPUT = Path(__file__).resolve().parent.parent / "assets"
+OUTPUT = Path(__file__).resolve().parent.parent / "web" / "assets"
 OPENING_BARS = [
     ([64, 60, 64, 60, 64, 60], [], []),
     ([64, 60, 64, 60, 64, 60], [], []),

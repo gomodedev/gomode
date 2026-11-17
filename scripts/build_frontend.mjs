@@ -15,10 +15,10 @@ if (args.length > 0 && !(args.length === 1 && args[0] === "--write")) {
   process.exit(help ? 0 : 1);
 }
 const root = fileURLToPath(new URL("../", import.meta.url));
-const output = path.join(root, "frontend/dist");
+const output = path.join(root, "internal/gatewayfrontend/dist");
 const result = await build({
   absWorkingDir: root,
-  entryPoints: ["frontend/src/main.tsx"],
+  entryPoints: ["internal/gatewayfrontend/src/main.tsx"],
   outdir: output,
   entryNames: "assets/[name]-[hash]",
   chunkNames: "assets/[name]-[hash]",
@@ -53,7 +53,9 @@ const result = await build({
 const assets = new Map(
   result.outputFiles.map((file) => [path.relative(output, file.path).split(path.sep).join("/"), file.contents]),
 );
-const entry = Object.entries(result.metafile.outputs).find(([, value]) => value.entryPoint === "frontend/src/main.tsx");
+const entry = Object.entries(result.metafile.outputs).find(
+  ([, value]) => value.entryPoint === "internal/gatewayfrontend/src/main.tsx",
+);
 if (!entry) throw new Error("Missing frontend entry point");
 // esbuild does not load the CSS belonging to dynamic JS chunks automatically.
 const links = [...assets.keys()]
@@ -66,7 +68,10 @@ links.push(
 assets.set(
   "index.html",
   Buffer.from(
-    (await readFile(path.join(root, "frontend/index.html"), "utf8")).replace("<!-- ASSETS -->", links.join("\n    ")),
+    (await readFile(path.join(root, "internal/gatewayfrontend/index.html"), "utf8")).replace(
+      "<!-- ASSETS -->",
+      links.join("\n    "),
+    ),
   ),
 );
 const compressed = new Map(

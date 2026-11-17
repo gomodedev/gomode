@@ -6,5 +6,5 @@ android/gomode/src/main/res/drawable/ic_download.xml are from Google Material Sy
 
 Copyright Google LLC.
 
-assets/thinking-score.json contains an arrangement of music by Hans Zimmer
+web/assets/thinking-score.json contains an arrangement of music by Hans Zimmer
 (First Step / Day One), adapted by Philipp A. G. Grzywaczyk.

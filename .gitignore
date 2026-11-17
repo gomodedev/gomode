@@ -17,6 +17,6 @@
 /go.work
 /go.work.sum
 /models/
-/sdk/halo/build/
+/android/halo/build/
 __pycache__/
 node_modules/

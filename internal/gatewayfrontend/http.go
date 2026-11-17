@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"embed"
 	"fmt"
 	"io"
 	"io/fs"
@@ -25,7 +26,6 @@ import (
 	"github.com/andybalholm/brotli"
 
 	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/frontend"
 	"github.com/maruel/gomode/httpserver"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/voicegateway"
@@ -53,7 +53,7 @@ func NewHandler(addr net.Addr, externalURL string, bridge voicegateway.MediaBrid
 		return nil, fmt.Errorf("frontend listener IP: %w", err)
 	}
 	localOnly := ip.IsLoopback() && externalURL == ""
-	dist, err := fs.Sub(frontend.Files, "dist")
+	dist, err := fs.Sub(files, "dist")
 	if err != nil {
 		return nil, err
 	}
@@ -249,3 +249,9 @@ func (*registry) ReadResource(_ context.Context, params *mcp.ResourcesReadParams
 }
 
 var _ mcp.Registry = (*registry)(nil)
+
+// files holds the production build of src/ as precompressed assets. Regenerate
+// it with make fix.
+//
+//go:embed dist
+var files embed.FS

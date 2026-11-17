@@ -25,12 +25,12 @@ User and integration guides are at [docs.gomode.dev](https://docs.gomode.dev):
   - `httpserver/`: trusted request metadata, host checks, logging, tracing and optional GeoIP.
   - `devicelogin/`: browser pairing with explicit approval and host session issuance.
   - `voicegateway/`: standalone or embedded WebRTC voice gateway.
-- `sdk/`: generated TypeScript, Kotlin, and Swift protocol clients plus the
-  Halo Android SDK.
+- `sdk/`: generated TypeScript, Kotlin, and Swift protocol clients.
 - `web/src/`: `@maruel/gomode` SolidJS browser integration.
-- `frontend/`: optional test app embedded by `cmd/voice-gateway`.
+- `internal/gatewayfrontend/`: optional test app embedded by `cmd/voice-gateway`.
 - `android/gomode/`: native WebView, voice, notifications, settings, and Halo
   shell.
+- `android/halo/`: Halo smart-glasses Android SDK.
 
 Go package documentation is on [pkg.go.dev](https://pkg.go.dev/github.com/maruel/gomode).
 [contrib/config.toml](contrib/config.toml) documents the standalone gateway settings, and
