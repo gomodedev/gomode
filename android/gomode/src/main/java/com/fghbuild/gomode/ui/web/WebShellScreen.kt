@@ -426,6 +426,8 @@ internal class ServiceWebPage(
                             return
                         }
 
+                        // The code and description identify transient failures; the URL may carry credentials.
+                        Log.w(TAG, "Service page load failed: ${error.errorCode} ${error.description}")
                         serviceSession.invalidatePageAuthentication()
                         authHandler.onNavigation(null)
                         frontendTools.clear(view)

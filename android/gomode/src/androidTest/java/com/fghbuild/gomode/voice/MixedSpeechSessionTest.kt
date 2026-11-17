@@ -2,12 +2,12 @@
 package com.fghbuild.gomode.voice
 
 import android.Manifest
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.gomode.MainActivity
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -15,11 +15,7 @@ import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.voicegateway.sdk.v2.TurnState
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
@@ -35,7 +31,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.CopyOnWriteArrayList
@@ -182,73 +177,57 @@ class MixedSpeechSessionTest {
     ): Unit =
         runBlocking {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
-            val dataStoreJob = SupervisorJob()
-            try {
-                val repository =
-                    SettingsRepository(
-                        PreferenceDataStoreFactory.create(
-                            scope = CoroutineScope(Dispatchers.IO + dataStoreJob),
-                            produceFile = {
-                                File(
-                                    context.filesDir,
-                                    "mixed-speech-${System.nanoTime()}.preferences_pb",
-                                )
-                            },
+            val repository = SettingsRepository(MemoryPreferences())
+            repository.addService("fixture", baseUrl)
+            repository.updateSavedVoiceSetup(null) {
+                it.copy(
+                    preference =
+                        it.preference.copy(
+                            mode = VoiceSetupMode.SEPARATE_STAGES,
+                            recognition = recognition,
+                            speech = speech,
+                            languageModel = VoiceLanguageModel.GATEWAY,
                         ),
-                    )
-                repository.addService("fixture", baseUrl)
-                repository.updateSavedVoiceSetup(null) {
-                    it.copy(
-                        preference =
-                            it.preference.copy(
-                                mode = VoiceSetupMode.SEPARATE_STAGES,
-                                recognition = recognition,
-                                speech = speech,
-                                languageModel = VoiceLanguageModel.GATEWAY,
-                            ),
-                    )
-                }
-                repository.settings.first {
-                    it.activeServiceURL == baseUrl && it.voiceSetup.effectiveRecognition == recognition &&
-                        it.voiceSetup.effectiveSpeech == speech
-                }
-                val activity = ActivityScenario.launch(MainActivity::class.java)
-                val pages = ServiceShellOwner(context, repository)
-                val conversation =
-                    VoiceConversation(repository, ServiceSettingsClient(), pages.catalog) { pages.entries }
-                val deviceSpeech = ScriptedSpeech(holdPlayback)
-                val session =
-                    VoiceSession(
-                        context,
-                        repository,
-                        conversation,
-                        "en-US",
-                        thinkingEarcon =
-                            object : ThinkingEarcon {
-                                override fun setThinking(active: Boolean) = Unit
-                            },
-                        createDeviceSpeech = {
-                            deviceSpeech.creations++
-                            deviceSpeech
+                )
+            }
+            repository.settings.first {
+                it.activeServiceURL == baseUrl && it.voiceSetup.effectiveRecognition == recognition &&
+                    it.voiceSetup.effectiveSpeech == speech
+            }
+            val activity = ActivityScenario.launch(MainActivity::class.java)
+            val pages = ServiceShellOwner(context, repository)
+            val conversation =
+                VoiceConversation(repository, ServiceSettingsClient(), pages.catalog) { pages.entries }
+            val deviceSpeech = ScriptedSpeech(holdPlayback)
+            val session =
+                VoiceSession(
+                    context,
+                    repository,
+                    conversation,
+                    "en-US",
+                    thinkingEarcon =
+                        object : ThinkingEarcon {
+                            override fun setThinking(active: Boolean) = Unit
                         },
-                    )
-                try {
-                    withTimeout(TIMEOUT_MS) {
-                        withContext(Dispatchers.Main) { pages.prepareCall(repository.settings.value) {} }
-                    }
-                    activity.onActivity { session.connect() }
-                    val ready = awaitState(session) { it.connected || it.error != null }
-                    assertNull(ready.error)
-                    block(session, deviceSpeech)
-                } finally {
-                    withContext(Dispatchers.Main) {
-                        session.close()
-                        pages.close()
-                    }
-                    activity.close()
+                    createDeviceSpeech = {
+                        deviceSpeech.creations++
+                        deviceSpeech
+                    },
+                )
+            try {
+                withTimeout(TIMEOUT_MS) {
+                    withContext(Dispatchers.Main) { pages.prepareCall(repository.settings.value) {} }
                 }
+                activity.onActivity { session.connect() }
+                val ready = awaitState(session) { it.connected || it.error != null }
+                assertNull(ready.error)
+                block(session, deviceSpeech)
             } finally {
-                withContext(NonCancellable) { dataStoreJob.cancelAndJoin() }
+                withContext(Dispatchers.Main) {
+                    session.close()
+                    pages.close()
+                }
+                activity.close()
             }
         }
 
@@ -285,6 +264,9 @@ class MixedSpeechSessionTest {
         withContext(Dispatchers.IO) {
             val connection = URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection
             try {
+                // A stalled fixture connection must fail at its call site: withTimeout cannot interrupt a blocking read.
+                connection.connectTimeout = TIMEOUT_MS.toInt()
+                connection.readTimeout = TIMEOUT_MS.toInt()
                 connection.requestMethod = method
                 check(connection.responseCode == HttpURLConnection.HTTP_OK) { "$path: HTTP ${connection.responseCode}" }
                 connection.inputStream.bufferedReader().use { it.readText() }
