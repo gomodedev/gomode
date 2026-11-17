@@ -215,7 +215,8 @@ class RetainedWebViewsTest {
                 device.sleep()
                 device.wakeUp()
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
-                    keyguard.isKeyguardLocked && evaluate(view, "goModeHost.isPageVisible()") == "true" &&
+                    keyguard.isKeyguardLocked &&
+                        evaluate(view, "goModeHost.isPageVisible()") == "true" &&
                         evaluate(view, "goModeHost.isMediaAllowed()") == "false"
                 }
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
@@ -508,7 +509,8 @@ class RetainedWebViewsTest {
         }
         try {
             composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
-                first.bearerStore.authReady.value && second.bearerStore.authReady.value &&
+                first.bearerStore.authReady.value &&
+                    second.bearerStore.authReady.value &&
                     first.frontendTools.declarations.isNotEmpty()
             }
         } catch (failure: Exception) {

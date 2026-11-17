@@ -132,7 +132,8 @@ class CarDialServerSwitchTest {
                     repository.switchService(requireNotNull(bearerID))
                     repository.settings.first {
                         it.activeServiceId == bearerID &&
-                            it.voiceLanguageTag == "fr-CA" && it.voiceSetup.languageModel == VoiceLanguageModel.GATEWAY
+                            it.voiceLanguageTag == "fr-CA" &&
+                            it.voiceSetup.languageModel == VoiceLanguageModel.GATEWAY
                     }
                     instrumentation.runOnMainSync {
                         CookieManager.getInstance().setCookie(cookieURL, "session=confirmed; Path=/")

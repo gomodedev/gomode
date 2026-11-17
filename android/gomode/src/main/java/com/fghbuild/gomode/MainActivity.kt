@@ -200,7 +200,8 @@ class MainActivity : ComponentActivity() {
             setTurnScreenOn(false)
         }
         val settings = (application as GoModeApplication).settingsRepository.settings.value
-        showServiceOnLockScreen = carVoiceOwner.isBusy && settings.loadState == SettingsLoadState.Ready &&
+        showServiceOnLockScreen = carVoiceOwner.isBusy &&
+            settings.loadState == SettingsLoadState.Ready &&
             settings.showServiceOnLockScreen
         if (locked && wasShowingService && !showServiceOnLockScreen) window.decorView.visibility = View.INVISIBLE
         if (state.status == CarDialStatus.IDLE) {
@@ -272,7 +273,8 @@ internal fun LockedCarCall(
                         modifier = Modifier.testTag("car_dial_status"),
                         textAlign = TextAlign.Center,
                     )
-                    if (voiceState.availableDevices.isNotEmpty() || voiceState.transcript.isNotEmpty() ||
+                    if (voiceState.availableDevices.isNotEmpty() ||
+                        voiceState.transcript.isNotEmpty() ||
                         voiceState.audioError != null
                     ) {
                         Column(

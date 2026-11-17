@@ -94,7 +94,9 @@ internal fun ServicesSetting(
                     IconButton(
                         onClick = { finish { if (edits.addService()) onAdded() } },
                         enabled =
-                            draft.normalizedURL != null && !edits.aliasTaken && !edits.urlTaken &&
+                            draft.normalizedURL != null &&
+                                !edits.aliasTaken &&
+                                !edits.urlTaken &&
                                 settings.loadState == SettingsLoadState.Ready,
                         modifier = Modifier.testTag("gomode-create-service"),
                     ) { Icon(Icons.Default.Check, contentDescription = "Add service") }

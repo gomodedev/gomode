@@ -149,8 +149,10 @@ internal class PendingMicrophoneVoiceStart(
         currentPage: ServiceShellSession,
         currentSession: VoiceSessionController,
     ): Boolean {
-        if (currentPage !== page || currentSession !== session ||
-            page.bearerStore.identityEpoch.value != identity || page.frontendPreparation.document != document
+        if (currentPage !== page ||
+            currentSession !== session ||
+            page.bearerStore.identityEpoch.value != identity ||
+            page.frontendPreparation.document != document
         ) {
             timing.finish(VoiceStartupOutcome.SUPERSEDED)
             return false
@@ -480,7 +482,8 @@ internal fun GoModeApp(
         } else if (microphoneWasGranted) {
             voiceSession.disconnect()
             microphoneDenied = true
-            microphoneNeedsSettings = microphoneHadExplicitDenial && activity != null &&
+            microphoneNeedsSettings = microphoneHadExplicitDenial &&
+                activity != null &&
                 !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
         }
         microphoneWasGranted = granted
@@ -521,8 +524,10 @@ internal fun GoModeApp(
             webLoadState = webLoadState,
         ).takeIf { activeNativeScreen == null && activeURL.isNotBlank() }
     val voiceSessionActive =
-        voiceState.connected || voiceState.connectStatus != null ||
-            voiceState.listening || voiceState.speaking
+        voiceState.connected ||
+            voiceState.connectStatus != null ||
+            voiceState.listening ||
+            voiceState.speaking
     LaunchedEffect(sharedConversation, voiceConversation, gatewayState, catalogState, activeKey, voiceState.connected) {
         if (!carVoiceBusy && sharedConversation && gatewayState != null) {
             if (!voiceConversation.isCurrent()) {
@@ -537,11 +542,14 @@ internal fun GoModeApp(
         serviceCatalog = serviceCatalog,
         activeKey = activeKey,
         serviceVisible =
-            activeNativeScreen == null && activeURL.isNotBlank() && shellRecovery == null &&
+            activeNativeScreen == null &&
+                activeURL.isNotBlank() &&
+                shellRecovery == null &&
                 (notificationDestination == null || notificationDestination.source == activeKey),
         configuredServices = serviceKeys.toSet().takeIf { settings.loadState == SettingsLoadState.Ready },
         voiceSessionActive =
-            !carVoiceBusy && voiceSessionActive &&
+            !carVoiceBusy &&
+                voiceSessionActive &&
                 languageModel != VoiceLanguageModel.NEEDLE_WHISTLE,
         sharedConversation = sharedConversation,
         onVoiceNotification = { event ->
@@ -562,12 +570,14 @@ internal fun GoModeApp(
         activeURL.isBlank() ||
             (frontendReady && authReady && webLoadState == WebShellLoadState.Ready)
     val voiceAvailable =
-        carVoiceBusy || voiceSessionActive ||
+        carVoiceBusy ||
+            voiceSessionActive ||
             (
-                frontendVoiceAvailable && (
-                    (localSelection != null && localModelState == LocalModelState.Ready) ||
-                        (authReady && configuredVoiceAvailable && shellRecovery == null)
-                )
+                frontendVoiceAvailable &&
+                    (
+                        (localSelection != null && localModelState == LocalModelState.Ready) ||
+                            (authReady && configuredVoiceAvailable && shellRecovery == null)
+                    )
             )
     val density = LocalDensity.current
     val keyboardOpen = WindowInsets.ime.getBottom(density) > 0
@@ -653,7 +663,8 @@ internal fun GoModeApp(
                 }
             }
             // Settings owns the full screen; elsewhere, keep failures visible even with the keyboard open.
-            if (activeURL.isNotBlank() && activeNativeScreen != NativeScreen.Settings &&
+            if (activeURL.isNotBlank() &&
+                activeNativeScreen != NativeScreen.Settings &&
                 (voiceState.error != null || (!keyboardOpen && (shellRecovery == null || voiceSessionActive)))
             ) {
                 VoicePanel(
@@ -819,10 +830,12 @@ internal suspend fun awaitVoiceAudioSelection(
 ): Boolean {
     val state =
         states.first {
-            !it.audioSwitching && (
-                it.selectedDeviceId == deviceId || it.audioError != null ||
-                    it.availableDevices.none { device -> device.id == deviceId }
-            )
+            !it.audioSwitching &&
+                (
+                    it.selectedDeviceId == deviceId ||
+                        it.audioError != null ||
+                        it.availableDevices.none { device -> device.id == deviceId }
+                )
         }
     return state.selectedDeviceId == deviceId && state.audioError == null
 }
@@ -844,7 +857,8 @@ internal suspend fun preferredVoiceAudioDevice(
 
 private fun AudioDevice.isBluetooth(): Boolean =
     type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-        type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+        type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+        type == AudioDeviceInfo.TYPE_BLE_SPEAKER
 
 internal suspend fun fetchBootstrapState(
     activeURL: String,
@@ -962,7 +976,8 @@ private fun GoModeContent(
                 if (selected || prepareAllPages) entry.requestPage()
             }
             if ((entryState.pageRequested || selected || prepareAllPages) &&
-                entry.key.url.isNotBlank() && entryState.bootstrap !is ServiceBootstrapState.Error
+                entry.key.url.isNotBlank() &&
+                entryState.bootstrap !is ServiceBootstrapState.Error
             ) {
                 key(entryState.webViewGeneration) {
                     WebShellScreen(
@@ -1174,7 +1189,9 @@ internal fun ServiceNotifications(
     val keyguardLocked = rememberKeyguardLocked()
     val lifecycleState by lifecycle.currentStateFlow.collectAsStateWithLifecycle()
     LaunchedEffect(keyguardLocked, lifecycleState, pendingNotifications, notificationPermissionPending) {
-        if (!keyguardLocked && pendingNotifications.isNotEmpty() && !notificationPermissionPending &&
+        if (!keyguardLocked &&
+            pendingNotifications.isNotEmpty() &&
+            !notificationPermissionPending &&
             lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
             !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
         ) {

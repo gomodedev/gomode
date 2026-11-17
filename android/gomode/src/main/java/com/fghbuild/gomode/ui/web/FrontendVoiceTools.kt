@@ -76,7 +76,10 @@ internal class FrontendVoiceTools(
         val nextRequiresSessionEcho = preparation.opt("voiceSessionVersion") == 1
         // Document identity owns this registration; a same-origin SPA route may
         // change while its initial-context acknowledgement is still pending.
-        if (owner.get() === view && ownsOrigin(view) && binding == next && declarations == tools &&
+        if (owner.get() === view &&
+            ownsOrigin(view) &&
+            binding == next &&
+            declarations == tools &&
             requiresSessionEcho == nextRequiresSessionEcho
         ) {
             return
@@ -194,7 +197,10 @@ internal class FrontendVoiceTools(
         }
 
     private fun current(call: Invocation): Boolean =
-        call.isCurrent() && canDispatch() && owner.get() === call.view && generation == call.generation &&
+        call.isCurrent() &&
+            canDispatch() &&
+            owner.get() === call.view &&
+            generation == call.generation &&
             ownsOrigin(call.view)
 
     private fun cancelJavascript(

@@ -60,7 +60,8 @@ internal fun VoiceState.withUsageReport(report: SessionUsage): VoiceState =
             if (report.responseID != null && report.responseUsage != null) {
                 transcript.map { entry ->
                     if (entry.speaker == TranscriptSpeaker.ASSISTANT &&
-                        entry.kind == TranscriptKind.TRANSCRIPT && entry.responseID == report.responseID
+                        entry.kind == TranscriptKind.TRANSCRIPT &&
+                        entry.responseID == report.responseID
                     ) {
                         entry.copy(responseUsage = report.responseUsage)
                     } else {

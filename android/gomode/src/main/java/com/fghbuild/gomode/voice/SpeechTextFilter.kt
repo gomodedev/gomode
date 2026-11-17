@@ -69,7 +69,8 @@ internal class SpeechTextFilter {
             if (destination > 0) {
                 if (c == '(') destination = minOf(32, destination + 1)
                 if (c == ')') destination--
-            } else if (c == '\\' && !code &&
+            } else if (c == '\\' &&
+                !code &&
                 ASCII_PUNCTUATION.matches(pending.getOrNull(i + 1)?.toString().orEmpty())
             ) {
                 i++

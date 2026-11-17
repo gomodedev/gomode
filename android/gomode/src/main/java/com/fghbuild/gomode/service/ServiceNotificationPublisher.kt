@@ -181,8 +181,11 @@ internal fun resolveNotificationURL(
 ): String? {
     val base = serviceURL.toHttpUrlOrNull() ?: return null
     val target = base.resolve(destination ?: serviceURL) ?: return null
-    if (base.scheme != target.scheme || base.host != target.host || base.port != target.port ||
-        target.username.isNotEmpty() || target.password.isNotEmpty()
+    if (base.scheme != target.scheme ||
+        base.host != target.host ||
+        base.port != target.port ||
+        target.username.isNotEmpty() ||
+        target.password.isNotEmpty()
     ) {
         return null
     }

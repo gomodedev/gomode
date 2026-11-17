@@ -106,7 +106,8 @@ internal class ServiceShellOwner(
                     }
                     // A failed load can arrive after the new route's callback. Retain one
                     // retry for that route, without repeatedly reloading an unreachable host.
-                    if (network != null && routeChanged &&
+                    if (network != null &&
+                        routeChanged &&
                         (load as? WebShellLoadState.Failed)?.networkFailure == true
                     ) {
                         entry.retryWebAutomatically()
@@ -119,7 +120,8 @@ internal class ServiceShellOwner(
                     entry.state.map { it.bootstrapReloadToken }.distinctUntilChanged(),
                     networkMonitor.network,
                 ) { reload, network -> reload to network }.collectLatest { (reload, network) ->
-                    if (network != null && entry.key.url.isNotBlank() &&
+                    if (network != null &&
+                        entry.key.url.isNotBlank() &&
                         (previousReload != reload || entry.state.value.bootstrap !is ServiceBootstrapState.Ready)
                     ) {
                         previousReload = reload
@@ -156,7 +158,8 @@ internal class ServiceShellOwner(
         current.values.filter { it.key.url.isNotBlank() }.forEach { it.requestPage() }
         val ready =
             target.state.first {
-                it.load == WebShellLoadState.Ready || it.load is WebShellLoadState.Failed ||
+                it.load == WebShellLoadState.Ready ||
+                    it.load is WebShellLoadState.Failed ||
                     it.bootstrap is ServiceBootstrapState.Error
             }
         check(

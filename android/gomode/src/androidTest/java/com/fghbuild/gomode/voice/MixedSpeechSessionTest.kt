@@ -89,7 +89,8 @@ class MixedSpeechSessionTest {
             withContext(Dispatchers.Main) { listener.onResult("Status please") }
             val replied =
                 awaitState(session) {
-                    it.turnState == TurnState.Idle && !it.speaking &&
+                    it.turnState == TurnState.Idle &&
+                        !it.speaking &&
                         it.transcript.lastOrNull()?.text == "Your service is ready."
                 }
             assertEquals(
@@ -113,8 +114,11 @@ class MixedSpeechSessionTest {
             withContext(Dispatchers.Main) { listener.onResult("wait") }
             val resumed =
                 awaitState(session) {
-                    it.turnState == TurnState.Idle && !it.speaking && it.transcript.lastOrNull()?.text ==
-                        "Your service is ready." && it.transcript.any { entry -> entry.text == "wait" }
+                    it.turnState == TurnState.Idle &&
+                        !it.speaking &&
+                        it.transcript.lastOrNull()?.text ==
+                        "Your service is ready." &&
+                        it.transcript.any { entry -> entry.text == "wait" }
                 }
             assertEquals(
                 listOf("Status please", "hold", "wait"),
@@ -191,7 +195,8 @@ class MixedSpeechSessionTest {
                 )
             }
             repository.settings.first {
-                it.activeServiceURL == baseUrl && it.voiceSetup.effectiveRecognition == recognition &&
+                it.activeServiceURL == baseUrl &&
+                    it.voiceSetup.effectiveRecognition == recognition &&
                     it.voiceSetup.effectiveSpeech == speech
             }
             val activity = ActivityScenario.launch(MainActivity::class.java)

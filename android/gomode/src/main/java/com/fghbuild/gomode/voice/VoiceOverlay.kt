@@ -167,8 +167,10 @@ fun VoicePanel(
     val contentInset =
         if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT) 8.dp else 24.dp
     val hasDiscussion =
-        voiceState.transcript.isNotEmpty() || voiceState.transcriptDraft != null ||
-            voiceState.toolHistory.isNotEmpty() || voiceState.usage != null
+        voiceState.transcript.isNotEmpty() ||
+            voiceState.transcriptDraft != null ||
+            voiceState.toolHistory.isNotEmpty() ||
+            voiceState.usage != null
     val active = voiceState.connected || voiceState.listening || voiceState.speaking || voiceState.connectStatus != null
     var transcriptExpanded by rememberSaveable { mutableStateOf(active) }
     var wasActive by rememberSaveable { mutableStateOf(active) }
@@ -205,7 +207,8 @@ fun VoicePanel(
     }
 
     val showUsage =
-        voiceState.connected || voiceState.usage != null ||
+        voiceState.connected ||
+            voiceState.usage != null ||
             (voiceState.transcript.isNotEmpty() || voiceState.transcriptDraft != null)
     val appControls: @Composable () -> Unit = {
         AppControls(onOpenSettings, onCycleApp, canCycleApps)
@@ -654,7 +657,9 @@ private fun ConversationPanel(
 ) {
     val focusColor = MaterialTheme.colorScheme.primary
     val showStatus =
-        voiceState.connected && voiceState.error == null && voiceState.connectStatus == null &&
+        voiceState.connected &&
+            voiceState.error == null &&
+            voiceState.connectStatus == null &&
             voiceState.activeTool == null
     val showTranscript =
         transcriptExpanded && (voiceState.transcript.isNotEmpty() || voiceState.transcriptDraft != null)

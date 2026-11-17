@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths: &android_paths
+      - .editorconfig
       - .github/workflows/android.yml
       - Makefile
       - android/**

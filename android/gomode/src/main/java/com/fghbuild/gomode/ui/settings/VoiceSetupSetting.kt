@@ -230,7 +230,8 @@ internal fun VoiceSetupSetting(
     val shown = explicitSetup(saved, choices, noService)
     val mode = shown.preference.mode.takeUnless { it == VoiceSetupMode.FOLLOW_GATEWAY }
     val resolution =
-        if (choices != null && mode != null &&
+        if (choices != null &&
+            mode != null &&
             shown.preference.effectiveLanguageModel == VoiceLanguageModel.GATEWAY
         ) {
             try {

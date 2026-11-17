@@ -338,7 +338,8 @@ private fun VoiceLanguageSetting(
         with(LocalDensity.current) {
             MaterialTheme.typography.bodyLarge.fontSize
                 .toDp()
-        } * VOICE_LANGUAGE_CHARACTERS
+        } *
+            VOICE_LANGUAGE_CHARACTERS
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Voice language", style = MaterialTheme.typography.labelLarge)
         OutlinedTextField(

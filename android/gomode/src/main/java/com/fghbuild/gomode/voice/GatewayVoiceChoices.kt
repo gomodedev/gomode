@@ -506,11 +506,12 @@ private fun validateVoiceChoices(catalog: VoiceChoicesResp) {
                     advertised.transport in it.transports.orEmpty() &&
                         it.id == advertised.id
                 }
-        } || catalog.defaults
-            .orEmpty()
-            .map { it.transport }
-            .toSet()
-            .size != catalog.defaults.orEmpty().size
+        } ||
+            catalog.defaults
+                .orEmpty()
+                .map { it.transport }
+                .toSet()
+                .size != catalog.defaults.orEmpty().size
     val models =
         listOf(
             catalog.recognitionModels.orEmpty().map { it.id to it.label },

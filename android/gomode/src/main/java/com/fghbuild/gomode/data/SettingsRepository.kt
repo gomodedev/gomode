@@ -618,7 +618,8 @@ class SettingsRepository(
     private fun decodeCarCallerSlots(prefs: Preferences): Map<String, Int> {
         val slots = prefs[Keys.CAR_CALLER_SLOTS]?.let { json.decodeFromString<Map<String, Int>>(it) } ?: emptyMap()
         require(
-            slots.keys.none(String::isBlank) && slots.values.all { it in 1..MAX_CAR_CALLER_SLOT } &&
+            slots.keys.none(String::isBlank) &&
+                slots.values.all { it in 1..MAX_CAR_CALLER_SLOT } &&
                 slots.values.toSet().size == slots.size,
         ) { "Invalid saved car contact assignments" }
         return slots

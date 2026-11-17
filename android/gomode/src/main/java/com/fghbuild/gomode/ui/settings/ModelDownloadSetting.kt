@@ -229,7 +229,8 @@ internal fun ModelDownloadControls(
                     }
                 }
             }
-            if (state is ModelDownloadState.Downloading || state is ModelDownloadState.Queued ||
+            if (state is ModelDownloadState.Downloading ||
+                state is ModelDownloadState.Queued ||
                 state == ModelDownloadState.Cancelling
             ) {
                 IconButton(

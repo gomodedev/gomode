@@ -124,7 +124,9 @@ internal class SentenceSegmenter {
     fun push(delta: String): List<String> {
         val fragments = mutableListOf<String>()
         for (c in delta) {
-            if (pending.length >= 2 && pending.last() == '.' && pending[pending.length - 2].isDigit() &&
+            if (pending.length >= 2 &&
+                pending.last() == '.' &&
+                pending[pending.length - 2].isDigit() &&
                 !c.isDigit()
             ) {
                 fragments.add(flush())

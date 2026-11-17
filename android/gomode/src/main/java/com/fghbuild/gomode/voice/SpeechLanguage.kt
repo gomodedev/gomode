@@ -223,7 +223,8 @@ internal fun classifySpeechLanguage(
     fun List<String>.includesLanguage() = any { it.equals(languageTag, ignoreCase = true) }
     val variants =
         (
-            support.installedOnDeviceLanguages + support.pendingOnDeviceLanguages +
+            support.installedOnDeviceLanguages +
+                support.pendingOnDeviceLanguages +
                 support.supportedOnDeviceLanguages
         ).filter {
             java.util.Locale

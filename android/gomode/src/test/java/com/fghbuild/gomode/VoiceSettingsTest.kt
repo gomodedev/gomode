@@ -297,7 +297,8 @@ class VoiceSettingsTest {
         val reopened = SettingsRepository(store)
         composeRule.waitUntil {
             reopened.settings.value.voiceSetup.let {
-                it.mode == VoiceSetupMode.SEPARATE_STAGES && it.deviceSpeech &&
+                it.mode == VoiceSetupMode.SEPARATE_STAGES &&
+                    it.deviceSpeech &&
                     it.languageModel == VoiceLanguageModel.NEEDLE_WHISTLE
             }
         }

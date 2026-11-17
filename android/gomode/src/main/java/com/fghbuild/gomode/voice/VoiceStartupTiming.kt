@@ -64,7 +64,9 @@ internal class VoiceStartupTiming(
             val next =
                 withTimeout(timeoutMillis) {
                     state.first {
-                        it.connected || it.error != null || it.connectStatus == null ||
+                        it.connected ||
+                            it.error != null ||
+                            it.connectStatus == null ||
                             it.startupProgressAtMillis != progress
                     }
                 }

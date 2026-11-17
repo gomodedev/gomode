@@ -1369,7 +1369,8 @@ class LocalLlmEngineTest {
                                                 "<think>outer<think>nested</think>unsafe"
                                             } else {
                                                 "<tool_call><function=switch_service><parameter=service>" +
-                                                    literal + "</parameter></function></tool_call>"
+                                                    literal +
+                                                    "</parameter></function></tool_call>"
                                             }
                                         flowOf(Message.model(raw.take(30)), Message.model(raw.drop(30)))
                                     }

@@ -88,7 +88,9 @@ internal class FrontendPreparation {
     }
 
     fun accepts(payload: JSONObject): Boolean =
-        payload.opt("document") == document && token != null && payload.opt("token") == token &&
+        payload.opt("document") == document &&
+            token != null &&
+            payload.opt("token") == token &&
             payload.opt("ready") is Boolean
 
     fun update(
@@ -99,8 +101,11 @@ internal class FrontendPreparation {
         mutableReady.value = payload.getBoolean("ready")
         val scope = payload.opt("scope") as? String
         voiceSubscriber =
-            if (mutableReady.value && payload.opt("voiceSessionVersion") == 1 &&
-                scope != null && scope.isNotBlank() && scope.length <= 128
+            if (mutableReady.value &&
+                payload.opt("voiceSessionVersion") == 1 &&
+                scope != null &&
+                scope.isNotBlank() &&
+                scope.length <= 128
             ) {
                 VoiceSubscriber(document, checkNotNull(token), scope, reply)
             } else {

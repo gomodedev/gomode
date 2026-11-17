@@ -241,7 +241,8 @@ internal class ServiceCatalog(
                                             val prepared = participant.prepared
                                             // Tool-schema refresh replaces PreparedService, but it
                                             // does not replace this credential-bound context owner.
-                                            if (members[key] !== participant || prepared == null ||
+                                            if (members[key] !== participant ||
+                                                prepared == null ||
                                                 !participant.current(prepared) ||
                                                 prepared.identity != authority.identity ||
                                                 prepared.mcp?.authorization !== mcp.authorization
@@ -466,7 +467,9 @@ internal class ServiceCatalog(
         }
 
         fun current(value: PreparedService): Boolean =
-            networkAvailable && members[entry.key] === this && prepared === value &&
+            networkAvailable &&
+                members[entry.key] === this &&
+                prepared === value &&
                 entry.bearerStore.authReady.value &&
                 entry.state.value.load == WebShellLoadState.Ready &&
                 value.identity.bootstrap == entry.state.value.bootstrap &&

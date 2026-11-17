@@ -78,8 +78,10 @@ internal class ServiceBearerStore(
         if (!isTrustedPermissionOrigin(sourceOrigin, serviceURL)) return false
         if (currentPageURL?.let { trustedPage(it, serviceURL) } != true) return false
         val message = runCatching { JSONObject(payload) }.getOrNull() ?: return false
-        if (message.opt("authChanging") == true && !message.has("authChanged") &&
-            !message.has("nativeAccess") && !message.has("bearerToken")
+        if (message.opt("authChanging") == true &&
+            !message.has("authChanged") &&
+            !message.has("nativeAccess") &&
+            !message.has("bearerToken")
         ) {
             _authReady.value = false
             _token.value = null
@@ -88,7 +90,9 @@ internal class ServiceBearerStore(
             _authEpoch.value += 1
             return true
         }
-        if (message.opt("authChanged") == true && !message.has("authChanging") && !message.has("bearerToken") &&
+        if (message.opt("authChanged") == true &&
+            !message.has("authChanging") &&
+            !message.has("bearerToken") &&
             message.opt("nativeAccess") is Boolean
         ) {
             val nativeAccess = message.getBoolean("nativeAccess")
@@ -101,7 +105,9 @@ internal class ServiceBearerStore(
             _authEpoch.value += 1
             return true
         }
-        if (!message.has("bearerToken") || message.has("authChanging") || message.has("authChanged") ||
+        if (!message.has("bearerToken") ||
+            message.has("authChanging") ||
+            message.has("authChanged") ||
             message.has("nativeAccess")
         ) {
             return false
@@ -115,7 +121,8 @@ internal class ServiceBearerStore(
 
                 is String -> {
                     value.takeIf {
-                        it.isNotBlank() && it.length <= MAX_TOKEN_LENGTH &&
+                        it.isNotBlank() &&
+                            it.length <= MAX_TOKEN_LENGTH &&
                             it.none(::isUnsafeHeaderChar)
                     }
                         ?: return false
@@ -170,7 +177,8 @@ internal class ServiceAuthMessageHandler(
         if (store.identityEpoch.value != priorIdentityEpoch) {
             onIdentityChanged()
         }
-        if (store.authEpoch.value != priorEpoch || store.token.value != priorToken ||
+        if (store.authEpoch.value != priorEpoch ||
+            store.token.value != priorToken ||
             store.authReady.value != priorReady
         ) {
             onInvalidated()

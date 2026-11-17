@@ -200,7 +200,8 @@ class Lfm3ModelAcceptanceTest {
                     // token. The note is separated from the question by 20K tokens.
                     val notes =
                         "The archive access code is ORCHID-6829.\n" +
-                            " neutral".repeat(20_000) + "\nWhat is the archive access code?"
+                            " neutral".repeat(20_000) +
+                            "\nWhat is the archive access code?"
                     val reply = StringBuilder()
                     engine.processTurn(UserTurnInput(notes), reply::append, {}) { error("No tools are advertised") }
                     assertTrue(reply.contains("ORCHID-6829"))

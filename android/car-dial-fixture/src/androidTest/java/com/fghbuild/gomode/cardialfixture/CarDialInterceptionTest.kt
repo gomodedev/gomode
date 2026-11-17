@@ -982,7 +982,8 @@ class CarDialInterceptionTest {
             startupTimingRecords().filter {
                 it.contains(
                     "attempt=$attempt ",
-                ) && it.contains("event=finished")
+                ) &&
+                    it.contains("event=finished")
             }
         assertEquals(terminal.toString(), 1, terminal.size)
         assertTrue(terminal.toString(), terminal.single().contains("outcome=$outcome "))
@@ -1142,7 +1143,9 @@ class CarDialInterceptionTest {
         while (System.nanoTime() < deadline) {
             val stats = fixtureStats()
             val foreground = shell("dumpsys activity services $APP").contains("isForeground=true")
-            if (!foreground && stats.getInt("textActive") == 0 && stats.getInt("rtcActive") == 0 &&
+            if (!foreground &&
+                stats.getInt("textActive") == 0 &&
+                stats.getInt("rtcActive") == 0 &&
                 !activeTelecomCalls().contains("self_mng")
             ) {
                 return
@@ -1162,7 +1165,8 @@ class CarDialInterceptionTest {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
         while (System.nanoTime() < deadline) {
             val current = latestCallRecord(shell("dumpsys telecom"))
-            if (callRecordID(current) != callRecordID(previousCall) && current.contains("USER_CONFIRMATION") &&
+            if (callRecordID(current) != callRecordID(previousCall) &&
+                current.contains("USER_CONFIRMATION") &&
                 !current.contains("SET_DISCONNECTED")
             ) {
                 // Android can ask whether to end the existing self-managed call before
@@ -1280,7 +1284,8 @@ class CarDialInterceptionTest {
                 activities.lines().any {
                     it.contains(
                         "topResumedActivity=",
-                    ) && it.contains("CarDialLaunchProbeActivity")
+                    ) &&
+                        it.contains("CarDialLaunchProbeActivity")
                 },
             )
             val policy = shell("dumpsys window policy")
@@ -1542,7 +1547,8 @@ class CarDialInterceptionTest {
         while (System.nanoTime() < deadline) {
             dump = shell("dumpsys telecom")
             val current = latestCallRecord(dump)
-            if (callRecordID(current) != callRecordID(previousCall) && current.contains("REDIRECTION_COMPLETED_USER") &&
+            if (callRecordID(current) != callRecordID(previousCall) &&
+                current.contains("REDIRECTION_COMPLETED_USER") &&
                 current.contains("Code: (CANCELED)")
             ) {
                 assertFalse(
@@ -1612,8 +1618,11 @@ class CarDialInterceptionTest {
             val ownedCall = calls.lines().any { it.contains("[Call id=") && it.contains(APP) }
             // ActivityManager's cached states start at 16; 20 is nonexistent. Wait for
             // actual cached/gone importance rather than guessing from a hidden window.
-            if (!bound && !ownedCall && !services.contains("isForeground=true") &&
-                processState != null && processState >= 16
+            if (!bound &&
+                !ownedCall &&
+                !services.contains("isForeground=true") &&
+                processState != null &&
+                processState >= 16
             ) {
                 break
             }

@@ -52,7 +52,8 @@ class FrontendToolInvocationBridgeTest {
             evaluate(
                 view,
                 "document.querySelector('iframe').contentWindow.gomodeFrontendToolResult.postMessage(" +
-                    JSONObject.quote(forged) + ")",
+                    JSONObject.quote(forged) +
+                    ")",
             )
             compose.waitForIdle()
             assertFalse(first.isCompleted)

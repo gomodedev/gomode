@@ -377,7 +377,8 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         ) {
             observer.settings.value.services
                 .first()
-                .label == "Pending name" && observer.settings.value.activeServiceId == activeServiceId
+                .label == "Pending name" &&
+                observer.settings.value.activeServiceId == activeServiceId
         }
         waitForSettingsButton()
         composeRule.waitUntil(

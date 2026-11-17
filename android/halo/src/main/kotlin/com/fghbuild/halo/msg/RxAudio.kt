@@ -109,7 +109,8 @@ class RxAudio(
                     pcmData.size shr
                         24
                 ).toByte(),
-            ) + pcmData
+            ) +
+                pcmData
         }
     }
 }

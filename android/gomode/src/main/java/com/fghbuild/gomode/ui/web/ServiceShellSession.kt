@@ -69,7 +69,9 @@ internal class ServiceShellSession(
     val state = mutableState.asStateFlow()
     val isFrontendReady: Boolean
         get() =
-            active && bearerStore.authReady.value && frontendPreparation.ready.value &&
+            active &&
+                bearerStore.authReady.value &&
+                frontendPreparation.ready.value &&
                 state.value.load == WebShellLoadState.Ready
     private var active = true
     private var automaticRetryAvailable = true

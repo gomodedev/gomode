@@ -518,7 +518,8 @@ internal class VoiceSession(
                     val voiceGatewayClient = ApiClient(voiceGatewayEndpointURL, httpClient = voiceGatewayHTTPClient)
                     val voiceGatewayHeaders = setup.gatewayHeaders
                     // Recovery keeps the Telecom call; only a fresh connect starts one.
-                    if (!telecomCallActive && callController.isSupported() &&
+                    if (!telecomCallActive &&
+                        callController.isSupported() &&
                         !callController.start(setup.serverName, setup.serverID) { disconnect() }
                     ) {
                         setError("Could not start the voice call")
@@ -1344,7 +1345,10 @@ internal class VoiceSession(
     }
 
     private fun contextUpdateBlocked(): Boolean =
-        userSpeechActive || speakerActive || awaitingGatewayTurn || _state.value.turnState != TurnState.Idle ||
+        userSpeechActive ||
+            speakerActive ||
+            awaitingGatewayTurn ||
+            _state.value.turnState != TurnState.Idle ||
             !_state.value.connected ||
             pendingGatewayTools.containsKey(attemptGeneration.get())
 
@@ -1963,9 +1967,10 @@ internal class VoiceSession(
                 override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
                     val selectedId = _state.value.selectedDeviceId
                     val lostBt =
-                        selectedId != null && removedDevices?.any {
-                            it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                        } == true
+                        selectedId != null &&
+                            removedDevices?.any {
+                                it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                            } == true
                     if (lostBt && !telecomCallActive) {
                         Log.i(TAG, "Selected Bluetooth device removed, disconnecting")
                         disconnect()
@@ -2274,8 +2279,11 @@ internal fun List<TranscriptEntry>.appendChunk(
         }
     val previous = getOrNull(index)
     val counts = responseUsage.takeIf { kind == TranscriptKind.TRANSCRIPT && id != null }
-    return if (previous != null && previous.speaker == speaker && previous.kind == kind &&
-        previous.responseID == id && (id != null || !previous.final)
+    return if (previous != null &&
+        previous.speaker == speaker &&
+        previous.kind == kind &&
+        previous.responseID == id &&
+        (id != null || !previous.final)
     ) {
         mapIndexed { i, entry ->
             if (i == index) {

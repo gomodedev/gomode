@@ -59,10 +59,16 @@ private fun parseConversationContext(
     val number = version?.doubleOrNull
     val dependencies = value["dependencies"] as? JsonArray
     require(
-        epoch?.isString == true && epoch.content.isNotEmpty() && epoch.content.length <= 128 &&
-            version != null && !version.isString && number != null &&
-            number in 0.0..9007199254740991.0 && number % 1.0 == 0.0 &&
-            dependencies != null && dependencies.size <= 128,
+        epoch?.isString == true &&
+            epoch.content.isNotEmpty() &&
+            epoch.content.length <= 128 &&
+            version != null &&
+            !version.isString &&
+            number != null &&
+            number in 0.0..9007199254740991.0 &&
+            number % 1.0 == 0.0 &&
+            dependencies != null &&
+            dependencies.size <= 128,
     ) { "Invalid context ordering" }
     val routing =
         dependencies.map { candidate ->

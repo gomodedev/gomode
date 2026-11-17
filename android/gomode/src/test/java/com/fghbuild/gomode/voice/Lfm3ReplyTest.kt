@@ -89,7 +89,8 @@ class Lfm3ReplyTest {
         val nested =
             parseLfm3Reply(
                 "<tool_call><function=dispatch_service_tool><parameter=arguments>" +
-                    """{"text":"$value"}""" + "</parameter></function></tool_call>",
+                    """{"text":"$value"}""" +
+                    "</parameter></function></tool_call>",
                 ToolCallValidator(nestedTools),
             )
         assertEquals(value, (nested.calls.single().arguments["arguments"] as Map<*, *>)["text"])

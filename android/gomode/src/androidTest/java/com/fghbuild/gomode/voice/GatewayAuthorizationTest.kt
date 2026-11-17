@@ -108,10 +108,14 @@ class GatewayAuthorizationTest {
                     }
                 }
                 repository.settings.first {
-                    it.activeServiceId == sponsorID && (
-                        !local ||
-                            (it.voiceSetup.deviceSpeech && it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM)
-                    )
+                    it.activeServiceId == sponsorID &&
+                        (
+                            !local ||
+                                (
+                                    it.voiceSetup.deviceSpeech &&
+                                        it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM
+                                )
+                        )
                 }
                 val entries =
                     repository.settings.value.services.associate { service ->

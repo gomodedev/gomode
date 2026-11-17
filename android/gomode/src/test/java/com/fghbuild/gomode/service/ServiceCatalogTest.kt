@@ -311,7 +311,8 @@ class ServiceCatalogTest {
                         it.copy(preference = it.preference.copy(languageModel = VoiceLanguageModel.LOCAL_LLM))
                     }
                     settings.settings.first {
-                        it.activeServiceId == aID && it.voiceSetup.deviceSpeech &&
+                        it.activeServiceId == aID &&
+                            it.voiceSetup.deviceSpeech &&
                             it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM
                     }
                     val a = first.entry(aID)
@@ -361,7 +362,8 @@ class ServiceCatalogTest {
                     it.copy(preference = it.preference.copy(languageModel = VoiceLanguageModel.LOCAL_LLM))
                 }
                 settings.settings.first {
-                    it.activeServiceId == id && it.voiceSetup.deviceSpeech &&
+                    it.activeServiceId == id &&
+                        it.voiceSetup.deviceSpeech &&
                         it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM
                 }
                 val entry = fixture.entry(id)

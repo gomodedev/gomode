@@ -199,7 +199,8 @@ private fun validateResponse(
     val expected =
         if (response.code == 206) {
             val range = contentRange.matchEntire(response.header("Content-Range").orEmpty())
-            if (range == null || range.groupValues[1].toLongOrNull() != offset ||
+            if (range == null ||
+                range.groupValues[1].toLongOrNull() != offset ||
                 range.groupValues[2].toLongOrNull() != artifact.size - 1 ||
                 range.groupValues[3].toLongOrNull() != artifact.size
             ) {

@@ -47,7 +47,8 @@ internal fun ModelLoadDiagnosticsControls(history: ModelLoadHistory) {
             Text(
                 listOfNotNull(history.latest, history.previous).joinToString("\n\n") { record ->
                     record.describe(format)
-                } + "\n\nMemory values are sampled process usage; GPU allocations may be excluded.",
+                } +
+                    "\n\nMemory values are sampled process usage; GPU allocations may be excluded.",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.testTag("gomode-model-diagnostics-details"),
             )

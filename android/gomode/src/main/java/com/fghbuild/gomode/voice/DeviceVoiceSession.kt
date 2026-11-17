@@ -356,7 +356,8 @@ internal class DeviceVoiceSession(
                     }
                     foreground.start(setup.serverName)
                     if (preparedLocalModel == null) otherSetup = setup
-                    if (!callController.isStarted && callController.isSupported() &&
+                    if (!callController.isStarted &&
+                        callController.isSupported() &&
                         !callController.start(setup.serverName, setup.serverID) { disconnect() }
                     ) {
                         setError("Could not start the voice call")
@@ -685,7 +686,8 @@ internal class DeviceVoiceSession(
 
                 MessageKind.TurnStatus -> {
                     val msg = json.decodeFromString(TurnStatus.serializer(), text)
-                    if (msg.state == TurnState.Thinking && pendingCancellations == 0 &&
+                    if (msg.state == TurnState.Thinking &&
+                        pendingCancellations == 0 &&
                         (!suppressReply || awaitingReply)
                     ) {
                         suppressReply = false
@@ -1407,7 +1409,10 @@ internal class DeviceVoiceSession(
             disconnect()
             return
         }
-        if (userSpeechActive || output.active || awaitingModelTurn || !_state.value.connected ||
+        if (userSpeechActive ||
+            output.active ||
+            awaitingModelTurn ||
+            !_state.value.connected ||
             (voiceConversation != null && pendingGatewayTools.containsKey(attemptGeneration.get()))
         ) {
             if (!pendingNotifications.add(text, generate)) {
@@ -1483,7 +1488,10 @@ internal class DeviceVoiceSession(
     }
 
     private fun flushAfterRemoteInterruption() {
-        if (suppressReply && !remoteTurnActive && !awaitingReply && pendingCancellations == 0 &&
+        if (suppressReply &&
+            !remoteTurnActive &&
+            !awaitingReply &&
+            pendingCancellations == 0 &&
             !pendingGatewayTools.containsKey(attemptGeneration.get())
         ) {
             awaitingModelTurn = false

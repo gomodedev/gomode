@@ -192,7 +192,8 @@ class VoiceChoicesTest {
                                     "id" to JsonPrimitive("live"),
                                     "label" to JsonPrimitive("Gemini Live"),
                                     "transports" to JsonArray(listOf(JsonPrimitive("text"), JsonPrimitive("webrtc"))),
-                                ) + row.getValue("catalog").jsonObject,
+                                ) +
+                                    row.getValue("catalog").jsonObject,
                             ),
                         )
                     val catalog = GatewayVoiceChoices(gateway, VoiceChoicesResp(listOf(choice), emptyList()))

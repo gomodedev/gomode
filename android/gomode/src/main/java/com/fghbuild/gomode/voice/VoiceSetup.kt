@@ -132,12 +132,16 @@ internal suspend fun prepareVoiceSetup(
     ) {
         throw VoiceSetupException("Voice token endpoint must be hosted by the service")
     }
-    if (sharedCatalog == null && group?.authRequired == true && mcpEndpointURL != null &&
-        cookieFor(mcpEndpointURL).isNullOrBlank() && bearerTokenFor(mcpEndpointURL).isNullOrBlank()
+    if (sharedCatalog == null &&
+        group?.authRequired == true &&
+        mcpEndpointURL != null &&
+        cookieFor(mcpEndpointURL).isNullOrBlank() &&
+        bearerTokenFor(mcpEndpointURL).isNullOrBlank()
     ) {
         throw VoiceSetupException("Sign in to the hosted service before using voice")
     }
-    if (!externalGateway && serviceSettings.webShell.voiceGateway.authRequired == true &&
+    if (!externalGateway &&
+        serviceSettings.webShell.voiceGateway.authRequired == true &&
         cookieFor(gatewayEndpointURL).isNullOrBlank() &&
         bearerTokenFor(gatewayEndpointURL).isNullOrBlank()
     ) {
@@ -211,9 +215,11 @@ internal fun ensureVoiceSettingsCurrent(
     current: SettingsState,
 ) {
     if (captured.activeServiceId != current.activeServiceId ||
-        captured.activeServiceURL != current.activeServiceURL || captured.voiceSetup != current.voiceSetup ||
+        captured.activeServiceURL != current.activeServiceURL ||
+        captured.voiceSetup != current.voiceSetup ||
         captured.gatewayVoiceSetups != current.gatewayVoiceSetups ||
-        captured.speakingVoices != current.speakingVoices || captured.synthesisVoices != current.synthesisVoices
+        captured.speakingVoices != current.speakingVoices ||
+        captured.synthesisVoices != current.synthesisVoices
     ) {
         throw VoiceSetupException("Voice settings changed. Try connecting again.")
     }

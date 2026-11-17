@@ -263,7 +263,8 @@ class FrontendPreparationBridgeTest {
         view: WebView,
     ) {
         compose.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
-            entry.state.value.load == WebShellLoadState.Ready && entry.bearerStore.authReady.value &&
+            entry.state.value.load == WebShellLoadState.Ready &&
+                entry.bearerStore.authReady.value &&
                 evaluate(view, "window.authAcknowledged === true") == "true"
         }
     }

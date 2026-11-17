@@ -18,7 +18,9 @@ internal class WebMediaPermissions(
         serviceURL: String,
         isCurrentPage: () -> Boolean,
     ): Array<String> {
-        if (pending != null || !isTrustedPermissionOrigin(request.origin, serviceURL) || !isCurrentPage() ||
+        if (pending != null ||
+            !isTrustedPermissionOrigin(request.origin, serviceURL) ||
+            !isCurrentPage() ||
             request.resources.isEmpty()
         ) {
             request.deny()

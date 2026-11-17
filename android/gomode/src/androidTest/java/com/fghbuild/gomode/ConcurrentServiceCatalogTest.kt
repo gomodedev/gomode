@@ -125,7 +125,8 @@ class ConcurrentServiceCatalogTest {
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
                     catalog.state.value.values
                         .count { it.readiness == ServiceReadiness.READY } == 2 &&
-                        first.streams.get() >= 1 && second.streams.get() >= 1
+                        first.streams.get() >= 1 &&
+                        second.streams.get() >= 1
                 }
                 val identities = entries.map { it.bearerStore.identityEpoch.value }
                 val streamCounts = first.streams.get() to second.streams.get()
@@ -138,7 +139,8 @@ class ConcurrentServiceCatalogTest {
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
                     catalog.state.value.values
                         .all { it.readiness == ServiceReadiness.READY } &&
-                        first.streams.get() > streamCounts.first && second.streams.get() > streamCounts.second
+                        first.streams.get() > streamCounts.first &&
+                        second.streams.get() > streamCounts.second
                 }
                 composeRule.runOnIdle {
                     assertEquals(identities, entries.map { it.bearerStore.identityEpoch.value })
@@ -264,7 +266,9 @@ class ConcurrentServiceCatalogTest {
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
                     catalog.state.value.values
                         .count { it.readiness == ServiceReadiness.READY } == 2 &&
-                        first.streams.get() >= 1 && second.streams.get() >= 1 && notifications.size >= 2 &&
+                        first.streams.get() >= 1 &&
+                        second.streams.get() >= 1 &&
+                        notifications.size >= 2 &&
                         entries.all { it.isFrontendReady && it.frontendTools.declarations.isNotEmpty() }
                 }
                 val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
@@ -616,7 +620,8 @@ class ConcurrentServiceCatalogTest {
                                                 put("jsonrpc", "2.0")
                                                 put("method", "notifications/resources/updated")
                                                 put("params", buildJsonObject { put("uri", uri) })
-                                            } + "\n\n"
+                                            } +
+                                            "\n\n"
                                     }.let {
                                         if (liveNotifications) {
                                             it.repeat(10_000)

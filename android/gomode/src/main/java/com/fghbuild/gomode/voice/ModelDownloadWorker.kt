@@ -90,7 +90,8 @@ class ModelDownloadWorker(
                         var lastStage: ModelTransferStage? = null
                         for (progress in updates) {
                             val now = SystemClock.elapsedRealtime()
-                            if (progress.stage != lastStage || progress.bytes == artifact.size ||
+                            if (progress.stage != lastStage ||
+                                progress.bytes == artifact.size ||
                                 now - lastUpdate >= 500
                             ) {
                                 setProgress(

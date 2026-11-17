@@ -24,6 +24,8 @@ indent_style = tab
 indent_size = 4
 
 # Compose functions are PascalCase by convention; ktlint's naming rule allows it.
+# Experimental rules add stricter wrapping.
 [*.{kt,kts}]
 indent_size = 4
+ktlint_experimental = enabled
 ktlint_function_naming_ignore_when_annotated_with = Composable

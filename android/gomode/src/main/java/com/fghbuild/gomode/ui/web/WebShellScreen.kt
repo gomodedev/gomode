@@ -238,7 +238,8 @@ internal class ServiceWebPage(
                     "gomodeFrontendDocument",
                     setOf(serviceOrigin(initialURL)),
                 ) { view, message, sourceOrigin, isMainFrame, reply ->
-                    if (message.data == "begin" && serviceSession.isCurrentPage(pageGeneration) &&
+                    if (message.data == "begin" &&
+                        serviceSession.isCurrentPage(pageGeneration) &&
                         acceptsFrontendVoiceTools(sourceOrigin, isMainFrame, view.url, initialURL)
                     ) {
                         // This document-start message, unlike onPageStarted, cannot
@@ -433,7 +434,8 @@ internal class ServiceWebPage(
                         frontendTools.clear(view)
 
                         loadFailed = true
-                        if (error.errorCode == WebViewClient.ERROR_TIMEOUT && request.method == "GET" &&
+                        if (error.errorCode == WebViewClient.ERROR_TIMEOUT &&
+                            request.method == "GET" &&
                             serviceSession.canRetryAutomatically
                         ) {
                             scheduleRetry()
@@ -523,7 +525,8 @@ internal class ServiceWebPage(
                         val permissionOwner = attachment
                         val missing =
                             mediaPermissions.request(request, hostURL) {
-                                attachment === permissionOwner && canLaunchNativeUI &&
+                                attachment === permissionOwner &&
+                                    canLaunchNativeUI &&
                                     serviceSession.isCurrentPage(pageGeneration) &&
                                     hostView.url?.toUri()?.let { isTrustedPermissionOrigin(it, hostURL) } == true
                             }
@@ -806,7 +809,8 @@ internal fun acceptsFrontendVoiceTools(
     pageURL: String?,
     serviceURL: String,
 ): Boolean =
-    isMainFrame && isTrustedPermissionOrigin(sourceOrigin, serviceURL) &&
+    isMainFrame &&
+        isTrustedPermissionOrigin(sourceOrigin, serviceURL) &&
         pageURL?.let { isTrustedPermissionOrigin(it.toUri(), serviceURL) } == true
 
 internal fun isTrustedPermissionOrigin(

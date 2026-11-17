@@ -235,7 +235,8 @@ internal class LocalModelLoadDiagnostics(
                     .MemoryInfo()
                     .also(Debug::getMemoryInfo)
                     .totalPss
-                    .toLong() * 1024
+                    .toLong() *
+                    1024
             val rss =
                 File("/proc/self/status").useLines { lines ->
                     lines

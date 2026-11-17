@@ -187,7 +187,8 @@ internal class VoiceConversation(
         val current = conversation ?: return false
         if (!current.lifetime.isCurrent) return false
         val sponsor = current.sponsor
-        if (sponsor != null && (
+        if (sponsor != null &&
+            (
                 entries()[sponsor.key] !== sponsor ||
                     sponsor.bearerStore.identityEpoch.value != current.sponsorEpoch
             )
@@ -199,7 +200,8 @@ internal class VoiceConversation(
             val entry = entries()[key] ?: continue
             if (entry.bearerStore.authReady.value &&
                 (
-                    identity.entry !== entry || identity.epoch != entry.bearerStore.identityEpoch.value ||
+                    identity.entry !== entry ||
+                        identity.epoch != entry.bearerStore.identityEpoch.value ||
                         identity.cookie != cookieFor(key.url) ||
                         identity.authorization?.let { !catalog.isAuthorizationCurrent(key, it) } == true
                 )

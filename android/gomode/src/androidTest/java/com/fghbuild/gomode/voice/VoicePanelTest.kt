@@ -1551,7 +1551,8 @@ class VoicePanelTest {
                                     TranscriptSpeaker.ASSISTANT,
                                     state.value.transcript
                                         .single()
-                                        .text + "\nNew paragraph.",
+                                        .text +
+                                        "\nNew paragraph.",
                                 ),
                             ),
                     )

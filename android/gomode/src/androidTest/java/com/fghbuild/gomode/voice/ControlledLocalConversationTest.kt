@@ -426,7 +426,8 @@ class ControlledLocalConversationTest {
         speech: ControlledSpeech,
     ) {
         composeRule.waitUntil(30_000) {
-            session.state.value.connected && speech.callback != null &&
+            session.state.value.connected &&
+                speech.callback != null &&
                 session.state.value.turnState == TurnState.Idle
         }
     }
@@ -443,7 +444,8 @@ class ControlledLocalConversationTest {
                 it.copy(preference = it.preference.withLanguageModel(VoiceLanguageModel.LOCAL_LLM))
             }
             repository.settings.first {
-                it.activeServiceId == first && it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM &&
+                it.activeServiceId == first &&
+                    it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM &&
                     it.voiceSetup.deviceSpeech
             }
             first to second

@@ -178,13 +178,18 @@ internal class CarDialVoiceOwner(
                     val changed = selected != null && !settingsCurrent(selected)
                     val ended =
                         mutableState.value.status == CarDialStatus.CONNECTED &&
-                            voice?.connected == false && voice.connectStatus == null
+                            voice?.connected == false &&
+                            voice.connectStatus == null
                     val page = attempt?.page
                     val pageRevoked =
                         attempt?.pageIdentityEpoch?.let { epoch ->
                             page == null || page.bearerStore.identityEpoch.value != epoch
                         } == true
-                    if (!eligible() || changed || ended || pageRevoked || conversation?.isCurrent() == false ||
+                    if (!eligible() ||
+                        changed ||
+                        ended ||
+                        pageRevoked ||
+                        conversation?.isCurrent() == false ||
                         (!next.starting && SystemClock.elapsedRealtime() >= next.expiresAt)
                     ) {
                         // CoroutineScope.cancel(String) would cancel only this watcher.
@@ -202,7 +207,8 @@ internal class CarDialVoiceOwner(
         activity: Any,
     ): Boolean {
         val current = request ?: return false
-        if (current.identity != identity || !eligible() ||
+        if (current.identity != identity ||
+            !eligible() ||
             (!current.starting && SystemClock.elapsedRealtime() >= current.expiresAt)
         ) {
             return false
@@ -229,8 +235,10 @@ internal class CarDialVoiceOwner(
         activity: Any,
     ): Boolean {
         val current = request ?: return false
-        if (current.identity != identity || current.activity !== activity ||
-            mutableState.value.status !in setOf(CarDialStatus.PREPARING, CarDialStatus.CONNECTED) || !eligible()
+        if (current.identity != identity ||
+            current.activity !== activity ||
+            mutableState.value.status !in setOf(CarDialStatus.PREPARING, CarDialStatus.CONNECTED) ||
+            !eligible()
         ) {
             return false
         }
@@ -360,7 +368,8 @@ internal class CarDialVoiceOwner(
             token.takeIf { isTrustedPermissionOrigin(url.toUri(), next.server.url) }
         }
         val authorityCurrent = {
-            next.authority.get() && settingsCurrent(settings) &&
+            next.authority.get() &&
+                settingsCurrent(settings) &&
                 page.bearerStore.identityEpoch.value == authorityEpoch &&
                 (state.value.status == CarDialStatus.CONNECTED || page.isFrontendReady) &&
                 // Main-thread dispatch checks eligibility synchronously; IO deltas use the
@@ -455,8 +464,10 @@ internal class CarDialVoiceOwner(
             Log.w("GoModeCarDial", "Voice session did not connect: ${connected.error}")
             if (connected.error == FRONTEND_NOT_READY) next.failure = CarDialFailure.FRONTEND
             val language = (voice as? DeviceVoiceSession)?.speechLanguageState?.value
-            if (language == SpeechLanguageState.Missing || language == SpeechLanguageState.Pending ||
-                language == SpeechLanguageState.Unsupported || language is SpeechLanguageState.Failed
+            if (language == SpeechLanguageState.Missing ||
+                language == SpeechLanguageState.Pending ||
+                language == SpeechLanguageState.Unsupported ||
+                language is SpeechLanguageState.Failed
             ) {
                 next.failure = CarDialFailure.SPEECH_LANGUAGE
             }
