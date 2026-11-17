@@ -137,7 +137,7 @@ segment and chips must use system colors.
 The [web reference](../screenshots/voice/web-settings.webp), its
 [desktop layout](../screenshots/voice/web-desktop-settings.webp), and the
 [Android reference](../screenshots/android/voice-settings.webp) show the same
-setup: Whisper recognition, GPT-6 Luna, client speech, and its speaking voice and speed.
+setup: Voxtral recognition, GPT 6 Luna, client speech, and its speaking voice and speed.
 Both fixtures serve `scene/voice-choices.json`. The client speech option is
 "Browser" on web and "Local" on Android.
 
@@ -292,14 +292,19 @@ agent-browser --session voice-settings eval 'localStorage.clear()'
 agent-browser --session voice-settings set viewport 411 1700 1.75
 agent-browser --session voice-settings reload
 agent-browser --session voice-settings click '[aria-label="Voice settings"]'
-agent-browser --session voice-settings click '[role="radiogroup"]:has(input[value="model:kokoro"]) input[value="browser"]'
+agent-browser --session voice-settings click '[role="radiogroup"]:has(input[value="model:kitten-mini"]) input[value="browser"]'
 agent-browser --session voice-settings eval 'document.activeElement.blur()'
 agent-browser --session voice-settings mouse move 0 0
+agent-browser --session voice-settings wait 1000
 agent-browser --session voice-settings screenshot '[role="region"][aria-label="Voice assistant"]' /tmp/gomode-voice-web-settings.png
 agent-browser --session voice-settings set viewport 1280 1400
+agent-browser --session voice-settings wait 1000
 agent-browser --session voice-settings screenshot '[role="region"][aria-label="Voice assistant"]' /tmp/gomode-voice-web-desktop-settings.png
 agent-browser --session voice-settings close
 ```
+
+Without the waits, the panel can still be laying out, and the capture clips
+its right side.
 
 Each procedure clears the preview origin's saved settings first, so an earlier
 session's language or setup does not leak into the capture. The preview serves a

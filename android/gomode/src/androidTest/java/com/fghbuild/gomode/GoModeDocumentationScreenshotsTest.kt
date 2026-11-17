@@ -226,6 +226,18 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         ) {
             device.executeShellCommand("am broadcast -a com.android.systemui.demo -e command $command")
         }
+        // SystemUI applies icon_blacklist and demo commands asynchronously; a cold first scene once
+        // drew the demo Wi-Fi icon. Every Wi-Fi view, demo or real, reports HIDDEN once the slot is blocked.
+        val wifiStates = Regex("WifiView\\(slot='wifi', isCollecting=\\w+, visibleState=(\\w+)")
+        val systemUiCommand = "dumpsys activity service com.android.systemui/.SystemUIService"
+        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
+            val states =
+                wifiStates
+                    .findAll(device.executeShellCommand(systemUiCommand))
+                    .map { it.groupValues[1] }
+                    .toList()
+            states.isNotEmpty() && states.all { it == "HIDDEN" }
+        }
         device.waitForIdle()
         check(device.executeShellCommand(controllerCommand).contains("isInDemoMode=true")) {
             "SystemUI demo mode was reset before capturing $name"

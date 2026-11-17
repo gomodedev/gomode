@@ -2,7 +2,7 @@
   "choices": [
     {
       "id": "preview",
-      "label": "GPT-6 Luna",
+      "label": "GPT 6 Luna",
       "composable": true,
       "transports": ["text", "webrtc"],
       "speechModes": [
@@ -26,7 +26,7 @@
     },
     {
       "id": "preview-alt",
-      "label": "Claude Haiku",
+      "label": "Claude Haiku 5.5",
       "composable": true,
       "transports": ["text", "webrtc"],
       "speechModes": [
@@ -63,22 +63,22 @@
   ],
   "recognitionModels": [
     {
-      "id": "whisper",
-      "label": "Whisper"
+      "id": "voxtral",
+      "label": "Voxtral 4B"
     },
     {
-      "id": "parakeet",
-      "label": "Parakeet"
+      "id": "parakeet-tdt",
+      "label": "Parakeet TDT 0.6B"
     }
   ],
   "synthesisModels": [
     {
       "id": "gemini-tts",
-      "label": "Gemini speech"
+      "label": "Gemini Flash Lite TTS"
     },
     {
-      "id": "kokoro",
-      "label": "Kokoro"
+      "id": "kitten-mini",
+      "label": "Kitten TTS mini 82M"
     }
   ],
   "defaults": [
