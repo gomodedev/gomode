@@ -15,13 +15,11 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.gomode.completeFixtureFrontend
 import com.fghbuild.gomode.data.LocalLlmModel
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.frontendPreparationFixtureScript
@@ -46,8 +44,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.withContext
 import okhttp3.mockwebserver.Dispatcher
@@ -692,14 +688,5 @@ class ControlledLocalConversationTest {
         }
 
         private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
-    }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        private val writeMutex = Mutex()
-        private val state = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = state
-
-        override suspend fun updateData(transform: suspend (Preferences) -> Preferences) =
-            writeMutex.withLock { transform(state.value).also { state.value = it } }
     }
 }

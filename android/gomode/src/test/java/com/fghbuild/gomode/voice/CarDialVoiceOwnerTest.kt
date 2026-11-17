@@ -8,9 +8,7 @@ import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.telecom.TelecomManager
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.service.ServiceCatalog
@@ -25,12 +23,9 @@ import com.fghbuild.gomode.ui.web.completeFrontendPreparation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -80,17 +75,8 @@ class CarDialVoiceOwnerTest {
             PackageManager.DONT_KILL_APP,
         )
         shadowOf(context.getSystemService(RoleManager::class.java)).addHeldRole(RoleManager.ROLE_CALL_REDIRECTION)
-        val preferences =
-            object : DataStore<Preferences> {
-                private val writeMutex = Mutex()
-                private val current = MutableStateFlow(emptyPreferences())
-                override val data: Flow<Preferences> = current
-
-                override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
-                    writeMutex.withLock { transform(current.value).also { current.value = it } }
-            }
         model = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
-        repository = SettingsRepository(preferences)
+        repository = SettingsRepository(MemoryPreferences())
         pages = ServiceShellOwner(context, repository)
         owner = CarDialVoiceOwner(context, repository, model, pages)
     }

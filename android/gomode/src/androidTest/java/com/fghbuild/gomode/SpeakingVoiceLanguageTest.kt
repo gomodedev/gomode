@@ -12,11 +12,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeechStageLocation.GATEWAY
@@ -24,12 +22,8 @@ import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.data.VoiceSetupPreference
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.settings.rememberSettingsEdits
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -142,15 +136,6 @@ class SpeakingVoiceLanguageTest {
         device.waitForIdle()
         val file = File(instrumentation.targetContext.getExternalFilesDir(null), "speaking-voice-$name.png")
         assertTrue(device.takeScreenshot(file))
-    }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        private val writes = Mutex()
-        private val current = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = current
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            writes.withLock { transform(current.value).also { current.value = it } }
     }
 
     private companion object {

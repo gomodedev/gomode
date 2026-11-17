@@ -2,17 +2,13 @@
 package com.fghbuild.gomode.voice
 
 import android.app.Application
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -43,12 +39,7 @@ class VoiceForegroundLeaseTest {
     fun idleCloudControllerDisposalCannotStopDialForegroundOwnership() {
         val repository =
             SettingsRepository(
-                object : DataStore<Preferences> {
-                    override val data: Flow<Preferences> = flowOf(emptyPreferences())
-
-                    override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
-                        error("Idle controller must not write settings")
-                },
+                MemoryPreferences().apply { beforeWrite = { error("Idle controller must not write settings") } },
             )
         val idle =
             VoiceSession(

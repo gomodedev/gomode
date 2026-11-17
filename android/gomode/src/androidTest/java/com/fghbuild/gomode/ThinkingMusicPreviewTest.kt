@@ -17,18 +17,12 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.lifecycle.Lifecycle
 import androidx.test.platform.app.InstrumentationRegistry
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.settings.rememberSettingsEdits
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Rule
 import org.junit.Test
@@ -121,14 +115,5 @@ class ThinkingMusicPreviewTest {
         play()
         composeRule.runOnIdle { visible.value = false }
         awaitMusic(false)
-    }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        private val writeMutex = Mutex()
-        private val state = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = state
-
-        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
-            writeMutex.withLock { transform(state.value).also { state.value = it } }
     }
 }

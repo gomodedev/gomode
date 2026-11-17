@@ -3,9 +3,7 @@ package com.fghbuild.gomode.service
 
 import android.net.Uri
 import android.webkit.WebView
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -30,12 +28,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -307,7 +302,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("Healthy").use { first ->
                 Fixture("Slow").use { second ->
-                    val settings = SettingsRepository(ContextPreferences())
+                    val settings = SettingsRepository(MemoryPreferences())
                     val aID = settings.addService("Healthy", first.server.url("/").toString())
                     val bID = settings.addService("Slow", second.server.url("/").toString())
                     settings.switchService(aID)
@@ -359,7 +354,7 @@ class ServiceCatalogTest {
     fun `unread selected context has a half second advisory startup budget`() =
         runTest {
             Fixture("Selected").use { fixture ->
-                val settings = SettingsRepository(ContextPreferences())
+                val settings = SettingsRepository(MemoryPreferences())
                 val id = settings.addService("Selected", fixture.server.url("/").toString())
                 settings.selectDeviceStages()
                 settings.updateSavedVoiceSetup(null) {
@@ -404,7 +399,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("A").use { first ->
                 Fixture("B").use { second ->
-                    val settings = SettingsRepository(ContextPreferences())
+                    val settings = SettingsRepository(MemoryPreferences())
                     val aID = settings.addService("A", first.server.url("/").toString())
                     val bID = settings.addService("B", second.server.url("/").toString())
                     settings.selectDeviceStages()
@@ -1262,17 +1257,6 @@ class ServiceCatalogTest {
                 }
             }
         }
-
-    private class ContextPreferences : DataStore<Preferences> {
-        private val mutex = Mutex()
-        private val state = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = state
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            mutex.withLock {
-                transform(state.value).also { state.value = it }
-            }
-    }
 
     private class DeferredWebView(
         private val documentURL: String,

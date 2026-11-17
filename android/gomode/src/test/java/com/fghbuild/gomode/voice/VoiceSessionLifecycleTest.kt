@@ -4,9 +4,7 @@ package com.fghbuild.gomode.voice
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Uri
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeakingVoiceOwner
 import com.fghbuild.gomode.data.SpeechStageLocation
@@ -31,7 +29,6 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -94,7 +91,7 @@ class VoiceSessionLifecycleTest {
 
     @Test
     fun failureSurvivesDisconnectUntilDismissed() {
-        val session = createCloudSession(SettingsRepository(InMemoryPreferencesDataStore()))
+        val session = createCloudSession(SettingsRepository(MemoryPreferences()))
         try {
             session.setError("session: download canceled")
             session.disconnect()
@@ -111,7 +108,7 @@ class VoiceSessionLifecycleTest {
         runTest {
             Dispatchers.setMain(StandardTestDispatcher(testScheduler))
             val context = RuntimeEnvironment.getApplication()
-            val session = createCloudSession(SettingsRepository(InMemoryPreferencesDataStore()))
+            val session = createCloudSession(SettingsRepository(MemoryPreferences()))
             val peer = RecordingPeerConnection()
             attachWaitingPeer(session, peer)
             VoiceSession::class.java.getDeclaredMethod("startNetworkMonitoring").apply {
@@ -195,7 +192,7 @@ class VoiceSessionLifecycleTest {
     fun toolResultDeliveryFailureStopsTheAttemptWithoutRepeatingTheAction() =
         runTest {
             for (failure in listOf("closed", "rejected", "exception")) {
-                val settings = SettingsRepository(InMemoryPreferencesDataStore())
+                val settings = SettingsRepository(MemoryPreferences())
                 val first = settings.addService("First", "https://first.example")
                 val second = settings.addService("Second", "https://second.example")
                 settings.settings.first { it.activeServiceId == second }
@@ -252,7 +249,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun rejectedContextDeliveryUsesTheExistingErrorState() =
         runTest {
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             val id = settings.addService("Home", "https://home.example")
             settings.settings.first { it.activeServiceId == id }
             val session = createCloudSession(settings)
@@ -280,7 +277,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun disconnectCancelsPendingToolWorkBeforeItCanCommitToAnotherCall() =
         runTest {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val settings = SettingsRepository(store)
             val first = settings.addService("First", "https://first.example")
             val second = settings.addService("Second", "https://second.example")
@@ -336,7 +333,7 @@ class VoiceSessionLifecycleTest {
                 ShadowLog.clear()
                 val timing = VoiceStartupTiming(VoiceStartupSource.MANUAL)
                 timing.enter(VoiceStartupStage.TRANSPORT)
-                val session = createCloudSession(SettingsRepository(InMemoryPreferencesDataStore()))
+                val session = createCloudSession(SettingsRepository(MemoryPreferences()))
                 val peer = RecordingPeerConnection(completeDescription)
                 attachWaitingPeer(session, peer)
                 try {
@@ -392,7 +389,7 @@ class VoiceSessionLifecycleTest {
         runTest {
             Dispatchers.setMain(StandardTestDispatcher(testScheduler))
             val timing = VoiceStartupTiming(VoiceStartupSource.MANUAL)
-            val session = createCloudSession(SettingsRepository(InMemoryPreferencesDataStore()))
+            val session = createCloudSession(SettingsRepository(MemoryPreferences()))
             val peer = RecordingPeerConnection()
             attachWaitingPeer(session, peer)
             try {
@@ -426,7 +423,7 @@ class VoiceSessionLifecycleTest {
                 if (source == VoiceStartupSource.CAR) timing.startDeadline(60_000)
                 timing.enter(VoiceStartupStage.TRANSPORT)
                 val session =
-                    createCloudSession(SettingsRepository(InMemoryPreferencesDataStore()), startupTiming = { timing })
+                    createCloudSession(SettingsRepository(MemoryPreferences()), startupTiming = { timing })
                 val peer = RecordingPeerConnection()
                 VoiceSession::class.java.getDeclaredField("peerConnection").apply {
                     isAccessible = true
@@ -524,7 +521,7 @@ class VoiceSessionLifecycleTest {
                 server.start()
                 try {
                     val base = server.url("/").toString().trimEnd('/')
-                    val repository = SettingsRepository(InMemoryPreferencesDataStore())
+                    val repository = SettingsRepository(MemoryPreferences())
                     repository.addService("Fixture", base)
                     repository.settings.first { it.activeServiceURL == base }
                     val attempt =
@@ -630,7 +627,7 @@ class VoiceSessionLifecycleTest {
                 }
             server.start()
             try {
-                val repository = SettingsRepository(InMemoryPreferencesDataStore())
+                val repository = SettingsRepository(MemoryPreferences())
                 repository.addService("Other", "https://other.example")
                 repository.addService("Fixture", server.url("/").toString())
                 repository.updateSavedVoiceSetup(null) {
@@ -674,7 +671,7 @@ class VoiceSessionLifecycleTest {
 
     @Test
     fun selectingAnUnavailableAudioDeviceReportsFailure() {
-        val settings = SettingsRepository(InMemoryPreferencesDataStore())
+        val settings = SettingsRepository(MemoryPreferences())
         val session = createCloudSession(settings)
         session.selectAudioDevice(Int.MAX_VALUE)
         assertTrue(
@@ -695,7 +692,7 @@ class VoiceSessionLifecycleTest {
             server.dispatcher = delayedSettings(discoveryStarted, releaseDiscovery)
             server.start()
             try {
-                val settings = SettingsRepository(InMemoryPreferencesDataStore())
+                val settings = SettingsRepository(MemoryPreferences())
                 settings.addService(label = "old", url = server.url("/").toString())
                 settings.settings.first { it.activeServiceURL.isNotBlank() }
                 val session = createCloudSession(settings)
@@ -729,7 +726,7 @@ class VoiceSessionLifecycleTest {
             server.dispatcher = delayedSettings(discoveryStarted, releaseDiscovery)
             server.start()
             val application = RuntimeEnvironment.getApplication()
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             settings.addService(label = "Work", url = server.url("/").toString())
             settings.settings.first { it.activeServiceURL.isNotBlank() }
             val session = createCloudSession(settings, beginConversation = true)
@@ -765,7 +762,7 @@ class VoiceSessionLifecycleTest {
             oldServer.start()
             newServer.start()
             try {
-                val settings = SettingsRepository(InMemoryPreferencesDataStore())
+                val settings = SettingsRepository(MemoryPreferences())
                 settings.addService(label = "old", url = oldServer.url("/").toString())
                 settings.settings.first { it.activeServiceURL == oldServer.url("/").toString().trimEnd('/') }
                 val session = createCloudSession(settings)
@@ -792,7 +789,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun liveDraftsReplaceAndOlderFinalsCannotEraseNewerInput() =
         runTest {
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             val id = settings.addService("Home", "https://home.example")
             settings.settings.first { it.activeServiceId == id }
             val session = createCloudSession(settings)
@@ -845,7 +842,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun reasoningReachesTheTranscriptOnlyWhenEnabled() =
         runBlocking {
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             val id = settings.addService("Home", "https://home.example")
             settings.settings.first { it.activeServiceId == id }
             val session = createCloudSession(settings)
@@ -896,7 +893,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun nativeServerToolsRejectNonObjectArgumentsOnTheDataChannel() =
         runBlocking {
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             val id = settings.addService("Home", "https://home.example")
             settings.settings.first { it.activeServiceId == id }
             val session = createCloudSession(settings)
@@ -926,7 +923,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun serverSwitchReturnsResultAndDisconnectedChannelCannotSwitchAgain() =
         runBlocking {
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             val first = settings.addService("First", "https://first.example")
             val second = settings.addService("Second", "https://second.example")
             settings.settings.first { it.activeServiceId == second }
@@ -975,7 +972,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun idleToolTurnWithoutSpeechFlushesFocusButIdleDuringPlaybackDoesNot() =
         runBlocking {
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             val first = settings.addService("First", "https://idle-first.example")
             val second = settings.addService("Second", "https://idle-second.example")
             settings.settings.first { it.activeServiceId == second }
@@ -1026,7 +1023,7 @@ class VoiceSessionLifecycleTest {
     @Test
     fun microphoneModesGateTheRtpTrackAcrossRepliesAndInterruption() =
         runBlocking {
-            val settings = SettingsRepository(InMemoryPreferencesDataStore())
+            val settings = SettingsRepository(MemoryPreferences())
             val id = settings.addService("Home", "https://home.example")
             settings.settings.first { it.activeServiceId == id }
             val session = createCloudSession(settings)
@@ -1302,22 +1299,6 @@ class VoiceSessionLifecycleTest {
                 return MockResponse().setResponseCode(500)
             }
         }
-
-    private class InMemoryPreferencesDataStore : DataStore<Preferences> {
-        var beforeWrite: suspend () -> Unit = {}
-        private val current = MutableStateFlow(emptyPreferences())
-
-        override val data: Flow<Preferences> = current
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
-            beforeWrite()
-            while (true) {
-                val before = current.value
-                val after = transform(before)
-                if (current.compareAndSet(before, after)) return after
-            }
-        }
-    }
 
     private companion object {
         const val SETTINGS_JSON = """

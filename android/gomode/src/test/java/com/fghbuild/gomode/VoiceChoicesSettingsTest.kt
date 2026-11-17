@@ -19,11 +19,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import com.fghbuild.gomode.data.GatewayVoiceSetup
 import com.fghbuild.gomode.data.LocalLlmModel
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeechStage
@@ -35,11 +33,8 @@ import com.fghbuild.gomode.data.VoiceSetupPreference
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.settings.rememberSettingsEdits
 import com.fghbuild.gomode.voice.GatewayVoiceChoices
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -50,6 +45,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 class VoiceChoicesSettingsTest {
@@ -120,12 +116,12 @@ class VoiceChoicesSettingsTest {
                 val voice = composeRule.onNodeWithTag("gomode-speaking-voice")
                 voice.performScrollTo().assertTextContains("Provider default").performClick()
                 composeRule.onNodeWithTag("gomode-speaking-voice-default").assertIsSelected()
-                composeRule.runOnIdle { store.failWrites = true }
+                composeRule.runOnIdle { store.beforeWrite = { throw IOException("Fixture write failure") } }
                 composeRule.onNodeWithTag("gomode-speaking-voice-Kore").assertIsNotSelected().performClick()
                 waitForTag("gomode-speaking-voice-save-error")
                 voice.assertTextContains("Provider default")
                 assertEquals(VoiceSetupMode.FOLLOW_GATEWAY, repository.settings.value.voiceSetup.mode)
-                composeRule.runOnIdle { store.failWrites = false }
+                composeRule.runOnIdle { store.beforeWrite = {} }
                 voice.performClick()
                 composeRule.onNodeWithTag("gomode-speaking-voice-Kore").performClick()
                 composeRule.waitUntil {
@@ -218,7 +214,8 @@ class VoiceChoicesSettingsTest {
                 // Device recognition with gateway speech.
                 composeRule.onNodeWithTag("gomode-recognition-model-parakeet").performScrollTo().assertIsSelected()
                 // A held write keeps the pickers disabled while it saves, as a slow disk does.
-                store.writes.lock()
+                val saving = CompletableDeferred<Unit>()
+                store.beforeWrite = { saving.await() }
                 composeRule
                     .onNodeWithTag(
                         "gomode-recognition-device",
@@ -226,7 +223,7 @@ class VoiceChoicesSettingsTest {
                     .assertIsNotSelected()
                     .performClick()
                 composeRule.onNodeWithTag("gomode-recognition-model-parakeet").performScrollTo().assertIsNotEnabled()
-                store.writes.unlock()
+                saving.complete(Unit)
                 composeRule.waitUntil { repository.settings.value.voiceSetup.recognition == DEVICE }
                 chosen("gomode-recognition").assertTextContains("Local")
                 // After a save, reselecting the current stage keeps it.
@@ -445,7 +442,7 @@ class VoiceChoicesSettingsTest {
                 }
 
                 // A failed save stays under its control until a later save succeeds.
-                composeRule.runOnIdle { store.failWrites = true }
+                composeRule.runOnIdle { store.beforeWrite = { throw IOException("Fixture write failure") } }
                 pick("gomode-recognition", "gomode-recognition-model-parakeet")
                 waitForTag("gomode-recognition-error")
                 stage("gomode-recognition-error").assertTextContains("Unable to save recognition", substring = true)
@@ -453,7 +450,7 @@ class VoiceChoicesSettingsTest {
                 composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").performScrollTo().performClick()
                 waitForTag("gomode-voice-setup-error")
                 composeRule.onNodeWithTag("gomode-recognition-error").assertDoesNotExist()
-                composeRule.runOnIdle { store.failWrites = false }
+                composeRule.runOnIdle { store.beforeWrite = {} }
                 composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").performClick()
                 composeRule.waitUntil { repository.settings.value.voiceSetup.mode == VoiceSetupMode.ALL_IN_ONE }
                 composeRule.onNodeWithTag("gomode-voice-setup-error").assertDoesNotExist()
@@ -508,19 +505,4 @@ class VoiceChoicesSettingsTest {
         composeRule.onNode(hasAnyAncestor(hasTestTag(field)) and isSelected()).performScrollTo()
 
     private fun SettingsState.gateway(base: String) = gatewayVoiceSetups[base] ?: GatewayVoiceSetup()
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        var failWrites = false
-
-        /** Serializes writes; a test holds it to keep a save in progress. */
-        val writes = Mutex()
-        private val current = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = current
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            writes.withLock {
-                if (failWrites) throw java.io.IOException("Fixture write failure")
-                transform(current.value).also { current.value = it }
-            }
-    }
 }

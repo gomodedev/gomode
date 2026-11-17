@@ -56,6 +56,9 @@ android {
     sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/speech-text"))
     sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/voice-choices"))
     sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("../e2e/voice-preview/scene"))
+    // Fakes compiled into both unit and instrumented tests.
+    sourceSets.getByName("test").java.srcDir("src/sharedTest/java")
+    sourceSets.getByName("androidTest").java.srcDir("src/sharedTest/java")
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
@@ -86,6 +89,7 @@ kotlin {
 detekt {
     buildUponDefaultConfig = true
     config.setFrom(files("$rootDir/detekt.yml"))
+    source.from("src/sharedTest/java")
     parallel = true
 }
 

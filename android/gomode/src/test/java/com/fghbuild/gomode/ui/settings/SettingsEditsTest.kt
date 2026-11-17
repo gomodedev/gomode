@@ -1,16 +1,10 @@
 // Tests native settings autosave validation, explicit creation, active-session guards, and failed-write recovery.
 package com.fghbuild.gomode.ui.settings
 
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -90,12 +84,12 @@ class SettingsEditsTest {
             val initial = repository.settings.first { it.loadState == SettingsLoadState.Ready }
             val edits = SettingsEdits(repository, initial, this)
             edits.language = "fr-CA"
-            store.failWrites = true
+            store.beforeWrite = { throw IOException("Disk full") }
             assertFalse(edits.save(true, commitURL = true))
             assertEquals("fr-CA", edits.language)
             assertTrue(edits.error.orEmpty().contains("Disk full"))
             assertEquals("en-US", repository.settings.value.voiceLanguageTag)
-            store.failWrites = false
+            store.beforeWrite = {}
             assertTrue(edits.save(true, commitURL = true))
             repository.settings.first { it.voiceLanguageTag == "fr-CA" }
         }
@@ -178,18 +172,4 @@ class SettingsEditsTest {
             assertEquals(ServiceEdit(null, "", ""), edits.service)
             repository.settings.first { it.services.isEmpty() }
         }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        private val writeMutex = Mutex()
-        private val current = MutableStateFlow(emptyPreferences())
-        var failWrites = false
-
-        override val data: Flow<Preferences> = current
-
-        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
-            writeMutex.withLock {
-                if (failWrites) throw IOException("Disk full")
-                transform(current.value).also { current.value = it }
-            }
-    }
 }

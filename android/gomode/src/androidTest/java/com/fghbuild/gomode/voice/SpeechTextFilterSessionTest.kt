@@ -2,14 +2,12 @@
 package com.fghbuild.gomode.voice
 
 import android.Manifest
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.gomode.MainActivity
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.voicegateway.sdk.v2.AssistantTextDelta
 import com.fghbuild.voicegateway.sdk.v2.MessageKind
@@ -152,13 +150,6 @@ class SpeechTextFilterSessionTest {
                 activity.close()
             }
         }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        override val data = MutableStateFlow(emptyPreferences())
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            transform(data.value).also { data.value = it }
-    }
 
     private class RecordingSpeech : DeviceSpeech {
         override val microphoneRms = MutableStateFlow(0f)

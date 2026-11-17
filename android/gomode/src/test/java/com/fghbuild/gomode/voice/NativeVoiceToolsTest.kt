@@ -1,9 +1,7 @@
 // Tests native tool availability, call control, server selection, arguments, and schema compatibility.
 package com.fghbuild.gomode.voice
 
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
@@ -12,11 +10,7 @@ import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.data.VoiceSetupPreference
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -69,7 +63,7 @@ class NativeVoiceToolsTest {
     @Test
     fun `lists servers by id and switches the selected instance`() =
         runTest {
-            val repository = SettingsRepository(MemoryStore())
+            val repository = SettingsRepository(MemoryPreferences())
             val first = repository.addService("Home", "https://first.example")
             val second = repository.addService("Work", "https://second.example")
             repository.awaitSettings { it.activeServiceId == second }
@@ -121,7 +115,7 @@ class NativeVoiceToolsTest {
     @Test
     fun `invalid arguments never change the active server`() =
         runTest {
-            val repository = SettingsRepository(MemoryStore())
+            val repository = SettingsRepository(MemoryPreferences())
             val id = repository.addService("Home", "https://example.com")
             repository.awaitSettings { it.activeServiceId == id }
             listOf(
@@ -162,7 +156,7 @@ class NativeVoiceToolsTest {
     @Test
     fun `empty saved server catalog is discoverable and schemas validate local calls`() =
         runTest {
-            val repository = SettingsRepository(MemoryStore())
+            val repository = SettingsRepository(MemoryPreferences())
             repository.awaitSettings { it.loadState == SettingsLoadState.Ready }
             val result =
                 executeNativeVoiceTool("list_servers", args("{}"), repository, repository::switchService, {}) {}
@@ -179,7 +173,7 @@ class NativeVoiceToolsTest {
     @Test
     fun `mute needs no loaded settings and repeated calls keep the microphone muted`() =
         runTest {
-            val repository = SettingsRepository(MemoryStore())
+            val repository = SettingsRepository(MemoryPreferences())
             var mode = MicrophoneMode.LISTENING
             repeat(2) {
                 val result =
@@ -216,13 +210,4 @@ class NativeVoiceToolsTest {
         }
 
     private fun args(payload: String): JsonObject = Json.parseToJsonElement(payload).jsonObject
-
-    private class MemoryStore : DataStore<Preferences> {
-        private val writeMutex = Mutex()
-        private val state = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = state
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            writeMutex.withLock { transform(state.value).also { state.value = it } }
-    }
 }

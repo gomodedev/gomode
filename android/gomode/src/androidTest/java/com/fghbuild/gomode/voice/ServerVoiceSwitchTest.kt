@@ -26,14 +26,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
 import com.fghbuild.gomode.LocalEmulatorOnly
 import com.fghbuild.gomode.R
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -41,11 +39,7 @@ import com.fghbuild.gomode.frontendPreparationFixtureScript
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.WebSocket
@@ -1241,15 +1235,6 @@ class ServerVoiceSwitchTest {
 
         private fun json(body: String): MockResponse =
             MockResponse().setHeader("Content-Type", "application/json").setBody(body)
-    }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        private val writeMutex = Mutex()
-        private val state = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = state
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            writeMutex.withLock { transform(state.value).also { state.value = it } }
     }
 }
 

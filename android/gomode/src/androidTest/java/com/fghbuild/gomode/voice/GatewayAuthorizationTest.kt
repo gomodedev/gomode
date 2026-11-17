@@ -3,10 +3,8 @@ package com.fghbuild.gomode.voice
 
 import android.net.Uri
 import android.webkit.CookieManager
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import com.fghbuild.gomode.completeFixtureFrontend
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.service.ServiceCatalog
@@ -17,11 +15,7 @@ import com.fghbuild.gomode.ui.web.ServiceShellKey
 import com.fghbuild.gomode.ui.web.ServiceShellSession
 import com.fghbuild.gomode.ui.web.WebShellLoadState
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -259,14 +253,5 @@ class GatewayAuthorizationTest {
         entry.bearerStore.onNavigation(entry.key.url)
         check(entry.bearerStore.receive(Uri.parse(entry.key.url), true, entry.key.url, """{"bearerToken":"$token"}"""))
         completeFixtureFrontend(entry)
-    }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        private val writeMutex = Mutex()
-        private val state = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = state
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            writeMutex.withLock { transform(state.value).also { state.value = it } }
     }
 }

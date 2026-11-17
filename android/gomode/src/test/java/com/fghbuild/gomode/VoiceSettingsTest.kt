@@ -52,10 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import com.fghbuild.gomode.data.LocalLlmModel
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -63,12 +61,9 @@ import com.fghbuild.gomode.ui.settings.ServiceStatus
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.settings.rememberSettingsEdits
 import com.fghbuild.gomode.ui.theme.GoModeTheme
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -329,10 +324,11 @@ class VoiceSettingsTest {
             .performClick()
         composeRule.onNodeWithTag("gomode-device-speech-rate-1.0").assertIsSelected()
         // A held write keeps the picker disabled while it saves, as a slow disk does.
-        runBlocking { store.writes.lock() }
+        val saving = CompletableDeferred<Unit>()
+        store.beforeWrite = { saving.await() }
         composeRule.onNodeWithTag("gomode-device-speech-rate-1.25").assertIsNotSelected().performClick()
         composeRule.onNodeWithTag("gomode-device-speech-rate").assertIsNotEnabled()
-        store.writes.unlock()
+        saving.complete(Unit)
         composeRule.waitUntil { repository.settings.value.voiceSetup.deviceSpeechRate == 1.25f }
         composeRule.onNodeWithTag("gomode-device-speech-rate").assertTextContains("1.25×")
         // After a save, reselecting the current speed closes the menu without saving.
@@ -643,15 +639,5 @@ class VoiceSettingsTest {
                 )
             }
         }
-    }
-
-    private class MemoryPreferences : DataStore<Preferences> {
-        /** Serializes writes; a test holds it to keep a save in progress. */
-        val writes = Mutex()
-        private val state = MutableStateFlow(emptyPreferences())
-        override val data: Flow<Preferences> = state
-
-        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
-            writes.withLock { transform(state.value).also { state.value = it } }
     }
 }

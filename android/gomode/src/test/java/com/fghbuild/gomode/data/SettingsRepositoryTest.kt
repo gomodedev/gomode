@@ -2,13 +2,9 @@
 package com.fghbuild.gomode.data
 
 import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -23,7 +19,7 @@ class SettingsRepositoryTest {
     @Test
     fun `lock screen service access requires a persisted opt in`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repository = SettingsRepository(store)
             assertFalse(
                 repository
@@ -50,7 +46,7 @@ class SettingsRepositoryTest {
     @Test
     fun `reasoning display requires a persisted opt in`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repository = SettingsRepository(store)
             assertFalse(
                 repository
@@ -70,7 +66,7 @@ class SettingsRepositoryTest {
     @Test
     fun `existing services receive persisted slots that survive reorder and rename`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit {
                 it[stringPreferencesKey("SERVICES")] =
                     """[{"id":"home","label":"Home","url":"https://home.example"},{"id":"work","url":"https://work.example"}]"""
@@ -94,7 +90,7 @@ class SettingsRepositoryTest {
     @Test
     fun `retired assignments are not recycled for a new server`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit { it[stringPreferencesKey("CAR_CALLER_SLOTS")] = """{"removed":1}""" }
             val repository = SettingsRepository(store)
             val id = repository.addService("New", "https://new.example")
@@ -105,7 +101,7 @@ class SettingsRepositoryTest {
     @Test
     fun `full registry keeps services usable without allocating or recycling a fixed number`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val retired = (1..99).joinToString(",", prefix = "{", postfix = "}") { "\"retired-$it\":$it" }
             store.edit { it[stringPreferencesKey("CAR_CALLER_SLOTS")] = retired }
             val repository = SettingsRepository(store)
@@ -122,7 +118,7 @@ class SettingsRepositoryTest {
     @Test
     fun `aliases are unique ignoring case and blank aliases share the default`() =
         runBlocking {
-            val repository = SettingsRepository(InMemoryPreferencesDataStore())
+            val repository = SettingsRepository(MemoryPreferences())
             val home = repository.addService(" Home ", "https://home.example")
             val blank = repository.addService("", "https://blank.example")
             val state = repository.awaitSettings("both services") { it.services.size == 2 }
@@ -142,7 +138,7 @@ class SettingsRepositoryTest {
     @Test
     fun `service URLs are unique after normalization`() =
         runBlocking {
-            val repository = SettingsRepository(InMemoryPreferencesDataStore())
+            val repository = SettingsRepository(MemoryPreferences())
             repository.addService("Home", "https://home.example")
             val work = repository.addService("Work", "https://home.example/work")
             repository.awaitSettings("both services") { it.services.size == 2 }
@@ -154,7 +150,7 @@ class SettingsRepositoryTest {
     @Test
     fun `removing the active service activates the first remaining one and keeps its car slot reserved`() =
         runBlocking {
-            val repository = SettingsRepository(InMemoryPreferencesDataStore())
+            val repository = SettingsRepository(MemoryPreferences())
             val first = repository.addService("First", "https://first.example")
             val second = repository.addService("Second", "https://second.example")
             val slots = repository.awaitSettings("second active") { it.activeServiceId == second }.carCallerSlots
@@ -172,7 +168,7 @@ class SettingsRepositoryTest {
     @Test
     fun `duplicate persisted car slots fail closed`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit { it[stringPreferencesKey("CAR_CALLER_SLOTS")] = """{"home":1,"work":1}""" }
             val state =
                 SettingsRepository(store).awaitSettings("invalid car slots") {
@@ -186,28 +182,7 @@ class SettingsRepositoryTest {
     // cold first read on a saturated CI runner does not flake.
     private val settleTimeoutMs = 10_000L
 
-    // In-memory DataStore for unit tests. This class exercises SettingsRepository logic,
-    // not androidx file persistence. The real PreferenceDataStoreFactory reads a temp file
-    // and runs a background update loop on top of a file watcher; in CI that loop has
-    // repeatedly stopped emitting (the edit completed, yet the data flow produced nothing
-    // for the full 10s guard), which flakes these tests nondeterministically.
-    private class InMemoryPreferencesDataStore : DataStore<Preferences> {
-        private val current = MutableStateFlow(emptyPreferences())
-
-        override val data: Flow<Preferences> = current
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
-            while (true) {
-                val before = current.value
-                val after = transform(before)
-                if (current.compareAndSet(before, after)) {
-                    return after
-                }
-            }
-        }
-    }
-
-    private fun createRepo(): SettingsRepository = SettingsRepository(InMemoryPreferencesDataStore())
+    private fun createRepo(): SettingsRepository = SettingsRepository(MemoryPreferences())
 
     // Awaits the first settings state matching [predicate]. On timeout, surfaces what we were
     // waiting for and the last observed StateFlow value so a CI flake is diagnosable.
@@ -230,7 +205,7 @@ class SettingsRepositoryTest {
     @Test
     fun `gateway selections survive recreation, stay per gateway, and keep the other mode's choice`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repository = SettingsRepository(store)
             val allInOne = { setup: VoiceSetupPreference -> setup.copy(mode = VoiceSetupMode.ALL_IN_ONE) }
             val device = preference { VoiceSetupPreference(mode = VoiceSetupMode.SEPARATE_STAGES) }
@@ -266,7 +241,7 @@ class SettingsRepositoryTest {
     @Test
     fun `the followed choice keeps its own field beside an explicit all-in-one choice`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             // A followed language model saved under the field's former name.
             store.edit {
                 it[stringPreferencesKey("VOICE_SETUP")] = """{"mode":"follow-gateway"}"""
@@ -298,7 +273,7 @@ class SettingsRepositoryTest {
     @Test
     fun `one write saves the setup, a gateway's selections, and the local model`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repository = SettingsRepository(store)
             repository.updateSavedVoiceSetup("https://first.example/") {
                 it.copy(
@@ -334,12 +309,12 @@ class SettingsRepositoryTest {
     fun `unreadable voice setup surfaces an error instead of a default`() =
         runBlocking {
             for (key in listOf("VOICE_SETUP", "GATEWAY_VOICE_SETUPS")) {
-                val store = InMemoryPreferencesDataStore()
+                val store = MemoryPreferences()
                 store.edit { it[stringPreferencesKey(key)] = "invalid JSON" }
                 val state = SettingsRepository(store).awaitSettings(key) { it.loadState is SettingsLoadState.Failed }
                 assertTrue(key, state.loadState is SettingsLoadState.Failed)
             }
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit {
                 it[stringPreferencesKey("GATEWAY_VOICE_SETUPS")] =
                     """{"https://a.example":{"allInOneChoiceID":""}}"""
@@ -351,7 +326,7 @@ class SettingsRepositoryTest {
     @Test
     fun `device speaking speed survives recreation and an unavailable saved speed fails loading`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             SettingsRepository(store).updateSavedVoiceSetup(null) {
                 it.copy(preference = it.preference.copy(deviceSpeechRate = 1.75f))
             }
@@ -359,7 +334,7 @@ class SettingsRepositoryTest {
                 SettingsRepository(store).awaitSettings("speed restored") { it.voiceSetup.deviceSpeechRate == 1.75f }
             assertEquals(SettingsLoadState.Ready, restored.loadState)
             assertTrue(runCatching { VoiceSetupPreference(deviceSpeechRate = 3f) }.isFailure)
-            val invalid = InMemoryPreferencesDataStore()
+            val invalid = MemoryPreferences()
             invalid.edit { it[stringPreferencesKey("VOICE_SETUP")] = """{"deviceSpeechRate":3.0}""" }
             val state =
                 SettingsRepository(invalid).awaitSettings("invalid speed") { it.loadState is SettingsLoadState.Failed }
@@ -387,7 +362,7 @@ class SettingsRepositoryTest {
                     Row("DEVICE", "NEEDLE_WHISTLE", device.copy(languageModel = VoiceLanguageModel.NEEDLE_WHISTLE)),
                 )
             for (row in rows) {
-                val store = InMemoryPreferencesDataStore()
+                val store = MemoryPreferences()
                 store.edit { prefs ->
                     row.mode?.let { prefs[stringPreferencesKey("VOICE_MODE")] = it }
                     row.engine?.let { prefs[stringPreferencesKey("ON_DEVICE_VOICE_ENGINE")] = it }
@@ -412,7 +387,7 @@ class SettingsRepositoryTest {
     @Test
     fun `the first voice setup write replaces the former keys`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit { prefs ->
                 prefs[stringPreferencesKey("VOICE_MODE")] = "DEVICE"
                 prefs[stringPreferencesKey("ON_DEVICE_VOICE_ENGINE")] = "LOCAL_LLM"
@@ -435,7 +410,7 @@ class SettingsRepositoryTest {
     @Test
     fun `unreadable voice choice preferences surface an error instead of a default`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit { it[stringPreferencesKey("VOICE_CHOICES")] = "invalid JSON" }
             val state =
                 SettingsRepository(store).awaitSettings("saved selection read failure") {
@@ -448,7 +423,7 @@ class SettingsRepositoryTest {
     @Test
     fun `speaking voices restore by gateway and choice with existing preferences intact`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit { it[stringPreferencesKey("VOICE_CHOICES")] = """{"https://first.example":{"webrtc":"live"}}""" }
             val repository = SettingsRepository(store)
             repository.awaitSettings("existing preferences") { it.loadState == SettingsLoadState.Ready }
@@ -488,7 +463,7 @@ class SettingsRepositoryTest {
     @Test
     fun `legacy single family choice is discarded instead of failing the settings load`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit { it[stringPreferencesKey("VOICE_CHOICES")] = """{"https://first.example":"live"}""" }
             val repository = SettingsRepository(store)
             repository.awaitSettings("legacy choices") { it.loadState == SettingsLoadState.Ready }
@@ -501,7 +476,7 @@ class SettingsRepositoryTest {
     @Test
     fun `unreadable speaking voice does not silently choose a default`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             store.edit { it[stringPreferencesKey("SPEAKING_VOICES")] = "invalid JSON" }
             val state =
                 SettingsRepository(
@@ -526,7 +501,7 @@ class SettingsRepositoryTest {
     @Test
     fun `Gemma choice defaults to E2B and persists across repository recreation`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repo = SettingsRepository(store)
             assertEquals(LocalLlmModel.GEMMA_4_E2B, repo.settings.value.localLlmModel)
             repo.updateSavedVoiceSetup(null) { it.copy(localLlmModel = LocalLlmModel.GEMMA_4_E4B) }
@@ -559,7 +534,7 @@ class SettingsRepositoryTest {
     @Test
     fun `audio output choice defaults to automatic and survives repository recreation`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repo = SettingsRepository(store)
             assertNull(repo.awaitSettings("default output").voiceAudioDeviceType)
             // Android's stable speaker and earpiece type values, not a session's transient device IDs.
@@ -673,7 +648,7 @@ class SettingsRepositoryTest {
     @Test
     fun `voice language defaults to US English and survives repository recreation`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repo = SettingsRepository(store)
             assertEquals("en-US", repo.awaitSettings("default language").voiceLanguageTag)
             repo.updateVoiceLanguageTag(" fr-ca ")
@@ -698,7 +673,7 @@ class SettingsRepositoryTest {
     @Test
     fun `voice setup defaults to following the gateway and persists on-device language models`() =
         runBlocking {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val repo = SettingsRepository(store)
             val initial = repo.awaitSettings("default voice setup")
             assertEquals(VoiceSetupMode.FOLLOW_GATEWAY, initial.voiceSetup.mode)
@@ -742,7 +717,7 @@ class SettingsRepositoryTest {
             assertEquals(VoiceLanguageModel.NEEDLE_WHISTLE, allInOne.voiceSetup.languageModel)
 
             // A serialized setup without a mode follows the gateway.
-            val stored = InMemoryPreferencesDataStore()
+            val stored = MemoryPreferences()
             stored.edit { it[stringPreferencesKey("VOICE_SETUP")] = """{"languageModel":"local-llm"}""" }
             val modeless =
                 SettingsRepository(stored).awaitSettings("modeless") {

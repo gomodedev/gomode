@@ -7,11 +7,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
 import android.speech.SpeechRecognizer
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.data.LocalLlmModel
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -33,12 +31,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -591,7 +586,7 @@ class DeviceVoiceSessionTest {
     @Test
     fun `disconnect cancels a remote tool handler before it changes the selected service`() =
         runTest {
-            val store = InMemoryPreferencesDataStore()
+            val store = MemoryPreferences()
             val settings = SettingsRepository(store)
             val first = settings.addService("First", "https://first.example")
             val second = settings.addService("Second", "https://second.example")
@@ -975,7 +970,7 @@ class DeviceVoiceSessionTest {
                             )
                     }
                 server.start()
-                val repository = SettingsRepository(InMemoryPreferencesDataStore())
+                val repository = SettingsRepository(MemoryPreferences())
                 val second = repository.addService("Tools only", "https://second.invalid")
                 val first = repository.addService("Sponsor", server.url("/").toString())
                 repository.updateSavedVoiceSetup(null) {
@@ -1330,7 +1325,7 @@ class DeviceVoiceSessionTest {
                 server.enqueue(toolFailureResponse())
                 server.start()
                 val speech = FakeSpeech()
-                val repo = SettingsRepository(InMemoryPreferencesDataStore())
+                val repo = SettingsRepository(MemoryPreferences())
                 selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
                 val session =
                     createSession(
@@ -1597,7 +1592,7 @@ class DeviceVoiceSessionTest {
     @Test
     fun `a failure before engine construction names the configured local model`() =
         runTest {
-            val repository = SettingsRepository(InMemoryPreferencesDataStore())
+            val repository = SettingsRepository(MemoryPreferences())
             selectEngine(repository, VoiceLanguageModel.LOCAL_LLM)
             repository.updateSavedVoiceSetup(null) { it.copy(localLlmModel = LocalLlmModel.GEMMA_4_E4B) }
             repository.settings.first { it.localLlmModel == LocalLlmModel.GEMMA_4_E4B }
@@ -1825,7 +1820,7 @@ class DeviceVoiceSessionTest {
     fun `local barge in drains inference and ignores stale deltas tools and completion`() =
         runTest {
             val speech = FakeSpeech(completeSpeechImmediately = false)
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
             val release = CompletableDeferred<Unit>()
             val turns = mutableListOf<String>()
@@ -1911,7 +1906,7 @@ class DeviceVoiceSessionTest {
     fun `canceled local inference releases queued alerts when recognition ends without final speech`() =
         runTest {
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
             val release = CompletableDeferred<Unit>()
             val turns = mutableListOf<String>()
@@ -2268,7 +2263,7 @@ class DeviceVoiceSessionTest {
         runTest {
             val speech = FakeSpeech()
             var webSocketOpened = false
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
 
             val session =
@@ -2303,7 +2298,7 @@ class DeviceVoiceSessionTest {
             val dispatcher = StandardTestDispatcher(testScheduler)
             Dispatchers.setMain(dispatcher)
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
 
             val conversation = localConversation(repo)
@@ -2348,7 +2343,7 @@ class DeviceVoiceSessionTest {
             val dispatcher = StandardTestDispatcher(testScheduler)
             Dispatchers.setMain(dispatcher)
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
 
             var failTurn = false
@@ -2472,7 +2467,7 @@ class DeviceVoiceSessionTest {
             val dispatcher = StandardTestDispatcher(testScheduler)
             Dispatchers.setMain(dispatcher)
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
             val finishSetup = CompletableDeferred<Unit>()
             val calls = FakeVoiceCallController()
@@ -2551,7 +2546,7 @@ class DeviceVoiceSessionTest {
             val dispatcher = StandardTestDispatcher(testScheduler)
             Dispatchers.setMain(dispatcher)
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
             val finishTurn = CompletableDeferred<Unit>()
             var allocations = 0
@@ -2635,7 +2630,7 @@ class DeviceVoiceSessionTest {
             val dispatcher = StandardTestDispatcher(testScheduler)
             Dispatchers.setMain(dispatcher)
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
             val finishTurn = CompletableDeferred<Unit>()
             var generations = 0
@@ -2725,7 +2720,7 @@ class DeviceVoiceSessionTest {
             val dispatcher = StandardTestDispatcher(testScheduler)
             Dispatchers.setMain(dispatcher)
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
             var generations = 0
             var resets = 0
@@ -2808,7 +2803,7 @@ class DeviceVoiceSessionTest {
     fun `local engine dispatches native hang up and server listing commands`() =
         runTest {
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
             val serverId = repo.addService("Home", "https://home.example")
             repo.settings.first { it.activeServiceId == serverId }
@@ -2873,7 +2868,7 @@ class DeviceVoiceSessionTest {
     fun `keyword startup adopts saved caller identity without beginning a shared conversation`() =
         runTest {
             for (offline in listOf(false, true)) {
-                val repo = SettingsRepository(InMemoryPreferencesDataStore())
+                val repo = SettingsRepository(MemoryPreferences())
                 selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
                 val savedID = repo.addService("Saved caller", "https://saved.example")
                 repo.settings.first { it.activeServiceId == savedID }
@@ -2934,7 +2929,7 @@ class DeviceVoiceSessionTest {
     fun `offline fallback runs on-device engine when remote gateway setup fails`() =
         runTest {
             val speech = FakeSpeech()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
 
             var connectedChimes = 0
@@ -3010,7 +3005,7 @@ class DeviceVoiceSessionTest {
         speech: DeviceSpeech,
         calls: VoiceCallController = NoopVoiceCallController(),
         languageTag: String = "en-US",
-        settingsRepo: SettingsRepository = SettingsRepository(InMemoryPreferencesDataStore()),
+        settingsRepo: SettingsRepository = SettingsRepository(MemoryPreferences()),
         ioDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         engineFactory: (VoiceLanguageModel) -> OnDeviceVoiceEngine = {
             createOnDeviceEngine(RuntimeEnvironment.getApplication(), it, ioDispatcher)
@@ -3073,7 +3068,7 @@ class DeviceVoiceSessionTest {
             val speech = FakeSpeech()
             val earcon = RecordingThinkingEarcon()
             var finish = CompletableDeferred<Unit>()
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
             val session =
                 createSession(
@@ -3234,7 +3229,7 @@ class DeviceVoiceSessionTest {
     @Test
     fun `server switch persists focus while the device voice transport continues`() =
         runTest {
-            val repo = SettingsRepository(InMemoryPreferencesDataStore())
+            val repo = SettingsRepository(MemoryPreferences())
             val first = repo.addService("First", "https://first.example")
             val second = repo.addService("Second", "https://second.example")
             repo.settings.first { it.activeServiceId == second }
@@ -3453,19 +3448,5 @@ class DeviceVoiceSessionTest {
         fun telecomDisconnect() {
             disconnectHandler?.invoke()
         }
-    }
-
-    private class InMemoryPreferencesDataStore : DataStore<Preferences> {
-        var beforeWrite: suspend () -> Unit = {}
-        private val writeMutex = Mutex()
-        private val current = MutableStateFlow(emptyPreferences())
-
-        override val data: Flow<Preferences> = current
-
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            writeMutex.withLock {
-                beforeWrite()
-                transform(current.value).also { current.value = it }
-            }
     }
 }

@@ -3,19 +3,14 @@ package com.fghbuild.gomode.ui.web
 
 import android.net.ConnectivityManager
 import android.net.LinkProperties
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
+import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.ui.ServiceBootstrapState
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
@@ -109,15 +104,4 @@ class ServiceShellOwnerTest {
                 Dispatchers.resetMain()
             }
         }
-
-    // SettingsRepository edits from its own IO scope while tests edit from the test thread;
-    // serialize read-modify-write like DataStore so neither edit is lost.
-    private class MemoryPreferences : DataStore<Preferences> {
-        private val current = MutableStateFlow(emptyPreferences())
-        private val writes = Mutex()
-        override val data = current
-
-        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
-            writes.withLock { transform(current.value).also { current.value = it } }
-    }
 }
