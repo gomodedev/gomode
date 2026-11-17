@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Publish the Go Mode launcher icon as a website's public/favicon.svg.
+"""Publish the Go Mode launcher mark as a transparent website favicon.
 
 The Android launcher foreground (ic_launcher.xml) is the source. The favicon
-keeps its brain and voice-wave strokes and their gradients on a light rounded
-tile. It drops the disc's shadow and rim, crops to the drawing, and thickens
-the strokes so the mark stays legible at 16 and 32 pixels. Sites use the same
-file as their header logo.
+keeps its brain and voice-wave strokes and their gradients on a transparent
+background. It drops the disc's shadow, fill, and rim, crops to the drawing,
+and thickens the strokes so the mark stays legible at 16 and 32 pixels. Sites
+use the same file as their header logo. Dark color schemes use brighter blue
+and teal gradient stops so the transparent mark remains visible.
 """
 
 import argparse
@@ -19,9 +20,13 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 AAPT = "{http://schemas.android.com/aapt}"
 # The 108-unit viewport square that holds the brain and wave with a margin.
 VIEW_BOX = (13, 12, 82, 82)
-TILE_RADIUS = 18
-TILE_COLOR = "#f4f8fb"  # gomode.dev README Brand table: paper.
 STROKE_SCALE = 1.4
+# Dark brand blues from gomode.dev's Brand table, with the launcher's teal accent.
+DARK_STYLE = (
+    "@media(prefers-color-scheme:dark){"
+    "stop{stop-color:#5cc3e6}stop:first-child{stop-color:#8fd6ee}stop:last-child{stop-color:#3cc1a7}"
+    "}"
+)
 
 
 def color(value: str) -> tuple[str, float]:
@@ -66,7 +71,7 @@ def stroke(path: ET.Element, gradient_id: str, definitions: list[str]) -> str:
 
 def favicon(source: pathlib.Path) -> str:
     # The clipped group holds the brain and wave; the paths before it draw the
-    # disc's shadow, fill, and rim, which the tile replaces.
+    # disc's shadow, fill, and rim, which the favicon omits.
     groups = ET.parse(source).getroot().findall("group")
     if len(groups) != 1:
         raise ValueError(f"{source.name} must hold exactly one drawing group")
@@ -80,11 +85,9 @@ def favicon(source: pathlib.Path) -> str:
             f' stroke-linecap="{path.get(ANDROID + "strokeLineCap", "butt")}"'
             f' stroke-linejoin="{path.get(ANDROID + "strokeLineJoin", "miter")}"/>'
         )
-    x, y, size, _ = VIEW_BOX
-    tile = f'<rect x="{x}" y="{y}" width="{size}" height="{size}" rx="{TILE_RADIUS}" fill="{TILE_COLOR}"/>'
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{" ".join(map(str, VIEW_BOX))}">'
-        f"<defs>{''.join(definitions)}</defs>{tile}{''.join(paths)}</svg>\n"
+        f"<style>{DARK_STYLE}</style><defs>{''.join(definitions)}</defs>{''.join(paths)}</svg>\n"
     )
 
 

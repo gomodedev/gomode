@@ -20,14 +20,14 @@ describe("readMcpNotificationStream", () => {
     await readMcpNotificationStream(
       streamOf([
         ": keepalive\n\n",
-        'data: {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"mddb://a"}}\n\n',
+        'data: {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"example://a"}}\n\n',
         ": keepalive\n\n",
         'data: {"jsonrpc":"2.0","method":"notifications/resources/list_changed"}\n\n',
       ]),
       (notification) => seen.push(notification),
     );
     expect(seen).toEqual([
-      { method: "notifications/resources/updated", params: { uri: "mddb://a" } },
+      { method: "notifications/resources/updated", params: { uri: "example://a" } },
       { method: "notifications/resources/list_changed", params: undefined },
     ]);
   });

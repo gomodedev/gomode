@@ -28,8 +28,8 @@ export function modelContextText(texts: Iterable<string>): string {
 // map and may publish the same texts again through setServiceContext; if that
 // lands before session.ready it is queued and flushed right after setup, so the
 // model receives the baseline twice. Confirm from the data-channel frames of a
-// fresh connect (BrowserVoiceSession.test.ts or the mddb/caic e2e fixtures
-// record them); if confirmed, seed the monitor's delivered state from this read
+// fresh connect (BrowserVoiceSession.test.ts or host e2e fixtures record them);
+// if confirmed, seed the monitor's delivered state from this read
 // so the first publish sends only later changes.
 /** Initial reads are advisory and fail independently of voice transport setup. */
 export async function readInitialModelContext(options: McpToolCallOptions): Promise<string> {

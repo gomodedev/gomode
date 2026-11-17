@@ -675,7 +675,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 			if len(listed) != 1 {
 				t.Fatalf("host templates = %#v", listed)
 			}
-			if first, _ := listed[0].(map[string]any); first["uriTemplate"] != "mddb://documents/{id}" {
+			if first, _ := listed[0].(map[string]any); first["uriTemplate"] != "example://documents/{id}" {
 				t.Fatalf("host templates = %#v", listed)
 			}
 		})
@@ -725,7 +725,7 @@ func (r *metadataRegistry) CallTool(_ context.Context, params *ToolsCallParams) 
 type templatedRegistry struct{ Registry }
 
 func (templatedRegistry) ResourceTemplates(context.Context) ([]ResourceTemplateDescriptor, error) {
-	return []ResourceTemplateDescriptor{{Name: "document", URITemplate: "mddb://documents/{id}"}}, nil
+	return []ResourceTemplateDescriptor{{Name: "document", URITemplate: "example://documents/{id}"}}, nil
 }
 
 type subscriptionTestRegistry struct {

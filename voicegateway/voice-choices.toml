@@ -2,7 +2,7 @@
 #
 # This release embeds this file as its default. To customize it, copy it to
 # voice-choices.toml in the configuration directory of the gateway or its host,
-# for example ~/.config/voice-gateway/, ~/.config/caic/ or ~/.config/mddb/.
+# for example ~/.config/voice-gateway/.
 # A copy replaces the defaults entirely and no longer follows later releases.
 #
 # Provider names come from genai's providers.All registry at https://github.com/maruel/genai

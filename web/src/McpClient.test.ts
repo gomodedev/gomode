@@ -151,7 +151,7 @@ describe("configureMcpClient", () => {
   });
 
   it("routes tool requests to the selected same-origin host endpoint", async () => {
-    configureMcpClient("/api/v1/gomode/mcp", "mddb-frontend");
+    configureMcpClient("/api/v1/gomode/mcp", "example-frontend");
     let url = "";
     let init: RequestInit | undefined;
     globalThis.fetch = async (input, options) => {
@@ -166,7 +166,7 @@ describe("configureMcpClient", () => {
     expect(url).toBe("/api/v1/gomode/mcp");
     expect(new Headers(init?.headers).get("Mcp-Method")).toBe("tools/list");
     expect(JSON.parse(String(init?.body)).params._meta["io.modelcontextprotocol/clientInfo"].name).toBe(
-      "mddb-frontend",
+      "example-frontend",
     );
   });
 
@@ -216,7 +216,7 @@ describe("configureMcpClient", () => {
 
   it("adds the current bearer token to discovery and JSON-RPC requests", async () => {
     let token = "first";
-    configureMcpClient("/api/v1/gomode/mcp", "mddb-frontend", () => token);
+    configureMcpClient("/api/v1/gomode/mcp", "example-frontend", () => token);
     const methods: string[] = [];
     const authorizations: string[] = [];
     globalThis.fetch = async (_input, init) => {
@@ -240,7 +240,7 @@ describe("configureMcpClient", () => {
   });
 
   it("surfaces HTTP authorization failures before reading a JSON-RPC result", async () => {
-    configureMcpClient("/api/v1/gomode/mcp", "mddb-frontend", () => "expired");
+    configureMcpClient("/api/v1/gomode/mcp", "example-frontend", () => "expired");
     globalThis.fetch = async () => new Response("Unauthorized", { status: 401 });
 
     await expect(mcpClient.listTools()).rejects.toThrow("MCP tools/list returned HTTP 401");
@@ -326,7 +326,7 @@ describe("subscribeResources", () => {
   });
 
   it("streams resource notifications to the host", async () => {
-    configureMcpClient("/api/v1/gomode/mcp", "mddb-frontend");
+    configureMcpClient("/api/v1/gomode/mcp", "example-frontend");
     let init: RequestInit | undefined;
     const encoder = new TextEncoder();
     globalThis.fetch = async (_input, options) => {
@@ -340,7 +340,7 @@ describe("subscribeResources", () => {
             );
             controller.enqueue(
               encoder.encode(
-                'data: {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"mddb://node/1"}}\n\n',
+                'data: {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"example://node/1"}}\n\n',
               ),
             );
             controller.close();
@@ -358,7 +358,7 @@ describe("subscribeResources", () => {
     const subscription = mcpClient.subscribeResources(
       {
         sessionID: "conversation-one",
-        resourceSubscriptions: ["mddb://node/1"],
+        resourceSubscriptions: ["example://node/1"],
         resourcesListChanged: true,
         onReady: () => {
           ready = true;
@@ -367,7 +367,7 @@ describe("subscribeResources", () => {
       resolveUpdate,
     );
 
-    expect(await received).toEqual({ uri: "mddb://node/1" });
+    expect(await received).toEqual({ uri: "example://node/1" });
     subscription.close();
     expect(ready).toBe(true);
     const headers = new Headers(init?.headers);
@@ -379,7 +379,7 @@ describe("subscribeResources", () => {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
     expect(body.params.notifications).toEqual({
-      resourceSubscriptions: ["mddb://node/1"],
+      resourceSubscriptions: ["example://node/1"],
       resourcesListChanged: true,
     });
   });

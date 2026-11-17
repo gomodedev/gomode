@@ -195,7 +195,7 @@ it("measures 2,000-node focus changes, missing resources, bursts, idle, and reco
     let itemTitle = "Opening page";
     let alerts: ReturnType<typeof alert>[] = [];
     const nodes: Array<{ uri: string; _meta?: Record<string, boolean> }> = Array.from({ length: 2000 }, (_, i) => ({
-      uri: `mddb://workspaces/workspace/nodes/${i}`,
+      uri: `example://workspaces/workspace/nodes/${i}`,
     }));
     let calls: Record<string, number> = {};
     let requestBytes = 0;
