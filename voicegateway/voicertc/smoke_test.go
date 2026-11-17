@@ -41,9 +41,9 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // TestSmokeVoiceRTCLocalAudio verifies the managed local-stack ASR, LLM, and

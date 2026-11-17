@@ -23,7 +23,7 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/language/display"
 
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // Local stack tuning. These bound the placeholder VAD/segmentation and TTS

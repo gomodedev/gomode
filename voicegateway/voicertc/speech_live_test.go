@@ -30,7 +30,7 @@ import (
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/whistle"
 
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // fakeTranscriber is a genai provider whose transcription sessions are handed

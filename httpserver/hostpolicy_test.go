@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver/geoip"
 )
 
 func newHostPolicy(t *testing.T, origin string, local bool) *httpserver.HostPolicy {

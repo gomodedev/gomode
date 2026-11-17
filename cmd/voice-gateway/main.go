@@ -28,11 +28,11 @@ import (
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 
-	"github.com/maruel/gomode/autoupdate"
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/internal/gatewayfrontend"
-	"github.com/maruel/gomode/voicegateway"
-	"github.com/maruel/gomode/voicegateway/voicertc"
+	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/internal/gatewayfrontend"
+	"github.com/gomodedev/gomode/voicegateway"
+	"github.com/gomodedev/gomode/voicegateway/voicertc"
 )
 
 var errRestartRequested = errors.New("restart requested")
@@ -88,7 +88,7 @@ func mainImpl(args []string) (err error) {
 		ext = ".zip"
 	}
 	updater, err = autoupdate.New(autoupdate.Config{
-		Repository: "maruel/gomode", CurrentVersion: autoupdate.Version(), Binary: binary,
+		Repository: "gomodedev/gomode", CurrentVersion: autoupdate.Version(), Binary: binary,
 		ArchiveName: func(string) string { return "voice-gateway_" + runtime.GOOS + "_" + runtime.GOARCH + ext },
 		Log:         log, TaskName: updaterTaskName,
 	})

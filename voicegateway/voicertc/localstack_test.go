@@ -32,8 +32,8 @@ import (
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/whistle"
 
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // stackVariant selects a test's intended speech lease without adding a second

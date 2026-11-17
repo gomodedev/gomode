@@ -34,7 +34,7 @@ if [[ "$platform" == linux ]]; then
   systemctl --user show-environment >/dev/null
 else
   env_file="$config_home/voice-gateway/voice-gateway.env"
-  service_path="$HOME/Library/LaunchAgents/com.maruel.voice-gateway.plist"
+  service_path="$HOME/Library/LaunchAgents/com.fghbuild.voice-gateway.plist"
   log_file="$HOME/Library/Logs/voice-gateway.log"
   command -v launchctl >/dev/null || fail 'launchctl is required.'
 fi
@@ -62,12 +62,12 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
-resolved="$(curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --head --output /dev/null --write-out '%{url_effective}' https://github.com/maruel/gomode/releases/latest)"
+resolved="$(curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --head --output /dev/null --write-out '%{url_effective}' https://github.com/gomodedev/gomode/releases/latest)"
 version="${resolved##*/}"
 release_tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 [[ "$version" =~ $release_tag_pattern ]] || fail 'The latest stable release could not be resolved.'
 asset="voice-gateway_${platform}_${arch}.tar.gz"
-base="https://github.com/maruel/gomode/releases/download/$version"
+base="https://github.com/gomodedev/gomode/releases/download/$version"
 archive="$work_dir/$asset"
 checksums="$work_dir/checksums.txt"
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$base/$asset" --output "$archive"
@@ -153,7 +153,7 @@ if [[ "$platform" == linux ]]; then
 else
   mkdir -p -- "$HOME/Library/Logs"
   domain="gui/$(id -u)"
-  if launchctl print "$domain/com.maruel.voice-gateway" >/dev/null 2>&1; then launchctl bootout "$domain/com.maruel.voice-gateway"; fi
+  if launchctl print "$domain/com.fghbuild.voice-gateway" >/dev/null 2>&1; then launchctl bootout "$domain/com.fghbuild.voice-gateway"; fi
   launchctl bootstrap "$domain" "$service_path"
 fi
 printf 'Installed: %s\nConfiguration: %s\nCredentials: %s\n' "$binary_path" "$config_path" "$env_file"

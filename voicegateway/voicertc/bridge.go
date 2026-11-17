@@ -25,15 +25,15 @@ import (
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genaipy/providers/kittentts"
 
-	activitydata "github.com/maruel/gomode/voicegateway/voicertc/data"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
-	"github.com/maruel/gomode/voicegateway"
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/voicegateway"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 const (

@@ -33,8 +33,8 @@ import (
 	"github.com/maruel/genai/providers/llamacpp/llamacppsrv"
 	"github.com/maruel/genai/providers/openrouter"
 
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // localStackRuntimeForConfig builds gateway-side ASR, LLM, and TTS adapters.

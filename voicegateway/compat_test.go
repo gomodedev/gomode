@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
 )
 
 type protocolBridgeSpy struct {

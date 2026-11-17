@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/mcp/mcptest"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
 // compatTestHandler returns a Handler backed by the shared fake registry.

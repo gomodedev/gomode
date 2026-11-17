@@ -22,11 +22,11 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers/llamacpp"
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 type realtimePeerFrame struct {

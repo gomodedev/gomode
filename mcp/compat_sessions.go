@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/gomode/sse"
+	"github.com/gomodedev/gomode/sse"
 )
 
 const (

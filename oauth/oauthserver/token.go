@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/gomode/oauth"
-	v5 "github.com/maruel/gomode/oauth/oauthserver/data/v5"
+	"github.com/gomodedev/gomode/oauth"
+	v5 "github.com/gomodedev/gomode/oauth/oauthserver/data/v5"
 )
 
 const (

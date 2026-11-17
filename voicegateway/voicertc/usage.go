@@ -8,8 +8,8 @@ import (
 	"encoding/hex"
 	"sync"
 
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 // usageTracker owns one connection's counts, independently of turn cancellation.

@@ -8,7 +8,7 @@
 #
 # Voice choices and stages live in voice-choices.toml beside this file. Without
 # it, the gateway uses the defaults built into this release:
-# https://github.com/maruel/gomode/blob/main/voicegateway/voice-choices.toml
+# https://github.com/gomodedev/gomode/blob/main/voicegateway/voice-choices.toml
 # Copy that file to customize it.
 
 # Released binaries check daily at 04:50 local time. Empty disables automatic updates.

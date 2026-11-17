@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 func TestAssistantSpeechPlayback(t *testing.T) {

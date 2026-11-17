@@ -5,7 +5,7 @@ package v1
 import (
 	"net/http"
 
-	"github.com/maruel/gomode/voicegateway/api"
+	"github.com/gomodedev/gomode/voicegateway/api"
 )
 
 // StatusResp is a common response for mutation endpoints.

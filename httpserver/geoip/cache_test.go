@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/httpserver/geoip/data"
+	"github.com/gomodedev/gomode/httpserver/geoip/data"
 )
 
 type prefixFetchSpy struct {

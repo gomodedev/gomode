@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/gomode/internal/pairing"
-	"github.com/maruel/gomode/oauth"
-	v5 "github.com/maruel/gomode/oauth/oauthserver/data/v5"
+	"github.com/gomodedev/gomode/internal/pairing"
+	"github.com/gomodedev/gomode/oauth"
+	v5 "github.com/gomodedev/gomode/oauth/oauthserver/data/v5"
 )
 
 // storeVersion is the on-disk schema version. Codes and Consents are keyed by

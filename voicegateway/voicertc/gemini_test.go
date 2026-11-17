@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 // geminiTestTransport routes the configured HTTP transport to a local peer.

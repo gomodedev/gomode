@@ -2,7 +2,7 @@
 
 package voicertc
 
-import voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+import voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 
 // backendSpeechSink opts native realtime speech into common playback events.
 // Generation completion queues a boundary; it does not mean PCM has played.

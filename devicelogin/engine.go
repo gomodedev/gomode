@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/gomode/internal/pairing"
+	"github.com/gomodedev/gomode/internal/pairing"
 )
 
 // UserAgent bounds browser metadata to 256 bytes while preserving valid UTF-8.

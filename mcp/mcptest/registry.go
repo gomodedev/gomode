@@ -7,7 +7,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 // FakeRegistry is a minimal mcp.Registry: it advertises one "echo" tool and one

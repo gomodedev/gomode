@@ -16,9 +16,9 @@ import (
 
 	"github.com/andybalholm/brotli"
 
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestNewHandler(t *testing.T) {

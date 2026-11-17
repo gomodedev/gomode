@@ -1,6 +1,6 @@
 # Go Mode
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/maruel/gomode.svg)](https://pkg.go.dev/github.com/maruel/gomode)
+[![Go Reference](https://pkg.go.dev/badge/github.com/gomodedev/gomode.svg)](https://pkg.go.dev/github.com/gomodedev/gomode)
 
 Go Mode provides a reusable host contract and a native Android shell for
 backend-hosted web applications. The repository contains the Go discovery
@@ -19,20 +19,20 @@ User and integration guides are at [docs.gomode.dev](https://docs.gomode.dev):
 
 ## Packages
 
-- Go module `github.com/maruel/gomode`: discovery manifest and voice token
+- Go module `github.com/gomodedev/gomode`: discovery manifest and voice token
   contracts.
   - `mcp/`, `oauth/`, `sse/`: reusable HTTP protocol implementations.
   - `httpserver/`: trusted request metadata, host checks, logging, tracing and optional GeoIP.
   - `devicelogin/`: browser pairing with explicit approval and host session issuance.
   - `voicegateway/`: standalone or embedded WebRTC voice gateway.
 - `sdk/`: generated TypeScript, Kotlin, and Swift protocol clients.
-- `web/src/`: `@maruel/gomode` SolidJS browser integration.
+- `web/src/`: `@gomodedev/gomode` SolidJS browser integration.
 - `internal/gatewayfrontend/`: optional test app embedded by `cmd/voice-gateway`.
 - `android/gomode/`: native WebView, voice, notifications, settings, and Halo
   shell.
 - `android/halo/`: Halo smart-glasses Android SDK.
 
-Go package documentation is on [pkg.go.dev](https://pkg.go.dev/github.com/maruel/gomode).
+Go package documentation is on [pkg.go.dev](https://pkg.go.dev/github.com/gomodedev/gomode).
 [contrib/config.toml](contrib/config.toml) documents the standalone gateway settings, and
 [voicegateway/voice-choices.toml](voicegateway/voice-choices.toml) the default voice choices and stages
 that the gateway and its hosts embed.

@@ -1,4 +1,4 @@
-module github.com/maruel/gomode
+module github.com/gomodedev/gomode
 
 go 1.27.3
 

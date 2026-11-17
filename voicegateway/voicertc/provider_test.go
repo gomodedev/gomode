@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/openaibase"
 	"github.com/maruel/genai/providers/openairesponses"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 func TestRealtimeTranscript(t *testing.T) {

@@ -1,7 +1,7 @@
 # oauth
 
 Standalone Go OAuth 2.0 authorization server and client library using the standard
-library, imported from the `github.com/maruel/gomode` module.
+library, imported from the `github.com/gomodedev/gomode` module.
 
 - [`oauth/`](./): shared constants, protocol DTOs, and protocol coverage.
 - [`oauthserver/`](oauthserver/): authorization server, account authority, and durable authorization state.

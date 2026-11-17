@@ -69,7 +69,7 @@ checksum:
 
 release:
   github:
-    owner: maruel
+    owner: gomodedev
     name: gomode
   prerelease: auto
 

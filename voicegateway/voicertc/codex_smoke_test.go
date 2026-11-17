@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai/providers/openairesponses"
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 func TestSmokeCodexSubscriptionTextSession(t *testing.T) {

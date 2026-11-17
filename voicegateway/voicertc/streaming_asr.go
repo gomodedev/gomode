@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // At most four recognizers may be draining. realtimeAudioGate normalizes every

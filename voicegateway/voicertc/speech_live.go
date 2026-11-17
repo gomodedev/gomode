@@ -18,7 +18,7 @@ import (
 	"github.com/maruel/genaipy/providers/whistle"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 // liveASR recognizes each utterance in its own genai transcription session,

@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/mcp/mcptest"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
 type compatOwnerKey struct{}

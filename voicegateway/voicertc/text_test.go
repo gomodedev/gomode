@@ -22,8 +22,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/maruel/gomode/internal/voicetest"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/internal/voicetest"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 func TestServeTextSessionCloseLogging(t *testing.T) { //nolint:paralleltest // The cases replace the process logger.

@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	activitydata "github.com/maruel/gomode/voicegateway/voicertc/data"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data"
 
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // activityLog writes the transcript and tool activity for one voice session.

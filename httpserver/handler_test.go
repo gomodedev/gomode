@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver/geoip"
 )
 
 func TestNewHandler(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maruel/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver"
 )
 
 func TestCanonicalOrigin(t *testing.T) {

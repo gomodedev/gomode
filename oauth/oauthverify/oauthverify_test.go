@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth"
 )
 
 type signingKey struct {

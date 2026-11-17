@@ -12,9 +12,9 @@ import (
 	"github.com/maruel/genai/base"
 	"golang.org/x/text/language"
 
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
-	"github.com/maruel/gomode/voicegateway/policy"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/voicegateway/policy"
 )
 
 var errSessionClosed = errors.New("session closed")

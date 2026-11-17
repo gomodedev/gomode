@@ -32,9 +32,9 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/tphakala/go-opus/opus"
 
-	"github.com/maruel/gomode/voicegateway"
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/voicegateway"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // newTestBridge returns a bridge on an ephemeral UDP port that skips UPnP

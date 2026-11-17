@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode"
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // fakeMediaBridge is a MediaBridge stub for handler tests.

@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // VoiceRTCErrorProvider supplies the retained gateway error for v1 diagnostics.

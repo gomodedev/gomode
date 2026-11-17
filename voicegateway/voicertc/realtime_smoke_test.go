@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai/providers/llamacpp/llamacppsrv"
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 const (

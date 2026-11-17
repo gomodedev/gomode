@@ -2,7 +2,7 @@
 
 Generic OAuth 2.0 authorization server, client helpers, and protocol DTOs.
 
-This package lives in the standalone `github.com/maruel/gomode` module and
+This package lives in the standalone `github.com/gomodedev/gomode` module and
 serves Go Mode hosts. Keep it free of host-specific types and backend
 dependencies; the protocol implementation uses the standard library.
 

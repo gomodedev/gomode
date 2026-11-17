@@ -45,7 +45,7 @@ Use `uv run --locked python scripts/android_e2e.py --class <Class[#method]>` for
 adding `--module telecom` for the independent fixture APK. Real model inference
 and large transfers require explicit acceptance-test selection and opt-in arguments.
 
-The TypeScript package `@maruel/gomode` exports source for Solid/Vite hosts.
+The TypeScript package `@gomodedev/gomode` exports source for Solid/Vite hosts.
 Keep `web/src` host neutral and configure its MCP endpoint in each host.
 
 ## Python tools

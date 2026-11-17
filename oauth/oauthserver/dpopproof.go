@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth"
 )
 
 // DPoPTokenType is the "token_type" value returned for DPoP-bound access tokens.

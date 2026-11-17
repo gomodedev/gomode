@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	activitydata "github.com/maruel/gomode/voicegateway/voicertc/data"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data"
 
 	"github.com/coder/websocket"
 
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 const (

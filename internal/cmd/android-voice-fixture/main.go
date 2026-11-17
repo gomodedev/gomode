@@ -20,10 +20,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/internal/voicetest"
-	"github.com/maruel/gomode/mcp"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/internal/voicetest"
+	"github.com/gomodedev/gomode/mcp"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // fixture serves the root settings document, a minimal MCP endpoint, and the

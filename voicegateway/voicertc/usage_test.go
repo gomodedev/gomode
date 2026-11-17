@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"testing"
 
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 // documentedUsageRetention is the public retention promise, independently of implementation.

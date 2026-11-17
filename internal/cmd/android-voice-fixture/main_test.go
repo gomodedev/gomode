@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/maruel/gomode"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 func TestFixtureFrontendPreparation(t *testing.T) {

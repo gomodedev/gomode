@@ -15,8 +15,8 @@ import (
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genaipy/providers/nemospeech"
 
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // TestSmokeLiveASR logs, per model, whether the session language is sent, the

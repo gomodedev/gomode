@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/gomode/httpserver/geoip/data"
+	"github.com/gomodedev/gomode/httpserver/geoip/data"
 )
 
 const originCacheMaxAge = 24 * time.Hour

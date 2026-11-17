@@ -1,4 +1,4 @@
-# Publish checksummed standalone voice gateway archives on version tags pushed to maruel/gomode.
+# Publish checksummed standalone voice gateway archives on version tags pushed to gomodedev/gomode.
 name: Release voice gateway
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
 jobs:
   release:
     # Repository tag-push permissions authorize publishers; forks cannot publish here.
-    if: github.repository == 'maruel/gomode'
+    if: github.repository == 'gomodedev/gomode'
     runs-on: ubuntu-latest
     permissions:
       contents: write

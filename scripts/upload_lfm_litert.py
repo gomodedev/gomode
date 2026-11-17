@@ -98,9 +98,9 @@ LiteRT-LM conversion of [{manifest.model}](https://huggingface.co/{manifest.mode
 - Size: {manifest.size_bytes / 1_000_000_000:.1f} GB.
 
 Tool calls use LFM3's trained XML-like format and require client-side parsing,
-as implemented in [Go Mode](https://github.com/maruel/gomode).
+as implemented in [Go Mode](https://github.com/gomodedev/gomode).
 
-[Export script](https://github.com/maruel/gomode/blob/main/scripts/export_lfm_litert.py).
+[Export script](https://github.com/gomodedev/gomode/blob/main/scripts/export_lfm_litert.py).
 
 ## License
 

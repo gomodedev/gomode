@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	v5 "github.com/maruel/gomode/oauth/oauthserver/data/v5"
+	v5 "github.com/gomodedev/gomode/oauth/oauthserver/data/v5"
 )
 
 func testStorePrivacy(t *testing.T) {

@@ -44,7 +44,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/maruel/gomode/sse"
+	"github.com/gomodedev/gomode/sse"
 )
 
 const (

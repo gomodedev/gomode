@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.maruel.voice-gateway</string>
+    <string>com.fghbuild.voice-gateway</string>
     <key>ProgramArguments</key>
     <array>
         <string>~/.local/bin/voice-gateway</string>

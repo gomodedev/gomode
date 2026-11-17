@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/maruel/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth"
 )
 
 // RedirectURIFunc returns the OAuth redirect URI from a request, resolved lazily

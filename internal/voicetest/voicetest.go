@@ -17,7 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // Sender identifies which side of a text session sent a recorded message.

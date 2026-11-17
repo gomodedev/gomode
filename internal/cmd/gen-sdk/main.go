@@ -3,7 +3,7 @@
 // It writes TypeScript, Kotlin, and Swift clients and an API.<version>.md reference under
 // sdk/<family> for discovery and SKILL.md frontmatter (gomode v1), MCP (v1), OAuth (v1), and the
 // voice gateway (v1 and v2). Imports name their version: TypeScript exports
-// @maruel/gomode/sdk/<family>/<version>/*, Kotlin packages end in .sdk.v1 or .sdk.v2, and Swift
+// @gomodedev/gomode/sdk/<family>/<version>/*, Kotlin packages end in .sdk.v1 or .sdk.v2, and Swift
 // library products are GoModeSDKV1, MCPSDKV1, OAuthSDKV1, VoiceGatewaySDKV1, and VoiceGatewaySDKV2.
 package main
 
@@ -13,13 +13,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/oauth"
+	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode/voicegateway/policy"
 	"github.com/maruel/apisdkgen"
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
-	"github.com/maruel/gomode/voicegateway/policy"
 )
 
 func main() {

@@ -142,7 +142,7 @@ def _download_cmdline_tools(sdk_root: str) -> str:
         raise RuntimeError(
             f"\nFailed to download cmdline-tools from {url} (HTTP {exc.code}).\n"
             "The repository XML may list a version not yet published.\n"
-            "Report this if it persists: https://github.com/maruel/gomode/issues"
+            "Report this if it persists: https://github.com/gomodedev/gomode/issues"
         ) from exc
     finally:
         if os.path.exists(zip_path):

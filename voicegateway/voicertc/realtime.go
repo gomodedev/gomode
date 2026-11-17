@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/llamacpp"
 	"github.com/maruel/genai/providers/llamacpp/llamacppsrv"
-	"github.com/maruel/gomode/voicegateway"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
 )
 
 // lazyLlamaRealtimeBackend shares residency limits with local ASR/LLM/TTS choices.

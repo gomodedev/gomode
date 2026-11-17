@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestStartRestartWatch(t *testing.T) {

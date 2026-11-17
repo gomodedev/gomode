@@ -32,10 +32,10 @@ import (
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/autoupdate"
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver/geoip"
 )
 
 // Config declares reusable voice stages and presets. ReadConfig loads it from

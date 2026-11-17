@@ -41,10 +41,10 @@ $publishing = $false
 try {
     $sourceArchive = Join-Path $workDir $asset
     $sourceChecksums = Join-Path $workDir 'checksums.txt'
-    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/maruel/gomode/releases/latest'
+    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/gomodedev/gomode/releases/latest'
     $version = $release.tag_name
     if ($version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { throw 'The latest stable release could not be resolved.' }
-    $base = "https://github.com/maruel/gomode/releases/download/$version"
+    $base = "https://github.com/gomodedev/gomode/releases/download/$version"
     Invoke-WebRequest -UseBasicParsing -Uri "$base/$asset" -OutFile $sourceArchive
     Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile $sourceChecksums
     $hashes = @()

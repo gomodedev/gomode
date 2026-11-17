@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 func TestGeminiAudioGate(t *testing.T) {

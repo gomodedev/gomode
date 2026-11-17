@@ -5,8 +5,8 @@ package voicertc
 import (
 	"encoding/json"
 
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
 )
 
 func clientProtocolMessage(p voiceapi.SessionProtocol, data []byte) ([]byte, error) {

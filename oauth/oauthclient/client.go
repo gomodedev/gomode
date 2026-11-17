@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth"
 )
 
 // exchangeTimeout bounds a single token-exchange request so a hung provider

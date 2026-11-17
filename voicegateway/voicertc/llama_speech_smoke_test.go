@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 // TestSmokeLlamaSpeech exercises separate llama.cpp live ASR and TTS around the

@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth"
 )
 
 const (

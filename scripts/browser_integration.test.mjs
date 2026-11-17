@@ -82,10 +82,10 @@ test("SDK exports require an explicit protocol version", () => {
     ["voicegateway", ["v1", "v2"]],
   ]) {
     for (const version of versions) {
-      const resolved = import.meta.resolve(`@maruel/gomode/sdk/${family}/${version}/types.gen`);
+      const resolved = import.meta.resolve(`@gomodedev/gomode/sdk/${family}/${version}/types.gen`);
       assert.equal(resolved, new URL(`../sdk/${family}/ts/${version}/types.gen`, import.meta.url).href);
     }
-    assert.throws(() => import.meta.resolve(`@maruel/gomode/sdk/${family}/types.gen`), {
+    assert.throws(() => import.meta.resolve(`@gomodedev/gomode/sdk/${family}/types.gen`), {
       code: "ERR_PACKAGE_PATH_NOT_EXPORTED",
     });
   }
@@ -118,7 +118,7 @@ test("the public network observer has no voice or UI runtime dependency", async 
   const result = await build({
     absWorkingDir: root,
     stdin: {
-      contents: 'export { observeNetworkChanges } from "@maruel/gomode/web/NetworkChanges";',
+      contents: 'export { observeNetworkChanges } from "@gomodedev/gomode/web/NetworkChanges";',
       sourcefile: "host-network-observer.ts",
       resolveDir: root,
       loader: "ts",

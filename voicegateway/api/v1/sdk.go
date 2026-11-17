@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"reflect"
 
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	"github.com/maruel/apisdkgen/apispec"
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
 )
 
 // SDKAPI is the SDK generation specification for the voice gateway API.

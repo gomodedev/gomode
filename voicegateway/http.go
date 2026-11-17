@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/oauth/oauthverify"
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
-	voicev2 "github.com/maruel/gomode/voicegateway/api/v2"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/oauth/oauthverify"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // MediaBridge is the WebRTC media transport used by the voice gateway API.
