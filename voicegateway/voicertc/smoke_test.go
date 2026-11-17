@@ -7,8 +7,8 @@
 // or speech quality; docs/PLAN_GOMODE.md owns target-Mac acceptance.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
-// source code is governed by the Apache v2 license that can be found in the
-// LICENSE file.
+// source code is governed by the GNU Affero General Public License v3 that
+// can be found in the LICENSE file.
 
 //go:build smoke
 

@@ -10,7 +10,7 @@ Compares `oauth/oauthclient` against the Go team's `golang.org/x/oauth2`
 | **Code volume**       | ~410 lines (client.go + provider.go)    | ~3,500 lines core + 25+ provider endpoint packages            |
 | **Age / maintenance** | Project-internal, ~1 year               | Since 2014, Go team, widely used                              |
 | **Dependencies**      | stdlib only                             | stdlib + `cloud.google.com/go/compute/metadata`               |
-| **License**           | Apache 2.0                              | BSD-style                                                     |
+| **License**           | AGPL v3                                 | BSD-style                                                     |
 | **Implemented RFCs**  | 6749 (auth code + refresh), 7636 (PKCE) | 6749, 6750, 7636, 7009, 7662, 8628, 8693                      |
 | **OAuth grants**      | Authorization code + refresh            | Auth code, password, refresh, device, JWT, client credentials |
 

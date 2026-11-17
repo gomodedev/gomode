@@ -36,3 +36,8 @@ Go package documentation is on [pkg.go.dev](https://pkg.go.dev/github.com/maruel
 [contrib/config.toml](contrib/config.toml) documents the standalone gateway settings, and
 [voicegateway/voice-choices.toml](voicegateway/voice-choices.toml) the default voice choices and stages
 that the gateway and its hosts embed.
+
+## License
+
+Go Mode is licensed under the [GNU Affero General Public License v3](LICENSE).
+For a commercial license, contact <licensing@gomode.dev>.

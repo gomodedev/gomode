@@ -12,4 +12,5 @@ See the Go package and interface documentation for integration contracts.
 
 ## License
 
-Apache 2.0
+GNU Affero General Public License v3; see [LICENSE](../LICENSE). For a
+commercial license, contact <licensing@gomode.dev>.

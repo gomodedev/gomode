@@ -1,8 +1,8 @@
 // Provides real Opus WebRTC media and transport observations for Android voice acceptance tests.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
-// source code is governed by the Apache v2 license that can be found in the
-// LICENSE file.
+// source code is governed by the GNU Affero General Public License v3 that
+// can be found in the LICENSE file.
 
 package main
 

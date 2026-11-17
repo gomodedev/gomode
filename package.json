@@ -1,6 +1,7 @@
 {
   "name": "@maruel/gomode",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "packageManager": "pnpm@12.17.0",
   "private": false,
   "type": "module",
