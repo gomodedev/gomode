@@ -455,24 +455,31 @@ class ServiceCatalogTest {
                 val entry = fixture.entry("a")
                 val catalog = ServiceCatalog(backgroundScope)
                 val lifetime = SupervisorJob()
-                val idle = CompletableDeferred<Unit>()
                 val dispatcher = credentialedHTTPClient.dispatcher
-                val previousIdle = dispatcher.idleCallback
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.monitoring?.resources != null }
                     fixture.blockContextItems = true
-                    dispatcher.idleCallback = Runnable { idle.complete(Unit) }
                     catalog.monitorVoiceContext(
                         CoroutineScope(backgroundScope.coroutineContext + lifetime),
                         "cancelled",
                     )
                     withContext(Dispatchers.IO) { assertTrue(fixture.contextReadEntered.await(5, TimeUnit.SECONDS)) }
+                    val contextCall =
+                        dispatcher.runningCalls().single {
+                            it.request().url.port == fixture.server.port &&
+                                it.request().header("Mcp-Method") == "resources/read"
+                        }
                     lifetime.cancelAndJoin()
-                    withContext(Dispatchers.Default) { withTimeout(2000) { idle.await() } }
-                    assertFalse(dispatcher.runningCalls().any { it.request().url.port == fixture.server.port })
+                    assertTrue("Retiring context must cancel the blocked HTTP call", contextCall.isCanceled())
+                    // Background discovery shares this dispatcher and may start another call
+                    // after an idle notification. Wait only for the captured context call to drain.
+                    withContext(Dispatchers.Default) {
+                        withTimeout(2000) {
+                            while (contextCall in dispatcher.runningCalls()) delay(10)
+                        }
+                    }
                 } finally {
-                    dispatcher.idleCallback = previousIdle
                     fixture.releaseContext.countDown()
                     lifetime.cancelAndJoin()
                     catalog.close()
