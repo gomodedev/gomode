@@ -30,6 +30,7 @@ import android.telecom.PhoneAccountHandle
 import android.util.Log
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.MainActivity
+import com.fghbuild.gomode.data.MAX_CAR_CALLER_SLOT
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsState
@@ -51,19 +52,28 @@ class CarDialRedirectionService : CallRedirectionService() {
         initialPhoneAccount: PhoneAccountHandle,
         allowInteractiveResponse: Boolean,
     ) {
+        val number = carDialNumber(handle)
+        if (number == null) {
+            placeCallUnmodified()
+            return
+        }
         scope.launch {
-            // Android allows five seconds. Local storage gets one second; never wait for a host.
+            // Telecom's five-second window starts at bind, including cold process startup.
+            // Only reserved Go Mode numbers wait for local settings, for at most four
+            // seconds after this callback. That leaves at most one second for startup
+            // and the response; ordinary numbers above never wait for settings.
+            // Host discovery and voice setup remain outside this local-storage wait.
             val settings =
-                withTimeoutOrNull(1_000) {
+                withTimeoutOrNull(4_000) {
                     (application as GoModeApplication).settingsRepository.settings.first {
                         it.loadState != SettingsLoadState.Loading
                     }
                 }
             if (settings == null) {
                 // A saved server's number then passes through to the phone; a cold start can cause it.
-                Log.w("GoModeCarDial", "Settings did not load within 1 s of the dial")
+                Log.w("GoModeCarDial", "Settings did not load within 4 s of the dial")
             }
-            when (val target = resolveCarDial(handle, settings)) {
+            when (val target = resolveCarDial(number, settings)) {
                 CarDialTarget.Unrecognized -> {
                     placeCallUnmodified()
                 }
@@ -122,19 +132,25 @@ internal sealed interface CarDialTarget {
     ) : CarDialTarget
 }
 
-internal fun resolveCarDial(
-    handle: Uri,
-    settings: SettingsState?,
-): CarDialTarget {
+internal fun carDialNumber(handle: Uri): String? {
     // Telecom supplies its formatted network number, with post-dial digits already removed:
     // AOSP CallRedirectionProcessorHelper.formatNumberForRedirection. Exactness applies to
     // that callback-visible number; the raw keypad string is unavailable to this service.
-    if (handle.scheme != "tel" || handle.fragment != null) return CarDialTarget.Unrecognized
+    if (handle.scheme != "tel" || handle.fragment != null) return null
     val raw = handle.schemeSpecificPart
     // Only presentation separators are removable. Letters, extensions, pauses, suffixes,
     // alternate schemes, and control characters must not turn into a saved identifier.
-    if (raw.any { it !in "+0123456789 ()-." }) return CarDialTarget.Unrecognized
+    if (raw.any { it !in "+0123456789 ()-." }) return null
     val number = raw.filter { it in "+0123456789" }
+    return number.takeIf { candidate ->
+        candidate == GO_MODE_CAR_NUMBER || (1..MAX_CAR_CALLER_SLOT).any { carCallerNumber(it) == candidate }
+    }
+}
+
+internal fun resolveCarDial(
+    number: String,
+    settings: SettingsState?,
+): CarDialTarget {
     val generic = number == GO_MODE_CAR_NUMBER
     if (settings?.loadState != SettingsLoadState.Ready) {
         return if (generic) CarDialTarget.Unavailable else CarDialTarget.Unrecognized

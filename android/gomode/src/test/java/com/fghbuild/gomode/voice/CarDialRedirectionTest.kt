@@ -18,7 +18,7 @@ class CarDialRedirectionTest {
     fun onlyPresentationSeparatorsCanBeRemovedFromAnExactSavedIdentity() {
         assertEquals(
             CarDialTarget.Server(server),
-            resolveCarDial(Uri.fromParts("tel", "+1 (867) 555-01.01", null), settings()),
+            resolve(Uri.fromParts("tel", "+1 (867) 555-01.01", null), settings()),
         )
         listOf(
             "+186755501010",
@@ -32,26 +32,26 @@ class CarDialRedirectionTest {
             assertEquals(
                 number,
                 CarDialTarget.Unrecognized,
-                resolveCarDial(Uri.fromParts("tel", number, null), settings()),
+                resolve(Uri.fromParts("tel", number, null), settings()),
             )
         }
         assertEquals(
             CarDialTarget.Unrecognized,
-            resolveCarDial(Uri.fromParts("gomode", "+18675550101", null), settings()),
+            resolve(Uri.fromParts("gomode", "+18675550101", null), settings()),
         )
         assertEquals(
             CarDialTarget.Unrecognized,
-            resolveCarDial(Uri.fromParts("tel", "+18675550101", "extra"), settings()),
+            resolve(Uri.fromParts("tel", "+18675550101", "extra"), settings()),
         )
     }
 
     @Test
     fun removedAndAmbiguousServersDoNotIntercept() {
         val handle = Uri.fromParts("tel", "+18675550101", null)
-        assertEquals(CarDialTarget.Unrecognized, resolveCarDial(handle, settings().copy(services = emptyList())))
+        assertEquals(CarDialTarget.Unrecognized, resolve(handle, settings().copy(services = emptyList())))
         assertEquals(
             CarDialTarget.Unrecognized,
-            resolveCarDial(handle, settings().copy(services = listOf(server, server.copy(label = "Duplicate")))),
+            resolve(handle, settings().copy(services = listOf(server, server.copy(label = "Duplicate")))),
         )
     }
 
@@ -61,11 +61,11 @@ class CarDialRedirectionTest {
         val first = settings().copy(services = listOf(server, other))
         val second = first.copy(activeServiceId = other.id)
         val handle = Uri.fromParts("tel", "+1 (867) 555-01.00", null)
-        assertEquals(CarDialTarget.Server(server), resolveCarDial(handle, first))
-        assertEquals(CarDialTarget.Server(other), resolveCarDial(handle, second))
+        assertEquals(CarDialTarget.Server(server), resolve(handle, first))
+        assertEquals(CarDialTarget.Server(other), resolve(handle, second))
         assertEquals(
             CarDialTarget.Server(server),
-            resolveCarDial(Uri.fromParts("tel", carCallerNumber(1), null), second),
+            resolve(Uri.fromParts("tel", carCallerNumber(1), null), second),
         )
     }
 
@@ -81,8 +81,8 @@ class CarDialRedirectionTest {
             ready.copy(activeServiceId = "removed"),
             ready.copy(services = emptyList()),
             ready.copy(services = listOf(server, server.copy(label = "Duplicate"))),
-        ).forEach { assertEquals(CarDialTarget.Unavailable, resolveCarDial(handle, it)) }
-        assertEquals(CarDialTarget.Unrecognized, resolveCarDial(Uri.fromParts("tel", "5550123", null), null))
+        ).forEach { assertEquals(CarDialTarget.Unavailable, resolve(handle, it)) }
+        assertEquals(CarDialTarget.Unrecognized, resolve(Uri.fromParts("tel", "5550123", null), null))
     }
 
     @Test
@@ -100,18 +100,23 @@ class CarDialRedirectionTest {
             assertEquals(
                 number,
                 CarDialTarget.Unrecognized,
-                resolveCarDial(Uri.fromParts("tel", number, null), settings()),
+                resolve(Uri.fromParts("tel", number, null), settings()),
             )
         }
         assertEquals(
             CarDialTarget.Unrecognized,
-            resolveCarDial(Uri.fromParts("gomode", GO_MODE_CAR_NUMBER, null), settings()),
+            resolve(Uri.fromParts("gomode", GO_MODE_CAR_NUMBER, null), settings()),
         )
         assertEquals(
             CarDialTarget.Unrecognized,
-            resolveCarDial(Uri.fromParts("tel", GO_MODE_CAR_NUMBER, "extra"), settings()),
+            resolve(Uri.fromParts("tel", GO_MODE_CAR_NUMBER, "extra"), settings()),
         )
     }
+
+    private fun resolve(
+        handle: Uri,
+        settings: SettingsState?,
+    ): CarDialTarget = carDialNumber(handle)?.let { resolveCarDial(it, settings) } ?: CarDialTarget.Unrecognized
 
     private fun settings() =
         SettingsState(

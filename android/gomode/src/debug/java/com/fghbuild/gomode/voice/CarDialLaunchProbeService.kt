@@ -26,6 +26,11 @@ class CarDialLaunchProbeService : CallRedirectionService() {
         initialPhoneAccount: PhoneAccountHandle,
         allowInteractiveResponse: Boolean,
     ) {
+        val number = carDialNumber(handle)
+        if (number == null) {
+            placeCallUnmodified()
+            return
+        }
         scope.launch {
             val settings =
                 withTimeoutOrNull(1_000) {
@@ -33,7 +38,7 @@ class CarDialLaunchProbeService : CallRedirectionService() {
                         it.loadState != SettingsLoadState.Loading
                     }
                 }
-            val target = resolveCarDial(handle, settings)
+            val target = resolveCarDial(number, settings)
             if (target == CarDialTarget.Unrecognized) {
                 placeCallUnmodified()
                 return@launch

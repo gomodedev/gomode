@@ -81,6 +81,9 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         composeRule.onNodeWithText("Open app settings").performClick()
 
         fun clickSystemText(text: String) {
+            // App info replaces its rows as permission summaries load. A visible label
+            // can still move before a tap, so wait for the Settings window to settle.
+            device.waitForIdle()
             requireNotNull(device.wait(Until.findObject(By.text(text)), GOMODE_DEFAULT_TIMEOUT_MS)) {
                 val shown = device.findObjects(By.text(Pattern.compile(".+"))).mapNotNull { it.text }
                 "System settings did not show $text in ${device.currentPackageName}; visible: $shown"
