@@ -622,13 +622,15 @@ func (c *genaiConversation) startGenerationLocked(ctx context.Context) llmStep {
 				}
 			}
 		}
-		// LFM3-Audio uses an open think block for reasoning and a closed one
-		// for direct answers. Keep the prefill out of committed history.
-		prefix := "<think>"
-		if c.effort == genai.EffortOff {
-			prefix = "<think></think>"
+		// LFM3-Audio's template does not read enable_thinking. Prefill
+		// reasoning so llama-server continues an open think block and parses
+		// its end. A text prefill continues content after llama-server's own
+		// closed think block, so "<think>" became "<think></think><think>" and
+		// the model closed both, answering twice. Keep the prefill out of
+		// committed history.
+		if c.effort != genai.EffortOff {
+			snapshot = append(snapshot, genai.Message{Replies: []genai.Reply{{Reasoning: "\n"}}})
 		}
-		snapshot = append(snapshot, genai.Message{Replies: []genai.Reply{{Text: prefix}}})
 	}
 	opts := c.genOptions()
 	c.revision++
@@ -655,14 +657,7 @@ func (c *genaiConversation) startGenerationLocked(ctx context.Context) llmStep {
 			u := &res.Usage
 			if accepting && (err == nil || u.InputTokens > 0 || u.OutputTokens > 0 || u.TotalTokens > 0 ||
 				u.InputCachedTokens > 0 || u.ReasoningTokens > 0 || u.ContextTokens > 0 || u.ContextWindow > 0) {
-				accepting = yield(llmFragment{usage: &usageObservation{provider: c.provider.Name(), model: c.provider.ModelID(), counts: res.Usage}})
-			}
-			if err == nil && c.audioInput {
-				var reasoning string
-				reasoning, err = separateStagedReasoning(&res.Message, c.effort != genai.EffortOff)
-				if accepting && err == nil && reasoning != "" && c.includeReasoning && ctx.Err() == nil {
-					yield(llmFragment{reasoning: reasoning})
-				}
+				yield(llmFragment{usage: &usageObservation{provider: c.provider.Name(), model: c.provider.ModelID(), counts: res.Usage}})
 			}
 		},
 		finish: func() (llmReply, error) {
@@ -750,6 +745,9 @@ func (c *genaiConversation) toReplyLocked(msg *genai.Message) (llmReply, error) 
 	if c.audioInput && answer == "" && len(calls) == 0 {
 		return llmReply{}, errors.New("staged generation returned no text or tool calls")
 	}
+	// llama-server parses LFM3 reasoning into reasoning_content. A tag left in
+	// the text means the model left or reopened a think block, possibly
+	// repeating its answer; speak none of it.
 	if c.audioInput && (strings.Contains(answer, "<think>") || strings.Contains(answer, "</think>")) {
 		return llmReply{}, errors.New("staged generation returned unparsed reasoning; refusing to synthesize it")
 	}

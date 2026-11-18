@@ -543,6 +543,25 @@ func TestGenaiConversationReasoning(t *testing.T) {
 	if !reflect.DeepEqual(fragments, want) {
 		t.Fatalf("fragments = %v, want %v", fragments, want)
 	}
+
+	// A staged LFM3 model that reopens its think block repeats the answer
+	// after the second end tag; none of it may be spoken or committed.
+	p = &fakeGenAIProvider{firstReplies: []genai.Reply{
+		{Reasoning: "Count them."},
+		{Text: "Five are waiting.\n</think>\nFive are waiting."},
+	}}
+	conv = (&genaiLLMAdapter{provider: p, audioInput: true}).newConversation("Answer briefly.", nil, false)
+	if step, err = conv.user(t.Context(), "How many are waiting?"); err != nil {
+		t.Fatal(err)
+	}
+	for range step.stream {
+	}
+	if reply, err := step.finish(); err == nil {
+		t.Fatalf("spoke unparsed reasoning: %+v", reply)
+	}
+	if n := len(conv.(*genaiConversation).messages); n != 1 {
+		t.Fatalf("committed %d messages, want only the user message", n)
+	}
 }
 
 func TestGenaiConversationStreamStop(t *testing.T) {

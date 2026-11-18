@@ -1366,7 +1366,7 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 				t.Fatalf("staged tool/history contract: %+v", req)
 			}
 			last := req.Messages[len(req.Messages)-1]
-			if last.Role != "assistant" || len(last.Content) != 1 || last.Content[0].Text != "<think>" {
+			if last.Role != "assistant" || len(last.Content) != 0 || len(last.ToolCalls) != 0 || last.ReasoningContent != "\n" {
 				t.Fatalf("missing staged thinking prefill: %+v", last)
 			}
 			found := false
