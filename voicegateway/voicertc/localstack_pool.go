@@ -453,7 +453,11 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 					err = errors.Join(err, b.Close())
 				}
 				cancel()
-				l.log.WarnContext(ctx, "voicertc: local stack startup failed", "err", err)
+				if cause := context.Cause(ctx); cause != nil {
+					l.log.InfoContext(ctx, "voicertc: local stack startup canceled", "cause", cause, "err", err)
+				} else {
+					l.log.WarnContext(ctx, "voicertc: local stack startup failed", "err", err)
+				}
 				p.mu.Lock()
 				l.cancel = nil
 			} else {

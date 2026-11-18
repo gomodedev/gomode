@@ -13,7 +13,7 @@
 // error. One teardown owner serves the overlay and Telecom, so duplicate or late callbacks are
 // harmless. A user hang-up is a local disconnect; a WebRTC or server failure is a remote or error
 // disconnect, and recovery runs only while the call is active. There is no hold: when Telecom
-// yields to a cellular or VoIP call, voice disconnects. The foreground service posts a
+// yields to a cellular or VoIP call, voice ends with an error naming it. The foreground service posts a
 // Notification.CallStyle.
 //
 // The endpoint picker still uses AudioManager; docs/PLAN_GOMODE.md phase telecom-routing replaces
@@ -85,7 +85,7 @@ internal class TelecomCallController(
     private var callGeneration = 0L
     private var activeCall = 0L
     private var activeServerID: String? = null
-    private var disconnectCallback: (() -> Unit)? = null
+    private var disconnectCallback: ((String?) -> Unit)? = null
     override val isStarted: Boolean get() = activeCall != 0L
 
     init {
@@ -112,7 +112,7 @@ internal class TelecomCallController(
     override suspend fun start(
         serverName: String,
         serverID: String?,
-        onTelecomDisconnect: () -> Unit,
+        onTelecomDisconnect: (error: String?) -> Unit,
     ): Boolean {
         if (!isSupported()) return false
         if (activeCall != 0L) {
@@ -149,21 +149,25 @@ internal class TelecomCallController(
                                 preferredStartingCallEndpoint = startingEndpoint,
                             ),
                         onAnswer = {},
-                        onDisconnect = {
+                        onDisconnect = { cause ->
+                            // Telecom forwards the call's prior cause, not why it hung up, so every
+                            // disconnect request counts as a hang-up (Call.disconnect in AOSP Telecom).
+                            Log.i(TAG, "Telecom disconnected the voice call: $cause")
                             if (activeCall == generation) {
                                 endedByTelecom = true
                                 val callback = disconnectCallback
                                 onTelecomEnded()
-                                callback?.invoke()
+                                callback?.invoke(null)
                             }
                         },
                         onSetActive = {},
                         onSetInactive = {
                             // Telecom yields to a cellular or VoIP call; voice disconnects.
+                            Log.i(TAG, "Telecom set the voice call inactive")
                             if (activeCall == generation) {
                                 val callback = disconnectCallback
                                 onTelecomEnded()
-                                callback?.invoke()
+                                callback?.invoke(VOICE_CALL_PREEMPTED_ERROR)
                             }
                         },
                         block = {

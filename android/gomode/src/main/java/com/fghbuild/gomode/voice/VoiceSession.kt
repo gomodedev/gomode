@@ -517,7 +517,9 @@ internal class VoiceSession(
                     // Recovery keeps the Telecom call; only a fresh connect starts one.
                     if (!telecomCallActive &&
                         callController.isSupported() &&
-                        !callController.start(setup.serverName, setup.serverID) { disconnect() }
+                        !callController.start(setup.serverName, setup.serverID) { error ->
+                            if (error == null) disconnect() else setError(error)
+                        }
                     ) {
                         setError("Could not start the voice call")
                         return@launch
@@ -748,7 +750,7 @@ internal class VoiceSession(
                 } catch (e: VoiceMcpAuthChangedException) {
                     if (ownsAttempt(attempt)) {
                         Log.i(TAG, "Service authentication changed during voice setup", e)
-                        disconnect()
+                        setError(VOICE_CONVERSATION_ENDED_ERROR)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -1277,7 +1279,7 @@ internal class VoiceSession(
     ) {
         if (_state.value.error != null) return
         if (!voiceConversation.isCurrent()) {
-            disconnect()
+            setError(VOICE_CONVERSATION_ENDED_ERROR)
             return
         }
         if (contextUpdateBlocked()) {
@@ -1353,7 +1355,7 @@ internal class VoiceSession(
     // become context without a competing turn.
     private fun flushPendingNotifications(allowResponse: Boolean = true) {
         if (!voiceConversation.isCurrent()) {
-            disconnect()
+            setError(VOICE_CONVERSATION_ENDED_ERROR)
             return
         }
         if (contextUpdateBlocked()) return
@@ -1824,7 +1826,7 @@ internal class VoiceSession(
     ) {
         if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
         if (!voiceConversation.isCurrent()) {
-            disconnect()
+            setError(VOICE_CONVERSATION_ENDED_ERROR)
             return
         }
         val id = msg.id
@@ -1868,7 +1870,7 @@ internal class VoiceSession(
         } catch (e: VoiceSetupException) {
             if (ownsAttempt(attempt) && dataChannel === originChannel) {
                 Log.i(TAG, "Conversation identity changed before catalog tool call", e)
-                disconnect()
+                setError(VOICE_CONVERSATION_ENDED_ERROR)
             }
         } catch (e: CancellationException) {
             throw e
@@ -1970,7 +1972,7 @@ internal class VoiceSession(
                             } == true
                     if (lostBt && !telecomCallActive) {
                         Log.i(TAG, "Selected Bluetooth device removed, disconnecting")
-                        disconnect()
+                        setError(VOICE_BLUETOOTH_LOST_ERROR)
                     } else {
                         refreshAvailableDevices()
                     }
@@ -2037,7 +2039,7 @@ internal class VoiceSession(
 
     /** Request exclusive audio focus so music/podcasts pause while the voice session is active. */
     private fun requestAudioFocus() {
-        val request = voiceAudioFocusRequest { disconnect() }
+        val request = voiceAudioFocusRequest { setError(VOICE_AUDIO_FOCUS_LOST_ERROR) }
         audioFocusRequest = request
         audioManager.requestAudioFocus(request)
     }

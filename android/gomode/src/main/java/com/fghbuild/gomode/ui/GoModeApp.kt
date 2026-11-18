@@ -103,6 +103,7 @@ import com.fghbuild.gomode.voice.MicrophonePermissionRecovery
 import com.fghbuild.gomode.voice.ServiceReconnectDetail
 import com.fghbuild.gomode.voice.SpeechLanguageRecovery
 import com.fghbuild.gomode.voice.TelecomCallController
+import com.fghbuild.gomode.voice.VOICE_CONVERSATION_ENDED_ERROR
 import com.fghbuild.gomode.voice.VoiceConversation
 import com.fghbuild.gomode.voice.VoicePanel
 import com.fghbuild.gomode.voice.VoiceService
@@ -526,7 +527,12 @@ internal fun GoModeApp(
     LaunchedEffect(sharedConversation, voiceConversation, gatewayState, catalogState, activeKey, voiceState.connected) {
         if (!carVoiceBusy && sharedConversation && gatewayState != null) {
             if (!voiceConversation.isCurrent()) {
-                voiceSession.disconnect()
+                // An identity change ends an active call; an idle session has nothing to report.
+                if (voiceSessionActive) {
+                    voiceSession.setError(VOICE_CONVERSATION_ENDED_ERROR)
+                } else {
+                    voiceSession.disconnect()
+                }
                 if (localSelection != null) localModelOwner.restartConversation()
             } else if (voiceSessionActive) {
                 voiceConversation.contextUpdate()?.let { voiceSession.injectText(it.text, it.generate) }
@@ -621,7 +627,11 @@ internal fun GoModeApp(
                         if (!carVoiceBusy) {
                             if (sharedConversation) {
                                 if (!voiceConversation.isCurrent()) {
-                                    manualVoiceSession.disconnect()
+                                    if (voiceSessionActive) {
+                                        manualVoiceSession.setError(VOICE_CONVERSATION_ENDED_ERROR)
+                                    } else {
+                                        manualVoiceSession.disconnect()
+                                    }
                                     if (localSelection != null) localModelOwner.restartConversation()
                                 }
                             } else if (entry === serviceSession ||

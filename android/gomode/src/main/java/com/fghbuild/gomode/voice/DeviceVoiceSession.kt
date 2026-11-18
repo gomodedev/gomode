@@ -358,7 +358,9 @@ internal class DeviceVoiceSession(
                     if (preparedLocalModel == null) otherSetup = setup
                     if (!callController.isStarted &&
                         callController.isSupported() &&
-                        !callController.start(setup.serverName, setup.serverID) { disconnect() }
+                        !callController.start(setup.serverName, setup.serverID) { error ->
+                            if (error == null) disconnect() else setError(error)
+                        }
                     ) {
                         setError("Could not start the voice call")
                         return@launch

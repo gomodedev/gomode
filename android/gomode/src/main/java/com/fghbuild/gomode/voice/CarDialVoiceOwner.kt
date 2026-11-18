@@ -325,7 +325,7 @@ internal class CarDialVoiceOwner(
         val ended = { if (request === current && attempt === next) cancel(current.identity) }
         val call = TelecomCallController(context, ended)
         callController = call
-        check(call.start(next.server.label, next.server.id, ended)) {
+        check(call.start(next.server.label, next.server.id) { ended() }) {
             "Could not establish replacement call"
         }
         // The replacement call now owns hang-up before storage, auth, networking or model work.

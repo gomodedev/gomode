@@ -14,8 +14,8 @@ internal data class CallAudioState(
 
 /**
  * VoiceCallController maps one active voice session to an Android Telecom
- * self-managed call. A car or headset hang-up arrives as [start]'s
- * onTelecomDisconnect callback.
+ * self-managed call. A car or headset hang-up, or Telecom yielding to another
+ * call, arrives as [start]'s onTelecomDisconnect callback.
  *
  * The implementation owns the Telecom call lifecycle. A session calls [start]
  * once, [activate] when the voice transport is ready, and [endLocal] for an
@@ -34,12 +34,13 @@ internal interface VoiceCallController {
     /**
      * start adds an outgoing audio call. It returns true when Telecom reports the
      * call ready and false when Telecom rejects it or the device lacks support.
-     * onTelecomDisconnect runs on a car or headset hang-up.
+     * onTelecomDisconnect receives null for a car or headset hang-up and a
+     * user-facing error when Telecom ends voice for another call.
      */
     suspend fun start(
         serverName: String,
         serverID: String?,
-        onTelecomDisconnect: () -> Unit,
+        onTelecomDisconnect: (error: String?) -> Unit,
     ): Boolean
 
     /** activate marks the call active after the voice transport is ready. */
@@ -60,7 +61,7 @@ internal class NoopVoiceCallController : VoiceCallController {
     override suspend fun start(
         serverName: String,
         serverID: String?,
-        onTelecomDisconnect: () -> Unit,
+        onTelecomDisconnect: (error: String?) -> Unit,
     ): Boolean = false
 
     override fun activate() = Unit

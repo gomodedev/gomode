@@ -1,4 +1,4 @@
-// Accepts transactional Telecom calls, which Robolectric lacks, and records the app's call-control requests.
+// Accepts transactional Telecom calls, which Robolectric lacks, and records call-control requests and callbacks.
 package com.fghbuild.gomode.voice
 
 import android.os.Build
@@ -26,8 +26,10 @@ class ShadowTransactionalTelecomManager : ShadowTelecomManager() {
     // ICallControl method names, such as sendEvent and disconnect, in request order.
     val controlRequests = CopyOnWriteArrayList<String>()
 
+    // Telecom's callbacks into each added call, such as onSetInactive, in call order.
+    val controlCallbacks = CopyOnWriteArrayList<CallControlCallback>()
+
     @Implementation(minSdk = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-    @Suppress("UnusedParameter") // Match the platform API; no fixture call requests app-side transitions.
     fun addCall(
         attributes: CallAttributes,
         executor: Executor,
@@ -52,6 +54,7 @@ class ShadowTransactionalTelecomManager : ShadowTelecomManager() {
                 .newInstance(attributes.displayName.toString(), server)
         // Telecom reports the starting route after adding a call; core-telecom waits for it.
         val earpiece = CallEndpoint("Earpiece", CallEndpoint.TYPE_EARPIECE, ParcelUuid(UUID.randomUUID()))
+        controlCallbacks += controlCallback
         executor.execute {
             receiver.onResult(control)
             eventCallback.onAvailableCallEndpointsChanged(listOf(earpiece))

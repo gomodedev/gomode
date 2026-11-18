@@ -485,6 +485,11 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 					cancel(err)
 					return
 				}
+				if sessionCtx.Err() != nil {
+					// The client is gone; cleanup logs the cause.
+					slog.DebugContext(sessionCtx, "voicertc: gateway client message ended with session", "session", sess.id, "err", err)
+					return
+				}
 				slog.WarnContext(sessionCtx, "voicertc: gateway client message failed", "session", sess.id, "err", err)
 				sess.sendGatewayError(sessionCtx, "session: "+err.Error())
 				return
@@ -494,7 +499,7 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 		dc.OnClose(func() {
 			slog.InfoContext(sessionCtx, "voicertc: data channel closed", "session", sess.id)
 			sess.setDataChannelState(dc.ReadyState().String())
-			cancel(errors.New("data channel closed"))
+			cancel(errClientClosed)
 		})
 	})
 
@@ -504,7 +509,10 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 		sess.setICEConnectionState(state.String())
 		//exhaustive:ignore
 		switch state {
-		case webrtc.ICEConnectionStateFailed, webrtc.ICEConnectionStateDisconnected, webrtc.ICEConnectionStateClosed:
+		case webrtc.ICEConnectionStateClosed:
+			// Pion closes the PeerConnection when the peer sends DTLS CloseNotify.
+			cancel(errClientClosed)
+		case webrtc.ICEConnectionStateFailed, webrtc.ICEConnectionStateDisconnected:
 			cancel(fmt.Errorf("ICE connection %s", state))
 		default:
 		}

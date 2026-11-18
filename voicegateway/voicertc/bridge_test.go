@@ -580,6 +580,17 @@ func TestBackend(t *testing.T) {
 	})
 }
 
+// sessionContextConnector exposes the session context each connection receives.
+type sessionContextConnector struct {
+	fakeBackendConnector
+	ctx chan context.Context
+}
+
+func (b *sessionContextConnector) connect(ctx context.Context, id string, sink backendSink) (backendSession, error) {
+	b.ctx <- ctx
+	return b.fakeBackendConnector.connect(ctx, id, sink)
+}
+
 type fakeBackendSession struct {
 	id       string
 	sink     backendSink
@@ -790,6 +801,7 @@ func testBridgeChoiceRuntime(t *testing.T) {
 type voiceRTCTestSession struct {
 	wg                sync.WaitGroup
 	sessionID         string
+	pc                *webrtc.PeerConnection
 	dc                *webrtc.DataChannel
 	micTrack          *webrtc.TrackLocalStaticSample
 	messages          chan voiceRTCMessage
@@ -932,6 +944,7 @@ func dialVoiceRTCClient(ctx context.Context, t *testing.T, fn voiceRTCOffer) *vo
 	}
 
 	s.sessionID = id
+	s.pc = pc
 	s.dc = dc
 	s.micTrack = mic
 	select {
@@ -1976,6 +1989,19 @@ func TestBridge(t *testing.T) {
 }
 
 func TestSession(t *testing.T) {
+	t.Run("client close", func(t *testing.T) {
+		b := &sessionContextConnector{ctx: make(chan context.Context, 1)}
+		client := dialVoiceRTCClient(t.Context(), t, newTestBridge(t.Context(), t, b).HandleOffer)
+		client.send(t.Context(), t, &voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: "local", Language: "en"}})
+		ctx := <-b.ctx
+		if err := client.pc.Close(); err != nil {
+			t.Fatal(err)
+		}
+		<-ctx.Done()
+		if got := context.Cause(ctx); got == nil || got.Error() != "client closed the WebRTC connection" {
+			t.Fatalf("cause = %v, want the client close", got)
+		}
+	})
 	t.Run("close", func(t *testing.T) {
 		var logs bytes.Buffer
 		prior := slog.Default()

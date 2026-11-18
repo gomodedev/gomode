@@ -2188,6 +2188,27 @@ class DeviceVoiceSessionTest {
         calls.telecomDisconnect()
         assertFalse(session.state.value.connected)
         assertEquals(0, calls.endedLocal)
+        assertEquals("a hang-up is not a failure", null, session.state.value.error)
+    }
+
+    @Test
+    fun `telecom yielding to another call reports why voice ended`() {
+        val calls = FakeVoiceCallController()
+        val socket = FakeWebSocket()
+        var listener: WebSocketListener? = null
+        val session =
+            createSession(FakeSpeech(), calls) { _, captured ->
+                listener = captured
+                socket
+            }
+
+        session.connect()
+        requireNotNull(listener).onOpen(socket, upgradeResponse())
+        requireNotNull(listener).onMessage(socket, """{"kind":"session.ready"}""")
+
+        calls.telecomDisconnect(VOICE_CALL_PREEMPTED_ERROR)
+        assertFalse(session.state.value.connected)
+        assertEquals(VOICE_CALL_PREEMPTED_ERROR, session.state.value.error)
     }
 
     @Test
@@ -3414,7 +3435,7 @@ class DeviceVoiceSessionTest {
         var started = 0
         var activated = 0
         var endedLocal = 0
-        private var disconnectHandler: (() -> Unit)? = null
+        private var disconnectHandler: ((String?) -> Unit)? = null
         private var telecomEnded = false
 
         override fun isSupported(): Boolean = supported
@@ -3422,15 +3443,15 @@ class DeviceVoiceSessionTest {
         override suspend fun start(
             serverName: String,
             serverID: String?,
-            onTelecomDisconnect: () -> Unit,
+            onTelecomDisconnect: (error: String?) -> Unit,
         ): Boolean {
             this.serverName = serverName
             this.serverID = serverID
             started++
             telecomEnded = false
-            disconnectHandler = {
+            disconnectHandler = { error ->
                 telecomEnded = true
-                onTelecomDisconnect()
+                onTelecomDisconnect(error)
             }
             return supported && startResult
         }
@@ -3444,8 +3465,8 @@ class DeviceVoiceSessionTest {
             endedLocal++
         }
 
-        fun telecomDisconnect() {
-            disconnectHandler?.invoke()
+        fun telecomDisconnect(error: String? = null) {
+            disconnectHandler?.invoke(error)
         }
     }
 }

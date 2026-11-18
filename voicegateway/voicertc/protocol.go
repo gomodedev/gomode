@@ -19,6 +19,11 @@ import (
 
 var errSessionClosed = errors.New("session closed")
 
+// errClientClosed ends a WebRTC session whose client closed its data channel
+// or peer connection. The gateway closes neither before canceling the session,
+// and the first cause wins.
+var errClientClosed = errors.New("client closed the WebRTC connection")
+
 func decodeGatewayMessage(data []byte, want voicev2.MessageKind, msg any) error {
 	if err := json.Unmarshal(data, msg); err != nil {
 		return fmt.Errorf("decode %s message: %w", want, err)
