@@ -38,12 +38,14 @@ type lazyLocalStack struct {
 	// All mutable state belongs to pool.mu. Loading reserves capacity before
 	// releasing the lock so concurrent cold choices cannot exceed the limit.
 	loaded    backendConnector
-	loading   chan struct{}
+	loading   *stackLoad
 	stage     string // current startup step while loading
 	unloading chan struct{}
-	cancel    context.CancelFunc
-	// users counts unreleased acquisitions, including sessions of a stack
-	// unloaded after its worker exited, until they close.
+	// cancel stops the loading or loaded runtime; only close and unload call it.
+	cancel context.CancelFunc
+	// users counts unreleased acquisitions, including sessions waiting on a
+	// load and sessions of a stack unloaded after its worker exited, until they
+	// close. A waiting session pins the stack it is about to use.
 	users int
 	// leases are the sessions on loaded, which a worker exit ends.
 	leases     []*leasedLocalStackSession
@@ -52,6 +54,14 @@ type lazyLocalStack struct {
 	closed     bool
 	owner      *localStackBackend
 	references int
+}
+
+// stackLoad is one runtime startup. Startup outlives the session that began it:
+// models take minutes to download and start, and a client that disconnects
+// early usually reconnects. Only closing the stack cancels it.
+type stackLoad struct {
+	done chan struct{}
+	err  error // set before done closes
 }
 
 // errWorkerExited ends sessions whose stack lost a managed worker.
@@ -401,7 +411,8 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 				oldest = e
 			}
 		}
-		if l.loading == nil && l.unloading == nil && (count < p.limits.MaxInstances || oldest != nil) {
+		load := l.loading
+		if load == nil && l.unloading == nil && (count < p.limits.MaxInstances || oldest != nil) {
 			if count >= p.limits.MaxInstances {
 				// unloadLocked logs a failed stop. The evicted processes are reaped
 				// and the slot released either way, so the failure belongs to the
@@ -410,76 +421,103 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 				p.mu.Unlock()
 				continue
 			}
-			l.loading = make(chan struct{})
-			// Runtime processes outlive the first session. Cancellation during
-			// startup still aborts downloads/workers; successful acquisition
-			// transfers cancellation ownership to this cache entry.
+			load = &stackLoad{done: make(chan struct{})}
+			l.loading = load
+			// Keep the session's values for logging, not its cancellation.
 			runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-			runCtx = context.WithValue(runCtx, startupStageKey{}, l.setStage)
 			l.cancel = cancel
-			stop := context.AfterFunc(ctx, cancel)
-			p.mu.Unlock()
-			l.log.InfoContext(ctx, "voicertc: starting local stack")
-			var b backendConnector
-			var servers []genai.Server
-			var err error
-			switch cfg := l.cfg.(type) {
-			case *voicegateway.PipelineConfig:
-				var runtime *localStackRuntime
-				runtime, err = localStackRuntimeForConfig(runCtx, cfg)
-				if runtime != nil {
-					b, servers = runtime, managedServers(runtime.runtime)
-				}
-			case *voicegateway.RealtimeConfig:
-				var runtime *llamaRealtimeBackend
-				runtime, err = newLlamaRealtimeBackend(runCtx, *cfg)
-				if runtime != nil {
-					b, servers = runtime, managedServers(runtime.runtime)
-				}
-			}
-			stop()
-			p.mu.Lock()
-			if err == nil {
-				err = ctx.Err()
-				if l.closed {
-					err = errors.New("local stack is closed")
-				}
-			}
-			if err != nil {
-				// Keep the loading reservation until cleanup finishes, without
-				// blocking other choices' leases or heartbeat observations.
-				p.mu.Unlock()
-				if b != nil {
-					err = errors.Join(err, b.Close())
-				}
-				cancel()
-				if cause := context.Cause(ctx); cause != nil {
-					l.log.InfoContext(ctx, "voicertc: local stack startup canceled", "cause", cause, "err", err)
-				} else {
-					l.log.WarnContext(ctx, "voicertc: local stack startup failed", "err", err)
-				}
-				p.mu.Lock()
-				l.cancel = nil
-			} else {
-				l.log.InfoContext(ctx, "voicertc: local stack started")
-				l.users++
-				l.watchLocked(b, servers)
-			}
-			close(l.loading)
-			l.loading = nil
-			l.stage = ""
-			p.notifyLocked()
-			p.mu.Unlock()
-			return b, err
+			go l.load(context.WithValue(runCtx, startupStageKey{}, l.setStage), load)
 		}
-		changed := p.changed
+		if load == nil {
+			changed := p.changed
+			p.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-changed:
+			}
+			continue
+		}
+		l.users++
 		p.mu.Unlock()
 		select {
 		case <-ctx.Done():
+			l.log.InfoContext(ctx, "voicertc: session left while the local stack starts; startup continues", "cause", context.Cause(ctx))
+			l.release()
 			return nil, ctx.Err()
-		case <-changed:
+		case <-load.done:
+		}
+		if load.err != nil {
+			l.release()
+			return nil, load.err
+		}
+		p.mu.Lock()
+		b := l.loaded
+		p.mu.Unlock()
+		if b != nil {
+			return b, nil
+		}
+		// A worker exited between startup and this session's turn.
+		l.release()
+	}
+}
+
+// load starts the runtime and publishes it, idle when every waiting session
+// left meanwhile. ctx is independent of those sessions.
+func (l *lazyLocalStack) load(ctx context.Context, load *stackLoad) {
+	p := l.pool
+	l.log.InfoContext(ctx, "voicertc: starting local stack")
+	var b backendConnector
+	var servers []genai.Server
+	var err error
+	switch cfg := l.cfg.(type) {
+	case *voicegateway.PipelineConfig:
+		var runtime *localStackRuntime
+		runtime, err = localStackRuntimeForConfig(ctx, cfg)
+		if runtime != nil {
+			b, servers = runtime, managedServers(runtime.runtime)
+		}
+	case *voicegateway.RealtimeConfig:
+		var runtime *llamaRealtimeBackend
+		runtime, err = newLlamaRealtimeBackend(ctx, *cfg)
+		if runtime != nil {
+			b, servers = runtime, managedServers(runtime.runtime)
 		}
 	}
+	p.mu.Lock()
+	if err == nil && l.closed {
+		err = errors.New("local stack is closed")
+	}
+	if err != nil {
+		// Keep the loading reservation until cleanup finishes, without
+		// blocking other choices' leases or heartbeat observations.
+		cancel := l.cancel
+		p.mu.Unlock()
+		if b != nil {
+			err = errors.Join(err, b.Close())
+		}
+		if ctx.Err() != nil {
+			l.log.InfoContext(ctx, "voicertc: local stack startup canceled by shutdown", "err", err)
+		} else {
+			l.log.WarnContext(ctx, "voicertc: local stack startup failed", "err", err)
+		}
+		cancel()
+		p.mu.Lock()
+		l.cancel = nil
+	} else {
+		l.log.InfoContext(ctx, "voicertc: local stack started")
+		l.watchLocked(b, servers)
+		if l.users == 0 {
+			l.idleLocked()
+		}
+	}
+	load.err = err
+	close(load.done)
+	l.loading = nil
+	l.stage = ""
+	p.notifyLocked()
+	l.pruneLocked()
+	p.mu.Unlock()
 }
 
 func (l *lazyLocalStack) release() {
@@ -488,19 +526,26 @@ func (l *lazyLocalStack) release() {
 	defer p.mu.Unlock()
 	l.users--
 	if l.users == 0 && !l.closed && l.loaded != nil {
-		l.idleSince = time.Now()
-		since := l.idleSince
-		l.timer = time.AfterFunc(time.Duration(p.limits.IdleTimeoutSeconds)*time.Second, func() {
-			p.mu.Lock()
-			defer p.mu.Unlock()
-			if l.loaded != nil && l.users == 0 && l.idleSince.Equal(since) {
-				if err := l.unloadLocked(false); err != nil {
-					slog.Error("voicertc: unload idle local stack", "err", err)
-				}
-			}
-		})
+		l.idleLocked()
 	}
 	p.notifyLocked()
+}
+
+// idleLocked unloads the stack after the idle timeout unless a session
+// acquires it first.
+func (l *lazyLocalStack) idleLocked() {
+	p := l.pool
+	l.idleSince = time.Now()
+	since := l.idleSince
+	l.timer = time.AfterFunc(time.Duration(p.limits.IdleTimeoutSeconds)*time.Second, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if l.loaded != nil && l.users == 0 && l.idleSince.Equal(since) {
+			if err := l.unloadLocked(false); err != nil {
+				slog.Error("voicertc: unload idle local stack", "err", err)
+			}
+		}
+	})
 }
 
 func (l *lazyLocalStack) close() error {
@@ -508,7 +553,7 @@ func (l *lazyLocalStack) close() error {
 	p.mu.Lock()
 	l.closed = true
 	if l.loading != nil {
-		done := l.loading
+		done := l.loading.done
 		l.cancel()
 		p.mu.Unlock()
 		<-done

@@ -266,11 +266,11 @@ func TestLocalStackPool(t *testing.T) {
 			l := stackVariant(t, a, clientSpeechConfig())
 			// Hold the stack in its loading state, as acquire does while starting.
 			p.mu.Lock()
-			l.loading = make(chan struct{})
+			l.loading = &stackLoad{done: make(chan struct{})}
 			p.mu.Unlock()
 			t.Cleanup(func() {
 				p.mu.Lock()
-				close(l.loading)
+				close(l.loading.done)
 				l.loading = nil
 				p.mu.Unlock()
 				_ = a.Close()
@@ -303,7 +303,7 @@ func TestLocalStackPool(t *testing.T) {
 			}
 		})
 	})
-	t.Run("text disconnect cancels cold startup", func(t *testing.T) {
+	t.Run("text disconnect ends the session during cold startup", func(t *testing.T) {
 		t.Parallel()
 		for _, action := range []string{"disconnect", "overflow", "overflow-disconnect", "session.close"} {
 			t.Run(action, func(t *testing.T) {
@@ -359,10 +359,70 @@ func TestLocalStackPool(t *testing.T) {
 						t.Fatalf("startup = %v", err)
 					}
 				case <-ctx.Done():
-					t.Fatal("disconnected text session did not cancel startup")
+					t.Fatal("disconnected text session kept waiting on startup")
 				}
 			})
 		}
+	})
+	t.Run("startup outlives the session that began it", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		t.Cleanup(cancel)
+		started, ready := make(chan struct{}, 1), make(chan struct{})
+		model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			select {
+			case <-ready:
+			case <-r.Context().Done():
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}))
+		t.Cleanup(model.Close)
+		p := newLocalStackPool(testRuntime)
+		b := p.backend(voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: model.URL, Model: "chat"}}})
+		t.Cleanup(func() { _ = b.Close() })
+		l := stackVariant(t, b, clientSpeechConfig())
+		sessionCtx, leave := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() { _, err := l.acquire(sessionCtx); done <- err }()
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("startup did not begin")
+		}
+		leave()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("departed session = %v", err)
+		}
+		close(ready)
+		var loaded backendConnector
+		for {
+			p.mu.Lock()
+			users, idle, changed := l.users, l.timer != nil, p.changed
+			loaded = l.loaded
+			p.mu.Unlock()
+			if loaded != nil {
+				if users != 0 || !idle {
+					t.Fatalf("unattended stack: users=%d idle=%v", users, idle)
+				}
+				break
+			}
+			select {
+			case <-changed:
+			case <-ctx.Done():
+				t.Fatal("startup stopped with its session")
+			}
+		}
+		again, err := l.acquire(ctx)
+		if err != nil || again != loaded {
+			t.Fatalf("reconnect = %p, %v; want the stack started for the departed session", again, err)
+		}
+		l.release()
 	})
 	t.Run("progress while waiting for capacity", func(t *testing.T) {
 		t.Parallel()
