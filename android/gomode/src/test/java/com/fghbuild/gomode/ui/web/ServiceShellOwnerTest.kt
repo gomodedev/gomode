@@ -28,6 +28,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowNetwork
 
 @RunWith(RobolectricTestRunner::class)
@@ -68,6 +69,93 @@ class ServiceShellOwnerTest {
             assertTrue(connectivity.networkCallbacks.isEmpty())
         }
 
+    // A cold start can fail its first page load on an unchanged route, for example right after an install.
+    @Test
+    @Config(
+        shadows = [HostedWebViewFeatures::class, HostedWebViewCompat::class],
+        instrumentedPackages = ["androidx.webkit"],
+    )
+    fun validatedBootstrapRetriesAColdStartPageFailureOnce() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val server = MockWebServer()
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+            server.enqueue(MockResponse().setBody(SETTINGS_JSON))
+            server.start()
+            val context = RuntimeEnvironment.getApplication()
+            val settings = SettingsRepository(MemoryPreferences())
+            val owner = ServiceShellOwner(context, settings)
+            try {
+                settings.addService("Service", server.url("/").toString())
+                owner.start()
+                val entry =
+                    owner.state
+                        .map { snapshot -> snapshot.entries.values.singleOrNull { it.key.url.isNotBlank() } }
+                        .filterNotNull()
+                        .first()
+                entry.updateLoad(WebShellLoadState.Failed("Could not connect", networkFailure = true))
+                runCurrent()
+                assertEquals("no evidence yet that the service is reachable", 0, entry.state.value.webReloadToken)
+                entry.state.first { it.bootstrap is ServiceBootstrapState.Ready }
+                runCurrent()
+                assertEquals(1, entry.state.value.webReloadToken)
+                entry.updateLoad(WebShellLoadState.Failed("Still unavailable", networkFailure = true))
+                runCurrent()
+                assertEquals("one retry per validation", 1, entry.state.value.webReloadToken)
+                entry.updateLoad(WebShellLoadState.Ready)
+                entry.reloadWeb()
+                runCurrent()
+                assertEquals(2, entry.state.value.webReloadToken)
+                entry.updateLoad(WebShellLoadState.Failed("Host went down", networkFailure = true))
+                runCurrent()
+                assertEquals("a manual reload is not reachability evidence", 2, entry.state.value.webReloadToken)
+                assertEquals(2, server.requestCount)
+            } finally {
+                owner.close()
+                server.shutdown()
+                Dispatchers.resetMain()
+            }
+        }
+
+    @Test
+    @Config(
+        shadows = [HostedWebViewFeatures::class, HostedWebViewCompat::class],
+        instrumentedPackages = ["androidx.webkit"],
+    )
+    fun pageLoadAfterValidatedBootstrapSpendsItsRetry() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val server = MockWebServer()
+            server.enqueue(MockResponse().setBody(SETTINGS_JSON))
+            server.start()
+            val context = RuntimeEnvironment.getApplication()
+            val settings = SettingsRepository(MemoryPreferences())
+            val owner = ServiceShellOwner(context, settings)
+            try {
+                settings.addService("Service", server.url("/").toString())
+                owner.start()
+                val entry =
+                    owner.state
+                        .map { snapshot -> snapshot.entries.values.singleOrNull { it.key.url.isNotBlank() } }
+                        .filterNotNull()
+                        .first()
+                entry.state.first { it.bootstrap is ServiceBootstrapState.Ready }
+                runCurrent()
+                entry.updateLoad(WebShellLoadState.Ready)
+                runCurrent()
+                entry.reloadWeb()
+                runCurrent()
+                assertEquals(1, entry.state.value.webReloadToken)
+                entry.updateLoad(WebShellLoadState.Failed("Host went down", networkFailure = true))
+                runCurrent()
+                assertEquals("the earlier validation was spent by the load", 1, entry.state.value.webReloadToken)
+            } finally {
+                owner.close()
+                server.shutdown()
+                Dispatchers.resetMain()
+            }
+        }
+
     @Test
     fun bootstrapRetriesTransientFailuresWithBackoffUntilAFinalAnswer() =
         runTest {
@@ -104,4 +192,15 @@ class ServiceShellOwnerTest {
                 Dispatchers.resetMain()
             }
         }
+
+    private companion object {
+        const val SETTINGS_JSON = """
+            {
+              "service": "generic",
+              "serviceVersion": "1",
+              "apiVersion": 1,
+              "webShell": {"bridgeVersion": 3, "toolGroups": [], "voiceGateway": {"required": false}}
+            }
+        """
+    }
 }

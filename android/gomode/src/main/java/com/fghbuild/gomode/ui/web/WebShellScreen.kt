@@ -841,12 +841,16 @@ internal sealed interface WebShellLoadState {
     ) : WebShellLoadState
 }
 
+// Chromium's AwWebResourceError maps net errors without a WebViewClient code, including ERR_ACCESS_DENIED,
+// ERR_NETWORK_ACCESS_DENIED, and ERR_NETWORK_CHANGED, to ERROR_UNKNOWN. Hypothesis, unconfirmed by device
+// logs: the first load after an install fails this way before Android grants the new process network access.
 private val networkLoadErrors =
     setOf(
         WebViewClient.ERROR_CONNECT,
         WebViewClient.ERROR_HOST_LOOKUP,
         WebViewClient.ERROR_IO,
         WebViewClient.ERROR_TIMEOUT,
+        WebViewClient.ERROR_UNKNOWN,
     )
 
 internal fun webLoadErrorMessage(errorCode: Int): String =

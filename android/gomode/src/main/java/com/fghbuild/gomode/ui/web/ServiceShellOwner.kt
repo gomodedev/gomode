@@ -92,27 +92,37 @@ internal class ServiceShellOwner(
         coroutineScope {
             launch {
                 var previous = networkMonitor.network.value
-                var routeChanged = false
+                var previousLoad = entry.state.value.load
+                var previousReachable = entry.state.value.bootstrap is ServiceBootstrapState.Ready
+                var recovered = false
                 combine(
                     networkMonitor.network,
                     entry.state.map { it.load }.distinctUntilChanged(),
-                ) { network, load -> network to load }.collect { (network, load) ->
-                    if (network != previous) {
-                        previous = network
-                        if (network != null) {
-                            routeChanged = true
+                    entry.state.map { it.bootstrap is ServiceBootstrapState.Ready }.distinctUntilChanged(),
+                ) { network, load, reachable -> Triple(network, load, reachable) }
+                    .collect { (network, load, reachable) ->
+                        // A load that completes after the evidence has used it.
+                        if (load != previousLoad && load == WebShellLoadState.Ready) recovered = false
+                        // A new route or a newly validated settings fetch shows the service may now load.
+                        // The fetch retries transient failures, so it also covers a first page load that
+                        // failed at process start on an unchanged route.
+                        if ((network != previous && network != null) || (reachable && !previousReachable)) {
+                            recovered = true
                             entry.resetAutomaticRetryBudget()
                         }
+                        previous = network
+                        previousLoad = load
+                        previousReachable = reachable
+                        // The failure can arrive after the evidence. Each piece of evidence authorizes one
+                        // retry, so an unreachable host is not reloaded repeatedly.
+                        if (network != null &&
+                            recovered &&
+                            (load as? WebShellLoadState.Failed)?.networkFailure == true
+                        ) {
+                            recovered = false
+                            entry.retryWebAutomatically()
+                        }
                     }
-                    // A failed load can arrive after the new route's callback. Retain one
-                    // retry for that route, without repeatedly reloading an unreachable host.
-                    if (network != null &&
-                        routeChanged &&
-                        (load as? WebShellLoadState.Failed)?.networkFailure == true
-                    ) {
-                        entry.retryWebAutomatically()
-                    }
-                }
             }
             launch {
                 var previousReload: Int? = null

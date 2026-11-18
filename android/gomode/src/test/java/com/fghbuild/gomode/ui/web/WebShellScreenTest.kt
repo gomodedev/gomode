@@ -3,7 +3,7 @@ package com.fghbuild.gomode.ui.web
 
 import android.content.Intent
 import android.net.Uri
-import android.webkit.TimeoutWebResourceError
+import android.webkit.CodedWebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -126,7 +126,11 @@ class WebShellScreenTest {
                             page.load(entry.state.value.webReloadToken)
                         } else {
                             client.onPageStarted(view, entry.key.url, null)
-                            client.onReceivedError(view, mainFrameRequest(entry.key.url), TimeoutWebResourceError())
+                            client.onReceivedError(
+                                view,
+                                mainFrameRequest(entry.key.url),
+                                CodedWebResourceError(WebViewClient.ERROR_TIMEOUT),
+                            )
                             // A new route can arrive while the timeout retry is still pending.
                             entry.resetAutomaticRetryBudget()
                             advanceTimeBy(1_000)
@@ -134,7 +138,11 @@ class WebShellScreenTest {
                         }
                         assertEquals(1, shadow.reloadInvocations)
                         client.onPageStarted(view, entry.key.url, null)
-                        client.onReceivedError(view, mainFrameRequest(entry.key.url), TimeoutWebResourceError())
+                        client.onReceivedError(
+                            view,
+                            mainFrameRequest(entry.key.url),
+                            CodedWebResourceError(WebViewClient.ERROR_TIMEOUT),
+                        )
                         advanceTimeBy(2_000)
                         runCurrent()
                         entry.retryWebAutomatically()
@@ -149,6 +157,27 @@ class WebShellScreenTest {
                 Dispatchers.resetMain()
             }
         }
+
+    // WebView reports access denial and network changes as ERROR_UNKNOWN; recovery must treat it as network.
+    @Test
+    fun unknownMainFrameErrorIsANetworkFailure() {
+        val entry = ServiceShellSession(ServiceShellKey("test", "https://service.test")) {}
+        try {
+            val page = entry.page(RuntimeEnvironment.getApplication())
+            val view = page.webView
+            val client = shadowOf(view).webViewClient
+            page.load(0)
+            client.onPageStarted(view, entry.key.url, null)
+            client.onReceivedError(
+                view,
+                mainFrameRequest(entry.key.url),
+                CodedWebResourceError(WebViewClient.ERROR_UNKNOWN),
+            )
+            assertEquals(true, (entry.state.value.load as WebShellLoadState.Failed).networkFailure)
+        } finally {
+            entry.close()
+        }
+    }
 
     private fun mainFrameRequest(url: String) =
         object : WebResourceRequest {
