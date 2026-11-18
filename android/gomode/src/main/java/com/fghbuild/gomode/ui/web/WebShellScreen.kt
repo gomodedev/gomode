@@ -173,19 +173,16 @@ internal class ServiceWebPage(
     private var automaticRetryJob: Job? = null
     private var recoveryLoadInProgress = false
     private var appliedReloadToken: Int? = null
-    var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+
+    // The picker covers the Activity, so it stays open across the pause it causes. Only the attached
+    // owner's result completes it; detaching the owner or closing the page cancels it.
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var mediaPermissions = WebMediaPermissions(applicationContext)
     private var attachment: Any? = null
     private var onAuthInvalidated: () -> Unit = {}
     private var onSharedAuthInvalidated: () -> Unit = {}
     private var launchMediaPermissions: (Array<String>) -> Unit = { mediaPermissions.onNavigation() }
-    private var launchFileChooser: (
-        Intent,
-    ) -> Unit = {
-        fileChooserCallback?.onReceiveValue(emptyArray())
-        fileChooserCallback =
-            null
-    }
+    private var launchFileChooser: (Intent) -> Unit = { cancelFileChooser() }
     private val authHandler =
         ServiceAuthMessageHandler(bearerStore, {
             serviceSession.onSharedIdentityChanged()
@@ -546,7 +543,7 @@ internal class ServiceWebPage(
                             filePathCallback.onReceiveValue(emptyArray())
                             return true
                         }
-                        fileChooserCallback?.onReceiveValue(emptyArray())
+                        cancelFileChooser()
                         fileChooserCallback = filePathCallback
                         launchFileChooser(
                             webFileChooserIntent(
@@ -588,7 +585,10 @@ internal class ServiceWebPage(
         mediaLauncher: (Array<String>) -> Unit,
         fileLauncher: (Intent) -> Unit,
     ) {
-        if (attachment !== owner) setVisible(false)
+        if (attachment !== owner) {
+            setVisible(false)
+            cancelFileChooser()
+        }
         if (mediaPermissions !== hostMediaPermissions) mediaPermissions.onNavigation()
         attachment = owner
         mediaPermissions = hostMediaPermissions
@@ -602,6 +602,7 @@ internal class ServiceWebPage(
     fun detach(expectedOwner: Any) {
         if (attachment !== expectedOwner) return
         setVisible(false)
+        cancelFileChooser()
         (webView.parent as? ViewGroup)?.removeView(webView)
         pageContext.baseContext = applicationContext
         attachment = null
@@ -609,10 +610,7 @@ internal class ServiceWebPage(
         onAuthInvalidated = {}
         onSharedAuthInvalidated = {}
         launchMediaPermissions = { mediaPermissions.onNavigation() }
-        launchFileChooser = {
-            fileChooserCallback?.onReceiveValue(emptyArray())
-            fileChooserCallback = null
-        }
+        launchFileChooser = { cancelFileChooser() }
     }
 
     fun completeFileChooser(
@@ -620,7 +618,14 @@ internal class ServiceWebPage(
         uris: Array<Uri>,
     ) {
         if (attachment !== owner) return
-        fileChooserCallback?.onReceiveValue(if (canLaunchNativeUI) uris else emptyArray())
+        // Android delivers the result before onResume marks the page visible again.
+        val keyguardLocked = context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
+        fileChooserCallback?.onReceiveValue(if (keyguardLocked) emptyArray() else uris)
+        fileChooserCallback = null
+    }
+
+    private fun cancelFileChooser() {
+        fileChooserCallback?.onReceiveValue(emptyArray())
         fileChooserCallback = null
     }
 
@@ -661,11 +666,7 @@ internal class ServiceWebPage(
             )
         }
         webView.evaluateJavascript("window.dispatchEvent(new Event('gomodevisibilitychange'))", null)
-        if (!nativeAllowed) {
-            mediaPermissions.onNavigation()
-            fileChooserCallback?.onReceiveValue(emptyArray())
-            fileChooserCallback = null
-        }
+        if (!nativeAllowed) mediaPermissions.onNavigation()
         if (visible) {
             serviceSession.acknowledgeAttention()
             webView.onResume()
@@ -754,8 +755,7 @@ internal class ServiceWebPage(
     fun close() {
         closed = true
         mediaPermissions.onNavigation()
-        fileChooserCallback?.onReceiveValue(emptyArray())
-        fileChooserCallback = null
+        cancelFileChooser()
         scope.cancel()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()

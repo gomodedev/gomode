@@ -2,10 +2,14 @@
 package com.fghbuild.gomode
 
 import android.app.Instrumentation.ActivityResult
+import android.content.ContentValues
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Bitmap
 import android.graphics.Rect
+import android.os.Environment
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.webkit.RenderProcessGoneDetail
@@ -26,6 +30,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.fghbuild.gomode.data.SettingsRepository
@@ -36,6 +41,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -488,6 +494,73 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         }
     }
 
+    // The real picker pauses the Activity before it returns; a stubbed result would not.
+    @Test
+    fun fileInputReceivesTheDocumentPickedInTheSystemPicker() {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val name = "gomode-attach-${System.currentTimeMillis()}.png"
+        val document =
+            requireNotNull(
+                resolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, name)
+                        put(MediaStore.Downloads.MIME_TYPE, "image/png")
+                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    },
+                ),
+            ) { "Could not create $name in Downloads" }
+        try {
+            val size =
+                requireNotNull(resolver.openOutputStream(document)) { "Could not write $name" }.use { output ->
+                    val bytes = ByteArrayOutputStream()
+                    Bitmap
+                        .createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+                        .compress(Bitmap.CompressFormat.PNG, 100, bytes)
+                    output.write(bytes.toByteArray())
+                    bytes.size()
+                }
+            openWebShell()
+            loadHostedHtml(FILE_INPUT_TEST_PAGE)
+            waitForDom("file input loaded") { "document.getElementById('picker') !== null" }
+
+            tapDomElement("#picker")
+            pickDownload(name)
+            waitForDom("file input received the picked document") {
+                "window.picked === ${"$name|image/png|$size".jsString()}"
+            }
+        } finally {
+            resolver.delete(document, null, null)
+        }
+    }
+
+    // DocumentsUI opens on its last root and view mode and animates its roots drawer, so retry each
+    // step until the document is listed by name.
+    private fun pickDownload(name: String) {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val deadline = SystemClock.uptimeMillis() + GOMODE_DEFAULT_TIMEOUT_MS
+        while (SystemClock.uptimeMillis() < deadline) {
+            try {
+                val document = device.findObject(By.text(name))
+                if (document != null) {
+                    document.click()
+                    return
+                }
+                // Grid view shows thumbnails without names.
+                (
+                    device.findObject(By.desc("List view"))
+                        ?: device.findObject(By.text("Downloads"))
+                        ?: device.findObject(By.desc("Show roots"))
+                )?.click()
+            } catch (_: StaleObjectException) {
+                // The drawer moved between lookup and click.
+            }
+            device.waitForIdle()
+            SystemClock.sleep(PICKER_POLL_INTERVAL_MS)
+        }
+        error("The document picker did not list $name in ${device.currentPackageName}")
+    }
+
     @Test
     fun gomodePackageNameIsAppSpecific() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -537,6 +610,22 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         private const val PINCH_STEPS = 24
         private const val TOUCH_EVENT_INTERVAL_MS = 16L
         private const val JS_TIMEOUT_MS = 5_000L
+        private const val PICKER_POLL_INTERVAL_MS = 250L
+        private val FILE_INPUT_TEST_PAGE =
+            """
+            <!doctype html>
+            <html>
+              <body>
+                <input id="picker" type="file" accept="image/png" style="width: 100%; height: 160px">
+                <script>
+                  document.getElementById('picker').addEventListener('change', (event) => {
+                    const file = event.target.files[0];
+                    window.picked = file ? [file.name, file.type, file.size].join('|') : 'none';
+                  });
+                </script>
+              </body>
+            </html>
+            """.trimIndent()
         private const val EXTERNAL_LINK_URL = "https://example.com/gomode-external-link"
         private val EXTERNAL_LINK_TEST_PAGE =
             """
