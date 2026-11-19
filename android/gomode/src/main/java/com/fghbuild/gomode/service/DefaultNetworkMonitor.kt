@@ -1,9 +1,13 @@
-// Tracks route changes without requiring public Internet validation for local services.
+// Tracks the default route this app can use, without requiring public Internet validation for local services.
+//
+// A blocked route counts as absent. A new process can start before Android grants its UID network access:
+// getActiveNetwork() then returns null, and DNS fails with "No address associated with hostname" until
+// onBlockedStatusChanged reports the unblock. Publishing that transition lets owners retry at once instead
+// of waiting out their backoff.
 package com.fghbuild.gomode.service
 
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.LinkProperties
 import android.net.Network
 import android.os.Handler
 import android.os.Looper
@@ -24,12 +28,13 @@ internal class DefaultNetworkMonitor(
         current.value = connectivity.activeNetwork
         val registration =
             object : ConnectivityManager.NetworkCallback() {
-                override fun onLinkPropertiesChanged(
+                // Android calls this last after onAvailable, after link properties, so sockets can use
+                // an unblocked route now. It is called again whenever the app's access changes.
+                override fun onBlockedStatusChanged(
                     network: Network,
-                    linkProperties: LinkProperties,
+                    blocked: Boolean,
                 ) {
-                    // Android delivers link properties after onAvailable; sockets can use the new route now.
-                    if (callback === this) current.value = network
+                    if (callback === this) current.value = network.takeUnless { blocked }
                 }
 
                 override fun onLost(network: Network) {

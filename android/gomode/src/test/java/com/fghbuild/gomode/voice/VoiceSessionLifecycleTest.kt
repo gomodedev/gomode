@@ -2,7 +2,6 @@
 package com.fghbuild.gomode.voice
 
 import android.net.ConnectivityManager
-import android.net.LinkProperties
 import android.net.Uri
 import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
@@ -131,7 +130,7 @@ class VoiceSessionLifecycleTest {
             val connectivity = shadowOf(context.getSystemService(ConnectivityManager::class.java))
             val callback = connectivity.networkCallbacks.single()
             val wifi = ShadowNetwork.newInstance(41)
-            callback.onLinkPropertiesChanged(wifi, LinkProperties())
+            callback.onBlockedStatusChanged(wifi, false)
             callback.onLost(wifi)
             observer.onIceConnectionChange(PeerConnection.IceConnectionState.CONNECTED)
             runCurrent()
@@ -148,7 +147,7 @@ class VoiceSessionLifecycleTest {
             assertTrue(peer.disposed)
             assertNull(session.state.value.error)
             session.disconnect("test")
-            callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(42), LinkProperties())
+            callback.onBlockedStatusChanged(ShadowNetwork.newInstance(42), false)
             runCurrent()
             // No replacement attempt has spent backoff.
             assertEquals(VoiceRecoveryPolicy().retryDelayMs(), policy.retryDelayMs())

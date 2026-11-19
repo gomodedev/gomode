@@ -2,7 +2,6 @@
 package com.fghbuild.gomode.voice
 
 import android.net.ConnectivityManager
-import android.net.LinkProperties
 import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
@@ -226,7 +225,7 @@ class DeviceVoiceSessionTest {
                 assertFalse(session.state.value.connected)
                 frontendReady = false
                 session.injectText("Alert received during handoff", generate = true)
-                callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(42), LinkProperties())
+                callback.onBlockedStatusChanged(ShadowNetwork.newInstance(42), false)
                 runCurrent()
                 assertEquals(2, sockets.size)
                 listeners.last().onOpen(sockets.last(), upgradeResponse())
@@ -249,7 +248,7 @@ class DeviceVoiceSessionTest {
                 runCurrent()
                 assertNull(session.state.value.error)
                 session.disconnect("test")
-                callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(43), LinkProperties())
+                callback.onBlockedStatusChanged(ShadowNetwork.newInstance(43), false)
                 advanceTimeBy(10_000)
                 runCurrent()
                 assertEquals(2, sockets.size)

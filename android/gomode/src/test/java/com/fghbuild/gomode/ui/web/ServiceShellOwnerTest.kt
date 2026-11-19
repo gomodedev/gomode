@@ -2,7 +2,6 @@
 package com.fghbuild.gomode.ui.web
 
 import android.net.ConnectivityManager
-import android.net.LinkProperties
 import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.ui.ServiceBootstrapState
@@ -13,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -46,7 +46,7 @@ class ServiceShellOwnerTest {
                 val entry = owner.entries.values.single()
                 entry.updateLoad(WebShellLoadState.Ready)
                 val callback = connectivity.networkCallbacks.single()
-                callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(41), LinkProperties())
+                callback.onBlockedStatusChanged(ShadowNetwork.newInstance(41), false)
                 runCurrent()
                 assertEquals(0, entry.state.value.webReloadToken)
                 entry.updateLoad(WebShellLoadState.Failed("Connection failed", networkFailure = true))
@@ -55,11 +55,11 @@ class ServiceShellOwnerTest {
                 entry.updateLoad(WebShellLoadState.Failed("Still unavailable", networkFailure = true))
                 runCurrent()
                 assertEquals(1, entry.state.value.webReloadToken)
-                callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(42), LinkProperties())
+                callback.onBlockedStatusChanged(ShadowNetwork.newInstance(42), false)
                 runCurrent()
                 assertEquals(2, entry.state.value.webReloadToken)
                 entry.updateLoad(WebShellLoadState.Failed("Sign in again"))
-                callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(43), LinkProperties())
+                callback.onBlockedStatusChanged(ShadowNetwork.newInstance(43), false)
                 runCurrent()
                 assertEquals(2, entry.state.value.webReloadToken)
             } finally {
@@ -186,6 +186,44 @@ class ServiceShellOwnerTest {
                 advanceTimeBy(60_000)
                 runCurrent()
                 assertEquals("a final answer stops automatic retries", 3, server.requestCount)
+            } finally {
+                owner.close()
+                server.shutdown()
+                Dispatchers.resetMain()
+            }
+        }
+
+    // A cold start can fetch settings before Android grants the process network access.
+    @Test
+    fun unblockedRouteRefetchesSettingsWithoutWaitingForBackoff() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val server = MockWebServer()
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+            server.enqueue(MockResponse().setBody(SETTINGS_JSON))
+            server.start()
+            val context = RuntimeEnvironment.getApplication()
+            val manager = context.getSystemService(ConnectivityManager::class.java)
+            val connectivity = shadowOf(manager)
+            val settings = SettingsRepository(MemoryPreferences())
+            val owner = ServiceShellOwner(context, settings)
+            try {
+                settings.addService("Service", server.url("/").toString())
+                owner.start()
+                val entry =
+                    owner.state
+                        .map { snapshot -> snapshot.entries.values.singleOrNull { it.key.url.isNotBlank() } }
+                        .filterNotNull()
+                        .first()
+                entry.state.first { (it.bootstrap as? ServiceBootstrapState.Unvalidated)?.transient == true }
+                val callback = connectivity.networkCallbacks.single()
+                val network = requireNotNull(manager.activeNetwork)
+                callback.onBlockedStatusChanged(network, true)
+                runCurrent()
+                callback.onBlockedStatusChanged(network, false)
+                entry.state.first { it.bootstrap is ServiceBootstrapState.Ready }
+                assertTrue("refetched after ${currentTime}ms", currentTime < 1_000)
+                assertEquals(2, server.requestCount)
             } finally {
                 owner.close()
                 server.shutdown()
