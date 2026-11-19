@@ -1,4 +1,4 @@
-// Runs permission-denial scenarios before microphone-granting tests in a separate instrumentation process.
+// Runs each microphone-prompt scenario from a revoked permission in its own instrumentation process.
 package com.fghbuild.gomode
 
 @Target(AnnotationTarget.FUNCTION)

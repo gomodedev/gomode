@@ -36,8 +36,34 @@ class WebMediaPermissionsTest {
 
         shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
         permissions.onPermissionsResult()
+        assertEquals(emptyList<String>(), request.responses)
+        permissions.settle()
+        permissions.settle()
 
         assertEquals(listOf("granted"), request.responses)
+    }
+
+    @Test
+    fun settleBeforeAndroidAnswersLeavesRequestPending() {
+        val request = MediaRequest(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+        permissions.request(request, serviceURL) { true }
+
+        permissions.settle()
+
+        assertEquals(emptyList<String>(), request.responses)
+    }
+
+    @Test
+    fun navigationBetweenAnswerAndSettleDeniesRequest() {
+        val request = MediaRequest(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+        permissions.request(request, serviceURL) { true }
+        shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
+        permissions.onPermissionsResult()
+
+        permissions.onNavigation()
+        permissions.settle()
+
+        assertEquals(listOf("denied"), request.responses)
     }
 
     @Test
@@ -45,8 +71,8 @@ class WebMediaPermissionsTest {
         val request = MediaRequest(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
         permissions.request(request, serviceURL) { true }
 
-        permissions.onPermissionsResult()
-        permissions.onPermissionsResult()
+        answerAndSettle()
+        answerAndSettle()
 
         assertEquals(listOf("denied"), request.responses)
     }
@@ -69,7 +95,7 @@ class WebMediaPermissionsTest {
             arrayOf(Manifest.permission.RECORD_AUDIO),
             permissions.request(request, serviceURL) { true },
         )
-        permissions.onPermissionsResult()
+        answerAndSettle()
 
         assertEquals(listOf("denied"), request.responses)
     }
@@ -99,7 +125,7 @@ class WebMediaPermissionsTest {
         currentPage = false
         shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
 
-        permissions.onPermissionsResult()
+        answerAndSettle()
 
         assertEquals(listOf("denied"), request.responses)
     }
@@ -112,7 +138,7 @@ class WebMediaPermissionsTest {
         permissions.onNavigation()
         permissions.onNavigation()
         shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
-        permissions.onPermissionsResult()
+        answerAndSettle()
 
         assertEquals(listOf("denied"), request.responses)
     }
@@ -127,7 +153,7 @@ class WebMediaPermissionsTest {
 
         assertEquals(0, permissions.request(overlapping, serviceURL) { true }.size)
         shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
-        permissions.onPermissionsResult()
+        answerAndSettle()
 
         assertEquals(emptyList<String>(), cancelled.responses)
         assertEquals(listOf("denied"), overlapping.responses)
@@ -143,9 +169,14 @@ class WebMediaPermissionsTest {
 
         permissions.cancel(MediaRequest(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
         shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
-        permissions.onPermissionsResult()
+        answerAndSettle()
 
         assertEquals(listOf("granted"), request.responses)
+    }
+
+    private fun answerAndSettle() {
+        permissions.onPermissionsResult()
+        permissions.settle()
     }
 
     private class MediaRequest(

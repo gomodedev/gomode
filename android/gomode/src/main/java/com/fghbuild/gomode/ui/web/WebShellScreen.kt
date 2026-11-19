@@ -81,6 +81,7 @@ internal fun WebShellScreen(
     val mediaPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             mediaPermissions.onPermissionsResult()
+            page.settleMediaPermissions(attachment)
         }
     val fileChooserLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -174,8 +175,9 @@ internal class ServiceWebPage(
     private var recoveryLoadInProgress = false
     private var appliedReloadToken: Int? = null
 
-    // The picker covers the Activity, so it stays open across the pause it causes. Only the attached
-    // owner's result completes it; detaching the owner or closing the page cancels it.
+    // Native prompts cover the Activity, so a file chooser or media permission request stays open across
+    // the pause it causes. Only the attached owner's result completes it; detaching the owner, navigating,
+    // or closing the page cancels it.
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var mediaPermissions = WebMediaPermissions(applicationContext)
     private var attachment: Any? = null
@@ -602,6 +604,7 @@ internal class ServiceWebPage(
     fun detach(expectedOwner: Any) {
         if (attachment !== expectedOwner) return
         setVisible(false)
+        mediaPermissions.onNavigation()
         cancelFileChooser()
         (webView.parent as? ViewGroup)?.removeView(webView)
         pageContext.baseContext = applicationContext
@@ -622,6 +625,10 @@ internal class ServiceWebPage(
         val keyguardLocked = context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
         fileChooserCallback?.onReceiveValue(if (keyguardLocked) emptyArray() else uris)
         fileChooserCallback = null
+    }
+
+    fun settleMediaPermissions(owner: Any) {
+        if (attachment === owner && canLaunchNativeUI) mediaPermissions.settle()
     }
 
     private fun cancelFileChooser() {
@@ -666,7 +673,6 @@ internal class ServiceWebPage(
             )
         }
         webView.evaluateJavascript("window.dispatchEvent(new Event('gomodevisibilitychange'))", null)
-        if (!nativeAllowed) mediaPermissions.onNavigation()
         if (visible) {
             serviceSession.acknowledgeAttention()
             webView.onResume()
@@ -674,6 +680,8 @@ internal class ServiceWebPage(
             webView.clearFocus()
             webView.onPause()
         }
+        // The permission prompt paused the Activity; decide its answer once capture is allowed again.
+        if (nativeAllowed) mediaPermissions.settle()
     }
 
     fun load(reloadToken: Int) {

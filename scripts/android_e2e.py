@@ -417,8 +417,18 @@ def run_suite(
     if not discovered.tests:
         print(f"{name}: no matching tests", flush=True)
         return discovered
-    permission = denied_microphone(adb, serial) if requires_denied_microphone else contextlib.nullcontext()
-    with permission:
+    if requires_denied_microphone:
+        # Each case starts from a revoked prompt, so one case's grant cannot hide another's prompt.
+        runs = []
+        for test in discovered.tests:
+            with denied_microphone(adb, serial):
+                runs.append(instrument(adb, serial, name, runner, {**arguments, "class": test.name}, False))
+        result = InstrumentationResult(
+            all(run.passed for run in runs),
+            sum(run.seconds for run in runs),
+            [test for run in runs for test in run.tests],
+        )
+    else:
         result = instrument(adb, serial, name, runner, arguments, False)
     expected = {test.name for test in discovered.tests}
     actual = {test.name for test in result.tests}

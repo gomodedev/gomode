@@ -49,6 +49,37 @@ import java.util.regex.Pattern
 
 @RunWith(AndroidJUnit4::class)
 class WebShellSmokeTest : GoModeE2eTestBase() {
+    // The real prompt pauses the Activity and answers before it resumes. The emulator camera cannot
+    // open in WebView, so the microphone covers the shared camera and microphone path.
+    @Test
+    @DeniedMicrophonePermission
+    fun hostedMicrophoneCaptureStartsWhenTheAndroidPromptIsAllowed() {
+        openWebShell()
+        waitForHostedFrontend()
+        executeDom("request the microphone") {
+            """
+            (() => {
+              window.capture = 'pending';
+              navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
+                window.capture = stream.getAudioTracks().every(track => track.readyState === 'live') ? 'live' : 'ended';
+                stream.getTracks().forEach(track => track.stop());
+              }, error => { window.capture = error.name; });
+              return true;
+            })()
+            """.trimIndent()
+        }
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        requireNotNull(
+            device.wait(
+                Until.findObject(By.res(Pattern.compile(".*:id/permission_allow_foreground_only_button"))),
+                GOMODE_DEFAULT_TIMEOUT_MS,
+            ),
+        ) { "Microphone permission prompt did not appear" }.click()
+        // The Activity resume that settles the answer runs on the Compose test clock.
+        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { js("window.capture") != "\"pending\"" }
+        assertEquals("\"live\"", js("window.capture"))
+    }
+
     @Test
     @DeniedMicrophonePermission
     fun microphoneDenialOffersPromptThenSettingsWithoutStartingVoiceOnReenable() {

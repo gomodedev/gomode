@@ -53,8 +53,14 @@ internal class WebMediaPermissions(
         return missing
     }
 
+    // Android answers before the Activity resumes, so the answer waits for settle().
     fun onPermissionsResult() {
-        val outstanding = pending ?: return
+        pending?.answered = true
+    }
+
+    // Decides an answered request; the page calls this once it can show native UI again.
+    fun settle() {
+        val outstanding = pending?.takeIf { it.answered } ?: return
         pending = null
         if (outstanding.cancelled) return
         if (outstanding.isCurrentPage() && outstanding.androidPermissions.all(::hasPermission)) {
@@ -85,5 +91,6 @@ internal class WebMediaPermissions(
         val androidPermissions: List<String>,
         val isCurrentPage: () -> Boolean,
         var cancelled: Boolean = false,
+        var answered: Boolean = false,
     )
 }
