@@ -283,22 +283,27 @@ func (c *TTSConfig) managedLlama() bool {
 	return c.Engine == TTSEngineGenAI && c.modelConfig().LlamaCPPServer
 }
 
-// validateManagedContext checks context_size, which sizes a managed llama.cpp
-// server and nothing else.
-func validateManagedContext(prefix string, size int, managed bool) error {
-	if !managed {
+// validateManagedServer checks context_size and slots, which size a managed
+// llama.cpp server and nothing else.
+func validateManagedServer(prefix string, size, slots int, managed bool) error {
+	var errs []error
+	switch {
+	case !managed:
 		if size != 0 {
-			return fmt.Errorf("%s.context_size requires a managed llama.cpp server", prefix)
+			errs = append(errs, fmt.Errorf("%s.context_size requires a managed llama.cpp server", prefix))
 		}
-		return nil
+		if slots != 0 {
+			errs = append(errs, fmt.Errorf("%s.slots requires a managed llama.cpp server", prefix))
+		}
+	case size == 0:
+		errs = append(errs, fmt.Errorf("%s.context_size is required for a managed llama.cpp server", prefix))
+	case size < 512 || size > 262144:
+		errs = append(errs, fmt.Errorf("%s.context_size must be between 512 and 262144", prefix))
 	}
-	if size == 0 {
-		return fmt.Errorf("%s.context_size is required for a managed llama.cpp server", prefix)
+	if managed && (slots < 0 || slots > 16) {
+		errs = append(errs, fmt.Errorf("%s.slots must be between 1 and 16", prefix))
 	}
-	if size < 512 || size > 262144 {
-		return fmt.Errorf("%s.context_size must be between 512 and 262144", prefix)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (c *TTSConfig) modelConfig() ModelConfig {
@@ -463,10 +468,14 @@ type LLMConfig struct {
 	ID    string
 	Label string
 	ModelConfig
-	// ContextSize is the managed llama.cpp context in tokens, 512 to 262144,
-	// and is required for a managed server. Conversation history is kept
-	// whole, so requests that outgrow it fail.
+	// ContextSize is the managed llama.cpp context per slot in tokens, 512 to
+	// 262144, and is required for a managed server. Conversation history is
+	// kept whole, so requests that outgrow it fail.
 	ContextSize int
+	// Slots is the number of concurrent requests of a managed llama.cpp
+	// server, 1 to 16; zero selects DefaultSlots. Further requests queue. The
+	// server holds Slots × ContextSize tokens of KV cache.
+	Slots int
 }
 
 func (c *LLMConfig) validate() error {
@@ -474,7 +483,7 @@ func (c *LLMConfig) validate() error {
 }
 
 func (c *LLMConfig) validateAs(prefix string) error {
-	return errors.Join(c.ModelConfig.validate(prefix), validateManagedContext(prefix, c.ContextSize, c.LlamaCPPServer))
+	return errors.Join(c.ModelConfig.validate(prefix), validateManagedServer(prefix, c.ContextSize, c.Slots, c.LlamaCPPServer))
 }
 
 // configFile holds standalone listeners and issuer policy beside the voice
@@ -518,10 +527,10 @@ func (c *configFile) Resolve() (ResolvedConfig, error) {
 func (c *Config) Resolve() (ResolvedConfig, error) {
 	out := ResolvedConfig{Runtime: c.Runtime, Realtime: slices.Clone(c.Realtime)}
 	out.Runtime.IdleTimeoutSeconds = cmp.Or(out.Runtime.IdleTimeoutSeconds, 3600)
-	out.Runtime.MaxInstances = cmp.Or(out.Runtime.MaxInstances, 1)
+	out.Runtime.MaxInstances = cmp.Or(out.Runtime.MaxInstances, 2)
 	for i := range out.Realtime {
 		if r := &out.Realtime[i]; r.Provider == "llamacpp" {
-			r.Slots = cmp.Or(r.Slots, 1)
+			r.Slots = cmp.Or(r.Slots, DefaultSlots)
 			if r.Staged {
 				r.Effort = cmp.Or(r.Effort, "medium")
 			}
@@ -703,13 +712,13 @@ func configFromTOML(c *configdata.Choices) Config {
 			}
 		}),
 		ASR: convertSlice(c.ASR, func(a *configdata.ASR) ASRConfig {
-			return ASRConfig{ID: a.ID, Label: a.Label, Engine: ASREngine(a.Engine), Provider: a.Provider, Remote: a.Remote, Model: a.Model, ContextSize: a.ContextSize}
+			return ASRConfig{ID: a.ID, Label: a.Label, Engine: ASREngine(a.Engine), Provider: a.Provider, Remote: a.Remote, Model: a.Model, ContextSize: a.ContextSize, Slots: a.Slots}
 		}),
 		LLM: convertSlice(c.LLM, func(l *configdata.LLM) LLMConfig {
-			return LLMConfig{ID: l.ID, Label: l.Label, ModelConfig: modelFromTOML(&l.ModelSettings), ContextSize: l.ContextSize}
+			return LLMConfig{ID: l.ID, Label: l.Label, ModelConfig: modelFromTOML(&l.ModelSettings), ContextSize: l.ContextSize, Slots: l.Slots}
 		}),
 		TTS: convertSlice(c.TTS, func(t *configdata.TTS) TTSConfig {
-			return TTSConfig{ID: t.ID, Label: t.Label, Engine: TTSEngine(t.Engine), Provider: t.Provider, Remote: t.Remote, Model: t.Model, Voice: t.Voice, ContextSize: t.ContextSize}
+			return TTSConfig{ID: t.ID, Label: t.Label, Engine: TTSEngine(t.Engine), Provider: t.Provider, Remote: t.Remote, Model: t.Model, Voice: t.Voice, ContextSize: t.ContextSize, Slots: t.Slots}
 		}),
 		Voice: convertSlice(c.Voice, func(v *configdata.Voice) VoiceConfig {
 			return VoiceConfig{ID: v.ID, Label: v.Label, ASR: v.ASR, LLM: v.LLM, TTS: v.TTS}
@@ -872,7 +881,7 @@ type RuntimeConfig struct {
 	// 3600 when omitted.
 	IdleTimeoutSeconds int
 	// MaxInstances counts complete choices, including ASR/LLM/TTS. Resolve
-	// selects 1 when omitted.
+	// selects 2 when omitted.
 	MaxInstances int
 }
 
@@ -929,9 +938,16 @@ type ASRConfig struct {
 	Provider string
 	Remote   string
 	Model    string
-	// ContextSize is the managed llama.cpp context in tokens, 512 to 262144,
-	// and is required for a managed server. Each session carries one utterance.
+	// ContextSize is the managed llama.cpp context per slot in tokens, 512 to
+	// 262144, and is required for a managed server. Each session carries one
+	// utterance of at most a minute.
 	ContextSize int
+	// Slots is the number of concurrent utterances of a managed llama.cpp
+	// server, 1 to 16; zero selects DefaultSlots. A transcription session
+	// holds its slot until the utterance's final transcript, so further
+	// utterances wait for a slot while their audio queues. The server holds
+	// Slots × ContextSize tokens of KV cache.
+	Slots int
 }
 
 // ASREngine selects how utterances are transcribed.
@@ -975,9 +991,14 @@ type TTSConfig struct {
 	Remote   string
 	Model    string
 	Voice    string
-	// ContextSize is the managed llama.cpp context in tokens, 512 to 262144,
-	// and is required for a managed server. Each request carries one reply.
+	// ContextSize is the managed llama.cpp context per slot in tokens, 512 to
+	// 262144, and is required for a managed server. Each request carries one
+	// reply.
 	ContextSize int
+	// Slots is the number of concurrent requests of a managed llama.cpp
+	// server, 1 to 16; zero selects DefaultSlots. Further requests queue. The
+	// server holds Slots × ContextSize tokens of KV cache.
+	Slots int
 }
 
 // TTSEngine selects how assistant text is synthesized.
@@ -995,8 +1016,12 @@ const (
 )
 
 func validateASR(c ASRConfig) error {
-	return errors.Join(validateASREngine(c), validateManagedContext("voice.asr", c.ContextSize, c.managedLlama()))
+	return errors.Join(validateASREngine(c), validateManagedServer("voice.asr", c.ContextSize, c.Slots, c.managedLlama()))
 }
+
+// DefaultSlots is the number of concurrent requests of a managed llama.cpp
+// server whose slots are omitted.
+const DefaultSlots = 2
 
 // LocalSpeechSampleRate is the PCM rate the gateway decodes the microphone at
 // for llama.cpp audio input (staged WAV utterances and realtime sessions) and
@@ -1098,7 +1123,7 @@ func validateASREngine(c ASRConfig) error {
 }
 
 func validateTTS(c TTSConfig) error {
-	return errors.Join(validateTTSEngine(c), validateManagedContext("voice.tts", c.ContextSize, c.managedLlama()))
+	return errors.Join(validateTTSEngine(c), validateManagedServer("voice.tts", c.ContextSize, c.Slots, c.managedLlama()))
 }
 
 func validateTTSEngine(c TTSConfig) error {

@@ -146,6 +146,7 @@ func (a *liveASR) transcribe(s *localStackSession, u *liveUtterance, lang string
 		}
 		return "", err
 	}
+	u.connected.Store(true)
 	ctx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
 	workers, workerCtx := errgroup.WithContext(ctx)

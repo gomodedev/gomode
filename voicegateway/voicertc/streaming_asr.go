@@ -5,19 +5,26 @@ package voicertc
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
-// At most four recognizers may be draining. realtimeAudioGate normalizes every
-// queued chunk to 20ms except the first, bounded to 200ms of preroll. Thus 512
-// queued chunks retain at most 10.42s of mono PCM16 at the recognizer's rate
-// per utterance, 1000320 bytes at 48 kHz, including while a single-slot server
-// drains its previous input.
+// At most four recognizers may be connecting, receiving audio or awaiting
+// their final transcript. An utterance whose transcript waits only for an
+// earlier utterance's commit holds no recognizer and does not count, so a slow
+// recognition cannot exhaust the bound with finished successors. The manual
+// gate ends an utterance after 200ms of quiet, so pauses within one sentence
+// start successive recognizers. realtimeAudioGate normalizes every queued chunk
+// to 20ms except the first, bounded to 200ms of preroll. Thus 512 queued chunks
+// retain at most 10.42s of mono PCM16 at the recognizer's rate per utterance,
+// 1000320 bytes at 48 kHz, including while a managed llama.cpp server holds
+// every slot for other utterances.
 const liveASRQueueFrames = 512
-const liveASRMaxPending = 4
+const liveASRMaxRecognizing = 4
 
 type liveASRAudio struct {
 	pcm []byte
@@ -28,9 +35,13 @@ type liveUtterance struct {
 	id       string
 	ctx      context.Context //nolint:containedctx // Recognition identity and cancellation belong to this utterance.
 	cancel   context.CancelFunc
+	started  time.Time
 	audio    chan liveASRAudio
 	previous <-chan struct{}
 	done     chan struct{}
+	// connected is set once the recognizer accepted the session. A queue that
+	// fills before then waited on the recognizer, not on recognition speed.
+	connected atomic.Bool
 }
 
 func (s *localStackSession) acceptLiveMicPCM(pcm []byte) error {
@@ -59,7 +70,13 @@ func (s *localStackSession) acceptLiveMicPCM(pcm []byte) error {
 		default:
 			u.cancel()
 			s.clearLiveDraft(u.id)
-			s.reportTurnError("asr", errors.New("speech recognition is busy; please repeat"))
+			connected := u.connected.Load()
+			slog.WarnContext(s.baseCtx, "voicertc: live ASR queue full", "session", s.id, "utterance", u.id, "connected", connected, "age", time.Since(u.started))
+			err := errors.New("speech recognition fell behind; please repeat")
+			if !connected {
+				err = errors.New("no speech recognizer became available; please repeat")
+			}
+			s.reportTurnError("asr", err)
 			s.liveCapture = nil
 			s.liveGate.finish()
 			return nil
@@ -76,8 +93,9 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 	if s.closed || s.conv == nil {
 		return nil
 	}
-	if len(s.livePending) >= liveASRMaxPending {
-		s.reportTurnError("asr", errors.New("speech recognition is busy; please repeat"))
+	if s.liveRecognizing >= liveASRMaxRecognizing {
+		slog.WarnContext(s.baseCtx, "voicertc: live ASR recognizers exhausted", "session", s.id, "recognizing", s.liveRecognizing, "pending", len(s.livePending))
+		s.reportTurnError("asr", errors.New("speech recognition is busy with earlier utterances; please repeat"))
 		return nil
 	}
 	if s.turnCancel != nil {
@@ -88,9 +106,10 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 	generation := s.turnGeneration
 	s.liveSequence++
 	ctx, cancel := context.WithTimeout(s.baseCtx, time.Minute)
-	u := &liveUtterance{id: s.id + "-asr-" + strconv.FormatUint(s.liveSequence, 10), ctx: ctx, cancel: cancel, audio: make(chan liveASRAudio, liveASRQueueFrames), previous: s.transcriptionTail, done: make(chan struct{})}
+	u := &liveUtterance{id: s.id + "-asr-" + strconv.FormatUint(s.liveSequence, 10), ctx: ctx, cancel: cancel, started: time.Now(), audio: make(chan liveASRAudio, liveASRQueueFrames), previous: s.transcriptionTail, done: make(chan struct{})}
 	s.transcriptionTail = u.done
 	s.livePending[u.id] = u
+	s.liveRecognizing++
 	if s.liveDraftID != "" {
 		s.emit(&voicev2.TranscriptDraft{Kind: voicev2.MessageKindTranscriptDraft, ID: s.liveDraftID})
 	}
@@ -120,6 +139,9 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 			s.mu.Unlock()
 		}()
 		text, err := s.liveASR.transcribe(s, u, lang)
+		s.mu.Lock()
+		s.liveRecognizing--
+		s.mu.Unlock()
 		if err != nil {
 			s.clearLiveDraft(u.id)
 			s.warnTurn(u.ctx, "asr", err)

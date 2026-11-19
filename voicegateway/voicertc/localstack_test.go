@@ -1334,15 +1334,19 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 		}))
 		t.Cleanup(remote.Close)
 		var startedModels []string
-		var contextSizes []int
+		var contextSizes, slots []int
 		var servers []*fakeManagedLlamaServer
-		models, err := localStackModelsForConfigWithStarter(t.Context(), &voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "owner/asr", ContextSize: 32768}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}, TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768}}, llamaLauncher(func(_ context.Context, model string, contextSize int) (managedServer, error) {
-			startedModels = append(startedModels, model)
-			contextSizes = append(contextSizes, contextSize)
+		models, err := localStackModelsForConfigWithStarter(t.Context(), &voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "owner/asr", ContextSize: 8192, Slots: 4}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}, TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768}}, func(_ context.Context, spec serverSpec) (managedServer, error) {
+			if spec.engine != engineLlamaCPP {
+				return nil, fmt.Errorf("unexpected managed server %+v", spec)
+			}
+			startedModels = append(startedModels, spec.model)
+			contextSizes = append(contextSizes, spec.contextSize)
+			slots = append(slots, spec.slots)
 			srv := &fakeManagedLlamaServer{url: remote.URL}
 			servers = append(servers, srv)
 			return srv, nil
-		}))
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1357,8 +1361,12 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 			t.Errorf("started models = %v, want %v", startedModels, wantModels)
 		}
 		// The chat history grows with the conversation; speech requests carry one utterance.
-		if want := []int{65536, 32768, 32768}; !slices.Equal(contextSizes, want) {
+		if want := []int{65536, 8192, 32768}; !slices.Equal(contextSizes, want) {
 			t.Errorf("context sizes = %v, want %v", contextSizes, want)
+		}
+		// Omitted slots start the default; recognition sets its own.
+		if want := []int{voicegateway.DefaultSlots, 4, voicegateway.DefaultSlots}; !slices.Equal(slots, want) {
+			t.Errorf("slots = %v, want %v", slots, want)
 		}
 		if models.runtime == nil {
 			t.Fatal("runtime = nil, want managed server closer")

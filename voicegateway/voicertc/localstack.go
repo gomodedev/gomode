@@ -325,8 +325,11 @@ type localStackSession struct {
 	outstanding       map[string]sessionToolCall
 	transcriptionTail <-chan struct{}
 	livePending       map[string]*liveUtterance
-	liveDraftID       string
-	liveSequence      uint64
+	// liveRecognizing counts livePending utterances whose recognizer has not
+	// returned; see liveASRMaxRecognizing.
+	liveRecognizing int
+	liveDraftID     string
+	liveSequence    uint64
 	// language is the session's ISO 639 base language, set once by session.setup
 	// before conv. Every gateway speech stage receives it.
 	language string

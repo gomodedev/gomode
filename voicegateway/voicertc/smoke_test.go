@@ -137,7 +137,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 
 	t.Run("LLM", func(t *testing.T) {
 		startup := time.Now()
-		endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL", 32768, startServer)
+		endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL", 32768, 1, startServer)
 		t.Logf("managed Gemma startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 		if err != nil {
 			t.Fatal(err)

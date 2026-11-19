@@ -10,6 +10,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/maruel/genai"
+
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -247,30 +249,120 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 		})
 	})
 
-	t.Run("stalled connection never blocks microphone", func(t *testing.T) {
+	t.Run("bound counts recognizers, not transcripts awaiting order", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			sessions := make(chan *fakeTranscription)
+			sessions := make(chan *fakeTranscription, 2*liveASRMaxRecognizing)
 			sink := &captureSink{changed: make(chan struct{}, 1)}
-			s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "bounded", sink, true)
+			s := (&localStackRuntime{liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "bound", sink, true)
 			s.conv = &fakeConversation{}
 			t.Cleanup(func() {
 				if err := s.close(); err != nil {
 					t.Error(err)
 				}
 			})
-			start := time.Now()
-			for range liveASRQueueFrames + 20 {
-				if err := s.acceptMicPCM(t.Context(), loudPCM(20)); err != nil {
-					t.Fatal(err)
+			start := func() *fakeTranscription {
+				f := newFakeTranscription()
+				sessions <- f
+				u := s.startLiveUtterance()
+				if u == nil {
+					t.Fatal(liveErrors(t, sink))
 				}
+				u.audio <- liveASRAudio{pcm: []byte{0, 0}, end: true}
+				<-f.committed
+				return f
 			}
-			if time.Since(start) > time.Second {
-				t.Fatal("RTP capture blocked on network")
+			// A slow first recognition holds every later transcript.
+			slow := start()
+			for range liveASRMaxRecognizing {
+				start().final("Later.", true)
+				synctest.Wait()
 			}
-			waitLiveMessage(t, sink, voicev2.MessageKindError, "", 1)
+			for range liveASRMaxRecognizing - 1 {
+				start()
+			}
+			if s.startLiveUtterance() != nil {
+				t.Fatal("exceeded recognizer bound")
+			}
+			if got := liveErrors(t, sink); len(got) != 1 || got[0] != "asr: speech recognition is busy with earlier utterances; please repeat" {
+				t.Fatal(got)
+			}
+			slow.final("First.", true)
 		})
 	})
+	t.Run("full queue names its cause", func(t *testing.T) {
+		t.Parallel()
+		// Recognizers are built in the bubble, so their channels block durably.
+		for name, tc := range map[string]struct {
+			asr  func() *liveASR
+			want string
+		}{
+			"recognizer unavailable": {func() *liveASR { return newFakeLiveASR(make(chan *fakeTranscription)) }, "asr: no speech recognizer became available; please repeat"},
+			"recognition behind":     {func() *liveASR { return newLiveASR(&stalledTranscriber{}, "fake-model") }, "asr: speech recognition fell behind; please repeat"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					sink := &captureSink{changed: make(chan struct{}, 1)}
+					s := (&localStackRuntime{liveASR: tc.asr()}).newSession(t.Context(), "bounded", sink, true)
+					s.conv = &fakeConversation{}
+					t.Cleanup(func() {
+						if err := s.close(); err != nil {
+							t.Error(err)
+						}
+					})
+					start := time.Now()
+					for range liveASRQueueFrames + 20 {
+						if err := s.acceptMicPCM(t.Context(), loudPCM(20)); err != nil {
+							t.Fatal(err)
+						}
+						synctest.Wait()
+					}
+					if time.Since(start) > time.Second {
+						t.Fatal("RTP capture blocked on network")
+					}
+					if got := liveErrors(t, sink); len(got) != 1 || got[0] != tc.want {
+						t.Fatal(got)
+					}
+				})
+			})
+		}
+	})
+}
+
+// stalledTranscriber connects transcription sessions that never accept audio.
+type stalledTranscriber struct {
+	fakeTranscriber
+}
+
+func (p *stalledTranscriber) ConnectRealtime(context.Context, ...genai.RealtimeOption) (genai.RealtimeSession, error) {
+	return stalledTranscription{newFakeTranscription()}, nil
+}
+
+type stalledTranscription struct {
+	*fakeTranscription
+}
+
+func (stalledTranscription) Send(ctx context.Context, _ genai.RealtimeInput) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// liveErrors returns the turn error messages sink received.
+func liveErrors(t *testing.T, sink *captureSink) []string {
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var out []string
+	for _, raw := range sink.msgs {
+		var msg voicev2.Error
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Kind == voicev2.MessageKindError {
+			out = append(out, msg.Message)
+		}
+	}
+	return out
 }
 
 func waitLiveDraft(t *testing.T, sink *captureSink, text string) {

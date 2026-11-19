@@ -31,10 +31,10 @@ func TestRealtimeConfig(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := out.Realtime
-			if got[0].Slots != 1 || got[0].Effort != "medium" {
+			if got[0].Slots != DefaultSlots || got[0].Effort != "medium" {
 				t.Fatalf("managed = %+v", got[0])
 			}
-			if got[1].Slots != 1 || got[1].ContextSize != 0 {
+			if got[1].Slots != DefaultSlots || got[1].ContextSize != 0 {
 				t.Fatalf("remote = %+v", got[1])
 			}
 			if got[2].Slots != 0 || got[2].ContextSize != 0 {

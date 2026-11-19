@@ -4,6 +4,7 @@ package voicertc
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -81,7 +82,7 @@ func localStackModelsForConfigWithStarter(
 ) (localStackModels, error) {
 	// Resolve credentials before starting speech models. The LLM is owned here
 	// until all ASR initialization succeeds and ownership transfers to the runtime.
-	llm, err := resolveLocalStackEndpoint(ctx, cfg.LLM.ModelConfig, cfg.LLM.ContextSize, launch)
+	llm, err := resolveLocalStackEndpoint(ctx, cfg.LLM.ModelConfig, cfg.LLM.ContextSize, cfg.LLM.Slots, launch)
 	if err != nil {
 		return localStackModels{}, err
 	}
@@ -126,7 +127,7 @@ func localStackModelsForConfigWithStarter(
 			liveASR = newLiveASR(asr.provider, cfg.ASR.Model)
 		default:
 			var err error
-			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, launch)
+			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, cfg.ASR.Slots, launch)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
@@ -139,7 +140,7 @@ func localStackModelsForConfigWithStarter(
 	if !cfg.TextOnly && cfg.TTS != (voicegateway.TTSConfig{}) {
 		switch cfg.TTS.Engine {
 		case voicegateway.TTSEngineGenAI:
-			endpoint, err := resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.TTS.Provider, Remote: cfg.TTS.Remote, Model: cfg.TTS.Model}, cfg.TTS.ContextSize, launch)
+			endpoint, err := resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.TTS.Provider, Remote: cfg.TTS.Remote, Model: cfg.TTS.Model}, cfg.TTS.ContextSize, cfg.TTS.Slots, launch)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, runtime.Close())
 			}
@@ -252,10 +253,11 @@ func voskEndpoint(ctx context.Context, remote string, model vosk.Model, launch s
 }
 
 // resolveLocalStackEndpoint wires one local stack adapter to its configured
-// provider. contextSize sizes a managed llama.cpp server.
-func resolveLocalStackEndpoint(ctx context.Context, cfg voicegateway.ModelConfig, contextSize int, launch serverLauncher) (localStackEndpoint, error) {
+// provider. contextSize per slot and slots, zero selecting
+// voicegateway.DefaultSlots, size a managed llama.cpp server.
+func resolveLocalStackEndpoint(ctx context.Context, cfg voicegateway.ModelConfig, contextSize, slots int, launch serverLauncher) (localStackEndpoint, error) {
 	if cfg.Provider == "llamacpp" {
-		return localStackLlamaEndpoint(ctx, cfg.Remote, cfg.Model, contextSize, launch)
+		return localStackLlamaEndpoint(ctx, cfg.Remote, cfg.Model, contextSize, slots, launch)
 	}
 	return localStackGenAIEndpoint(ctx, cfg)
 }
@@ -263,10 +265,10 @@ func resolveLocalStackEndpoint(ctx context.Context, cfg voicegateway.ModelConfig
 // localStackLlamaEndpoint wires the managed (or remote) llama.cpp runtime. A
 // managed server was just started by us, so it is known to be reachable; a
 // user-supplied remote is pinged to fail fast on misconfiguration.
-func localStackLlamaEndpoint(ctx context.Context, remote, model string, contextSize int, launch serverLauncher) (localStackEndpoint, error) {
+func localStackLlamaEndpoint(ctx context.Context, remote, model string, contextSize, slots int, launch serverLauncher) (localStackEndpoint, error) {
 	var runtime io.Closer
 	if remote == "" {
-		srv, err := launch(ctx, serverSpec{engine: engineLlamaCPP, model: model, contextSize: contextSize})
+		srv, err := launch(ctx, serverSpec{engine: engineLlamaCPP, model: model, contextSize: contextSize, slots: cmp.Or(slots, voicegateway.DefaultSlots)})
 		if err != nil {
 			return localStackEndpoint{}, err
 		}
@@ -368,11 +370,12 @@ const (
 )
 
 // serverSpec identifies a managed server: stacks needing equal specs can share
-// one process. contextSize applies to llama.cpp only.
+// one process. contextSize, per slot, and slots apply to llama.cpp only.
 type serverSpec struct {
 	engine      serverEngine
 	model       string
 	contextSize int
+	slots       int
 }
 
 // serverLauncher starts the managed server a spec names. The process lives
@@ -383,7 +386,7 @@ type serverLauncher func(ctx context.Context, spec serverSpec) (managedServer, e
 func startServer(ctx context.Context, spec serverSpec) (managedServer, error) {
 	switch spec.engine {
 	case engineLlamaCPP:
-		return startManagedLlamaServer(ctx, spec.model, spec.contextSize)
+		return startManagedLlamaServer(ctx, spec.model, spec.contextSize, spec.slots)
 	case engineWhistle:
 		// genaipy owns the isolated uv/Python 3.12 Needle worker and disables
 		// telemetry. Needle downloads a prebuilt native engine and weights
@@ -457,7 +460,7 @@ func newManagedLlamaReleaseCache() *managedLlamaReleaseCache {
 	return &managedLlamaReleaseCache{gate: make(chan struct{}, 1)}
 }
 
-func startManagedLlamaServer(ctx context.Context, model string, contextSize int) (managedServer, error) {
+func startManagedLlamaServer(ctx context.Context, model string, contextSize, slots int) (managedServer, error) {
 	version := llamacppsrv.Version
 	cache, err := localStackLlamaCacheDir()
 	if err != nil {
@@ -475,14 +478,14 @@ func startManagedLlamaServer(ctx context.Context, model string, contextSize int)
 	if err != nil {
 		return nil, err
 	}
-	// Gateway sessions share each managed server and queue concurrent turns
-	// through one slot.
+	// Gateway sessions share each managed server; requests beyond its slots
+	// queue.
 	args := []string{"-hf", model, "--no-warmup", "--no-log-timestamps"}
-	slog.InfoContext(ctx, "voicertc: starting managed llama.cpp", "model", model, "version", version, "hostPort", hostPort, "context_size", contextSize)
+	slog.InfoContext(ctx, "voicertc: starting managed llama.cpp", "model", model, "version", version, "hostPort", hostPort, "context_size", contextSize, "slots", slots)
 	// llama-server downloads a missing model before loading it.
 	reportStartupStage(ctx, "Server is downloading or loading "+model+"…")
 	logger := slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)
-	srv, err := llamacppsrv.New(ctx, exe, &llamacppsrv.Config{HostPort: hostPort, Slots: 1, ContextSize: contextSize, Args: args, LogOutput: logger.Writer()})
+	srv, err := llamacppsrv.New(ctx, exe, &llamacppsrv.Config{HostPort: hostPort, Slots: slots, ContextSize: contextSize, Args: args, LogOutput: logger.Writer()})
 	if err != nil {
 		return nil, fmt.Errorf("start managed llama.cpp: %w", err)
 	}

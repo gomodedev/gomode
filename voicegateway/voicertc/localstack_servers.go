@@ -10,8 +10,8 @@ import (
 	"github.com/maruel/genai"
 )
 
-// sharedServers lets local stacks that need the same model and context size
-// share one managed server, so switching between choices that differ
+// sharedServers lets local stacks that need the same model, context size and
+// slots share one managed server, so switching between choices that differ
 // elsewhere keeps its model loaded. A server runs while any stack holds a
 // lease. An unleased server stops at the next sweep, which a stack unload or
 // load completion triggers; a capacity eviction defers it so the stack taking

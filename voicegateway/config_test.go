@@ -588,6 +588,7 @@ id = "local_asr"
 provider = "llamacpp"
 model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
 context_size = 8192
+slots = 4
 [[tts]]
 id = "local_tts"
 provider = "llamacpp"
@@ -611,6 +612,9 @@ tts = "local_tts"`
 				if cfg.LLM[1].ContextSize != 131072 || p.LLM.ContextSize != 131072 || p.ASR.ContextSize != 8192 || p.TTS.ContextSize != 16384 {
 					t.Fatalf("context sizes: llm %d / %d, asr %d, tts %d", cfg.LLM[1].ContextSize, p.LLM.ContextSize, p.ASR.ContextSize, p.TTS.ContextSize)
 				}
+				if p.ASR.Slots != 4 {
+					t.Fatalf("asr slots %d", p.ASR.Slots)
+				}
 			})
 			t.Run("error", func(t *testing.T) {
 				remote := strings.Replace(definitions, `effort = "low"`, "effort = \"low\"\ncontext_size = 4096", 1)
@@ -629,12 +633,26 @@ tts = "local_tts"`
 				if _, err := load(strings.Replace(managed, "context_size = 131072", "context_size = 262145", 1)); err == nil || !strings.Contains(err.Error(), "context_size must be between 512 and 262144") {
 					t.Fatalf("oversized context: %v", err)
 				}
+				for _, slots := range []string{"-1", "17"} {
+					if _, err := load(strings.Replace(managed, "slots = 4", "slots = "+slots, 1)); err == nil || !strings.Contains(err.Error(), "voice.asr.slots must be between 1 and 16") {
+						t.Fatalf("slots %s: %v", slots, err)
+					}
+				}
 				// recognition is a remote server and speech uses kittentts.
 				for _, tc := range []struct{ old, want string }{
 					{`remote = "http://localhost:8081"`, "voice.asr.context_size requires a managed llama.cpp server"},
 					{`engine = "kittentts"`, "voice.tts.context_size requires a managed llama.cpp server"},
 				} {
 					data := strings.Replace(definitions, tc.old, tc.old+"\ncontext_size = 4096", 1)
+					if _, err := load(data); err == nil || !strings.Contains(err.Error(), tc.want) {
+						t.Fatalf("%s: %v", tc.want, err)
+					}
+				}
+				for _, tc := range []struct{ old, want string }{
+					{`remote = "http://localhost:8081"`, "voice.asr.slots requires a managed llama.cpp server"},
+					{`engine = "kittentts"`, "voice.tts.slots requires a managed llama.cpp server"},
+				} {
+					data := strings.Replace(definitions, tc.old, tc.old+"\nslots = 2", 1)
 					if _, err := load(data); err == nil || !strings.Contains(err.Error(), tc.want) {
 						t.Fatalf("%s: %v", tc.want, err)
 					}
@@ -999,7 +1017,7 @@ public_key = %q
 				t.Fatalf("unknown field: %v", err)
 			}
 		}
-		for _, data := range []string{"bogus = 1", "[[llm]]\nslots = 2", "[[asr]]\nunknown = true", "[[tts]]\nunknown = true", "[[voice]]\nunknown = true"} {
+		for _, data := range []string{"bogus = 1", "[[llm]]\nunknown = true", "[[asr]]\nunknown = true", "[[tts]]\nunknown = true", "[[voice]]\nunknown = true"} {
 			dir := t.TempDir()
 			path := filepath.Join(dir, ConfigFileName)
 			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
@@ -1061,7 +1079,7 @@ func TestRuntimeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Runtime.IdleTimeoutSeconds != 3600 || out.Runtime.MaxInstances != 1 {
+	if out.Runtime.IdleTimeoutSeconds != 3600 || out.Runtime.MaxInstances != 2 {
 		t.Fatalf("defaults = %+v", out.Runtime)
 	}
 	for _, limits := range []RuntimeConfig{{IdleTimeoutSeconds: -1}, {IdleTimeoutSeconds: 31536001}, {MaxInstances: -1}} {
@@ -1982,6 +2000,7 @@ provider = "openaicompatible"
 model = "chat-model"
 api_key_name = "CHAT_KEY"
 context_size = 8192
+slots = 5
 [[asr]]
 id = "ears"
 label = "Ears"
@@ -1990,6 +2009,7 @@ provider = "p"
 remote = "ws://127.0.0.1:2700"
 model = "vosk-model"
 context_size = 1024
+slots = 6
 [[tts]]
 id = "mouth"
 label = "Mouth"
@@ -1999,6 +2019,7 @@ remote = "r"
 model = "kitten"
 voice = "Kore"
 context_size = 2048
+slots = 7
 [[voice]]
 id = "preset"
 label = "Preset"
@@ -2027,9 +2048,9 @@ tts = "mouth"
 				},
 				Staged: true, CacheDir: "cache", Threads: 4, Slots: 3, ContextSize: 4096, MaxOutputTokens: 512,
 			}},
-			ASR:   []ASRConfig{{ID: "ears", Label: "Ears", Engine: ASREngineVosk, Provider: "p", Remote: "ws://127.0.0.1:2700", Model: "vosk-model", ContextSize: 1024}},
-			LLM:   []LLMConfig{{ID: "chat", Label: "Chat", ModelConfig: ModelConfig{Provider: "openaicompatible", Model: "chat-model", APIKeyName: "CHAT_KEY"}, ContextSize: 8192}},
-			TTS:   []TTSConfig{{ID: "mouth", Label: "Mouth", Engine: TTSEngineKittenTTS, Provider: "p", Remote: "r", Model: "kitten", Voice: "Kore", ContextSize: 2048}},
+			ASR:   []ASRConfig{{ID: "ears", Label: "Ears", Engine: ASREngineVosk, Provider: "p", Remote: "ws://127.0.0.1:2700", Model: "vosk-model", ContextSize: 1024, Slots: 6}},
+			LLM:   []LLMConfig{{ID: "chat", Label: "Chat", ModelConfig: ModelConfig{Provider: "openaicompatible", Model: "chat-model", APIKeyName: "CHAT_KEY"}, ContextSize: 8192, Slots: 5}},
+			TTS:   []TTSConfig{{ID: "mouth", Label: "Mouth", Engine: TTSEngineKittenTTS, Provider: "p", Remote: "r", Model: "kitten", Voice: "Kore", ContextSize: 2048, Slots: 7}},
 			Voice: []VoiceConfig{{ID: "preset", Label: "Preset", ASR: "ears", LLM: "chat", TTS: "mouth"}},
 		},
 		AutoUpdate: "10 3 * * *",

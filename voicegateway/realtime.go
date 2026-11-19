@@ -25,7 +25,7 @@ type RealtimeConfig struct {
 
 	CacheDir string
 	Threads  int
-	// Slots is 1 to 16; Resolve selects 1 when omitted.
+	// Slots is 1 to 16; Resolve selects DefaultSlots when omitted.
 	Slots int
 	// ContextSize is tokens per slot, 512 to 131072, and is required for a
 	// managed server. A realtime conversation that outgrows it ends.

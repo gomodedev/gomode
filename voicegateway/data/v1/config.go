@@ -148,6 +148,7 @@ type LLM struct {
 	Label string `toml:"label"`
 	ModelSettings
 	ContextSize int `toml:"context_size"`
+	Slots       int `toml:"slots"`
 }
 
 // ASR is one [[asr]] entry.
@@ -159,6 +160,7 @@ type ASR struct {
 	Remote      string `toml:"remote"`
 	Model       string `toml:"model"`
 	ContextSize int    `toml:"context_size"`
+	Slots       int    `toml:"slots"`
 }
 
 // TTS is one [[tts]] entry.
@@ -171,6 +173,7 @@ type TTS struct {
 	Model       string `toml:"model"`
 	Voice       string `toml:"voice"`
 	ContextSize int    `toml:"context_size"`
+	Slots       int    `toml:"slots"`
 }
 
 // Voice is one [[voice]] preset entry.
