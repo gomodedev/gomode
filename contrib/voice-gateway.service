@@ -6,7 +6,6 @@ Description=Go Mode voice gateway
 Type=exec
 ExecStart=%h/.local/bin/voice-gateway
 Environment="PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=-%h/.config/systemd/user/voice-gateway.env
 # The current gateway catches SIGINT to close sessions before exiting.
 KillSignal=SIGINT
 TimeoutStopSec=30s

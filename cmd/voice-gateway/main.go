@@ -61,7 +61,7 @@ func mainImpl(args []string) (err error) {
 	flags := flag.NewFlagSet("voice-gateway", flag.ContinueOnError)
 	configPath := flags.String("config", voicegateway.DefaultConfigPath(), "voice gateway config.toml path")
 	logFile := flags.String("log-file", "", "append stdout and stderr to this file instead of the console")
-	envFile := flags.String("env-file", "", "load process environment from this dotenv file; file values override inherited values")
+	envFile := flags.String("env-file", "", "dotenv file whose values override inherited environment variables (default "+envFileName+" beside -config)")
 	flags.StringVar(&updaterTaskName, "task-name", "", "Windows task launch context; task must use queued instances")
 	version := flags.Bool("version", false, "print the running build version and exit")
 	if err := flags.Parse(args); err != nil {
@@ -76,10 +76,9 @@ func mainImpl(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-	if *envFile != "" {
-		if err := loadEnvFile(*envFile); err != nil {
-			return err
-		}
+	envPath, err := loadEnvFile(*configPath, *envFile)
+	if err != nil {
+		return err
 	}
 	binary := "voice-gateway"
 	ext := ".tar.gz"
@@ -156,7 +155,7 @@ func mainImpl(args []string) (err error) {
 	if err := resolved.Validate(); err != nil {
 		return fmt.Errorf("available voice choices: %w", err)
 	}
-	watcher, err := startRestartWatch(ctx, *configPath, cancel)
+	watcher, err := startRestartWatch(ctx, *configPath, envPath, cancel)
 	if err != nil {
 		return err
 	}
@@ -280,35 +279,49 @@ func initLogging(path string, level *slog.LevelVar) (*slog.Logger, error) {
 	return l, nil
 }
 
-// loadEnvFile changes only this process and its children. Windows tasks and macOS
-// launch agents can pass -env-file without exporting credentials for the whole user.
-func loadEnvFile(path string) error {
+// envFileName is the credentials file loaded from beside config.toml on every
+// platform, so installers and manual runs share one location.
+const envFileName = "voice-gateway.env"
+
+// loadEnvFile loads the dotenv file at path, or envFileName beside configPath
+// when path is empty, and returns the path it used. Only the default may be
+// absent. Values change only this process and its children, so service
+// managers never export credentials to the whole user session.
+func loadEnvFile(configPath, path string) (string, error) {
+	explicit := path != ""
+	if !explicit {
+		path = filepath.Join(filepath.Dir(configPath), envFileName)
+	}
 	f, err := os.Open(path) // #nosec G304 -- The operator selects the CLI env path.
 	if err != nil {
-		return fmt.Errorf("open env file: %w", err)
+		if !explicit && errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		}
+		return "", fmt.Errorf("open env file: %w", err)
 	}
 	const maxEnvFileSize = 1 << 20
 	data, readErr := io.ReadAll(io.LimitReader(f, maxEnvFileSize+1))
 	if err := errors.Join(readErr, f.Close()); err != nil {
-		return fmt.Errorf("read env file %s: %w", path, err)
+		return "", fmt.Errorf("read env file %s: %w", path, err)
 	}
 	if len(data) > maxEnvFileSize {
-		return fmt.Errorf("env file %s exceeds 1 MiB", path)
+		return "", fmt.Errorf("env file %s exceeds 1 MiB", path)
 	}
 	values, err := godotenv.Unmarshal(strings.TrimPrefix(string(data), "\uFEFF"))
 	if err != nil {
 		// Parser errors can quote credentials from the offending line.
-		return fmt.Errorf("parse env file %s: invalid dotenv syntax", path)
+		return "", fmt.Errorf("parse env file %s: invalid dotenv syntax", path)
 	}
 	for name, value := range values {
 		if err := os.Setenv(name, value); err != nil {
-			return fmt.Errorf("set env variable %s from %s: %w", name, path, err)
+			return "", fmt.Errorf("set env variable %s from %s: %w", name, path, err)
 		}
 	}
-	return nil
+	return path, nil
 }
 
-// startRestartWatch triggers graceful shutdown after a rebuild or config change.
+// startRestartWatch triggers graceful shutdown after a rebuild, config or
+// credentials change.
 // Unix service managers own watcher relaunch; Windows queues its named task.
 type restartWatcher struct {
 	watcher *fsnotify.Watcher
@@ -321,10 +334,14 @@ func (w *restartWatcher) Close() error {
 	return err
 }
 
-func startRestartWatch(ctx context.Context, path string, cancel context.CancelCauseFunc) (*restartWatcher, error) {
+func startRestartWatch(ctx context.Context, path, envPath string, cancel context.CancelCauseFunc) (*restartWatcher, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolve config path: %w", err)
+	}
+	envTarget, err := filepath.Abs(envPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve env file path: %w", err)
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -356,6 +373,13 @@ func startRestartWatch(ctx context.Context, path string, cancel context.CancelCa
 			continue
 		}
 		break
+	}
+	// An explicit env file exists after loading, so its directory does too. The
+	// default sits beside the config and shares that watch.
+	if dir := filepath.Dir(envTarget); dir != filepath.Dir(absPath) {
+		if err := w.Add(dir); err != nil {
+			return nil, errors.Join(fmt.Errorf("watch env file directory: %w", err), w.Close())
+		}
 	}
 	watcher := &restartWatcher{watcher: w}
 	watcher.wg.Go(func() {
@@ -389,7 +413,7 @@ func startRestartWatch(ctx context.Context, path string, cancel context.CancelCa
 						}
 					}
 					reason = "executable modified"
-				case configTarget, voiceTarget:
+				case configTarget, voiceTarget, envTarget:
 					if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) == 0 {
 						continue
 					}

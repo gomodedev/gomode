@@ -34,6 +34,8 @@ func TestStartRestartWatch(t *testing.T) {
 		{"config replacement", "config.toml", true},
 		{"voice config creation", voicegateway.ConfigFileName, false},
 		{"voice config replacement", voicegateway.ConfigFileName, true},
+		{"env file creation", envFileName, false},
+		{"env file replacement", envFileName, true},
 	} {
 		replace := tc.replace
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,7 +47,7 @@ func TestStartRestartWatch(t *testing.T) {
 			}
 			cfg := filepath.Join(dir, tc.file)
 			ctx, cancel := context.WithCancelCause(t.Context())
-			w, err := startRestartWatch(ctx, path, cancel)
+			w, err := startRestartWatch(ctx, path, filepath.Join(dir, envFileName), cancel)
 			if err != nil {
 				cancel(nil)
 				t.Fatal(err)
@@ -85,7 +87,7 @@ func TestStartRestartWatch(t *testing.T) {
 		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "missing", "nested")
 		ctx, cancel := context.WithCancelCause(t.Context())
-		w, err := startRestartWatch(ctx, filepath.Join(dir, "config.toml"), cancel)
+		w, err := startRestartWatch(ctx, filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
 		if err != nil {
 			cancel(nil)
 			t.Fatal(err)
@@ -112,7 +114,8 @@ func TestStartRestartWatch(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancelCause(t.Context())
 		t.Cleanup(func() { cancel(nil) })
-		w, err := startRestartWatch(ctx, filepath.Join(t.TempDir(), "config.toml"), cancel)
+		dir := t.TempDir()
+		w, err := startRestartWatch(ctx, filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,6 +129,37 @@ func TestStartRestartWatch(t *testing.T) {
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("watcher failure did not trigger shutdown")
+		}
+	})
+	t.Run("explicit env file elsewhere", func(t *testing.T) {
+		t.Parallel()
+		cfgDir := t.TempDir()
+		envPath := filepath.Join(t.TempDir(), "credentials.env")
+		if err := os.WriteFile(envPath, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w, err := startRestartWatch(ctx, filepath.Join(cfgDir, "config.toml"), envPath, cancel)
+		if err != nil {
+			cancel(nil)
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cancel(nil)
+			if err := w.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		if err := os.WriteFile(envPath, []byte("KEY=value\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ctx.Done():
+			if !errors.Is(context.Cause(ctx), errRestartRequested) {
+				t.Fatalf("shutdown cause = %v, want a restart request", context.Cause(ctx))
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("env file change did not trigger shutdown")
 		}
 	})
 	t.Run("executable replacement", func(t *testing.T) {
@@ -213,7 +247,7 @@ func TestRestartWatchProcess(t *testing.T) { //nolint:paralleltest // Subprocess
 	}
 	ctx, cancel := context.WithCancelCause(t.Context())
 	// A missing config directory must not disable executable watching.
-	w, err := startRestartWatch(ctx, filepath.Join(dir, "missing", "config.toml"), cancel)
+	w, err := startRestartWatch(ctx, filepath.Join(dir, "missing", "config.toml"), filepath.Join(dir, "missing", envFileName), cancel)
 	if err != nil {
 		cancel(nil)
 		t.Fatal(err)
@@ -235,6 +269,44 @@ func TestRestartWatchProcess(t *testing.T) { //nolint:paralleltest // Subprocess
 	case <-time.After(10 * time.Second):
 		t.Fatal("executable replacement did not trigger shutdown")
 	}
+}
+
+func TestLoadEnvFile(t *testing.T) { //nolint:paralleltest // Setenv mutates the process environment.
+	const name = "GOMODE_TEST_LOAD_ENV_FILE"
+	t.Setenv(name, "inherited")
+	t.Run("missing default", func(t *testing.T) {
+		dir := t.TempDir()
+		got, err := loadEnvFile(filepath.Join(dir, "config.toml"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(dir, envFileName); got != want {
+			t.Errorf("path = %q, want %q", got, want)
+		}
+		if v := os.Getenv(name); v != "inherited" {
+			t.Errorf("%s = %q, want inherited value", name, v)
+		}
+	})
+	t.Run("default beside config", func(t *testing.T) {
+		dir := t.TempDir()
+		// Windows editors may add a byte order mark and CRLF line endings.
+		if err := os.WriteFile(filepath.Join(dir, envFileName), []byte("\uFEFF"+name+"=\"from file\"\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(name, "inherited")
+		if _, err := loadEnvFile(filepath.Join(dir, "config.toml"), ""); err != nil {
+			t.Fatal(err)
+		}
+		if v := os.Getenv(name); v != "from file" {
+			t.Errorf("%s = %q, want file value", name, v)
+		}
+	})
+	t.Run("missing explicit", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := loadEnvFile(filepath.Join(dir, "config.toml"), filepath.Join(dir, "other.env")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("err = %v, want not exist", err)
+		}
+	})
 }
 
 func TestIsNormalShutdown(t *testing.T) {

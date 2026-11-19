@@ -8,8 +8,6 @@
     <key>ProgramArguments</key>
     <array>
         <string>~/.local/bin/voice-gateway</string>
-        <string>-env-file</string>
-        <string>~/.config/voice-gateway/voice-gateway.env</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

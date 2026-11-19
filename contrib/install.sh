@@ -27,13 +27,12 @@ done
 install_dir="$HOME/.local/bin"
 binary_path="$install_dir/voice-gateway"
 config_path="$config_home/voice-gateway/config.toml"
+env_file="$config_home/voice-gateway/voice-gateway.env"
 if [[ "$platform" == linux ]]; then
-  env_file="$HOME/.config/systemd/user/voice-gateway.env"
   service_path="$config_home/systemd/user/voice-gateway.service"
   command -v systemctl >/dev/null || fail 'systemctl is required.'
   systemctl --user show-environment >/dev/null
 else
-  env_file="$config_home/voice-gateway/voice-gateway.env"
   service_path="$HOME/Library/LaunchAgents/com.fghbuild.voice-gateway.plist"
   log_file="$HOME/Library/Logs/voice-gateway.log"
   command -v launchctl >/dev/null || fail 'launchctl is required.'
@@ -86,7 +85,7 @@ expected_hash="$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')"
 actual_hash="$("${hash_command[@]}" <"$archive")"
 actual_hash="${actual_hash%% *}"
 [[ "$actual_hash" == "$expected_hash" ]] || fail 'Archive SHA-256 checksum mismatch.'
-printf '%s\n' LICENSE config.toml voice-gateway voice-gateway.env.example "voice-gateway.$([[ "$platform" == linux ]] && printf service || printf plist)" | LC_ALL=C sort >"$work_dir/expected"
+printf '%s\n' LICENSE config.toml voice-gateway voice-gateway.env "voice-gateway.$([[ "$platform" == linux ]] && printf service || printf plist)" | LC_ALL=C sort >"$work_dir/expected"
 tar -tzf "$archive" | LC_ALL=C sort >"$work_dir/members"
 cmp -s "$work_dir/expected" "$work_dir/members" || fail 'Archive must contain exactly the expected release files at its root.'
 # Reject links and special files before extraction, including links with valid member names.
@@ -114,7 +113,6 @@ else
     case "$line" in
     '        <string>~/.local/bin/voice-gateway</string>') value="$binary_path" ;;
     '        <string>~/.config</string>') value="$config_home" ;;
-    '        <string>~/.config/voice-gateway/voice-gateway.env</string>') value="$env_file" ;;
     '        <string>~/.local/bin:~/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>') value="$install_dir:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" ;;
     '    <string>~/Library/Logs/voice-gateway.log</string>')
       printf '    <string>%s</string>\n' "$(xml_value "$log_file")"
@@ -131,14 +129,14 @@ else
 fi
 
 publishing=true
-mkdir -p -- "$install_dir" "$(dirname -- "$config_path")" "$(dirname -- "$env_file")"
+mkdir -p -- "$install_dir" "$(dirname -- "$config_path")"
 if [[ ! -e "$config_path" ]]; then (
   set -o noclobber
   cat "$work_dir/files/config.toml" >"$config_path"
 ); fi
 if [[ ! -e "$env_file" ]]; then (
   set -o noclobber
-  cat "$work_dir/files/voice-gateway.env.example" >"$env_file"
+  cat "$work_dir/files/voice-gateway.env" >"$env_file"
 ); fi
 binary_temp="$(mktemp "$install_dir/.voice-gateway.XXXXXX")"
 install -m 755 "$work_dir/files/voice-gateway" "$binary_temp"

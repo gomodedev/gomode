@@ -97,7 +97,7 @@ effort = "medium"
 # Remote LLMs
 # Recognition, language, and synthesis models are offered in file declaration order.
 # Select recognition and synthesis independently for named LLMs. Credentials are listed in
-# https://github.com/gomodedev/gomode/blob/main/contrib/voice-gateway.env.example, using genai's provider environment variables.
+# https://github.com/gomodedev/gomode/blob/main/contrib/voice-gateway.env, using genai's provider environment variables.
 
 [[llm]]
 id = "gpt-luna-codex"

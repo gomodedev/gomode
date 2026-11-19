@@ -46,7 +46,7 @@ archives:
       - LICENSE
       - src: contrib/config.toml
         strip_parent: true
-      - src: contrib/voice-gateway.env.example
+      - src: contrib/voice-gateway.env
         strip_parent: true
       - src: 'contrib/voice-gateway.{{ if eq .Os "linux" }}service{{ else }}plist{{ end }}'
         strip_parent: true
@@ -60,7 +60,7 @@ archives:
       - LICENSE
       - src: contrib/config.toml
         strip_parent: true
-      - src: contrib/voice-gateway.env.example
+      - src: contrib/voice-gateway.env
         strip_parent: true
 
 checksum:

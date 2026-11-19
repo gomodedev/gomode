@@ -9,7 +9,7 @@ $configHome = [Environment]::GetEnvironmentVariable('XDG_CONFIG_HOME', 'User')
 if (-not $configHome) { $configHome = [Environment]::GetEnvironmentVariable('XDG_CONFIG_HOME', 'Machine') }
 if (-not $configHome) { $configHome = Join-Path $env:USERPROFILE '.config' }
 $ConfigPath = Join-Path $configHome 'voice-gateway/config.toml'
-$EnvFile = Join-Path $InstallDir 'voice-gateway.env'
+$EnvFile = Join-Path (Split-Path $ConfigPath -Parent) 'voice-gateway.env'
 $exe = Join-Path $InstallDir 'voice-gateway.exe'
 $logFile = Join-Path $InstallDir 'voice-gateway.log'
 $TaskName = 'GoModeVoiceGateway'
@@ -60,7 +60,7 @@ try {
     $null = [IO.Directory]::CreateDirectory($filesDir)
     try {
         $expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-        foreach ($name in @('LICENSE', 'config.toml', 'voice-gateway.env.example', 'voice-gateway.exe')) { $null = $expected.Add($name) }
+        foreach ($name in @('LICENSE', 'config.toml', 'voice-gateway.env', 'voice-gateway.exe')) { $null = $expected.Add($name) }
         foreach ($entry in $zip.Entries) {
             if (-not $expected.Remove($entry.FullName)) { throw "Unexpected or duplicate archive member: $($entry.FullName)" }
             $fileType = ($entry.ExternalAttributes -shr 16) -band 0xf000
@@ -77,10 +77,10 @@ try {
     if ((Get-Item -LiteralPath $source).Length -eq 0) { throw 'Archive binary must be nonempty.' }
 
     $publishing = $true
-    foreach ($directory in @($InstallDir, (Split-Path $ConfigPath -Parent), (Split-Path $EnvFile -Parent))) {
+    foreach ($directory in @($InstallDir, (Split-Path $ConfigPath -Parent))) {
         $null = [IO.Directory]::CreateDirectory($directory)
     }
-    if (-not (Test-Path -LiteralPath $EnvFile)) { [IO.File]::Copy((Join-Path $filesDir 'voice-gateway.env.example'), $EnvFile) }
+    if (-not (Test-Path -LiteralPath $EnvFile)) { [IO.File]::Copy((Join-Path $filesDir 'voice-gateway.env'), $EnvFile) }
     if (-not (Test-Path -LiteralPath $ConfigPath)) { [IO.File]::Copy((Join-Path $filesDir 'config.toml'), $ConfigPath) }
     $binaryTemp = Join-Path $InstallDir ('.voice-gateway-' + [Guid]::NewGuid().ToString('N') + '.exe')
     [IO.File]::Copy($source, $binaryTemp)
@@ -110,7 +110,7 @@ try {
         }
         $binaryTemp = $null
         $user = [Environment]::UserDomainName + '\' + [Environment]::UserName
-        $arguments = '-task-name "' + $TaskName + '" -config "' + $ConfigPath + '" -log-file "' + $logFile + '" -env-file "' + $EnvFile + '"'
+        $arguments = '-task-name "' + $TaskName + '" -config "' + $ConfigPath + '" -log-file "' + $logFile + '"'
         $action = New-ScheduledTaskAction -Execute $exe -Argument $arguments -WorkingDirectory $InstallDir
         # Interactive tasks use the persistent user environment and need no elevation.
         $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
