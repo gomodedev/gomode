@@ -377,7 +377,7 @@ internal class DeviceVoiceSession(
                 } catch (e: VoiceMcpAuthChangedException) {
                     if (ownsAttempt(attempt)) {
                         Log.i(TAG, "Service authentication changed during voice setup", e)
-                        setError(VOICE_CONVERSATION_ENDED_ERROR)
+                        endForConversationChange()
                     }
                 } catch (e: TimeoutCancellationException) {
                     if (ownsAttempt(attempt)) timing?.noteTimeout()
@@ -978,10 +978,7 @@ internal class DeviceVoiceSession(
                     }
                     return@withLock
                 }
-                if (voiceConversation?.isCurrent() == false) {
-                    setError(VOICE_CONVERSATION_ENDED_ERROR)
-                    return@withLock
-                }
+                if (endIfConversationChanged(voiceConversation)) return@withLock
                 awaitingModelTurn = true
                 _state.update { it.copy(turnState = TurnState.Thinking) }
                 // Engine callbacks arrive in order; join the last Main delivery before
@@ -1091,10 +1088,7 @@ internal class DeviceVoiceSession(
     ): JsonElement {
         fun currentTurn() = ownsAttempt(attempt) && turn == localTurnGeneration.get()
         if (!currentTurn()) return errorJson("Turn was interrupted")
-        if (voiceConversation?.isCurrent() == false) {
-            setError(VOICE_CONVERSATION_ENDED_ERROR)
-            return errorJson("Conversation authorization changed")
-        }
+        if (endIfConversationChanged(voiceConversation)) return errorJson("Conversation authorization changed")
         val name = msg.name
         // Pin this call to its conversation before native/frontend dispatch can suspend.
         val sessionID = conversationID
@@ -1152,10 +1146,7 @@ internal class DeviceVoiceSession(
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
             if (!currentTurn()) return errorJson("Turn was interrupted")
-            if (voiceConversation?.isCurrent() == false) {
-                setError(VOICE_CONVERSATION_ENDED_ERROR)
-                return errorJson("Conversation authorization changed")
-            }
+            if (endIfConversationChanged(voiceConversation)) return errorJson("Conversation authorization changed")
             _state.update { it.copy(activeTool = null) }
             val errMsg = e.message ?: "Unknown error"
             Log.e(TAG, "Tool $name threw: $errMsg", e)
@@ -1202,10 +1193,7 @@ internal class DeviceVoiceSession(
         origin: WebSocket,
     ) {
         if (!ownsAttempt(attempt) || webSocket !== origin) return
-        if (voiceConversation?.isCurrent() == false) {
-            setError(VOICE_CONVERSATION_ENDED_ERROR)
-            return
-        }
+        if (endIfConversationChanged(voiceConversation)) return
         val id = msg.id
         val name = msg.name
         // Pin this call to its conversation before native/frontend dispatch can suspend.
@@ -1273,7 +1261,7 @@ internal class DeviceVoiceSession(
         } catch (e: VoiceMcpAuthChangedException) {
             if (ownsAttempt(attempt) && webSocket === origin) {
                 Log.i(TAG, "Service authentication changed before MCP tool call", e)
-                setError(VOICE_CONVERSATION_ENDED_ERROR)
+                endForConversationChange()
             }
         } catch (e: CancellationException) {
             throw e
@@ -1413,10 +1401,7 @@ internal class DeviceVoiceSession(
         generate: Boolean,
     ) {
         if (_state.value.error != null) return
-        if (voiceConversation?.isCurrent() == false) {
-            setError(VOICE_CONVERSATION_ENDED_ERROR)
-            return
-        }
+        if (endIfConversationChanged(voiceConversation)) return
         if (userSpeechActive ||
             output.active ||
             awaitingModelTurn ||
@@ -1456,10 +1441,7 @@ internal class DeviceVoiceSession(
     private fun flushPendingNotifications(allowResponse: Boolean = true) {
         if (userSpeechActive || output.active || awaitingModelTurn) return
         val attempt = attemptGeneration.get()
-        if (voiceConversation?.isCurrent() == false) {
-            setError(VOICE_CONVERSATION_ENDED_ERROR)
-            return
-        }
+        if (endIfConversationChanged(voiceConversation)) return
         if (!_state.value.connected ||
             (voiceConversation != null && pendingGatewayTools.containsKey(attemptGeneration.get()))
         ) {

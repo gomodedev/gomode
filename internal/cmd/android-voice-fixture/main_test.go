@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -419,4 +420,60 @@ func TestFixtureSettingsGate(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestProductionGateway(t *testing.T) {
+	t.Parallel()
+	f := &fixture{log: slog.New(slog.DiscardHandler)}
+	production, err := newProductionGateway(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := production.close(context.WithoutCancel(t.Context())); err != nil {
+			t.Error(err)
+		}
+	})
+	srv := httptest.NewServer(production.routes(f.routes()))
+	t.Cleanup(srv.Close)
+
+	t.Run("advertises the production choice with gateway synthesis", func(t *testing.T) {
+		resp, err := httpGet(t, srv.URL+"/api/voicegateway/v2/voice/choices")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		var catalog voicev2.VoiceChoicesResp
+		if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+			t.Fatal(err)
+		}
+		if len(catalog.Choices) != 1 || catalog.Choices[0].ID != "production" ||
+			catalog.DefaultChoiceID(voicev2.VoiceTransportWebRTC) != "production" {
+			t.Fatalf("production catalog = %+v", catalog)
+		}
+		if len(catalog.SynthesisModels) != 1 || catalog.SynthesisModels[0].ID != "production-tts" {
+			t.Fatalf("production synthesis models = %+v", catalog.SynthesisModels)
+		}
+	})
+	t.Run("serves the fixture service routes", func(t *testing.T) {
+		resp, err := httpGet(t, srv.URL+"/.well-known/gomode.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("settings status = %d", resp.StatusCode)
+		}
+	})
+}
+
+func TestCleanupRecorder(t *testing.T) {
+	t.Parallel()
+	f := &fixture{}
+	log := slog.New(cleanupRecorder{Handler: slog.DiscardHandler, fixture: f}).With("component", "test")
+	log.Info("voicertc: session cleaned up", "session", "s1", "cause", errors.New("client closed the WebRTC connection"))
+	log.Info("voicertc: data channel closed", "session", "s1")
+	if got := f.stats.ProductionCleanups; len(got) != 1 || got[0] != "client closed the WebRTC connection" {
+		t.Fatalf("cleanups = %q", got)
+	}
 }

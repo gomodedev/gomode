@@ -110,7 +110,9 @@ DENIED_MICROPHONE = APP_PACKAGE + ".DeniedMicrophonePermission"
 # Each instrumentation APK declares its own annotation; the runner rejects unknown classes.
 APP_LOCAL_ONLY = APP_PACKAGE + ".LocalEmulatorOnly"
 TELECOM_LOCAL_ONLY = TELECOM_PACKAGE + ".LocalEmulatorOnly"
-RESULTS = ROOT / "android" / "gomode" / "build" / "outputs" / "model-free-tests"
+# Each run writes to its own timestamped directory below this root, so a focused rerun keeps the
+# evidence of the run it follows.
+RESULTS_ROOT = ROOT / "android" / "gomode" / "build" / "outputs" / "model-free-tests"
 # The slowest model-free test takes about 70s. AndroidJUnitRunner fails a test method past this
 # limit with its stuck thread's stack and continues with the next test.
 TEST_TIMEOUT_SECONDS = 300
@@ -211,13 +213,14 @@ def stop_fixture(process: subprocess.Popen[bytes]) -> None:
 
 
 @contextlib.contextmanager
-def gateway_fixture() -> Iterator[int]:
+def gateway_fixture(results: pathlib.Path) -> Iterator[tuple[int, int]]:
+    """Yield the synthetic gateway's port and the production gateway's port."""
     # A private bound-port announcement identifies our process; never probe a
     # guessed free port that another process could take before the server starts.
     with tempfile.TemporaryDirectory(prefix="gomode-gateway-fixture-") as directory:
         binary = pathlib.Path(directory) / "android-voice-fixture"
         subprocess.run(["go", "build", "-o", str(binary), "./internal/cmd/android-voice-fixture"], cwd=ROOT, check=True)
-        log_path = RESULTS / f"{pathlib.Path(directory).name}.log"
+        log_path = results / f"{pathlib.Path(directory).name}.log"
         with log_path.open("wb") as output:
             process = subprocess.Popen(
                 [str(binary), "-addr", "127.0.0.1:0", "-rtc-ip", "10.0.2.2"],
@@ -228,12 +231,15 @@ def gateway_fixture() -> Iterator[int]:
             )
             try:
                 deadline = time.monotonic() + 30
+                ports: dict[str, int] = {}
                 with log_path.open() as log:
                     while time.monotonic() < deadline:
                         line = log.readline()
-                        match = re.search(r"msg=listening addr=127\.0\.0\.1:([0-9]+)$", line)
+                        match = re.search(r'msg=(listening|"production listening") addr=127\.0\.0\.1:([0-9]+)$', line)
                         if match:
-                            yield int(match[1])
+                            ports[match[1]] = int(match[2])
+                        if len(ports) == 2:
+                            yield ports["listening"], ports['"production listening"']
                             return
                         if process.poll() is not None:
                             raise RuntimeError(f"Gateway fixture exited during startup; see {log_path}")
@@ -294,7 +300,13 @@ def denied_microphone(adb: str, serial: str) -> Iterator[None]:
 
 
 def instrument(
-    adb: str, serial: str, name: str, runner: str, arguments: dict[str, str], discovery: bool
+    adb: str,
+    serial: str,
+    results: pathlib.Path,
+    name: str,
+    runner: str,
+    arguments: dict[str, str],
+    discovery: bool,
 ) -> InstrumentationResult:
     command = [adb, "-s", serial, "shell", "am", "instrument", "-w", "-r"]
     command.extend(("-e", "timeout_msec", str(TEST_TIMEOUT_SECONDS * 1000)))
@@ -329,12 +341,12 @@ def instrument(
             return
 
     with contextlib.ExitStack() as stack:
-        log = stack.enter_context((RESULTS / f"{name}.log").open("w"))
+        log = stack.enter_context((results / f"{name}.log").open("w"))
         if not discovery:
             # The ring buffer holds seconds of a loaded emulator; stream the whole run so a
             # failure in an early test keeps its evidence.
             shell(adb, serial, "logcat", "-c")
-            logcat = stack.enter_context((RESULTS / f"{name}-logcat.log").open("w"))
+            logcat = stack.enter_context((results / f"{name}-logcat.log").open("w"))
             reader = subprocess.Popen(
                 [adb, "-s", serial, "logcat", "-v", "threadtime"], stdout=logcat, stderr=subprocess.STDOUT
             )
@@ -408,12 +420,18 @@ def instrument(
 
 
 def run_suite(
-    adb: str, serial: str, name: str, runner: str, arguments: dict[str, str], requires_denied_microphone: bool
+    adb: str,
+    serial: str,
+    results: pathlib.Path,
+    name: str,
+    runner: str,
+    arguments: dict[str, str],
+    requires_denied_microphone: bool,
 ) -> InstrumentationResult:
-    discovered = instrument(adb, serial, name + "-discovery", runner, arguments, True)
-    (RESULTS / f"{name}-discovery.json").write_text(json.dumps(dataclasses.asdict(discovered), indent=2) + "\n")
+    discovered = instrument(adb, serial, results, name + "-discovery", runner, arguments, True)
+    (results / f"{name}-discovery.json").write_text(json.dumps(dataclasses.asdict(discovered), indent=2) + "\n")
     if not discovered.passed:
-        raise RuntimeError(f"Instrumentation discovery failed for {name}; see {RESULTS}")
+        raise RuntimeError(f"Instrumentation discovery failed for {name}; see {results}")
     if not discovered.tests:
         print(f"{name}: no matching tests", flush=True)
         return discovered
@@ -422,14 +440,16 @@ def run_suite(
         runs = []
         for test in discovered.tests:
             with denied_microphone(adb, serial):
-                runs.append(instrument(adb, serial, name, runner, {**arguments, "class": test.name}, False))
+                # Name each case's logs, so later cases keep earlier evidence.
+                case = f"{name}-{test.name.rpartition('.')[2]}"
+                runs.append(instrument(adb, serial, results, case, runner, {**arguments, "class": test.name}, False))
         result = InstrumentationResult(
             all(run.passed for run in runs),
             sum(run.seconds for run in runs),
             [test for run in runs for test in run.tests],
         )
     else:
-        result = instrument(adb, serial, name, runner, arguments, False)
+        result = instrument(adb, serial, results, name, runner, arguments, False)
     expected = {test.name for test in discovered.tests}
     actual = {test.name for test in result.tests}
     complete = expected == actual and len(result.tests) == len(discovered.tests)
@@ -444,18 +464,24 @@ def run_suite(
             file=sys.stderr,
         )
     result.passed &= complete
-    (RESULTS / f"{name}.json").write_text(json.dumps(dataclasses.asdict(result), indent=2) + "\n")
+    (results / f"{name}.json").write_text(json.dumps(dataclasses.asdict(result), indent=2) + "\n")
     return result
+
+
+def new_results() -> pathlib.Path:
+    """Create the directory that holds one run's logs and results."""
+    RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+    return pathlib.Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-"), dir=RESULTS_ROOT))
 
 
 def run_capture_tests(port: int, arguments: dict[str, str], serial: str) -> int:
     """Build and run explicit documentation captures on their hosted fixture."""
     adb = adb_path()
-    RESULTS.mkdir(parents=True, exist_ok=True)
+    results = new_results()
     prepare_apks(adb, serial, False, False)
     with forward_ports(adb, serial, [port]):
         result = run_suite(
-            adb, serial, "captures", APP_RUNNER, {"baseUrl": f"http://localhost:{port}", **arguments}, False
+            adb, serial, results, "captures", APP_RUNNER, {"baseUrl": f"http://localhost:{port}", **arguments}, False
         )
         return 0 if result.passed and result.tests else 1
 
@@ -487,24 +513,30 @@ def main() -> int:
         serial = emulators[0]
     require_emulator(adb, serial)
     signal.signal(signal.SIGTERM, exit_on_signal)
-    RESULTS.mkdir(parents=True, exist_ok=True)
+    results_dir = new_results()
     started = time.monotonic()
     prepare_apks(adb, serial, module != "app", args.verbose)
     selection = {"class": args.test_class} if args.test_class else {}
     app_excluded = [*EXCLUDED, APP_LOCAL_ONLY] if args.ci else EXCLUDED
     telecom_excluded = {"notAnnotation": TELECOM_LOCAL_ONLY} if args.ci else {}
     results: list[InstrumentationResult] = []
-    with hosted_fixture() as hosted, gateway_fixture() as gateway, forward_ports(adb, serial, [hosted, gateway]):
+    with (
+        hosted_fixture() as hosted,
+        gateway_fixture(results_dir) as (gateway, production),
+        forward_ports(adb, serial, [hosted, gateway, production]),
+    ):
         if module != "telecom":
             arguments = {
                 "baseUrl": f"http://localhost:{hosted}",
                 "gatewayBaseUrl": f"http://localhost:{gateway}",
+                "productionGatewayBaseUrl": f"http://localhost:{production}",
                 **selection,
             }
             results.append(
                 run_suite(
                     adb,
                     serial,
+                    results_dir,
                     "app-microphone-denied",
                     APP_RUNNER,
                     {**arguments, "annotation": DENIED_MICROPHONE, "notAnnotation": ",".join(app_excluded)},
@@ -515,6 +547,7 @@ def main() -> int:
                 run_suite(
                     adb,
                     serial,
+                    results_dir,
                     "app",
                     APP_RUNNER,
                     {**arguments, "notAnnotation": ",".join([*app_excluded, DENIED_MICROPHONE])},
@@ -526,6 +559,7 @@ def main() -> int:
                 run_suite(
                     adb,
                     serial,
+                    results_dir,
                     "telecom",
                     TELECOM_RUNNER,
                     {"baseUrl": f"http://localhost:{gateway}", **telecom_excluded, **selection},
@@ -538,7 +572,7 @@ def main() -> int:
         print("No model-free tests matched the selection.", file=sys.stderr)
     print(
         f"Android model-free run: {count} tests in {time.monotonic() - started:.2f}s; "
-        f"passed={passed}; results: {RESULTS}",
+        f"passed={passed}; results: {results_dir}",
         flush=True,
     )
     return 0 if passed else 1

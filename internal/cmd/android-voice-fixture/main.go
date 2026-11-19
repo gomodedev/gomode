@@ -363,32 +363,59 @@ func writeJSON(w http.ResponseWriter, body any) {
 	}
 }
 
-func run(ctx context.Context, log *slog.Logger, addr, rtcIP string) error {
+// run serves the synthetic gateway on addr and the production gateway on
+// productionAddr until ctx ends or a server fails.
+func run(ctx context.Context, f *fixture, addr, productionAddr string) (err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var lc net.ListenConfig
 	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
-	f := &fixture{log: log, rtcIP: rtcIP}
-	srv := &http.Server{
-		Handler:           f.routes(),
-		ReadHeaderTimeout: 5 * time.Second,
-		BaseContext:       func(net.Listener) context.Context { return ctx },
+	productionListener, err := lc.Listen(ctx, "tcp", productionAddr)
+	if err != nil {
+		return errors.Join(err, listener.Close())
 	}
-	// The runner reads this line to learn the port when addr uses port 0.
-	log.InfoContext(ctx, "listening", "addr", listener.Addr().String())
-	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	production, err := newProductionGateway(ctx, f)
+	if err != nil {
+		return errors.Join(err, listener.Close(), productionListener.Close())
 	}
-	return nil
+	defer func() { err = errors.Join(err, production.close(context.WithoutCancel(ctx))) }()
+	service := f.routes()
+	servers := []*http.Server{
+		{Handler: service, ReadHeaderTimeout: 5 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }},
+		{Handler: production.routes(service), ReadHeaderTimeout: 5 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }},
+	}
+	// The runner reads these lines to learn the ports when the addresses use port 0.
+	f.log.InfoContext(ctx, "listening", "addr", listener.Addr().String())
+	f.log.InfoContext(ctx, "production listening", "addr", productionListener.Addr().String())
+	errs := make(chan error, 2)
+	for i, l := range []net.Listener{listener, productionListener} {
+		go func() { errs <- servers[i].Serve(l) }()
+	}
+	select {
+	case err = <-errs:
+	case <-ctx.Done():
+	}
+	for _, srv := range servers {
+		err = errors.Join(err, srv.Close())
+	}
+	return err
 }
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:0", "listen address")
+	productionAddr := flag.String("production-addr", "127.0.0.1:0", "production gateway listen address")
 	rtcIP := flag.String("rtc-ip", "", "host candidate address visible from the emulator (10.0.2.2)")
 	flag.Parse()
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if err := run(context.Background(), log, *addr, *rtcIP); err != nil {
+	f := &fixture{rtcIP: *rtcIP}
+	// voicertc logs through the default logger; the recorder exposes its
+	// session cleanup causes to tests.
+	log := slog.New(cleanupRecorder{Handler: slog.NewTextHandler(os.Stderr, nil), fixture: f})
+	slog.SetDefault(log)
+	f.log = log
+	if err := run(context.Background(), f, *addr, *productionAddr); err != nil {
 		log.Error("android-voice-fixture", "err", err)
 		os.Exit(1)
 	}

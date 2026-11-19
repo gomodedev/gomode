@@ -750,7 +750,7 @@ internal class VoiceSession(
                 } catch (e: VoiceMcpAuthChangedException) {
                     if (ownsAttempt(attempt)) {
                         Log.i(TAG, "Service authentication changed during voice setup", e)
-                        setError(VOICE_CONVERSATION_ENDED_ERROR)
+                        endForConversationChange()
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -1279,10 +1279,7 @@ internal class VoiceSession(
         generate: Boolean,
     ) {
         if (_state.value.error != null) return
-        if (!voiceConversation.isCurrent()) {
-            setError(VOICE_CONVERSATION_ENDED_ERROR)
-            return
-        }
+        if (endIfConversationChanged(voiceConversation)) return
         if (contextUpdateBlocked()) {
             if (!pendingNotifications.add(text, generate)) {
                 setError("Too many pending service alerts. Reconnect voice.")
@@ -1355,10 +1352,7 @@ internal class VoiceSession(
     // A user utterance about to be sent already requests the next response, so its alerts
     // become context without a competing turn.
     private fun flushPendingNotifications(allowResponse: Boolean = true) {
-        if (!voiceConversation.isCurrent()) {
-            setError(VOICE_CONVERSATION_ENDED_ERROR)
-            return
-        }
+        if (endIfConversationChanged(voiceConversation)) return
         if (contextUpdateBlocked()) return
         val update = pendingNotifications.drain() ?: return
         sendClientContent(update.text, update.generate && allowResponse)
@@ -1826,10 +1820,7 @@ internal class VoiceSession(
         originChannel: DataChannel,
     ) {
         if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
-        if (!voiceConversation.isCurrent()) {
-            setError(VOICE_CONVERSATION_ENDED_ERROR)
-            return
-        }
+        if (endIfConversationChanged(voiceConversation)) return
         val id = msg.id
         val name = msg.name
         val sessionID = conversationID
@@ -1871,7 +1862,7 @@ internal class VoiceSession(
         } catch (e: VoiceSetupException) {
             if (ownsAttempt(attempt) && dataChannel === originChannel) {
                 Log.i(TAG, "Conversation identity changed before catalog tool call", e)
-                setError(VOICE_CONVERSATION_ENDED_ERROR)
+                endForConversationChange()
             }
         } catch (e: CancellationException) {
             throw e

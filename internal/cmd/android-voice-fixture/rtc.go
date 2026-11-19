@@ -54,6 +54,14 @@ type fixtureStats struct {
 	// MicFrameSamples counts decoded microphone packets by samples per packet,
 	// which is the sender's frame size at the 48kHz decode rate.
 	MicFrameSamples map[string]int `json:"micFrameSamples"`
+
+	// ProductionTurns and ProductionSpeech count the production gateway's
+	// language model and synthesis requests.
+	ProductionTurns  int `json:"productionTurns"`
+	ProductionSpeech int `json:"productionSpeech"`
+	// ProductionCleanups lists the cause of each production gateway session
+	// cleanup, in order.
+	ProductionCleanups []string `json:"productionCleanups"`
 }
 
 type mediaPeer struct {
@@ -89,6 +97,7 @@ func (f *fixture) handleStats(w http.ResponseWriter, _ *http.Request) {
 	stats.ToolResults = append([]json.RawMessage(nil), f.stats.ToolResults...)
 	stats.MicFrameSamples = maps.Clone(f.stats.MicFrameSamples)
 	stats.RTCUserMessages = append([]string{}, f.stats.RTCUserMessages...)
+	stats.ProductionCleanups = append([]string{}, f.stats.ProductionCleanups...)
 	f.mu.Unlock()
 	writeJSON(w, stats)
 }

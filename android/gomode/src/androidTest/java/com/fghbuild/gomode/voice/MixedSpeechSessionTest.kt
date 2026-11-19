@@ -1,4 +1,4 @@
-// Exercises WebRTC sessions whose recognition and speech run on different sides against the controlled gateway.
+// Exercises WebRTC sessions whose recognition and speech run on different sides, on the controlled and production gateways.
 package com.fghbuild.gomode.voice
 
 import android.Manifest
@@ -158,6 +158,42 @@ class MixedSpeechSessionTest {
             assertNull("Gateway recognition must not start device recognition", speech.listening.value)
         }
 
+    // The production gateway runs voicertc's bridge and local stack over fake model endpoints, so this
+    // covers the production session protocol, synthesis and teardown from Android's WebRTC stack.
+    @Test
+    fun productionGatewaySpeaksTheModelReplyAndNamesTheClientHangUp() =
+        withSession(
+            SpeechStageLocation.DEVICE,
+            SpeechStageLocation.GATEWAY,
+            service = productionBaseUrl,
+        ) { session, speech ->
+            val cleanups = fixtureStats().getJSONArray("productionCleanups").length()
+            val listener = awaitListener(speech, null)
+            withContext(Dispatchers.Main) { listener.onResult("Status please") }
+            val replied =
+                awaitState(session) {
+                    it.turnState == TurnState.Idle &&
+                        !it.speaking &&
+                        it.transcript.lastOrNull()?.text == "Production gateway reply."
+                }
+            assertEquals(
+                listOf(
+                    TranscriptSpeaker.USER to "Status please",
+                    TranscriptSpeaker.ASSISTANT to "Production gateway reply.",
+                ),
+                replied.transcript.map { it.speaker to it.text },
+            )
+            assertTrue("Production gateway did not synthesize the reply", fixtureStats().getInt("productionSpeech") > 0)
+            assertTrue("Gateway speech must not use device speech", speech.spoken.isEmpty())
+
+            withContext(Dispatchers.Main) { session.disconnect("test hang-up") }
+            awaitFixture { it.getJSONArray("productionCleanups").length() > cleanups }
+            assertEquals(
+                "client closed the WebRTC connection",
+                fixtureStats().getJSONArray("productionCleanups").getString(cleanups),
+            )
+        }
+
     @Test
     fun gatewayStagesNameTheirModelsAndLeaveDeviceSpeechUnused() =
         withSession(SpeechStageLocation.GATEWAY, SpeechStageLocation.GATEWAY) { session, speech ->
@@ -177,12 +213,13 @@ class MixedSpeechSessionTest {
         recognition: SpeechStageLocation,
         speech: SpeechStageLocation,
         holdPlayback: Boolean = false,
+        service: String = baseUrl,
         block: suspend (VoiceSession, ScriptedSpeech) -> Unit,
     ): Unit =
         runBlocking {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val repository = SettingsRepository(MemoryPreferences())
-            repository.addService("fixture", baseUrl)
+            repository.addService("fixture", service)
             repository.updateSavedVoiceSetup(null) {
                 it.copy(
                     preference =
@@ -195,7 +232,7 @@ class MixedSpeechSessionTest {
                 )
             }
             repository.settings.first {
-                it.activeServiceURL == baseUrl &&
+                it.activeServiceURL == service &&
                     it.voiceSetup.effectiveRecognition == recognition &&
                     it.voiceSetup.effectiveSpeech == speech
             }
@@ -280,10 +317,17 @@ class MixedSpeechSessionTest {
             }
         }
 
+    // Both gateways share one fixture, so fixture controls and stats use the controlled gateway's URL.
     private val baseUrl: String
         get() =
             requireNotNull(InstrumentationRegistry.getArguments().getString("gatewayBaseUrl")) {
                 "gatewayBaseUrl instrumentation argument is required"
+            }
+
+    private val productionBaseUrl: String
+        get() =
+            requireNotNull(InstrumentationRegistry.getArguments().getString("productionGatewayBaseUrl")) {
+                "productionGatewayBaseUrl instrumentation argument is required"
             }
 
     /** One device recognition utterance's callbacks; the session calls and stops them on the main thread. */

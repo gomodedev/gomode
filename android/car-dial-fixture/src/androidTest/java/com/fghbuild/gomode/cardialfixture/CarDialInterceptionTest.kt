@@ -1051,8 +1051,7 @@ class CarDialInterceptionTest {
             Thread.sleep(100)
         }
         if (!voiceConnected()) {
-            val status = voiceStatusText()
-            throw AssertionError("Voice controls did not connect: $status\n${voiceFailureDiagnostics(before)}")
+            throw AssertionError("${voiceFailureSummary()}\n${voiceFailureDiagnostics(before)}")
         }
         awaitMicrophoneForeground()
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
@@ -1115,6 +1114,24 @@ class CarDialInterceptionTest {
     }
 
     private fun voiceStatusText(): String = device.findObject(By.res("car_dial_status"))?.text ?: "no status"
+
+    // Tells a missing Go Mode window apart from a session that did not connect, and names the app
+    // process's last voice session record. Each test starts a fresh process, so its PID scopes the log.
+    private fun voiceFailureSummary(): String {
+        val pid = shell("pidof $APP").trim()
+        val record =
+            if (pid.isEmpty()) {
+                "app process not running"
+            } else {
+                shell("logcat -d --pid=$pid -s GoModeVoiceSession:V GoModeDeviceVoice:V *:S")
+                    .lineSequence()
+                    .map { it.substringAfter(": ", "") }
+                    .lastOrNull { it.isNotBlank() && !it.startsWith("ICE candidate") }
+                    ?: "none"
+            }
+        val window = if (device.hasObject(By.pkg(APP))) "status: ${voiceStatusText()}" else "Go Mode window not showing"
+        return "Voice did not connect; $window; last voice record: $record"
+    }
 
     private fun awaitMicrophoneForeground() {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)

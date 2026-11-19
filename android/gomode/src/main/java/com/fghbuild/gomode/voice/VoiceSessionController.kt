@@ -104,11 +104,21 @@ internal class PendingVoiceContext {
  * session reports why; an idle one has nothing to report.
  */
 internal fun VoiceSessionController.endForSignInChange() {
-    if (state.value.active) {
-        setError(
-            VOICE_CONVERSATION_ENDED_ERROR,
-        )
-    } else {
-        disconnect("service sign-in changed while idle")
-    }
+    if (state.value.active) endForConversationChange() else disconnect("service sign-in changed while idle")
+}
+
+/**
+ * endForConversationChange ends an active session whose service identity or
+ * conversation changed underneath it, with an error naming the cause.
+ */
+internal fun VoiceSessionController.endForConversationChange() = setError(VOICE_CONVERSATION_ENDED_ERROR)
+
+/**
+ * endIfConversationChanged ends the session when [conversation] is no longer
+ * current and reports whether it did. A null conversation never changes.
+ */
+internal fun VoiceSessionController.endIfConversationChanged(conversation: VoiceConversation?): Boolean {
+    if (conversation?.isCurrent() != false) return false
+    endForConversationChange()
+    return true
 }
