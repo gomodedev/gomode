@@ -1,6 +1,7 @@
 // Instrumented smoke coverage for the Go Mode WebView shell.
 package com.fghbuild.gomode
 
+import android.Manifest
 import android.app.Instrumentation.ActivityResult
 import android.content.ContentValues
 import android.content.Intent
@@ -119,20 +120,20 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
             device.executeShellCommand("screencap -p /data/local/tmp/gomode-microphone-denied.png")
         }
         composeRule.onNodeWithText("Open app settings").performClick()
-
-        fun clickSystemText(text: String) {
-            // App info replaces its rows as permission summaries load. A visible label
-            // can still move before a tap, so wait for the Settings window to settle.
-            device.waitForIdle()
-            requireNotNull(device.wait(Until.findObject(By.text(text)), GOMODE_DEFAULT_TIMEOUT_MS)) {
-                val shown = device.findObjects(By.text(Pattern.compile(".+"))).mapNotNull { it.text }
-                "System settings did not show $text in ${device.currentPackageName}; visible: $shown"
-            }.click()
+        requireNotNull(
+            device.wait(Until.findObject(By.pkg("com.android.settings").text("Go Mode")), GOMODE_DEFAULT_TIMEOUT_MS),
+        ) {
+            val shown = device.findObjects(By.text(Pattern.compile(".+"))).mapNotNull { it.text }
+            "System settings did not show Go Mode's app info in ${device.currentPackageName}; visible: $shown"
         }
-        clickSystemText("Permissions")
-        clickSystemText("Microphone")
-        clickSystemText("Allow only while using the app")
-        repeat(3) { device.pressBack() }
+        // Grant while Settings is in front, as the user would there. Settings' App info
+        // rows load asynchronously and dropped taps on Permissions on CI; the app only
+        // observes the grant when it resumes.
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(
+            InstrumentationRegistry.getInstrumentation().targetContext.packageName,
+            Manifest.permission.RECORD_AUDIO,
+        )
+        device.pressBack()
         waitForAppFocus()
         composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
             composeRule.onAllNodesWithTag("gomode-microphone-recovery").fetchSemanticsNodes().isEmpty()

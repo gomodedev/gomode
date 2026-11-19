@@ -1093,8 +1093,13 @@ class CarDialInterceptionTest {
         )
     }
 
-    private fun voiceConnected(): Boolean =
-        device.hasObject(By.res("car_dial_status").text("Voice connected")) || device.hasObject(By.desc("End voice"))
+    // Reads a fresh tree; see awaitFresh. On CI the cached voice button kept the "Cancel" description
+    // of the connecting phase for 50 s, beside a fresh "Listening…" that only a connected session shows.
+    private fun voiceConnected(): Boolean {
+        instrumentation.uiAutomation.clearCache()
+        return device.hasObject(By.res("car_dial_status").text("Voice connected")) ||
+            device.hasObject(By.desc("End voice"))
+    }
 
     // Names the stage a voice start stopped at: the app's startup records and session
     // log, the fixture counters, and Telecom's record of the latest call.
@@ -1108,6 +1113,7 @@ class CarDialInterceptionTest {
                     "basic_packet_socket_factory.cc:V physical_socket_server.cc:V *:S",
             )
         val call = latestCallRecord(shell("dumpsys telecom")).take(4_000)
+        instrumentation.uiAutomation.clearCache()
         val windows = ByteArrayOutputStream().also { device.dumpWindowHierarchy(it) }.toString()
         return "fixture before=$before\nfixture after=${fixtureStats()}\napp log:\n$log\nTelecom call:\n$call\n" +
             "windows:\n$windows"
