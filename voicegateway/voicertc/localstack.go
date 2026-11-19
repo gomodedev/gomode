@@ -23,7 +23,6 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/language/display"
 
-	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -272,9 +271,11 @@ func (b *localStackRuntime) newSession(ctx context.Context, sessionID string, si
 		outstanding:   make(map[string]sessionToolCall),
 		livePending:   make(map[string]*liveUtterance),
 	}
-	s.liveGate = newRealtimeAudioGate(s.inputSampleRate(), realtimeAudioManual)
-	if b.directAudio {
-		s.vad = newEnergyVAD(s.inputSampleRate())
+	switch {
+	case s.liveASR != nil:
+		s.liveGate = newRealtimeAudioGate(s.liveASR.rate, realtimeAudioManual)
+	case s.directAudio:
+		s.vad = newEnergyVAD(defaultInputSampleRate)
 	}
 	return s
 }
@@ -453,13 +454,27 @@ func (s *localStackSession) checkLanguage(lang string) error {
 	return nil
 }
 
-// inputSampleRate is the recognizer's rate with live recognition; the energy
-// VAD and direct audio run at voicegateway.LocalSpeechSampleRate.
+// defaultInputSampleRate is the microphone rate where no model fixes one: the
+// energy VAD with direct audio, whose WAV header carries the rate for
+// llama.cpp to resample, and a live recognizer without a qualified
+// transcription session rate, such as Whistle, NeMo-Speech or Vosk, which all
+// accept it. 16 kHz matches LFM3's audio encoder and keeps buffered utterances
+// a third of their size at Opus's native 48 kHz.
+const defaultInputSampleRate = 16000
+
+// inputSampleRate is the recognizer's rate with live recognition, and
+// defaultInputSampleRate with direct audio, where the LLM hears the energy
+// VAD's utterances. Client recognition accepts no microphone audio, so it has
+// no rate.
 func (s *localStackSession) inputSampleRate() int {
-	if s.liveASR != nil {
+	switch {
+	case s.liveASR != nil:
 		return s.liveASR.rate
+	case s.directAudio:
+		return defaultInputSampleRate
+	default:
+		return 0
 	}
-	return voicegateway.LocalSpeechSampleRate
 }
 
 func (s *localStackSession) acceptMicPCM(ctx context.Context, pcm []byte) error {
@@ -560,7 +575,7 @@ func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	conv := s.conv.(*genaiConversation)
 	s.mu.Unlock()
 	turnCtx, cancel := context.WithCancel(ctx)
-	step, err := conv.userAudio(turnCtx, utterance)
+	step, err := conv.userAudio(turnCtx, utterance, s.inputSampleRate())
 	if err != nil {
 		cancel()
 		s.reportTurnError("audio", err)

@@ -34,9 +34,9 @@ func TestSmokeLlamaRealtimeGateway(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	t.Cleanup(cancel)
-	pcm := generateSmokeAudio(ctx, t, cacheRoot)
-	if len(pcm) == 0 || len(pcm) > 15*32000 {
-		t.Fatal("generated audio must be <=15 seconds of mono16k PCM16LE")
+	pcm, pcmRate := generateSmokeAudio(ctx, t, cacheRoot)
+	if len(pcm) == 0 || len(pcm) > 15*pcmRate*2 {
+		t.Fatal("generated audio must be <=15 seconds of mono PCM16LE")
 	}
 	cache := filepath.Join(cacheRoot, "gomode", "llama-realtime-smoke")
 	logFile, err := os.CreateTemp(t.TempDir(), "llama-runtime-*.log")
@@ -82,14 +82,19 @@ func TestSmokeLlamaRealtimeGateway(t *testing.T) {
 	}
 	t.Logf("managed %s ready in %s", llamacppsrv.Version, time.Since(start))
 	start = time.Now()
+	rate := s.inputSampleRate()
+	if rate != pcmRate {
+		pcm = resamplePCM16(pcm, pcmRate, rate)
+	}
 	// Deliberately unpaced 100ms capture chunks test streaming correctness and
 	// throughput, not a realtime capture-latency or hardware performance promise.
-	for i := 0; i < len(pcm); i += 3200 {
-		if err := s.acceptMicPCM(ctx, pcm[i:min(i+3200, len(pcm))]); err != nil {
+	chunk := rate * 2 / 10
+	for i := 0; i < len(pcm); i += chunk {
+		if err := s.acceptMicPCM(ctx, pcm[i:min(i+chunk, len(pcm))]); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.acceptMicPCM(ctx, make([]byte, 32000/2)); err != nil {
+	if err := s.acceptMicPCM(ctx, make([]byte, rate)); err != nil {
 		t.Fatal(err)
 	}
 	var resultSent bool
@@ -163,7 +168,7 @@ func realtimeSmokeMessages(msgs [][]byte) string {
 	return strings.Join(parts, "\n")
 }
 
-func generateSmokeAudio(ctx context.Context, t *testing.T, cacheRoot string) []byte {
+func generateSmokeAudio(ctx context.Context, t *testing.T, cacheRoot string) ([]byte, int) {
 	cache := filepath.Join(cacheRoot, "gomode", "llama-tts")
 	if err := os.MkdirAll(cache, 0o750); err != nil {
 		t.Fatal(err)
@@ -184,11 +189,7 @@ func generateSmokeAudio(ctx context.Context, t *testing.T, cacheRoot string) []b
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("llama-tts: %v", err)
 	}
-	pcm, rate := readPCM16WAV(t, path)
-	if rate != voicegateway.LocalSpeechSampleRate {
-		pcm = resamplePCM16(pcm, rate, voicegateway.LocalSpeechSampleRate)
-	}
-	return pcm
+	return readPCM16WAV(t, path)
 }
 
 // readPCM16WAV reads the mono PCM16LE data chunk and returns its sample rate.

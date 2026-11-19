@@ -100,7 +100,7 @@ func TestSmokeLiveASR(t *testing.T) {
 				switch a.rate {
 				case backendOutputSampleRate:
 					return pcm
-				case voicegateway.LocalSpeechSampleRate:
+				case defaultInputSampleRate:
 					return downsample24to16(pcm)
 				default:
 					t.Fatalf("no conversion to %d Hz", a.rate)

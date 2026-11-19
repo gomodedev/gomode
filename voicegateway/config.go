@@ -1023,15 +1023,6 @@ func validateASR(c ASRConfig) error {
 // server whose slots are omitted.
 const DefaultSlots = 2
 
-// LocalSpeechSampleRate is the PCM rate the gateway decodes the microphone at
-// for llama.cpp audio input (staged WAV utterances and realtime sessions) and
-// for a live recognizer whose provider qualifies no transcription session rate.
-// llama.cpp resamples any input to the model's encoder rate; 16 kHz matches
-// LFM3's audio encoder, so it avoids that work. Each backend's inputSampleRate
-// selects the microphone rate, such as 24 kHz for a realtime provider that
-// requires it.
-const LocalSpeechSampleRate = 16000
-
 // ValidOpusRate reports whether Opus decodes natively to rate, so the gateway
 // can feed a stage at rate without resampling.
 func ValidOpusRate(rate int) bool {

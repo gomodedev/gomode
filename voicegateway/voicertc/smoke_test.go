@@ -654,10 +654,10 @@ func upsample24PCMTo48Samples(pcm []byte, trailingSilenceMS int) []int16 {
 
 func downsample24to16(pcm []byte) []byte {
 	samples24 := len(pcm) / 2
-	samples16 := samples24 * voicegateway.LocalSpeechSampleRate / backendOutputSampleRate
+	samples16 := samples24 * defaultInputSampleRate / backendOutputSampleRate
 	out := make([]byte, samples16*2)
 	for i := range samples16 {
-		src := i * backendOutputSampleRate / voicegateway.LocalSpeechSampleRate
+		src := i * backendOutputSampleRate / defaultInputSampleRate
 		copy(out[i*2:], pcm[src*2:src*2+2])
 	}
 	return out

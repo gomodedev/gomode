@@ -5,11 +5,9 @@ package voicertc
 import (
 	"encoding/binary"
 	"testing"
-
-	"github.com/gomodedev/gomode/voicegateway"
 )
 
-const realtimeFrameBytes = voicegateway.LocalSpeechSampleRate * 2 / 50
+const realtimeFrameBytes = defaultInputSampleRate * 2 / 50
 
 func TestRealtimeAudioGate(t *testing.T) {
 	t.Run("activity policies", func(t *testing.T) {
@@ -31,7 +29,7 @@ func TestRealtimeAudioGate(t *testing.T) {
 			{"server sparse noise", realtimeAudioServer, sparse, true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				g := newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, tc.mode)
+				g := newRealtimeAudioGate(defaultInputSampleRate, tc.mode)
 				var starts int
 				for chunk := range g.push(tc.pcm) {
 					if chunk.start {
@@ -45,7 +43,7 @@ func TestRealtimeAudioGate(t *testing.T) {
 		}
 	})
 	t.Run("push", func(t *testing.T) {
-		g := newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioManual)
+		g := newRealtimeAudioGate(defaultInputSampleRate, realtimeAudioManual)
 		for range g.push(testPCM(2000, 0)) {
 			t.Fatal("silence opened a turn")
 		}

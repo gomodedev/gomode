@@ -605,7 +605,7 @@ func (s *fakeBackendSession) acceptClientMessage(ctx context.Context, _ []byte) 
 }
 
 func (s *fakeBackendSession) inputSampleRate() int {
-	return voicegateway.LocalSpeechSampleRate
+	return defaultInputSampleRate
 }
 
 func (s *fakeBackendSession) acceptMicPCM(_ context.Context, pcm []byte) error {
@@ -2018,6 +2018,26 @@ func TestSession(t *testing.T) {
 		if record["err"] != "realtime transport cleanup failed" || record["session"] != "cleanup" {
 			t.Fatalf("close failure was dropped: %v", record)
 		}
+	})
+	t.Run("audioRxLoop", func(t *testing.T) {
+		t.Run("client recognition rejects a microphone track", func(t *testing.T) {
+			backend := (&localStackRuntime{llm: echoLLM{}}).newSession(t.Context(), "client-recognition", nil, true)
+			log, err := openActivityLog(t.TempDir(), "client-recognition")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := log.close(); err != nil {
+					t.Error(err)
+				}
+			})
+			s := &session{id: "client-recognition", backend: backend, activityLog: log}
+			// The loop returns before reading a track when the backend has no rate.
+			s.audioRxLoop(t.Context(), nil)
+			if want := "microphone: this session accepts no microphone audio"; s.lastError != want {
+				t.Fatalf("lastError = %q, want %q", s.lastError, want)
+			}
+		})
 	})
 	t.Run("audioSendLoop", func(t *testing.T) {
 		enc, err := newEncoder()

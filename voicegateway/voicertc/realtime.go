@@ -122,7 +122,7 @@ func (b *llamaRealtimeBackend) connect(ctx context.Context, id string, sink back
 		return &stagedLlamaSession{backendSession: b.staged.newSession(ctx, id, sink, false), slots: b.slots}, nil
 	}
 	life, cancel := context.WithCancel(ctx)
-	return &llamaRealtimeSession{backend: b, id: id, sink: sink, playback: playback, ctx: life, cancel: cancel, gate: newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioManual)}, nil
+	return &llamaRealtimeSession{backend: b, id: id, sink: sink, playback: playback, ctx: life, cancel: cancel}, nil
 }
 
 type realtimePendingInput struct {
@@ -254,6 +254,8 @@ func (s *llamaRealtimeSession) setup(msg *voicev2.SessionSetup) error {
 		return errors.Join(errSessionClosed, rt.Close())
 	}
 	s.rt = rt
+	// genai's Audio takes PCM at the rate llama.cpp reports for the model.
+	s.gate = newRealtimeAudioGate(rt.Info().InputFormat.SampleRate, realtimeAudioManual)
 	s.sink.backendReady(s.ctx)
 	s.workers.Go(s.receive)
 	return nil
@@ -343,7 +345,12 @@ func (s *llamaRealtimeSession) acceptClientMessage(ctx context.Context, data []b
 }
 
 func (s *llamaRealtimeSession) inputSampleRate() int {
-	return voicegateway.LocalSpeechSampleRate
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rt == nil {
+		return 0
+	}
+	return s.rt.Info().InputFormat.SampleRate
 }
 
 func (s *llamaRealtimeSession) acceptMicPCM(ctx context.Context, pcm []byte) (err error) {
@@ -414,7 +421,7 @@ func (s *llamaRealtimeSession) enqueueLocked(input genai.RealtimeInputContent, t
 	// Share a 15-second PCM budget across audio, text, and control records.
 	// Charge control records as well, bounding allocations even without audio.
 	size = max(size, 64)
-	for s.pendingBytes+size > 15*voicegateway.LocalSpeechSampleRate*2 {
+	for s.pendingBytes+size > 15*s.rt.Info().InputFormat.SampleRate*2 {
 		var oldest *realtimeMicrophoneTurn
 		for i := range s.pending {
 			if mic := s.pending[i].microphone; mic != nil && !mic.sent {

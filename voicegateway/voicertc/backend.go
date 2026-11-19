@@ -16,6 +16,8 @@ type backendSession interface {
 	acceptClientMessage(ctx context.Context, data []byte) error
 	acceptMicPCM(ctx context.Context, pcm []byte) error
 	// inputSampleRate is the native mono PCM16LE rate accepted by acceptMicPCM.
+	// It is 0 when the session takes no microphone audio, before the backend
+	// reports ready, and after close.
 	inputSampleRate() int
 	close() error
 }

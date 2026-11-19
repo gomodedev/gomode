@@ -5,13 +5,11 @@ package voicertc
 import (
 	"testing"
 	"time"
-
-	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestMicAudioClock(t *testing.T) {
 	t.Run("continuous and DTX", func(t *testing.T) {
-		c := micAudioClock{rate: voicegateway.LocalSpeechSampleRate}
+		c := micAudioClock{rate: defaultInputSampleRate}
 		now := time.Now()
 		if c.idle(now) != 0 {
 			t.Fatal("synthesized audio before the microphone started")
@@ -35,7 +33,7 @@ func TestMicAudioClock(t *testing.T) {
 		}
 	})
 	t.Run("wraparound and late packets", func(t *testing.T) {
-		c := micAudioClock{rate: voicegateway.LocalSpeechSampleRate}
+		c := micAudioClock{rate: defaultInputSampleRate}
 		now := time.Now()
 		c.receive(65535, 0xffffff00, 320, now)
 		if !c.newer(0) || c.newer(65535) || c.newer(65534) {
@@ -52,7 +50,7 @@ func TestMicAudioClock(t *testing.T) {
 		}
 	})
 	t.Run("bounded gaps", func(t *testing.T) {
-		c := micAudioClock{rate: voicegateway.LocalSpeechSampleRate}
+		c := micAudioClock{rate: defaultInputSampleRate}
 		now := time.Now()
 		c.receive(0, 0, 320, now)
 		if gap := c.idle(now.Add(10 * time.Minute)); gap != 16000 {
@@ -66,9 +64,9 @@ func TestMicAudioClock(t *testing.T) {
 		}
 	})
 	t.Run("turn endings during sparse packets", func(t *testing.T) {
-		c := micAudioClock{rate: voicegateway.LocalSpeechSampleRate}
-		g := newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioServer)
-		v := newEnergyVAD(voicegateway.LocalSpeechSampleRate)
+		c := micAudioClock{rate: defaultInputSampleRate}
+		g := newRealtimeAudioGate(defaultInputSampleRate, realtimeAudioServer)
+		v := newEnergyVAD(defaultInputSampleRate)
 		now := time.Now()
 		for i := range 10 {
 			pcm := testPCM(20, 2000)

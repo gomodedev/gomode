@@ -196,7 +196,7 @@ func newRealtimePolicySession(t *testing.T, paused bool) (*llamaRealtimeSession,
 	b := &llamaRealtimeBackend{slots: make(chan struct{}, 1)}
 	b.slots <- struct{}{}
 	sink := &realtimeEventSink{events: make(chan struct{}, 1)}
-	s := &llamaRealtimeSession{backend: b, ctx: ctx, cancel: cancel, sink: sink, playback: sink, rt: p, gate: newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioManual)}
+	s := &llamaRealtimeSession{backend: b, ctx: ctx, cancel: cancel, sink: sink, playback: sink, rt: p, gate: newRealtimeAudioGate(defaultInputSampleRate, realtimeAudioManual)}
 	s.workers.Go(s.receive)
 	t.Cleanup(func() {
 		if err := s.close(); err != nil {
@@ -294,7 +294,7 @@ func TestLlamaRealtimeSession(t *testing.T) {
 		sink := &realtimePacedSink{realtimeEventSink: realtimeEventSink{events: make(chan struct{}, 1)}}
 		backend := &llamaRealtimeBackend{slots: make(chan struct{}, 1)}
 		backend.slots <- struct{}{}
-		s := &llamaRealtimeSession{backend: backend, ctx: ctx, cancel: cancel, sink: sink, playback: sink, rt: peer, gate: newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioManual)}
+		s := &llamaRealtimeSession{backend: backend, ctx: ctx, cancel: cancel, sink: sink, playback: sink, rt: peer, gate: newRealtimeAudioGate(defaultInputSampleRate, realtimeAudioManual)}
 		s.workers.Go(s.receive)
 		t.Cleanup(func() {
 			if err := s.close(); err != nil {
@@ -755,7 +755,7 @@ func TestLlamaRealtimeSession(t *testing.T) {
 			if err := s.acceptMicPCM(t.Context(), append(testPCM(8000, 3000), testPCM(200, 0)...)); err != nil {
 				t.Fatal(err)
 			}
-			if sink.wasCanceled() || s.pendingBytes > 15*voicegateway.LocalSpeechSampleRate*2 {
+			if sink.wasCanceled() || s.pendingBytes > 15*defaultInputSampleRate*2 {
 				t.Fatal("overflow failed to retain a bounded live session")
 			}
 			if err := s.acceptClientMessage(t.Context(), []byte(`{"kind":"tool.result","id":"pending","name":"slow","result":{}}`)); err != nil {
@@ -1021,7 +1021,7 @@ func TestLlamaRealtimeSession(t *testing.T) {
 				})
 				ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 				t.Cleanup(cancel)
-				writeGeminiFixture(t, ctx, ws, `{"type":"session.created","session":{"id":"local","type":"realtime","instructions":"","output_modalities":null,"tools":[],"max_output_tokens":"inf","audio":{"input":{"format":{"type":"audio/pcm","rate":16000},"turn_detection":null},"output":{"format":{"type":"audio/pcm","rate":24000}}}}}`)
+				writeGeminiFixture(t, ctx, ws, `{"type":"session.created","session":{"id":"local","type":"realtime","instructions":"","output_modalities":null,"tools":[],"max_output_tokens":"inf","audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"turn_detection":null},"output":{"format":{"type":"audio/pcm","rate":24000}}}}}`)
 				setup := readGeminiFixture(t, ctx, ws)
 				close(accepted)
 				select {
@@ -1080,12 +1080,19 @@ func TestLlamaRealtimeSession(t *testing.T) {
 			if sink.isReady() {
 				t.Fatal("ready before accepted provider setup")
 			}
+			if got := s.inputSampleRate(); got != 0 {
+				t.Fatalf("input rate before readiness = %d, want 0", got)
+			}
 			close(release)
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
 			if !sink.isReady() {
 				t.Fatal("missing readiness")
+			}
+			// The microphone follows the model's rate that llama.cpp reports.
+			if got := s.inputSampleRate(); got != 24000 {
+				t.Fatalf("input rate = %d, want the reported 24000", got)
 			}
 			// Exercise a callback already queued at the deadline but ordered behind
 			// accepted setup. It must leave the lifetime and provider connection usable.

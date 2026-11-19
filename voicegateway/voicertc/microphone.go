@@ -10,7 +10,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/gomodedev/gomode/voicegateway"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -81,7 +80,10 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	}
 	rate := backend.inputSampleRate()
 	if rate == 0 {
-		rate = voicegateway.LocalSpeechSampleRate
+		// Clients that recognize speech themselves send no microphone track.
+		slog.WarnContext(ctx, "voicertc: microphone track for a session without microphone input", "session", s.id)
+		s.sendGatewayError(ctx, "microphone: this session accepts no microphone audio")
+		return
 	}
 	dec, err := newDecoder(rate)
 	if err != nil {

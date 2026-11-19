@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
@@ -307,7 +306,7 @@ func TestRealtimeBridgeSessionSerializesSends(t *testing.T) {
 	release := make(chan struct{})
 	peer.sendRelease = release
 	peer.sendStarted = make(chan struct{}, 1)
-	s := &realtimeBridgeSession{ctx: t.Context(), realtime: peer, audioGate: newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioServer)}
+	s := &realtimeBridgeSession{ctx: t.Context(), realtime: peer, audioGate: newRealtimeAudioGate(defaultInputSampleRate, realtimeAudioServer)}
 	micDone := make(chan error, 1)
 	go func() { micDone <- s.acceptMicPCM(t.Context(), testPCM(120, 2000)) }()
 	select {
