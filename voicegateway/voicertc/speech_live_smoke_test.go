@@ -14,6 +14,7 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/vosk"
 
 	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
@@ -80,6 +81,9 @@ func TestSmokeLiveASR(t *testing.T) {
 		{model: string(nemospeech.NemotronASREnglish), endpoint: nemo(nemospeech.NemotronASREnglish), mismatched: true},
 		{model: string(nemospeech.ParakeetCTC), endpoint: nemo(nemospeech.ParakeetCTC), mismatched: true},
 		{model: string(nemospeech.ParakeetTDT), endpoint: nemo(nemospeech.ParakeetTDT), finalOnly: true},
+		{model: string(vosk.English), endpoint: func(ctx context.Context) (localStackEndpoint, error) {
+			return voskEndpoint(ctx, "", vosk.English, startServer)
+		}},
 	} {
 		t.Run(row.model, func(t *testing.T) {
 			endpoint, err := row.endpoint(t.Context())

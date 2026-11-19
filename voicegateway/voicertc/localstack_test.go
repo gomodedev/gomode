@@ -30,6 +30,7 @@ import (
 	"github.com/maruel/genai/providers/openrouter"
 	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/vosk"
 	"github.com/maruel/genaipy/providers/whistle"
 
 	"github.com/gomodedev/gomode/voicegateway"
@@ -2590,6 +2591,10 @@ func testLocalStackSessionLanguage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			voskEN, err := vosk.New(http.DefaultClient, "http://127.0.0.1:1", vosk.English)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, tc := range []struct {
 				asr              genai.Provider
 				tts              ttsAdapter
@@ -2601,6 +2606,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				{whistleASR, nil, "ja-JP", "", "Cactus-Compute/whistle does not support Japanese"},
 				{localWhistle, nil, "ja-JP", "", "whistle.cact does not support Japanese"},
 				{nemotronEN, nil, "fr-FR", "", "nemotron-en does not support French"},
+				{voskEN, nil, "fr-FR", "", "vosk-model-en-us-0.22 does not support French"},
 			} {
 				t.Run(tc.want, func(t *testing.T) {
 					t.Parallel()

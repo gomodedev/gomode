@@ -26,6 +26,7 @@ import (
 	"github.com/maruel/genai/providers/openairesponses"
 	"github.com/maruel/genai/providers/openrouter"
 	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/vosk"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -1655,13 +1656,17 @@ func testValidateASR(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		cfgs := make([]ASRConfig, 0, 3+len(nemospeech.Models))
+		cfgs := make([]ASRConfig, 0, 4+len(nemospeech.Models)+len(vosk.Models))
 		cfgs = append(cfgs,
 			ASRConfig{Engine: ASREngineWhistle},
 			ASRConfig{Engine: ASREngineWhistle, Model: "/tmp/whistle.cact"},
-			ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080"})
+			ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080"},
+			ASRConfig{Engine: ASREngineVosk, Model: string(vosk.English), Remote: "http://127.0.0.1:2700"})
 		for _, m := range nemospeech.Models {
 			cfgs = append(cfgs, ASRConfig{Engine: ASREngineNemoSpeech, Model: string(m)})
+		}
+		for _, m := range vosk.Models {
+			cfgs = append(cfgs, ASRConfig{Engine: ASREngineVosk, Model: string(m)})
 		}
 		for _, cfg := range cfgs {
 			if err := validateASR(cfg); err != nil {
@@ -1682,6 +1687,10 @@ func testValidateASR(t *testing.T) {
 			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Provider: "llamacpp"}, "voice.asr.provider is only used with the genai engine"},
 			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", Remote: "http://127.0.0.1:8080/v1"}, "voice.asr.remote must not contain a path"},
 			{ASRConfig{Engine: ASREngineNemoSpeech, Model: "parakeet-tdt", ContextSize: 32768}, "voice.asr.context_size requires a managed llama.cpp server"},
+			{ASRConfig{Engine: ASREngineVosk}, `voice.asr.model "" is not a Vosk model`},
+			{ASRConfig{Engine: ASREngineVosk, Model: "vosk-model-fr-0.22"}, "is not a Vosk model"},
+			{ASRConfig{Engine: ASREngineVosk, Model: string(vosk.English), Provider: "llamacpp"}, "voice.asr.provider is only used with the genai engine"},
+			{ASRConfig{Engine: ASREngineVosk, Model: string(vosk.English), Remote: "ws://127.0.0.1:2700"}, "voice.asr.remote must use http:// or https://"},
 		} {
 			if err := validateASR(tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("%+v: %v, want %q", tc.cfg, err, tc.want)

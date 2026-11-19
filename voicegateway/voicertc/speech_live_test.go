@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/maruel/genai/providers/openairesponses"
 	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/vosk"
 	"github.com/maruel/genaipy/providers/whistle"
 
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
@@ -626,6 +628,44 @@ func TestLiveASR(t *testing.T) {
 					t.Errorf("final-only session published drafts %q", drafts)
 				}
 			})
+		})
+		t.Run("vosk", func(t *testing.T) {
+			t.Parallel()
+			// The peer follows vosk-server's protocol: a configuration, then
+			// one result per binary PCM message and per end of input.
+			remote := peer(t, func(ctx context.Context, ws *websocket.Conn) {
+				if config := readGeminiFixture(t, ctx, ws); !reflect.DeepEqual(config, map[string]any{"config": map[string]any{"sample_rate": float64(micSampleRate)}}) {
+					t.Errorf("config %v, want %d Hz", config, micSampleRate)
+				}
+				for {
+					typ, data, err := ws.Read(ctx)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					if typ == websocket.MessageText {
+						if string(data) != `{"eof" : 1}` {
+							t.Errorf("text message %q", data)
+						}
+						break
+					}
+					writeGeminiFixture(t, ctx, ws, `{"partial" : "turn on"}`)
+				}
+				writeGeminiFixture(t, ctx, ws, `{"text" : "turn on the light"}`)
+				_, _, _ = ws.Read(ctx)
+			})
+			c, err := vosk.New(http.DefaultClient, remote, vosk.English)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, sink, _ := newLiveTestSession(t, newLiveASR(c, string(vosk.English)), "en")
+			startSpeech(t, s)
+			waitLiveDraft(t, sink, "turn on")
+			endSpeech(t, s)
+			waitLiveMessage(t, sink, voicev2.MessageKindTranscriptDelta, "turn on the light", 1)
+			if err := s.turns.Wait(); err != nil {
+				t.Fatal(err)
+			}
 		})
 		t.Run("mistral", func(t *testing.T) {
 			t.Parallel()

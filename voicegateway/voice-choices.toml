@@ -250,8 +250,9 @@ model = "KittenML/kitten-tts-2-mini"
 voice = "Eleanor"
 
 # Recognition streams each utterance through a live transcription session:
-# engine nemospeech or whistle, or a genai provider whose scoreboard qualifies
-# one at a rate Opus decodes to, such as OpenAI's 24 kHz gpt-live-transcribe.
+# engine nemospeech, vosk or whistle, or a genai provider whose scoreboard
+# qualifies one at a rate Opus decodes to, such as OpenAI's 24 kHz
+# gpt-live-transcribe.
 # Provider speech uses its native endpoint. Omit remote to start a managed model.
 [[asr]]
 id = "voxtral"
@@ -277,6 +278,16 @@ id = "nemotron"
 label = "Nemotron 3.5 0.6B"
 engine = "nemospeech"
 model = "nemotron-3.5"
+
+# Vosk: the gateway downloads the 1.8 GB US English model into the genaipy
+# cache and starts a worker using about 7 GB of memory. Set remote to a running
+# vosk-server, such as http://127.0.0.1:2700, that loaded the model. English
+# only, drafts while speaking.
+[[asr]]
+id = "vosk-en"
+label = "Vosk English"
+engine = "vosk"
+model = "vosk-model-en-us-0.22"
 
 [[asr]]
 id = "gemini-transcribe-live"

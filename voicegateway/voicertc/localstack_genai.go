@@ -24,6 +24,8 @@ import (
 	"github.com/maruel/genaipy/providers/kittentts/kittenttssrv"
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/nemospeech/nemospeechsrv"
+	"github.com/maruel/genaipy/providers/vosk"
+	"github.com/maruel/genaipy/providers/vosk/vosksrv"
 	"github.com/maruel/genaipy/providers/whistle"
 	"github.com/maruel/genaipy/providers/whistle/whistlesrv"
 
@@ -111,6 +113,13 @@ func localStackModelsForConfigWithStarter(
 		case voicegateway.ASREngineNemoSpeech:
 			var err error
 			asr, err = nemoSpeechEndpoint(ctx, cfg.ASR.Remote, nemospeech.Model(cfg.ASR.Model), launch)
+			if err != nil {
+				return localStackModels{}, errors.Join(err, llm.runtime.Close())
+			}
+			liveASR = newLiveASR(asr.provider, cfg.ASR.Model)
+		case voicegateway.ASREngineVosk:
+			var err error
+			asr, err = voskEndpoint(ctx, cfg.ASR.Remote, vosk.Model(cfg.ASR.Model), launch)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
@@ -212,6 +221,30 @@ func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Mod
 		remote, runtime = srv.URL(), srv
 	}
 	c, err := nemospeech.New(http.DefaultClient, remote, model)
+	if err != nil {
+		return localStackEndpoint{}, errors.Join(err, joinClosers(runtime).Close())
+	}
+	return localStackEndpoint{provider: c, runtime: joinClosers(c, runtime)}, nil
+}
+
+// voskEndpoint recognizes with model on the vosk-server at remote. Without
+// remote, it starts a dedicated genaipy worker, which downloads the model into
+// the genaipy cache; its runtime closes the worker.
+//
+// Sessions are genai transcription sessions over vosk.Client: each 20 ms
+// message yields a draft or, at a pause Vosk detects, a phrase. The client has
+// no qualified scoreboard, so liveASR feeds micSampleRate and sends the
+// session language, which the model's single language must match.
+func voskEndpoint(ctx context.Context, remote string, model vosk.Model, launch serverLauncher) (localStackEndpoint, error) {
+	var runtime io.Closer
+	if remote == "" {
+		srv, err := launch(ctx, serverSpec{engine: engineVosk, model: string(model)})
+		if err != nil {
+			return localStackEndpoint{}, err
+		}
+		remote, runtime = srv.URL(), srv
+	}
+	c, err := vosk.New(http.DefaultClient, remote, model)
 	if err != nil {
 		return localStackEndpoint{}, errors.Join(err, joinClosers(runtime).Close())
 	}
@@ -330,6 +363,7 @@ const (
 	engineKittenTTS  serverEngine = "kittentts"
 	engineLlamaCPP   serverEngine = "llamacpp"
 	engineNemoSpeech serverEngine = "nemospeech"
+	engineVosk       serverEngine = "vosk"
 	engineWhistle    serverEngine = "whistle"
 )
 
@@ -378,6 +412,16 @@ func startServer(ctx context.Context, spec serverSpec) (managedServer, error) {
 		return srv, nil
 	case engineNemoSpeech:
 		return startNemoSpeechServer(ctx, nemospeech.Model(spec.model))
+	case engineVosk:
+		// genaipy owns the model download, the uv/Python 3.12 worker and its
+		// vosk package. Each session decodes with its own recognizer over the
+		// shared model; cancellation leaves the model loaded.
+		reportStartupStage(ctx, "Server is downloading or loading Vosk "+spec.model+"…")
+		srv, err := vosksrv.New(ctx, vosk.Model(spec.model))
+		if err != nil {
+			return nil, err
+		}
+		return srv, nil
 	}
 	return nil, fmt.Errorf("unknown managed server engine %q", spec.engine)
 }

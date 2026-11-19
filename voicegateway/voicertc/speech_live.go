@@ -15,6 +15,7 @@ import (
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/vosk"
 	"github.com/maruel/genaipy/providers/whistle"
 	"golang.org/x/sync/errgroup"
 
@@ -93,8 +94,8 @@ func newLiveASR(p genai.Provider, model string) *liveASR {
 	return &liveASR{provider: p, model: model, languages: liveASRLanguages(p, model), inputLanguage: !declined, rate: rate}
 }
 
-// liveASRLanguages declares the session languages of model on p. Whistle and
-// NeMo-Speech export theirs. llama.cpp models, which receive none, are declared
+// liveASRLanguages declares the session languages of model on p. Whistle,
+// NeMo-Speech and Vosk export theirs. llama.cpp models, which receive none, are declared
 // by Hugging Face repository. nil accepts any language: an unlisted llama.cpp
 // model is treated as detecting every language, and other providers reject an
 // unsupported one at connect.
@@ -109,6 +110,8 @@ func liveASRLanguages(p genai.Provider, model string) []string {
 		return whistle.Languages
 	case *nemospeech.Client:
 		return nemospeech.Model(c.ModelID()).Languages()
+	case *vosk.Client:
+		return vosk.Model(c.ModelID()).Languages()
 	}
 	switch modelRepository(model) {
 	case "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF":

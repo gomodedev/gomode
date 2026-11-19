@@ -30,6 +30,7 @@ import (
 	"github.com/maruel/genai/scoreboard"
 	"github.com/maruel/genaipy/providers/kittentts"
 	"github.com/maruel/genaipy/providers/nemospeech"
+	"github.com/maruel/genaipy/providers/vosk"
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/gomodedev/gomode"
@@ -907,8 +908,8 @@ func (c *PipelineConfig) validate() error {
 
 // ASRConfig configures a speech-to-text adapter.
 //
-// Provider is used only by the genai engine, and Remote only by the genai and
-// nemospeech engines.
+// Provider is used only by the genai engine, and Remote only by the genai,
+// nemospeech and vosk engines.
 type ASRConfig struct {
 	ID       string    `toml:"id"`
 	Label    string    `toml:"label"`
@@ -942,6 +943,11 @@ const (
 	// into NeMo-Speech.cpp's own cache; Remote selects an operator-owned server
 	// that loaded Model. Provider must be empty.
 	ASREngineNemoSpeech ASREngine = "nemospeech"
+	// ASREngineVosk runs a Vosk recognizer. Model is required and is one of
+	// vosk.Models. Without Remote, the gateway downloads the model into the
+	// genaipy cache and starts a dedicated worker; Remote selects an
+	// operator-owned vosk-server that loaded Model. Provider must be empty.
+	ASREngineVosk ASREngine = "vosk"
 )
 
 // TTSConfig selects a speech synthesis engine.
@@ -1060,6 +1066,14 @@ func validateASREngine(c ASRConfig) error {
 		}
 		if !slices.Contains(nemospeech.Models, nemospeech.Model(c.Model)) {
 			return fmt.Errorf("voice.asr.model %q is not a NeMo-Speech model: use one of %q", c.Model, nemospeech.Models)
+		}
+		return validateURL("voice.asr.remote", c.Remote, false)
+	case ASREngineVosk:
+		if c.Provider != "" {
+			return errors.New("voice.asr.provider is only used with the genai engine")
+		}
+		if !slices.Contains(vosk.Models, vosk.Model(c.Model)) {
+			return fmt.Errorf("voice.asr.model %q is not a Vosk model: use one of %q", c.Model, vosk.Models)
 		}
 		return validateURL("voice.asr.remote", c.Remote, false)
 	default:
