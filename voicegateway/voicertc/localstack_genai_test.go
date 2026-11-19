@@ -44,10 +44,10 @@ func TestLocalStackModelsForConfigCodex(t *testing.T) {
 	base.DefaultTransport = transport
 	t.Cleanup(func() { base.DefaultTransport = previousTransport })
 	cfg := &voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openai", Auth: openairesponses.AuthCodex, Model: "gpt-6-luna", Effort: genai.EffortLow}}}
-	models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, func(context.Context, string, int) (managedLlamaServer, error) {
+	models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
 		t.Fatal("subscription LLM started a managed runtime")
 		return nil, errors.New("unexpected managed runtime")
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

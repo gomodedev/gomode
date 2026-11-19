@@ -44,8 +44,8 @@ import (
 // provider-backed stages use their provider's health check. Operators must warm
 // external speech models before latency-sensitive use, since the first request
 // may otherwise load or download a model.
-func localStackRuntimeForConfig(ctx context.Context, cfg *voicegateway.PipelineConfig) (*localStackRuntime, error) {
-	models, err := localStackModelsForConfigWithStarter(ctx, cfg, startManagedLlamaServer)
+func localStackRuntimeForConfig(ctx context.Context, cfg *voicegateway.PipelineConfig, launch serverLauncher) (*localStackRuntime, error) {
+	models, err := localStackModelsForConfigWithStarter(ctx, cfg, launch)
 	if err != nil {
 		return nil, err
 	}
@@ -75,11 +75,11 @@ type localStackEndpoint struct {
 func localStackModelsForConfigWithStarter(
 	ctx context.Context,
 	cfg *voicegateway.PipelineConfig,
-	start managedLlamaStarter,
+	launch serverLauncher,
 ) (localStackModels, error) {
 	// Resolve credentials before starting speech models. The LLM is owned here
 	// until all ASR initialization succeeds and ownership transfers to the runtime.
-	llm, err := resolveLocalStackEndpoint(ctx, cfg.LLM.ModelConfig, cfg.LLM.ContextSize, start)
+	llm, err := resolveLocalStackEndpoint(ctx, cfg.LLM.ModelConfig, cfg.LLM.ContextSize, launch)
 	if err != nil {
 		return localStackModels{}, err
 	}
@@ -98,8 +98,7 @@ func localStackModelsForConfigWithStarter(
 			// and splits utterances into consecutive 30-second windows; words
 			// crossing a window boundary may lose accuracy. Cancellation
 			// preserves the model for subsequent requests.
-			reportStartupStage(ctx, "Server is starting Whistle "+cfg.ASR.Model+"…")
-			srv, err := whistlesrv.New(ctx, cfg.ASR.Model)
+			srv, err := launch(ctx, serverSpec{engine: engineWhistle, model: cfg.ASR.Model})
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
@@ -111,14 +110,14 @@ func localStackModelsForConfigWithStarter(
 			liveASR = newLiveASR(c, c.ModelID())
 		case voicegateway.ASREngineNemoSpeech:
 			var err error
-			asr, err = nemoSpeechEndpoint(ctx, cfg.ASR.Remote, nemospeech.Model(cfg.ASR.Model))
+			asr, err = nemoSpeechEndpoint(ctx, cfg.ASR.Remote, nemospeech.Model(cfg.ASR.Model), launch)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
 			liveASR = newLiveASR(asr.provider, cfg.ASR.Model)
 		default:
 			var err error
-			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, start)
+			asr, err = resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.ASR.Provider, Remote: cfg.ASR.Remote, Model: cfg.ASR.Model}, cfg.ASR.ContextSize, launch)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, llm.runtime.Close())
 			}
@@ -131,7 +130,7 @@ func localStackModelsForConfigWithStarter(
 	if !cfg.TextOnly && cfg.TTS != (voicegateway.TTSConfig{}) {
 		switch cfg.TTS.Engine {
 		case voicegateway.TTSEngineGenAI:
-			endpoint, err := resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.TTS.Provider, Remote: cfg.TTS.Remote, Model: cfg.TTS.Model}, cfg.TTS.ContextSize, start)
+			endpoint, err := resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: cfg.TTS.Provider, Remote: cfg.TTS.Remote, Model: cfg.TTS.Model}, cfg.TTS.ContextSize, launch)
 			if err != nil {
 				return localStackModels{}, errors.Join(err, runtime.Close())
 			}
@@ -151,8 +150,7 @@ func localStackModelsForConfigWithStarter(
 		case voicegateway.TTSEngineKittenTTS:
 			// genaipy owns Python setup and caches. Cancellation preserves its
 			// worker for later fragments; runtime eviction closes the process.
-			reportStartupStage(ctx, "Server is starting KittenTTS "+cfg.TTS.Model+"…")
-			srv, err := kittenttssrv.New(ctx, kittenttssrv.Config{Model: cfg.TTS.Model})
+			srv, err := launch(ctx, serverSpec{engine: engineKittenTTS, model: cfg.TTS.Model})
 			if err != nil {
 				return localStackModels{}, errors.Join(err, runtime.Close())
 			}
@@ -204,23 +202,12 @@ func localStackModelsForConfigWithStarter(
 //     war").
 //   - parakeet-tdt yielded no drafts and transcribed each sentence exactly in
 //     its spoken language, with punctuation, in either session.
-func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Model) (localStackEndpoint, error) {
+func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Model, launch serverLauncher) (localStackEndpoint, error) {
 	var runtime io.Closer
 	if remote == "" {
-		cacheBase, err := os.UserCacheDir()
+		srv, err := launch(ctx, serverSpec{engine: engineNemoSpeech, model: string(model)})
 		if err != nil {
-			return localStackEndpoint{}, fmt.Errorf("get user cache dir: %w", err)
-		}
-		reportStartupStage(ctx, "Server is preparing NeMo-Speech.cpp "+nemospeechsrv.Version+"…")
-		exe, err := nemospeechsrv.Download(ctx, filepath.Join(cacheBase, "gomode", "nemo-speech"), "")
-		if err != nil {
-			return localStackEndpoint{}, fmt.Errorf("install NeMo-Speech.cpp: %w", err)
-		}
-		slog.InfoContext(ctx, "voicertc: starting managed NeMo-Speech.cpp", "model", model, "version", nemospeechsrv.Version)
-		reportStartupStage(ctx, "Server is downloading or loading "+string(model)+"…")
-		srv, err := nemospeechsrv.New(ctx, exe, model)
-		if err != nil {
-			return localStackEndpoint{}, fmt.Errorf("start managed NeMo-Speech.cpp: %w", err)
+			return localStackEndpoint{}, err
 		}
 		remote, runtime = srv.URL(), srv
 	}
@@ -233,9 +220,9 @@ func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Mod
 
 // resolveLocalStackEndpoint wires one local stack adapter to its configured
 // provider. contextSize sizes a managed llama.cpp server.
-func resolveLocalStackEndpoint(ctx context.Context, cfg voicegateway.ModelConfig, contextSize int, start managedLlamaStarter) (localStackEndpoint, error) {
+func resolveLocalStackEndpoint(ctx context.Context, cfg voicegateway.ModelConfig, contextSize int, launch serverLauncher) (localStackEndpoint, error) {
 	if cfg.Provider == "llamacpp" {
-		return localStackLlamaEndpoint(ctx, cfg.Remote, cfg.Model, contextSize, start)
+		return localStackLlamaEndpoint(ctx, cfg.Remote, cfg.Model, contextSize, launch)
 	}
 	return localStackGenAIEndpoint(ctx, cfg)
 }
@@ -243,10 +230,10 @@ func resolveLocalStackEndpoint(ctx context.Context, cfg voicegateway.ModelConfig
 // localStackLlamaEndpoint wires the managed (or remote) llama.cpp runtime. A
 // managed server was just started by us, so it is known to be reachable; a
 // user-supplied remote is pinged to fail fast on misconfiguration.
-func localStackLlamaEndpoint(ctx context.Context, remote, model string, contextSize int, start managedLlamaStarter) (localStackEndpoint, error) {
+func localStackLlamaEndpoint(ctx context.Context, remote, model string, contextSize int, launch serverLauncher) (localStackEndpoint, error) {
 	var runtime io.Closer
 	if remote == "" {
-		srv, err := start(ctx, model, contextSize)
+		srv, err := launch(ctx, serverSpec{engine: engineLlamaCPP, model: model, contextSize: contextSize})
 		if err != nil {
 			return localStackEndpoint{}, err
 		}
@@ -330,12 +317,89 @@ func pingLocalStackProvider(ctx context.Context, p genai.Provider) error {
 	return nil
 }
 
-type managedLlamaServer interface {
+// managedServer is a model server process started by the gateway.
+type managedServer interface {
 	io.Closer
 	URL() string
 }
 
-type managedLlamaStarter func(ctx context.Context, model string, contextSize int) (managedLlamaServer, error)
+// serverEngine names a managed server implementation.
+type serverEngine string
+
+const (
+	engineKittenTTS  serverEngine = "kittentts"
+	engineLlamaCPP   serverEngine = "llamacpp"
+	engineNemoSpeech serverEngine = "nemospeech"
+	engineWhistle    serverEngine = "whistle"
+)
+
+// serverSpec identifies a managed server: stacks needing equal specs can share
+// one process. contextSize applies to llama.cpp only.
+type serverSpec struct {
+	engine      serverEngine
+	model       string
+	contextSize int
+}
+
+// serverLauncher starts the managed server a spec names. The process lives
+// until the returned server is closed, not until ctx is canceled.
+type serverLauncher func(ctx context.Context, spec serverSpec) (managedServer, error)
+
+// startServer is the production serverLauncher.
+func startServer(ctx context.Context, spec serverSpec) (managedServer, error) {
+	switch spec.engine {
+	case engineLlamaCPP:
+		return startManagedLlamaServer(ctx, spec.model, spec.contextSize)
+	case engineWhistle:
+		// genaipy owns the isolated uv/Python 3.12 Needle worker and disables
+		// telemetry. Needle downloads a prebuilt native engine and weights
+		// into its own cache, rather than building the runtime from source.
+		// Its sessions buffer the utterance until Commit and yield only the
+		// final transcript, with automatic language detection; session.setup
+		// rejects a language outside whistle.Languages. The worker
+		// normalizes 16 kHz PCM to float samples, serializes native calls,
+		// and splits utterances into consecutive 30-second windows; words
+		// crossing a window boundary may lose accuracy. Cancellation
+		// preserves the model for subsequent requests.
+		reportStartupStage(ctx, "Server is starting Whistle "+spec.model+"…")
+		srv, err := whistlesrv.New(ctx, spec.model)
+		if err != nil {
+			return nil, err
+		}
+		return srv, nil
+	case engineKittenTTS:
+		// genaipy owns Python setup and caches. Cancellation preserves its
+		// worker for later fragments; closing the server stops the process.
+		reportStartupStage(ctx, "Server is starting KittenTTS "+spec.model+"…")
+		srv, err := kittenttssrv.New(ctx, kittenttssrv.Config{Model: spec.model})
+		if err != nil {
+			return nil, err
+		}
+		return srv, nil
+	case engineNemoSpeech:
+		return startNemoSpeechServer(ctx, nemospeech.Model(spec.model))
+	}
+	return nil, fmt.Errorf("unknown managed server engine %q", spec.engine)
+}
+
+func startNemoSpeechServer(ctx context.Context, model nemospeech.Model) (managedServer, error) {
+	cacheBase, err := os.UserCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("get user cache dir: %w", err)
+	}
+	reportStartupStage(ctx, "Server is preparing NeMo-Speech.cpp "+nemospeechsrv.Version+"…")
+	exe, err := nemospeechsrv.Download(ctx, filepath.Join(cacheBase, "gomode", "nemo-speech"), "")
+	if err != nil {
+		return nil, fmt.Errorf("install NeMo-Speech.cpp: %w", err)
+	}
+	slog.InfoContext(ctx, "voicertc: starting managed NeMo-Speech.cpp", "model", model, "version", nemospeechsrv.Version)
+	reportStartupStage(ctx, "Server is downloading or loading "+string(model)+"…")
+	srv, err := nemospeechsrv.New(ctx, exe, model)
+	if err != nil {
+		return nil, fmt.Errorf("start managed NeMo-Speech.cpp: %w", err)
+	}
+	return srv, nil
+}
 
 type managedLlamaReleaseCache struct {
 	gate  chan struct{}
@@ -349,7 +413,7 @@ func newManagedLlamaReleaseCache() *managedLlamaReleaseCache {
 	return &managedLlamaReleaseCache{gate: make(chan struct{}, 1)}
 }
 
-func startManagedLlamaServer(ctx context.Context, model string, contextSize int) (managedLlamaServer, error) {
+func startManagedLlamaServer(ctx context.Context, model string, contextSize int) (managedServer, error) {
 	version := llamacppsrv.Version
 	cache, err := localStackLlamaCacheDir()
 	if err != nil {

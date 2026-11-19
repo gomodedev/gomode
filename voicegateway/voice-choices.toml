@@ -25,8 +25,10 @@
 # Managed LLMs, speech stages, and native llama.cpp audio load on first use.
 # A choice counts as one instance, including its ASR/LLM/TTS workers. Active
 # sessions pin instances; another choice waits when all instances are busy.
-# Idle choices are evicted first when capacity is needed. External servers
-# remain operator-owned.
+# Idle choices are evicted first when capacity is needed. Choices that name the
+# same managed ASR, LLM, or TTS model (and llama.cpp context size) share one
+# server, so switching between them keeps it loaded. External servers remain
+# operator-owned.
 [local_stack_runtime]
 idle_timeout_seconds = 3600
 max_instances = 1

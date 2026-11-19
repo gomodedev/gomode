@@ -1333,13 +1333,13 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 		var startedModels []string
 		var contextSizes []int
 		var servers []*fakeManagedLlamaServer
-		models, err := localStackModelsForConfigWithStarter(t.Context(), &voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "owner/asr", ContextSize: 32768}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}, TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768}}, func(_ context.Context, model string, contextSize int) (managedLlamaServer, error) {
+		models, err := localStackModelsForConfigWithStarter(t.Context(), &voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "owner/asr", ContextSize: 32768}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}, TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768}}, llamaLauncher(func(_ context.Context, model string, contextSize int) (managedServer, error) {
 			startedModels = append(startedModels, model)
 			contextSizes = append(contextSizes, contextSize)
 			srv := &fakeManagedLlamaServer{url: remote.URL}
 			servers = append(servers, srv)
 			return srv, nil
-		})
+		}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1388,14 +1388,14 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 			LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536},
 			TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768},
 		}
-		_, err := localStackModelsForConfigWithStarter(t.Context(), &cfg, func(_ context.Context, model string, _ int) (managedLlamaServer, error) {
+		_, err := localStackModelsForConfigWithStarter(t.Context(), &cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 			if model == "owner/tts" {
 				return nil, sentinel
 			}
 			s := &fakeManagedLlamaServer{url: "http://127.0.0.1:12345"}
 			servers = append(servers, s)
 			return s, nil
-		})
+		}))
 		if !errors.Is(err, sentinel) {
 			t.Fatalf("initialization error = %v", err)
 		}
@@ -1428,10 +1428,10 @@ func TestLocalStackGeminiSpeech(t *testing.T) { //nolint:paralleltest // Replace
 		t.Fatal(err)
 	}
 	var models []string
-	runtime, err := localStackModelsForConfigWithStarter(t.Context(), &cfg, func(_ context.Context, model string, _ int) (managedLlamaServer, error) {
+	runtime, err := localStackModelsForConfigWithStarter(t.Context(), &cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 		models = append(models, model)
 		return &fakeManagedLlamaServer{url: "http://localhost:8080"}, nil
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1479,10 +1479,10 @@ func TestLocalStackTextOnly(t *testing.T) {
 	cfg := &voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}}
 	var started []string
 	server := &fakeManagedLlamaServer{url: "http://127.0.0.1:12345"}
-	models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, func(_ context.Context, model string, _ int) (managedLlamaServer, error) {
+	models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 		started = append(started, model)
 		return server, nil
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1813,10 +1813,10 @@ func TestLocalStackModelsForConfigOpenAICompatible(t *testing.T) {
 				ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: srv.URL + "/asr", Model: "asr"},
 				LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: srv.URL + "/v1/chat/completions", Model: "qwen3-8-27b", APIKeyName: envName}},
 			}
-			models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, func(context.Context, string, int) (managedLlamaServer, error) {
+			models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
 				t.Fatal("remote LLM must not start a managed model")
 				return nil, errors.New("unexpected managed model startup")
-			})
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1861,10 +1861,10 @@ func TestLocalStackModelsForConfigOpenAICompatible(t *testing.T) {
 	t.Run("missing key fails before starting models", func(t *testing.T) {
 		t.Setenv(envName, "")
 		cfg := &voicegateway.PipelineConfig{LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "https://example.com/v1/chat/completions", APIKeyName: envName}}}
-		_, err := localStackModelsForConfigWithStarter(t.Context(), cfg, func(context.Context, string, int) (managedLlamaServer, error) {
+		_, err := localStackModelsForConfigWithStarter(t.Context(), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
 			t.Fatal("missing key must fail before starting a managed model")
 			return nil, errors.New("unexpected managed model startup")
-		})
+		}))
 		if err == nil || !strings.Contains(err.Error(), envName) {
 			t.Fatalf("missing key error = %v", err)
 		}
@@ -2673,4 +2673,14 @@ type languageTTS struct {
 func (l languageTTS) synthesize(_ context.Context, lang, _, _ string) iter.Seq2[[]byte, error] {
 	l.got <- lang
 	return func(func([]byte, error) bool) {}
+}
+
+// llamaLauncher adapts a llama.cpp-only fake; any other engine fails the test.
+func llamaLauncher(start func(ctx context.Context, model string, contextSize int) (managedServer, error)) serverLauncher {
+	return func(ctx context.Context, spec serverSpec) (managedServer, error) {
+		if spec.engine != engineLlamaCPP {
+			return nil, fmt.Errorf("unexpected managed server %+v", spec)
+		}
+		return start(ctx, spec.model, spec.contextSize)
+	}
 }

@@ -22,6 +22,9 @@ type localStackPool struct {
 	recognition []voicegateway.ASRConfig
 	synthesis   []voicegateway.TTSConfig
 
+	// servers shares managed servers among entries.
+	servers *sharedServers
+
 	mu      sync.Mutex
 	entries []*lazyLocalStack
 	changed chan struct{}
@@ -79,7 +82,7 @@ var (
 var errWorkerExited = errors.New("local stack: model worker exited unexpectedly")
 
 func newLocalStackPool(limits voicegateway.RuntimeConfig) *localStackPool {
-	return &localStackPool{limits: limits, changed: make(chan struct{})}
+	return &localStackPool{limits: limits, servers: newSharedServers(startServer), changed: make(chan struct{})}
 }
 
 func (p *localStackPool) backend(cfg voicegateway.PipelineConfig) *localStackBackend {
@@ -350,7 +353,9 @@ func (p *localStackPool) notifyLocked() {
 // unloadLocked closes clients before their managed processes and only then
 // releases capacity. External server processes are never owned here. After a
 // worker exited, attached sessions end before the surviving workers stop.
-func (l *lazyLocalStack) unloadLocked(exited bool) error {
+// Shared servers no stack holds stop with the unload, unless handoff is set
+// because the caller loads another stack next and sweeps when that load ends.
+func (l *lazyLocalStack) unloadLocked(exited, handoff bool) error {
 	if l.timer != nil {
 		l.timer.Stop()
 		l.timer = nil
@@ -374,6 +379,9 @@ func (l *lazyLocalStack) unloadLocked(exited bool) error {
 	// others.
 	err := b.Close()
 	cancel(nil)
+	if !handoff {
+		l.pool.servers.stop(l.pool.servers.takeIdle()...)
+	}
 	switch {
 	case exited:
 		l.log.Error("voicertc: local stack worker exited", "err", err)
@@ -431,7 +439,7 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 				// unloadLocked logs a failed stop. The evicted processes are reaped
 				// and the slot released either way, so the failure belongs to the
 				// evicted choice, not to this session.
-				_ = oldest.unloadLocked(false)
+				_ = oldest.unloadLocked(false, true)
 				p.mu.Unlock()
 				continue
 			}
@@ -492,7 +500,7 @@ func (l *lazyLocalStack) load(ctx context.Context, load *stackLoad) {
 	switch cfg := l.cfg.(type) {
 	case *voicegateway.PipelineConfig:
 		var runtime *localStackRuntime
-		runtime, err = localStackRuntimeForConfig(ctx, cfg)
+		runtime, err = localStackRuntimeForConfig(ctx, cfg, p.servers.acquire)
 		if runtime != nil {
 			b, servers = runtime, managedServers(runtime.runtime)
 		}
@@ -538,6 +546,8 @@ func (l *lazyLocalStack) load(ctx context.Context, load *stackLoad) {
 	p.notifyLocked()
 	l.pruneLocked()
 	p.mu.Unlock()
+	// Servers a handoff left idle stop now that the load has taken what it needs.
+	p.servers.stop(p.servers.takeIdle()...)
 }
 
 // preemptUnattendedLoadLocked cancels another choice's startup that no session
@@ -575,7 +585,7 @@ func (l *lazyLocalStack) idleLocked() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if l.loaded != nil && l.users == 0 && l.idleSince.Equal(since) {
-			if err := l.unloadLocked(false); err != nil {
+			if err := l.unloadLocked(false, false); err != nil {
 				slog.Error("voicertc: unload idle local stack", "err", err)
 			}
 		}
@@ -602,7 +612,7 @@ func (l *lazyLocalStack) close() error {
 	p.notifyLocked()
 	var err error
 	if l.loaded != nil {
-		err = l.unloadLocked(false)
+		err = l.unloadLocked(false, false)
 	}
 	p.mu.Unlock()
 	// Unloading stopped every worker, so each watcher returns.
@@ -631,7 +641,7 @@ func (l *lazyLocalStack) workerExited(b backendConnector) {
 	defer p.mu.Unlock()
 	if l.loaded == b {
 		// unloadLocked logs the exit.
-		_ = l.unloadLocked(true)
+		_ = l.unloadLocked(true, false)
 	}
 }
 

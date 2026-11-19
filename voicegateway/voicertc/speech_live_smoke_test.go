@@ -54,12 +54,12 @@ func TestSmokeLiveASR(t *testing.T) {
 	}
 	resolve := func(provider, model string) func(context.Context) (localStackEndpoint, error) {
 		return func(ctx context.Context) (localStackEndpoint, error) {
-			return resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: provider, Model: model}, 32768, startManagedLlamaServer)
+			return resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: provider, Model: model}, 32768, startServer)
 		}
 	}
 	nemo := func(model nemospeech.Model) func(context.Context) (localStackEndpoint, error) {
 		return func(ctx context.Context) (localStackEndpoint, error) {
-			return nemoSpeechEndpoint(ctx, "", model)
+			return nemoSpeechEndpoint(ctx, "", model, startServer)
 		}
 	}
 	for _, row := range []struct {

@@ -23,7 +23,7 @@ func TestSmokeLlamaSpeech(t *testing.T) {
 		TTS:   voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M", Voice: "female"},
 	}
 	startup := time.Now()
-	runtime, err := localStackRuntimeForConfig(t.Context(), &cfg)
+	runtime, err := localStackRuntimeForConfig(t.Context(), &cfg, startServer)
 	t.Logf("managed speech stack setup: %s", time.Since(startup))
 	if err != nil {
 		t.Fatal(err)

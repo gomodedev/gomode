@@ -22,7 +22,7 @@ import (
 func TestSmokeTTSLanguage(t *testing.T) {
 	isolateSmokeHost(t)
 	const text = "Je voudrais réserver une table pour deux ce soir."
-	endpoint, err := nemoSpeechEndpoint(t.Context(), "", nemospeech.ParakeetTDT)
+	endpoint, err := nemoSpeechEndpoint(t.Context(), "", nemospeech.ParakeetTDT, startServer)
 	if err != nil {
 		t.Fatal(err)
 	}

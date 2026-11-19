@@ -107,7 +107,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 				t.Fatal("TTS did not produce ASR input")
 			}
 			startup := time.Now()
-			endpoint, err := nemoSpeechEndpoint(runtimeCtx, "", nemospeech.ParakeetTDT)
+			endpoint, err := nemoSpeechEndpoint(runtimeCtx, "", nemospeech.ParakeetTDT, startServer)
 			t.Logf("managed Parakeet TDT startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 			if err != nil {
 				t.Fatal(err)
@@ -135,7 +135,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 
 	t.Run("LLM", func(t *testing.T) {
 		startup := time.Now()
-		endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL", 32768, startManagedLlamaServer)
+		endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL", 32768, startServer)
 		t.Logf("managed Gemma startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 		if err != nil {
 			t.Fatal(err)

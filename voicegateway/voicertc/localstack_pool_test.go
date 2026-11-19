@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -819,10 +820,10 @@ func TestLocalStackBackend(t *testing.T) {
 				t.Fatalf("missing mode %+v", tc.mode)
 			}
 			var started []string
-			models, err := localStackModelsForConfigWithStarter(t.Context(), variant, func(_ context.Context, model string, _ int) (managedLlamaServer, error) {
+			models, err := localStackModelsForConfigWithStarter(t.Context(), variant, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 				started = append(started, model)
 				return &fakeManagedLlamaServer{url: tts.URL}, nil
-			})
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1293,4 +1294,70 @@ func (s *fakeServer) Err() error {
 	default:
 		return nil
 	}
+}
+
+// closeSignalServer is a managed server whose Close is observable across goroutines.
+type closeSignalServer struct{ closed chan struct{} }
+
+func (s *closeSignalServer) URL() string { return "http://localhost:1" }
+
+func (s *closeSignalServer) Close() error {
+	close(s.closed)
+	return nil
+}
+
+func TestLocalStackPoolSharedServers(t *testing.T) {
+	t.Parallel()
+	t.Run("choice switch keeps servers both choices need", func(t *testing.T) {
+		t.Parallel()
+		p := newLocalStackPool(testRuntime)
+		var mu sync.Mutex
+		servers := map[string]*closeSignalServer{}
+		starts := map[string]int{}
+		p.servers.launch = func(_ context.Context, spec serverSpec) (managedServer, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			starts[spec.model]++
+			s := &closeSignalServer{closed: make(chan struct{})}
+			servers[spec.model] = s
+			return s, nil
+		}
+		choice := func(llm string) *lazyLocalStack {
+			cfg := voicegateway.PipelineConfig{
+				ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "voxtral", ContextSize: 32768},
+				LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: llm}, ContextSize: 32768},
+				TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2-mini", Voice: "Eleanor"},
+			}
+			b := p.backend(cfg)
+			t.Cleanup(func() { _ = b.Close() })
+			return stackVariant(t, b, voicev2.SpeechConfig{Input: voicev2.SpeechLocationGateway, Output: voicev2.SpeechLocationGateway})
+		}
+		a, b := choice("llm-a"), choice("llm-b")
+		if _, err := a.acquire(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		a.release()
+		if _, err := b.acquire(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(b.release)
+		// The evicted choice's server stops once the new load took what it needs.
+		select {
+		case <-servers["llm-a"].closed:
+		case <-t.Context().Done():
+			t.Fatal("unused server of the evicted choice kept running")
+		}
+		for _, model := range []string{"voxtral", "KittenML/kitten-tts-2-mini"} {
+			select {
+			case <-servers[model].closed:
+				t.Fatalf("shared %s server stopped on choice switch", model)
+			default:
+			}
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if starts["voxtral"] != 1 || starts["KittenML/kitten-tts-2-mini"] != 1 || starts["llm-a"] != 1 || starts["llm-b"] != 1 {
+			t.Fatalf("starts = %v, want one per model", starts)
+		}
+	})
 }
