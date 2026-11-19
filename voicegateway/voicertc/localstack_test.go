@@ -1523,7 +1523,7 @@ data: [DONE]
 		TextOnly: true,
 		LLM:      voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: llmServer.URL + "/v1/chat/completions", Model: "test-model"}},
 	}}
-	bridge, err := newBridgeWithTimeout(t.Context(), &config, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
+	bridge, err := NewBridge(t.Context(), &config, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

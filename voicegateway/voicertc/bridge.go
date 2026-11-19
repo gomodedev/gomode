@@ -78,14 +78,14 @@ var opusReceiveCodec = webrtc.RTPCodecCapability{
 
 // Bridge manages voice choices and sessions on one shared WebRTC transport.
 type Bridge struct {
-	backends        map[string]backendConnector
-	choices         voicev2.VoiceChoicesResp
-	activityLogDir  string
-	udpMux          ice.UDPMux
-	voiceNet        *ipv4Net
-	hostIP          net.IP
-	udpPort         int
-	upnpSSDPTimeout time.Duration
+	backends       map[string]backendConnector
+	choices        voicev2.VoiceChoicesResp
+	activityLogDir string
+	udpMux         ice.UDPMux
+	voiceNet       *ipv4Net
+	hostIP         net.IP
+	udpPort        int
+	disableUPnP    bool
 
 	setupMu             sync.Mutex
 	api                 *webrtc.API
@@ -106,7 +106,8 @@ type Bridge struct {
 }
 
 // NewBridge creates a Bridge that multiplexes WebRTC traffic through a single
-// UDP port and eagerly verifies its UPnP publication.
+// UDP port and, unless webrtc.DisableUPnP, eagerly verifies its UPnP
+// publication.
 //
 // Credentials use each provider's native environment variables or, for OpenAI
 // Codex authentication, the file-backed Codex login. Configured choices share
@@ -117,10 +118,6 @@ type Bridge struct {
 // model runtimes load on first use through the shared capacity and idle-eviction
 // pool. A construction failure closes all backends already initialized.
 func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, webrtc voicegateway.WebRTCConfig, activityLogDir string) (*Bridge, error) {
-	return newBridgeWithTimeout(ctx, cfg, webrtc, activityLogDir, defaultUPnPSSDPTimeout)
-}
-
-func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig, webrtc voicegateway.WebRTCConfig, activityLogDir string, upnpSSDPTimeout time.Duration) (*Bridge, error) {
 	if activityLogDir == "" {
 		return nil, errors.New("voice activity log directory is required")
 	}
@@ -185,7 +182,7 @@ func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig,
 		}
 	}
 	advertised.Defaults = voicev2.DefaultChoices(advertised.Choices, preferred)
-	b, err := newBridgeWithBackendAndTimeout(ctx, backends[defaultID], webrtc.UDPPort, activityLogDir, upnpSSDPTimeout)
+	b, err := newBridgeWithBackend(ctx, backends[defaultID], webrtc, activityLogDir)
 	if err != nil {
 		return nil, errors.Join(err, cleanup())
 	}
@@ -198,16 +195,9 @@ func newBridgeWithTimeout(ctx context.Context, cfg *voicegateway.ResolvedConfig,
 	return b, nil
 }
 
-func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort int, activityLogDir string) (*Bridge, error) {
-	return newBridgeWithBackendAndTimeout(ctx, backend, udpPort, activityLogDir, defaultUPnPSSDPTimeout)
-}
-
-func newBridgeWithBackendAndTimeout(ctx context.Context, backend backendConnector, udpPort int, activityLogDir string, upnpSSDPTimeout time.Duration) (*Bridge, error) {
+func newBridgeWithBackend(ctx context.Context, backend backendConnector, webrtc voicegateway.WebRTCConfig, activityLogDir string) (*Bridge, error) {
 	if backend == nil {
 		return nil, errors.New("voice backend is required")
-	}
-	if upnpSSDPTimeout <= 0 {
-		upnpSSDPTimeout = defaultUPnPSSDPTimeout
 	}
 	choices, err := defaultBackendChoices(ctx, backend)
 	if err != nil {
@@ -220,9 +210,9 @@ func newBridgeWithBackendAndTimeout(ctx context.Context, backend backendConnecto
 		return nil, fmt.Errorf("detect host IP: %w", err)
 	}
 	var lc net.ListenConfig
-	conn, err := lc.ListenPacket(ctx, "udp4", fmt.Sprintf(":%d", udpPort))
+	conn, err := lc.ListenPacket(ctx, "udp4", fmt.Sprintf(":%d", webrtc.UDPPort))
 	if err != nil {
-		return nil, fmt.Errorf("listen UDP4 :%d: %w", udpPort, err)
+		return nil, fmt.Errorf("listen UDP4 :%d: %w", webrtc.UDPPort, err)
 	}
 	addr, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok {
@@ -243,7 +233,7 @@ func newBridgeWithBackendAndTimeout(ctx context.Context, backend backendConnecto
 		hostIP:              append(net.IP(nil), hostIP...),
 		advertisedEndpoints: udpCandidates(candidateIPs, addr.Port),
 		udpPort:             addr.Port,
-		upnpSSDPTimeout:     upnpSSDPTimeout,
+		disableUPnP:         webrtc.DisableUPnP,
 		sessions:            make(map[string]*session),
 		textCtx:             textCtx,
 		textCancel:          textCancel,
@@ -789,11 +779,15 @@ func (b *Bridge) ensureWebRTCAPI(ctx context.Context) (*webrtc.API, error) {
 		return b.api, nil
 	}
 	advertisedEndpoints := append([]udpCandidate(nil), b.advertisedEndpoints...)
-	mapping, err := mapUPnPUDP(ctx, b.hostIP, b.udpPort, b.upnpSSDPTimeout)
-	if err != nil {
-		b.udpMappingError = fmt.Sprintf("UPnP UDP mapping failed: %v", err)
-		slog.ErrorContext(ctx, "voicertc: UPnP UDP mapping failed; falling back to local ICE address", "udpPort", b.udpPort, "err", err)
-	} else {
+	var mapping *upnpMapping
+	if !b.disableUPnP {
+		var err error
+		if mapping, err = mapUPnPUDP(ctx, b.hostIP, b.udpPort); err != nil {
+			b.udpMappingError = fmt.Sprintf("UPnP UDP mapping failed: %v", err)
+			slog.ErrorContext(ctx, "voicertc: UPnP UDP mapping failed; falling back to local ICE address", "udpPort", b.udpPort, "err", err)
+		}
+	}
+	if mapping != nil {
 		b.udpMappingError = ""
 		updated := appendUniqueUDPCandidate(nil, udpCandidate{host: mapping.ip, port: int(mapping.externalPort)})
 		for _, c := range advertisedEndpoints {

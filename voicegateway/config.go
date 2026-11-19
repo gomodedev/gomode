@@ -805,6 +805,11 @@ type WebRTCConfig struct {
 	// which suffices when clients can reach the gateway's advertised UDP
 	// endpoint: the gateway learns each client's address from its checks.
 	STUNServers []string `toml:"stun_servers"`
+	// DisableUPnP skips the UPnP UDP mapping the gateway otherwise requests
+	// from the LAN router at startup, along with its SSDP search of up to two
+	// seconds. Disable it when clients reach the UDP port without it, or when
+	// the router must not open ports on the gateway's behalf.
+	DisableUPnP bool `toml:"disable_upnp"`
 }
 
 // NewWebRTCConfig returns the defaults: an ephemeral port and Google's public

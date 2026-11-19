@@ -1239,7 +1239,7 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 			t.Fatal(err)
 		}
 		// CloseAll closes b only once the bridge exists.
-		br, err := newBridgeWithBackendAndTimeout(ctx, b, 0, t.TempDir(), 5*time.Millisecond)
+		br, err := newBridgeWithBackend(ctx, b, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 		if err != nil {
 			t.Fatal(errors.Join(err, b.Close()))
 		}

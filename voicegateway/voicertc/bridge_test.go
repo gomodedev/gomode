@@ -37,10 +37,9 @@ import (
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
-// newTestBridge returns a bridge on an ephemeral UDP port that skips UPnP
-// discovery quickly.
+// newTestBridge returns a bridge on an ephemeral UDP port without UPnP.
 func newTestBridge(ctx context.Context, t *testing.T, backend backendConnector) *Bridge {
-	b, err := newBridgeWithBackendAndTimeout(ctx, backend, 0, t.TempDir(), 5*time.Millisecond)
+	b, err := newBridgeWithBackend(ctx, backend, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +153,7 @@ func TestNewBridge(t *testing.T) {
 	t.Run("NewBridge", func(t *testing.T) {
 		t.Parallel()
 		stun := []string{"stun:stun.example:3478"}
-		b, err := newBridgeWithTimeout(t.Context(), cfg, voicegateway.WebRTCConfig{STUNServers: stun}, t.TempDir(), 5*time.Millisecond)
+		b, err := NewBridge(t.Context(), cfg, voicegateway.WebRTCConfig{STUNServers: stun, DisableUPnP: true}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -166,7 +165,7 @@ func TestNewBridge(t *testing.T) {
 
 	t.Run("PeerConnection", func(t *testing.T) {
 		t.Parallel()
-		b, err := newBridgeWithTimeout(t.Context(), cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
+		b, err := NewBridge(t.Context(), cfg, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -403,7 +402,7 @@ func TestBackendConnector(t *testing.T) {
 	t.Run("NewBridgeWithBackendBindsUDPAndDefersAPI", func(t *testing.T) {
 		t.Parallel()
 		backend := &fakeBackendConnector{}
-		b, err := newBridgeWithBackend(t.Context(), backend, 0, t.TempDir())
+		b, err := newBridgeWithBackend(t.Context(), backend, voicegateway.WebRTCConfig{}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1320,7 +1319,7 @@ func TestBridge(t *testing.T) {
 				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "recognition"}},
 				Pipelines:   []voicegateway.PipelineConfig{{ID: "preset", Label: "Preset", ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "preset-recognition"}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-llm"}}}},
 			}
-			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
+			b, err := NewBridge(t.Context(), &cfg, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1347,7 +1346,7 @@ func TestBridge(t *testing.T) {
 					{ID: "kitten", Engine: voicegateway.TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2", Voice: "Luna"},
 				},
 			}
-			b, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
+			b, err := NewBridge(t.Context(), &cfg, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2165,7 +2164,7 @@ func testBridgeConfiguredChoices(t *testing.T) {
 		},
 		LLM: []voicegateway.LLMConfig{{ID: "chat", Label: "Chat", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "https://example.com/v1/chat/completions", Model: "model-a"}}},
 	}
-	bridge, err := newBridgeWithTimeout(t.Context(), &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
+	bridge, err := NewBridge(t.Context(), &cfg, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -41,7 +41,7 @@ func TestSmokeCodexSubscriptionTextSession(t *testing.T) {
 	if len(cfg.LLM) != 1 {
 		t.Fatal("configured Codex subscription unavailable; a file-backed Codex login is required")
 	}
-	bridge, err := newBridgeWithTimeout(ctx, &cfg, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
+	bridge, err := NewBridge(ctx, &cfg, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestSmokeChatTokenUsage(t *testing.T) {
 			t.Cleanup(cancel)
 			config := voicegateway.ResolvedConfig{Runtime: testRuntime}
 			config.Realtime, config.Pipelines, config.LLM = nil, nil, []voicegateway.LLMConfig{choice}
-			bridge, err := newBridgeWithTimeout(ctx, &config, voicegateway.WebRTCConfig{}, t.TempDir(), 5*time.Millisecond)
+			bridge, err := NewBridge(ctx, &config, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

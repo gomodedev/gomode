@@ -64,7 +64,8 @@ func newProductionGateway(ctx context.Context, f *fixture) (*productionGateway, 
 	}
 	// Host candidates only: the emulator's user-mode network reaches the host's
 	// interface addresses, and the gateway learns the client's from its checks.
-	bridge, err := voicertc.NewBridge(ctx, &resolved, voicegateway.WebRTCConfig{}, logDir)
+	// The emulator needs no router mapping, so startup skips the SSDP search.
+	bridge, err := voicertc.NewBridge(ctx, &resolved, voicegateway.WebRTCConfig{DisableUPnP: true}, logDir)
 	if err != nil {
 		return nil, errors.Join(err, model.Close(), os.RemoveAll(logDir))
 	}
