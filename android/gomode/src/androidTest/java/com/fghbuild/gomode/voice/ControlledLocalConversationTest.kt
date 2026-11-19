@@ -302,7 +302,7 @@ class ControlledLocalConversationTest {
                         .count { it.speaker == TranscriptSpeaker.USER },
                 )
                 assertTrue(session.state.value.connected)
-                composeRule.runOnIdle { session.disconnect() }
+                composeRule.runOnIdle { session.disconnect("test") }
             }
         }
     }
@@ -383,7 +383,7 @@ class ControlledLocalConversationTest {
                     }
                     assertTrue(started.await(30, TimeUnit.SECONDS))
                     composeRule.runOnIdle {
-                        session.disconnect()
+                        session.disconnect("test")
                         entry.bearerStore.receive(
                             Uri.parse(entry.key.url),
                             true,
@@ -409,7 +409,7 @@ class ControlledLocalConversationTest {
                             """{"bearerToken":"third-account"}""",
                         )
                         assertFalse(conversation.isCurrent())
-                        session.disconnect()
+                        session.disconnect("test")
                         assertFalse(conversation.isCurrent())
                         assertTrue(runCatching { conversation.contextText() }.exceptionOrNull() is VoiceSetupException)
                     }

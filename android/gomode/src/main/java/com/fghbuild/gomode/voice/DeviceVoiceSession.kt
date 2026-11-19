@@ -316,7 +316,7 @@ internal class DeviceVoiceSession(
                     if (!ownsAttempt(attempt)) return@launch
                     if (language != SpeechLanguageState.Ready && language !is SpeechLanguageState.Unverified) {
                         timing?.finish(VoiceStartupOutcome.FAILED)
-                        disconnect()
+                        disconnect("speech language $language")
                         return@launch
                     }
                     setStatus("Connecting…")
@@ -359,7 +359,7 @@ internal class DeviceVoiceSession(
                     if (!callController.isStarted &&
                         callController.isSupported() &&
                         !callController.start(setup.serverName, setup.serverID) { error ->
-                            if (error == null) disconnect() else setError(error)
+                            if (error == null) disconnect("Telecom hang-up") else setError(error)
                         }
                     ) {
                         setError("Could not start the voice call")
@@ -377,7 +377,7 @@ internal class DeviceVoiceSession(
                 } catch (e: VoiceMcpAuthChangedException) {
                     if (ownsAttempt(attempt)) {
                         Log.i(TAG, "Service authentication changed during voice setup", e)
-                        disconnect()
+                        setError(VOICE_CONVERSATION_ENDED_ERROR)
                     }
                 } catch (e: TimeoutCancellationException) {
                     if (ownsAttempt(attempt)) timing?.noteTimeout()
@@ -532,7 +532,7 @@ internal class DeviceVoiceSession(
                             ) {
                                 scheduleReconnect("Voice gateway restarting")
                             } else {
-                                disconnect()
+                                disconnect("gateway closed the WebSocket: $code $reason")
                             }
                         }
                     }
@@ -865,8 +865,13 @@ internal class DeviceVoiceSession(
             onError = { message ->
                 if (currentRecognition()) {
                     when (speech.languageState.value) {
-                        SpeechLanguageState.Missing, SpeechLanguageState.Unsupported -> disconnect()
-                        else -> reportAttemptError(attempt, message)
+                        SpeechLanguageState.Missing, SpeechLanguageState.Unsupported -> {
+                            disconnect("speech language ${speech.languageState.value}")
+                        }
+
+                        else -> {
+                            reportAttemptError(attempt, message)
+                        }
                     }
                 }
             },
@@ -974,7 +979,7 @@ internal class DeviceVoiceSession(
                     return@withLock
                 }
                 if (voiceConversation?.isCurrent() == false) {
-                    disconnect()
+                    setError(VOICE_CONVERSATION_ENDED_ERROR)
                     return@withLock
                 }
                 awaitingModelTurn = true
@@ -1087,7 +1092,7 @@ internal class DeviceVoiceSession(
         fun currentTurn() = ownsAttempt(attempt) && turn == localTurnGeneration.get()
         if (!currentTurn()) return errorJson("Turn was interrupted")
         if (voiceConversation?.isCurrent() == false) {
-            disconnect()
+            setError(VOICE_CONVERSATION_ENDED_ERROR)
             return errorJson("Conversation authorization changed")
         }
         val name = msg.name
@@ -1102,7 +1107,7 @@ internal class DeviceVoiceSession(
                     settingsRepository,
                     switchServer = switchServer,
                     onMute = { setMicrophoneMode(MicrophoneMode.MUTE_ONCE) },
-                    onDisconnect = ::disconnect,
+                    onDisconnect = { disconnect("assistant hang_up tool") },
                 )
             if (serverResult != null) {
                 if (!currentTurn()) return errorJson("Turn was interrupted")
@@ -1148,7 +1153,7 @@ internal class DeviceVoiceSession(
         ) {
             if (!currentTurn()) return errorJson("Turn was interrupted")
             if (voiceConversation?.isCurrent() == false) {
-                disconnect()
+                setError(VOICE_CONVERSATION_ENDED_ERROR)
                 return errorJson("Conversation authorization changed")
             }
             _state.update { it.copy(activeTool = null) }
@@ -1198,7 +1203,7 @@ internal class DeviceVoiceSession(
     ) {
         if (!ownsAttempt(attempt) || webSocket !== origin) return
         if (voiceConversation?.isCurrent() == false) {
-            disconnect()
+            setError(VOICE_CONVERSATION_ENDED_ERROR)
             return
         }
         val id = msg.id
@@ -1214,7 +1219,7 @@ internal class DeviceVoiceSession(
                     settingsRepository,
                     switchServer = switchServer,
                     onMute = { setMicrophoneMode(MicrophoneMode.MUTE_ONCE) },
-                    onDisconnect = ::disconnect,
+                    onDisconnect = { disconnect("assistant hang_up tool") },
                 )
             if (serverResult != null) {
                 if (!ownsAttempt(attempt) || webSocket !== origin) return
@@ -1268,7 +1273,7 @@ internal class DeviceVoiceSession(
         } catch (e: VoiceMcpAuthChangedException) {
             if (ownsAttempt(attempt) && webSocket === origin) {
                 Log.i(TAG, "Service authentication changed before MCP tool call", e)
-                disconnect()
+                setError(VOICE_CONVERSATION_ENDED_ERROR)
             }
         } catch (e: CancellationException) {
             throw e
@@ -1283,7 +1288,8 @@ internal class DeviceVoiceSession(
         }
     }
 
-    override fun disconnect() {
+    override fun disconnect(reason: String) {
+        Log.i(TAG, "Voice ended: $reason")
         stopNetworkMonitoring()
         recoveryPolicy.reset()
         recoveryContext = ""
@@ -1408,7 +1414,7 @@ internal class DeviceVoiceSession(
     ) {
         if (_state.value.error != null) return
         if (voiceConversation?.isCurrent() == false) {
-            disconnect()
+            setError(VOICE_CONVERSATION_ENDED_ERROR)
             return
         }
         if (userSpeechActive ||
@@ -1443,7 +1449,7 @@ internal class DeviceVoiceSession(
         microphoneLevelJob.cancel()
         thinkingAudioJob.cancel()
         audioStateJob.cancel()
-        disconnect()
+        disconnect("session closed")
         speech.close()
     }
 
@@ -1451,7 +1457,7 @@ internal class DeviceVoiceSession(
         if (userSpeechActive || output.active || awaitingModelTurn) return
         val attempt = attemptGeneration.get()
         if (voiceConversation?.isCurrent() == false) {
-            disconnect()
+            setError(VOICE_CONVERSATION_ENDED_ERROR)
             return
         }
         if (!_state.value.connected ||

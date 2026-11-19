@@ -186,7 +186,7 @@ class PendingMicrophoneVoiceStartTest {
             connections++
         }
 
-        override fun disconnect() = Unit
+        override fun disconnect(reason: String) = Unit
 
         override fun setMicrophoneMode(mode: MicrophoneMode) = Unit
 

@@ -60,7 +60,7 @@ func newTestLocalStackBackend(t *testing.T, asr *liveASR, llm llmAdapter, tts tt
 	}
 	b := p.backend(cfg)
 	for _, variant := range b.variants {
-		_, cancel := context.WithCancel(t.Context())
+		_, cancel := context.WithCancelCause(t.Context())
 		runtime := &localStackRuntime{llm: llm}
 		if variant.speech.Input == voicev2.SpeechLocationGateway {
 			runtime.liveASR = asr

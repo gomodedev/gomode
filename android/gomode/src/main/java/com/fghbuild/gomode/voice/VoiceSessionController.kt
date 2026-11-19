@@ -27,7 +27,8 @@ internal interface VoiceSessionController {
         conversationID: String? = null,
     )
 
-    fun disconnect()
+    /** disconnect ends voice without an error; reason names the caller in the log. */
+    fun disconnect(reason: String)
 
     fun setMicrophoneMode(mode: MicrophoneMode)
 
@@ -95,5 +96,19 @@ internal class PendingVoiceContext {
         val update = VoiceContextUpdate((listOfNotNull(context) + alerts).joinToString("\n\n"), alerts.isNotEmpty())
         clear()
         return update
+    }
+}
+
+/**
+ * endForSignInChange ends voice after the service identity changed. An active
+ * session reports why; an idle one has nothing to report.
+ */
+internal fun VoiceSessionController.endForSignInChange() {
+    if (state.value.active) {
+        setError(
+            VOICE_CONVERSATION_ENDED_ERROR,
+        )
+    } else {
+        disconnect("service sign-in changed while idle")
     }
 }

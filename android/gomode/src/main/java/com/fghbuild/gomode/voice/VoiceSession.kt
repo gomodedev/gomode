@@ -518,7 +518,7 @@ internal class VoiceSession(
                     if (!telecomCallActive &&
                         callController.isSupported() &&
                         !callController.start(setup.serverName, setup.serverID) { error ->
-                            if (error == null) disconnect() else setError(error)
+                            if (error == null) disconnect("Telecom hang-up") else setError(error)
                         }
                     ) {
                         setError("Could not start the voice call")
@@ -1210,7 +1210,8 @@ internal class VoiceSession(
         pc?.dispose()
     }
 
-    override fun disconnect() {
+    override fun disconnect(reason: String) {
+        Log.i(TAG, "Voice ended: $reason")
         stopNetworkMonitoring()
         voiceConversation.finish()
         pinnedVoice = null
@@ -1294,7 +1295,7 @@ internal class VoiceSession(
     override fun close() {
         audioStateJob?.cancel()
         thinkingAudioJob.cancel()
-        disconnect()
+        disconnect("session closed")
         pcFactory?.dispose()
         pcFactory = null
         RtcMicrophoneProcessing.release(state)
@@ -1841,7 +1842,7 @@ internal class VoiceSession(
                     settingsRepository,
                     switchServer = switchServer,
                     onMute = { setMicrophoneMode(MicrophoneMode.MUTE_ONCE) },
-                    onDisconnect = ::disconnect,
+                    onDisconnect = { disconnect("assistant hang_up tool") },
                 )
             if (serverResult != null) {
                 if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
@@ -2016,8 +2017,7 @@ internal class VoiceSession(
                             it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
                         }
                     if (isBtSco && !telecomCallActive) {
-                        Log.i(TAG, "SCO audio disconnected (HFP hang-up), disconnecting")
-                        disconnect()
+                        disconnect("Bluetooth SCO hang-up")
                     }
                 }
             }
@@ -2154,6 +2154,10 @@ data class VoiceState(
 ) {
     val muted: Boolean
         get() = microphoneMode != MicrophoneMode.LISTENING
+
+    /** active is true from connection start until voice ends. */
+    val active: Boolean
+        get() = connected || connectStatus != null || listening || speaking
 }
 
 /** Replace only the current ephemeral hypothesis; stale clears cannot erase newer input. */

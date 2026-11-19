@@ -94,7 +94,7 @@ class VoiceSessionLifecycleTest {
         val session = createCloudSession(SettingsRepository(MemoryPreferences()))
         try {
             session.setError("session: download canceled")
-            session.disconnect()
+            session.disconnect("test")
             assertEquals("session: download canceled", session.state.value.error)
             session.dismissError()
             assertNull(session.state.value.error)
@@ -147,7 +147,7 @@ class VoiceSessionLifecycleTest {
             assertTrue(peer.closed)
             assertTrue(peer.disposed)
             assertNull(session.state.value.error)
-            session.disconnect()
+            session.disconnect("test")
             callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(42), LinkProperties())
             runCurrent()
             // No replacement attempt has spent backoff.
@@ -309,7 +309,7 @@ class VoiceSessionLifecycleTest {
                     )
                 }
             entered.await()
-            session.disconnect()
+            session.disconnect("test")
             runCurrent()
             val generation =
                 VoiceSession::class.java
@@ -705,7 +705,7 @@ class VoiceSessionLifecycleTest {
                         .nextStartedService.component
                         ?.className,
                 )
-                session.disconnect()
+                session.disconnect("test")
                 releaseDiscovery.countDown()
 
                 assertEquals("/.well-known/gomode.json", server.takeRequest(5, TimeUnit.SECONDS)?.path)
@@ -777,7 +777,7 @@ class VoiceSessionLifecycleTest {
 
                 assertEquals("/.well-known/gomode.json", oldServer.takeRequest(5, TimeUnit.SECONDS)?.path)
                 assertNull(oldServer.takeRequest(500, TimeUnit.MILLISECONDS))
-                session.disconnect()
+                session.disconnect("test")
             } finally {
                 releaseOld.countDown()
                 releaseNew.countDown()
@@ -951,7 +951,7 @@ class VoiceSessionLifecycleTest {
                 assertEquals(2, channel.sent.size)
                 assertTrue(channel.sent.last().contains("switch"))
                 assertNull(session.state.value.activeTool)
-                session.disconnect()
+                session.disconnect("test")
                 invokeHandleToolCall(
                     session,
                     ToolCall(

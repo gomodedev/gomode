@@ -134,7 +134,7 @@ class SpeechTextFilterSessionTest {
                     delta(backend, "word ".repeat(1000))
                     assertTrue("Long unpunctuated text must speak before idle", speech.spoken.size > before)
                     delta(backend, "\n```kotlin")
-                    session.disconnect()
+                    session.disconnect("test")
                     ready = CompletableDeferred()
                 }
                 val replacement = connect()

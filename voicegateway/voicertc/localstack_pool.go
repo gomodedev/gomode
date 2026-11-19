@@ -41,8 +41,9 @@ type lazyLocalStack struct {
 	loading   *stackLoad
 	stage     string // current startup step while loading
 	unloading chan struct{}
-	// cancel stops the loading or loaded runtime; only close and unload call it.
-	cancel context.CancelFunc
+	// cancel stops the loading or loaded runtime. Close, unload, and a choice
+	// preempting an unattended startup call it.
+	cancel context.CancelCauseFunc
 	// users counts unreleased acquisitions, including sessions waiting on a
 	// load and sessions of a stack unloaded after its worker exited, until they
 	// close. A waiting session pins the stack it is about to use.
@@ -62,7 +63,17 @@ type lazyLocalStack struct {
 type stackLoad struct {
 	done chan struct{}
 	err  error // set before done closes
+	// preempted marks a startup canceled for another choice while no session
+	// waited on it.
+	preempted bool
 }
+
+var (
+	errStackClosed = errors.New("local stack is closed")
+	// errStartupPreempted cancels an unattended startup when another choice
+	// needs its slot.
+	errStartupPreempted = errors.New("local stack startup canceled for another choice")
+)
 
 // errWorkerExited ends sessions whose stack lost a managed worker.
 var errWorkerExited = errors.New("local stack: model worker exited unexpectedly")
@@ -163,7 +174,7 @@ func (b *localStackBackend) selectStages(speech voicev2.SpeechConfig, setup *voi
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if b.closed {
-		return nil, errors.New("local stack is closed")
+		return nil, errStackClosed
 	}
 	for _, l := range p.entries {
 		if l.owner == b && *l.cfg.(*voicegateway.PipelineConfig) == cfg {
@@ -362,7 +373,7 @@ func (l *lazyLocalStack) unloadLocked(exited bool) error {
 	// Close reports the worker's exit, joined with any failure to stop the
 	// others.
 	err := b.Close()
-	cancel()
+	cancel(nil)
 	switch {
 	case exited:
 		l.log.Error("voicertc: local stack worker exited", "err", err)
@@ -389,7 +400,7 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 		}
 		if l.closed {
 			p.mu.Unlock()
-			return nil, errors.New("local stack is closed")
+			return nil, errStackClosed
 		}
 		if l.loaded != nil {
 			if l.timer != nil {
@@ -412,6 +423,9 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 			}
 		}
 		load := l.loading
+		if load == nil && l.unloading == nil && count >= p.limits.MaxInstances && oldest == nil {
+			l.preemptUnattendedLoadLocked(ctx)
+		}
 		if load == nil && l.unloading == nil && (count < p.limits.MaxInstances || oldest != nil) {
 			if count >= p.limits.MaxInstances {
 				// unloadLocked logs a failed stop. The evicted processes are reaped
@@ -424,7 +438,7 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 			load = &stackLoad{done: make(chan struct{})}
 			l.loading = load
 			// Keep the session's values for logging, not its cancellation.
-			runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+			runCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
 			l.cancel = cancel
 			go l.load(context.WithValue(runCtx, startupStageKey{}, l.setStage), load)
 		}
@@ -446,6 +460,11 @@ func (l *lazyLocalStack) acquire(ctx context.Context) (backendConnector, error) 
 			l.release()
 			return nil, ctx.Err()
 		case <-load.done:
+		}
+		if errors.Is(load.err, errStartupPreempted) {
+			// This session arrived after the preemption; compete for a slot anew.
+			l.release()
+			continue
 		}
 		if load.err != nil {
 			l.release()
@@ -486,7 +505,7 @@ func (l *lazyLocalStack) load(ctx context.Context, load *stackLoad) {
 	}
 	p.mu.Lock()
 	if err == nil && l.closed {
-		err = errors.New("local stack is closed")
+		err = errStackClosed
 	}
 	if err != nil {
 		// Keep the loading reservation until cleanup finishes, without
@@ -496,12 +515,13 @@ func (l *lazyLocalStack) load(ctx context.Context, load *stackLoad) {
 		if b != nil {
 			err = errors.Join(err, b.Close())
 		}
-		if ctx.Err() != nil {
-			l.log.InfoContext(ctx, "voicertc: local stack startup canceled by shutdown", "err", err)
+		if cause := context.Cause(ctx); cause != nil {
+			l.log.InfoContext(ctx, "voicertc: local stack startup canceled", "cause", cause, "err", err)
+			err = cause
 		} else {
 			l.log.WarnContext(ctx, "voicertc: local stack startup failed", "err", err)
 		}
-		cancel()
+		cancel(nil)
 		p.mu.Lock()
 		l.cancel = nil
 	} else {
@@ -518,6 +538,20 @@ func (l *lazyLocalStack) load(ctx context.Context, load *stackLoad) {
 	p.notifyLocked()
 	l.pruneLocked()
 	p.mu.Unlock()
+}
+
+// preemptUnattendedLoadLocked cancels another choice's startup that no session
+// waits on, so a session does not wait for a model nobody uses. The canceled
+// load frees its slot when it finishes.
+func (l *lazyLocalStack) preemptUnattendedLoadLocked(ctx context.Context) {
+	for _, e := range l.pool.entries {
+		if e != l && e.loading != nil && e.users == 0 && !e.loading.preempted {
+			e.loading.preempted = true
+			e.log.InfoContext(ctx, "voicertc: canceling unattended local stack startup for another choice")
+			e.cancel(errStartupPreempted)
+			return
+		}
+	}
 }
 
 func (l *lazyLocalStack) release() {
@@ -554,7 +588,7 @@ func (l *lazyLocalStack) close() error {
 	l.closed = true
 	if l.loading != nil {
 		done := l.loading.done
-		l.cancel()
+		l.cancel(errStackClosed)
 		p.mu.Unlock()
 		<-done
 		p.mu.Lock()
@@ -651,7 +685,7 @@ func (l *lazyLocalStack) connect(ctx context.Context, id string, sink backendSin
 	case attached:
 		return lease, nil
 	case closed:
-		return nil, errors.Join(errors.New("local stack is closed"), lease.close())
+		return nil, errors.Join(errStackClosed, lease.close())
 	default:
 		return nil, errors.Join(errWorkerExited, lease.close())
 	}

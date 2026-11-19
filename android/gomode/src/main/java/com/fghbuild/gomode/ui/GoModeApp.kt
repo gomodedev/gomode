@@ -103,7 +103,6 @@ import com.fghbuild.gomode.voice.MicrophonePermissionRecovery
 import com.fghbuild.gomode.voice.ServiceReconnectDetail
 import com.fghbuild.gomode.voice.SpeechLanguageRecovery
 import com.fghbuild.gomode.voice.TelecomCallController
-import com.fghbuild.gomode.voice.VOICE_CONVERSATION_ENDED_ERROR
 import com.fghbuild.gomode.voice.VoiceConversation
 import com.fghbuild.gomode.voice.VoicePanel
 import com.fghbuild.gomode.voice.VoiceService
@@ -114,6 +113,7 @@ import com.fghbuild.gomode.voice.VoiceStartupSource
 import com.fghbuild.gomode.voice.VoiceStartupStage
 import com.fghbuild.gomode.voice.VoiceStartupTiming
 import com.fghbuild.gomode.voice.VoiceState
+import com.fghbuild.gomode.voice.endForSignInChange
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -400,7 +400,7 @@ internal fun GoModeApp(
                     intent: Intent?,
                 ) {
                     if (intent?.action == VoiceService.ACTION_HANG_UP) {
-                        voiceSession.disconnect()
+                        voiceSession.disconnect("notification hang-up")
                     }
                 }
             }
@@ -416,7 +416,7 @@ internal fun GoModeApp(
     val voiceAuthIdentity = remember(bearerStore) { VoiceAuthIdentity() }
     LaunchedEffect(bearerToken, authEpoch, authReady, voiceSession) {
         val changed = voiceAuthIdentity.update(bearerToken, authEpoch)
-        if (!sharedConversation && (changed || !authReady)) manualVoiceSession.disconnect()
+        if (!sharedConversation && (changed || !authReady)) manualVoiceSession.endForSignInChange()
     }
     val controllerState by key(voiceSession) { voiceSession.state.collectAsStateWithLifecycle() }
     val voiceState =
@@ -476,7 +476,7 @@ internal fun GoModeApp(
             microphoneNeedsSettings = false
             microphoneHadExplicitDenial = false
         } else if (microphoneWasGranted) {
-            voiceSession.disconnect()
+            voiceSession.disconnect("microphone permission revoked")
             microphoneDenied = true
             microphoneNeedsSettings = microphoneHadExplicitDenial &&
                 activity != null &&
@@ -519,20 +519,11 @@ internal fun GoModeApp(
             bootstrapFailure = (bootstrapState as? ServiceBootstrapState.Unvalidated)?.reason,
             webLoadState = webLoadState,
         ).takeIf { activeNativeScreen == null && activeURL.isNotBlank() }
-    val voiceSessionActive =
-        voiceState.connected ||
-            voiceState.connectStatus != null ||
-            voiceState.listening ||
-            voiceState.speaking
+    val voiceSessionActive = voiceState.active
     LaunchedEffect(sharedConversation, voiceConversation, gatewayState, catalogState, activeKey, voiceState.connected) {
         if (!carVoiceBusy && sharedConversation && gatewayState != null) {
             if (!voiceConversation.isCurrent()) {
-                // An identity change ends an active call; an idle session has nothing to report.
-                if (voiceSessionActive) {
-                    voiceSession.setError(VOICE_CONVERSATION_ENDED_ERROR)
-                } else {
-                    voiceSession.disconnect()
-                }
+                voiceSession.endForSignInChange()
                 if (localSelection != null) localModelOwner.restartConversation()
             } else if (voiceSessionActive) {
                 voiceConversation.contextUpdate()?.let { voiceSession.injectText(it.text, it.generate) }
@@ -627,18 +618,14 @@ internal fun GoModeApp(
                         if (!carVoiceBusy) {
                             if (sharedConversation) {
                                 if (!voiceConversation.isCurrent()) {
-                                    if (voiceSessionActive) {
-                                        manualVoiceSession.setError(VOICE_CONVERSATION_ENDED_ERROR)
-                                    } else {
-                                        manualVoiceSession.disconnect()
-                                    }
+                                    manualVoiceSession.endForSignInChange()
                                     if (localSelection != null) localModelOwner.restartConversation()
                                 }
                             } else if (entry === serviceSession ||
                                 isTrustedPermissionOrigin(entry.key.url.toUri(), serviceSession.key.url)
                             ) {
                                 localModelOwner.clearSelection(localSelection)
-                                manualVoiceSession.disconnect()
+                                manualVoiceSession.endForSignInChange()
                             }
                         }
                     },
@@ -763,7 +750,7 @@ internal fun GoModeApp(
                             carVoiceOwner.cancel()
                         } else {
                             manualStartup?.finish(VoiceStartupOutcome.CANCELED)
-                            manualVoiceSession.disconnect()
+                            manualVoiceSession.disconnect("user hang-up")
                         }
                     },
                     onSelectMicrophoneMode = { voiceSession.setMicrophoneMode(it) },

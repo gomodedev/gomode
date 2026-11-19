@@ -104,7 +104,7 @@ class DeviceVoiceSessionTest {
                     listeners.last().onOpen(sockets.last(), upgradeResponse())
                     runCurrent()
                     if (hangup) {
-                        session.disconnect()
+                        session.disconnect("test")
                     } else {
                         // A replacement that never becomes ready is retried with backoff.
                         advanceTimeBy(15_000)
@@ -248,7 +248,7 @@ class DeviceVoiceSessionTest {
                 listeners.first().onFailure(sockets.first(), IOException("old route"), null)
                 runCurrent()
                 assertNull(session.state.value.error)
-                session.disconnect()
+                session.disconnect("test")
                 callback.onLinkPropertiesChanged(ShadowNetwork.newInstance(43), LinkProperties())
                 advanceTimeBy(10_000)
                 runCurrent()
@@ -302,7 +302,7 @@ class DeviceVoiceSessionTest {
                 session.state.value.transcript
                     .all { it.final },
             )
-            session.disconnect()
+            session.disconnect("test")
             assertEquals(
                 11L,
                 session.state.value.transcript
@@ -351,7 +351,7 @@ class DeviceVoiceSessionTest {
                     ?.totals
                     ?.inputTokens,
             )
-            session.disconnect()
+            session.disconnect("test")
             assertEquals(
                 123L,
                 session.state.value.usage
@@ -569,7 +569,7 @@ class DeviceVoiceSessionTest {
             backend.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
             assertEquals("Fresh", speech.spoken.last())
             delta("```kotlin")
-            session.disconnect()
+            session.disconnect("test")
             session.connect()
             val replacement = requireNotNull(listener)
             replacement.onOpen(socket, upgradeResponse())
@@ -617,7 +617,7 @@ class DeviceVoiceSessionTest {
                     """{"kind":"tool.call","id":"pending","name":"switch_server","args":{"server_id":"$first"}}""",
                 )
                 assertTrue(entered)
-                session.disconnect()
+                session.disconnect("test")
                 assertTrue(canceled)
                 assertEquals(second, settings.settings.value.activeServiceId)
                 assertFalse(socket.sent.any { it.contains("pending") })
@@ -656,7 +656,7 @@ class DeviceVoiceSessionTest {
             assertEquals(0f, session.state.value.micLevel)
             speech.microphoneRms.value = 0.03f
             assertEquals(0f, session.state.value.micLevel)
-            session.disconnect()
+            session.disconnect("test")
             assertEquals(0f, session.state.value.micLevel)
         } finally {
             session.close()
@@ -1157,7 +1157,7 @@ class DeviceVoiceSessionTest {
                     assertFalse(session.state.value.speaking)
                     assertEquals(spokenBefore, speech.spoken)
                     assertEquals(1, call.endedLocal)
-                    session.disconnect()
+                    session.disconnect("test")
                     assertEquals(2, call.endedLocal)
                 } finally {
                     session.close()
@@ -1201,7 +1201,7 @@ class DeviceVoiceSessionTest {
         connected.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
         assertTrue("starts listening after the turn and speech end", speech.listening)
 
-        session.disconnect()
+        session.disconnect("test")
         assertTrue(socket.closed)
         assertFalse(session.state.value.connected)
     }
@@ -1540,7 +1540,7 @@ class DeviceVoiceSessionTest {
             assertTrue(socket.closed)
             val recorded = awaitRecordedError("llm: out of memory")
             assertEquals(VoiceErrorPhase.CALL, recorded.phase)
-            session.disconnect()
+            session.disconnect("test")
             assertEquals("llm: out of memory", session.state.value.error)
             session.dismissError()
             assertEquals(null, session.state.value.error)
@@ -1710,7 +1710,7 @@ class DeviceVoiceSessionTest {
         )
         val beforeDisconnect = requireNotNull(speech.partialCallback)
         beforeDisconnect("Disconnected draft")
-        session.disconnect()
+        session.disconnect("test")
         beforeDisconnect("Late disconnected draft")
         assertTrue(
             session.state.value.transcript
@@ -2143,7 +2143,7 @@ class DeviceVoiceSessionTest {
         calls.audio.value = calls.audio.value.copy(selectedDeviceId = 8)
         assertEquals(8, session.state.value.selectedDeviceId)
 
-        session.disconnect()
+        session.disconnect("test")
 
         assertEquals(1, calls.endedLocal)
     }
@@ -2307,7 +2307,7 @@ class DeviceVoiceSessionTest {
             assertTrue(speech.spoken.any { it.contains("Heard: \"Hello\"") })
             assertTrue("resumes listening after turn", speech.listening)
 
-            session.disconnect()
+            session.disconnect("test")
             assertFalse(session.state.value.connected)
             session.close()
         }
@@ -2351,7 +2351,7 @@ class DeviceVoiceSessionTest {
             assertTrue(speech.spoken.isEmpty())
             assertFalse(speech.listening)
 
-            session.disconnect()
+            session.disconnect("test")
             session.close()
             owner.close()
             testScheduler.runCurrent()
@@ -2469,7 +2469,7 @@ class DeviceVoiceSessionTest {
                     ?.totals
                     ?.outputTokens,
             )
-            session.disconnect()
+            session.disconnect("test")
             assertEquals(
                 48L,
                 session.state.value.usage
@@ -2542,7 +2542,7 @@ class DeviceVoiceSessionTest {
             assertEquals(0, calls.activated)
             assertTrue(speech.spoken.isEmpty())
             assertFalse(speech.listening)
-            session.disconnect()
+            session.disconnect("test")
             finishSetup.complete(Unit)
             testScheduler.runCurrent()
             assertFalse(session.state.value.connected)
@@ -2628,7 +2628,7 @@ class DeviceVoiceSessionTest {
             testScheduler.runCurrent()
             requireNotNull(speech.resultCallback)("Hi")
             testScheduler.runCurrent()
-            session.disconnect()
+            session.disconnect("test")
             session.connect()
             testScheduler.runCurrent()
             assertFalse(session.state.value.connected)
@@ -2724,7 +2724,7 @@ class DeviceVoiceSessionTest {
             // Complete native work before the queued selection-disposal worker starts.
             finishTurn.complete(Unit)
             owner.select(null)
-            session.disconnect()
+            session.disconnect("test")
             testScheduler.runCurrent()
             assertFalse(session.state.value.connected)
             assertEquals(1, generations)
@@ -2885,6 +2885,61 @@ class DeviceVoiceSessionTest {
         }
 
     @Test
+    fun `conversation change during voice reports why voice ended`() =
+        runTest {
+            val dispatcher = StandardTestDispatcher(testScheduler)
+            Dispatchers.setMain(dispatcher)
+            val repo = SettingsRepository(MemoryPreferences())
+            selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
+            val conversation = localConversation(repo)
+            val owner =
+                LocalModelOwner(
+                    RuntimeEnvironment.getApplication(),
+                    localModelInstallation(ModelDownloadState.Ready(1, true, removalError = null)),
+                    dispatcher,
+                ) {
+                    LocalLlmEngine(RuntimeEnvironment.getApplication(), { _, _ ->
+                        object : EdgeLlmRunner {
+                            override val isModelLoaded = true
+                            override val backendName = "test"
+
+                            override fun getUsage() = EngineUsage(0, 0, 0, 8192)
+
+                            override suspend fun generateStream(message: Message) =
+                                kotlinx.coroutines.flow.flowOf(Message.model("Hello"))
+
+                            override fun replaceConversation(config: ConversationConfig) = Unit
+
+                            override fun close() = Unit
+                        }
+                    }, dispatcher)
+                }
+            owner.select(
+                LocalModelSelection("en-US", { localSetup(conversation) }, { true }, model = LocalLlmModel.GEMMA_4_E2B),
+            )
+            val session =
+                createSession(
+                    speech = FakeSpeech(),
+                    settingsRepo = repo,
+                    ioDispatcher = dispatcher,
+                    localModelOwner = owner,
+                    voiceConversation = conversation,
+                )
+            try {
+                session.connect()
+                testScheduler.runCurrent()
+                assertTrue(session.state.value.connected)
+                conversation.finish()
+                session.injectText("Build is waiting", generate = true)
+                assertEquals(VOICE_CONVERSATION_ENDED_ERROR, session.state.value.error)
+            } finally {
+                session.close()
+                owner.close()
+                testScheduler.runCurrent()
+            }
+        }
+
+    @Test
     fun `keyword startup adopts saved caller identity without beginning a shared conversation`() =
         runTest {
             for (offline in listOf(false, true)) {
@@ -2977,7 +3032,7 @@ class DeviceVoiceSessionTest {
             assertTrue(speech.spoken.isEmpty())
             assertEquals(1, connectedChimes)
 
-            session.disconnect()
+            session.disconnect("test")
             session.close()
         }
 

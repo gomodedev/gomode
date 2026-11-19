@@ -192,7 +192,7 @@ func TestLocalStackPool(t *testing.T) {
 			var logs bytes.Buffer
 			l.log = slog.New(slog.NewJSONHandler(&logs, nil))
 			p.mu.Lock()
-			l.cancel = func() {}
+			l.cancel = func(error) {}
 			l.watchLocked(crashed, managedServers(crashed.runtime))
 			p.mu.Unlock()
 			setup := mustGatewayServerMessage(&voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
@@ -423,6 +423,63 @@ func TestLocalStackPool(t *testing.T) {
 			t.Fatalf("reconnect = %p, %v; want the stack started for the departed session", again, err)
 		}
 		l.release()
+	})
+	t.Run("another choice preempts only an unattended startup", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		t.Cleanup(cancel)
+		started, aborted := make(chan struct{}, 1), make(chan struct{})
+		model := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			started <- struct{}{}
+			<-r.Context().Done()
+			close(aborted)
+		}))
+		t.Cleanup(model.Close)
+		p := newLocalStackPool(testRuntime)
+		slow := p.backend(voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: model.URL, Model: "chat"}}})
+		other := p.backend(poolTestConfig("other"))
+		t.Cleanup(func() { _ = slow.Close(); _ = other.Close() })
+		l, next := stackVariant(t, slow, clientSpeechConfig()), stackVariant(t, other, clientSpeechConfig())
+		sessionCtx, leave := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() { _, err := l.acquire(sessionCtx); done <- err }()
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("startup did not begin")
+		}
+		// A session waits on the startup, so the other choice waits too.
+		waitCtx, stopWaiting := context.WithTimeout(ctx, 200*time.Millisecond)
+		_, err := next.acquire(waitCtx)
+		stopWaiting()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("other choice beside an attended startup = %v", err)
+		}
+		p.mu.Lock()
+		preempted := l.loading.preempted
+		p.mu.Unlock()
+		if preempted {
+			t.Fatal("preempted a startup a session waits on")
+		}
+		leave()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("departed session = %v", err)
+		}
+		if _, err := next.acquire(ctx); err != nil {
+			t.Fatalf("other choice after the session left = %v", err)
+		}
+		t.Cleanup(next.release)
+		select {
+		case <-aborted:
+		case <-ctx.Done():
+			t.Fatal("unattended startup kept running")
+		}
+		p.mu.Lock()
+		resident := l.loaded != nil || l.loading != nil
+		p.mu.Unlock()
+		if resident {
+			t.Fatal("preempted choice kept its slot")
+		}
 	})
 	t.Run("progress while waiting for capacity", func(t *testing.T) {
 		t.Parallel()
