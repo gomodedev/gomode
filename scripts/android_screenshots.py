@@ -245,13 +245,16 @@ def validate_previous_android_images(directory: pathlib.Path) -> None:
     validate_android_images(directory, None)
 
 
-def restore_emulator(adb: str, serial: str, settings: dict[str, dict[str, str]]) -> None:
+def restore_emulator(adb: str, serial: str, settings: dict[str, dict[str, str]], night_mode: str) -> None:
     """Exit SystemUI demo and restore saved settings, attempting every step before reporting failures.
 
     A demo left active makes the next capture refuse to start.
     """
     demo_exit = ("shell", "am", "broadcast", "-a", "com.android.systemui.demo", "-e", "command", "exit")
-    steps: list[tuple[str, tuple[str, ...]]] = [("exit SystemUI demo", demo_exit)]
+    steps = [
+        ("exit SystemUI demo", demo_exit),
+        ("restore system appearance", ("shell", "cmd", "uimode", "night", night_mode)),
+    ]
     for namespace, values in settings.items():
         for key, value in values.items():
             command = ("delete", namespace, key) if value == "null" else ("put", namespace, key, value)
@@ -310,6 +313,9 @@ def _capture() -> int:
     configuration = adb_command(adb, serial, "shell", "cmd", "activity", "get-config")
     if not re.search(r"^config: en-rUS-", configuration, re.MULTILINE):
         raise RuntimeError("Documentation captures require the en-US display locale; emulator settings are preserved")
+    night_mode = adb_command(adb, serial, "shell", "cmd", "uimode", "night").removeprefix("Night mode: ")
+    if night_mode not in ("auto", "custom_bedtime", "custom_schedule", "no", "yes"):
+        raise RuntimeError(f"Could not read the emulator's system appearance: {night_mode}")
     started = time.monotonic()
     try:
         hidden = set() if old_hidden == "null" else set(old_hidden.split(","))
@@ -317,6 +323,7 @@ def _capture() -> int:
         hidden_icons = ",".join(sorted(hidden))
         for key in overrides[:3]:
             adb_command(adb, serial, "shell", "settings", "put", "global", key, "0")
+        adb_command(adb, serial, "shell", "cmd", "uimode", "night", "no")
         # The instrumentation enables and enters the profile after shell and
         # SystemUI readiness, and reapplies it per scene. Cold test initialization
         # can reset demo_allowed before the first Activity becomes visible.
@@ -351,7 +358,7 @@ def _capture() -> int:
                 validate_previous_android_images,
             )
     finally:
-        restore_emulator(adb, serial, {"secure": original_secure, "global": original})
+        restore_emulator(adb, serial, {"secure": original_secure, "global": original}, night_mode)
     print(f"Android screenshots update completed in {time.monotonic() - started:.2f}s")
     return 0
 

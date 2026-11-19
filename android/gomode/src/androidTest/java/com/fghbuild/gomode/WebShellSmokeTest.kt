@@ -6,6 +6,7 @@ import android.app.Instrumentation.ActivityResult
 import android.content.ContentValues
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Environment
@@ -182,6 +183,52 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
 
         pressActivityBack()
         waitForDom("SPA back returned home") { "location.pathname === '/'" }
+    }
+
+    @Test
+    fun systemAppearanceUpdatesTheHostedPageWithoutReloadingIt() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        check(device.executeShellCommand("getprop ro.kernel.qemu").trim() == "1") {
+            "Changing the system appearance in this test requires an emulator"
+        }
+        val original = device.executeShellCommand("cmd uimode night").trim().removePrefix("Night mode: ")
+        check(original in setOf("auto", "custom_bedtime", "custom_schedule", "no", "yes")) {
+            "Unexpected night mode: $original"
+        }
+        try {
+            device.executeShellCommand("cmd uimode night no")
+            openWebShell()
+            waitForHostedFrontend()
+            waitForDom("the hosted light palette is applied") {
+                "getComputedStyle(document.documentElement).backgroundColor === 'rgb(242, 246, 243)'"
+            }
+            tapDomElement("#save-note")
+            waitForText("Saved to your field notes.")
+
+            device.executeShellCommand("cmd uimode night yes")
+            waitForHostedFrontend()
+            waitForDom("the hosted dark palette is applied") {
+                "getComputedStyle(document.documentElement).backgroundColor === 'rgb(16, 27, 27)'"
+            }
+            composeRule.onNodeWithTag("gomode-web-open-settings").performClick()
+            composeRule.onNodeWithTag("gomode-settings").assertExists()
+            device.executeShellCommand("cmd uimode night no")
+            composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
+                composeRule.runOnUiThread {
+                    val mode = composeRule.activity.resources.configuration.uiMode
+                    mode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_NO
+                }
+            }
+            composeRule.onNodeWithTag("gomode-settings").assertExists()
+            pressActivityBack()
+            waitForHostedFrontend()
+            waitForDom("the retained page returns to the hosted light palette") {
+                "getComputedStyle(document.documentElement).backgroundColor === 'rgb(242, 246, 243)'"
+            }
+            assertEquals("\"Saved to your field notes.\"", js("document.querySelector('#note-status').textContent"))
+        } finally {
+            device.executeShellCommand("cmd uimode night $original")
+        }
     }
 
     @Test

@@ -1,4 +1,5 @@
 <resources>
-    <color name="gomode_seed">#1D6A96</color>
+    <color name="gomode_paper">#F4F8FB</color>
+    <color name="gomode_primary">#1D6A96</color>
     <color name="ic_launcher_background">#DFF0FA</color>
 </resources>

@@ -1,26 +1,31 @@
-/* Standalone voice test page and public theme tokens for shared controls. */
-.app {
-  --color-bg: #f5f7fa;
-  --color-bg-surface: #fff;
-  --color-bg-hover: #e8edf3;
-  --color-border: #cbd3df;
-  --color-border-medium: #8c9ab0;
+/* Go Mode brand palette and shared voice tokens for the standalone gateway. */
+:global(:root) {
+  color-scheme: light dark;
+  --color-bg: #f4f8fb;
+  --color-bg-surface: #e4edf3;
+  --color-bg-hover: #dce7ee;
+  --color-border: #c4d3df;
+  --color-border-medium: #71849a;
   --color-danger: #b42332;
-  --color-primary: #245cba;
-  --color-text: #192638;
-  --color-text-secondary: #45556b;
-  --color-text-muted: #53647a;
-  --color-plan: #7143a8;
-  --color-text-faint: #63728a;
+  --color-primary: #1d6a96;
+  --color-text: #0d2148;
+  --color-text-secondary: #47596b;
+  --color-text-muted: #47596b;
+  --color-plan: #a14a08;
+  --color-text-faint: #53647a;
   --radius-sm: 0.4rem;
   --color-success: #167448;
-  --color-warning: #916000;
+  --color-warning: #a14a08;
+  --gateway-focus: #b45309;
 
-  min-height: 100dvh;
   color: var(--color-text);
   background: var(--color-bg);
   font-family: system-ui, sans-serif;
   line-height: 1.6;
+}
+
+.app {
+  min-height: 100dvh;
 }
 
 :global(body) {
@@ -92,8 +97,8 @@
   cursor: default;
 }
 
-.app :focus-visible {
-  outline: 2px solid var(--color-primary);
+.main :focus-visible {
+  outline: 2px solid var(--gateway-focus);
   outline-offset: 3px;
 }
 
@@ -106,21 +111,22 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .app {
-    --color-bg: #111923;
-    --color-bg-surface: #1b2736;
-    --color-bg-hover: #2b3c50;
-    --color-border: #405069;
-    --color-border-medium: #687c98;
+  :global(:root) {
+    --color-bg: #0d1a2b;
+    --color-bg-surface: #172a40;
+    --color-bg-hover: #20374d;
+    --color-border: #3d536b;
+    --color-border-medium: #798ea3;
     --color-danger: #ff8b98;
-    --color-primary: #92b9ff;
-    --color-text: #edf2fa;
-    --color-text-secondary: #c0ccde;
-    --color-text-muted: #acbbd1;
-    --color-plan: #ccadff;
-    --color-text-faint: #96a7c0;
+    --color-primary: #5cc3e6;
+    --color-text: #eaf2f8;
+    --color-text-secondary: #bccddb;
+    --color-text-muted: #bccddb;
+    --color-plan: #ffba75;
+    --color-text-faint: #a5b7ca;
     --color-success: #76dbab;
-    --color-warning: #efcb7b;
+    --color-warning: #ffba75;
+    --gateway-focus: #ffc78f;
   }
 }
 

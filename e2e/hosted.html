@@ -6,22 +6,51 @@
   <meta charset="utf-8">
   <title>Field Notes · Go Mode demo service</title>
   <style>
-    :root { color-scheme: light; font-family: sans-serif; color: #17302c; background: #f2f6f3; }
+    :root {
+      color-scheme: light dark;
+      --paper: #f2f6f3;
+      --ink: #17302c;
+      --eyebrow: #4b6d61;
+      --muted: #50645b;
+      --surface: #fff;
+      --label: #dceddf;
+      --line: #dbe5de;
+      --brand: #216143;
+      --on-brand: #fff;
+      --focus: #b45309;
+      font-family: sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #101b1b;
+        --ink: #f3f5ec;
+        --eyebrow: var(--muted);
+        --muted: #bacac4;
+        --surface: #172525;
+        --label: #213a34;
+        --line: #3d5350;
+        --brand: #a5f0c5;
+        --on-brand: #11271d;
+        --focus: #ffd28e;
+      }
+    }
     * { box-sizing: border-box; }
     body { margin: 0; }
     main { min-height: 100vh; padding: 24px 20px; }
-    .eyebrow { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #4b6d61; }
+    .eyebrow { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--eyebrow); }
     h1 { font-size: 34px; letter-spacing: -.04em; margin: 14px 0 10px; }
-    .intro { color: #50645b; line-height: 1.5; font-size: 15px; }
-    .label { display: inline-block; background: #dceddf; padding: 6px 10px; border-radius: 30px; font-size: 12px; }
+    .intro { color: var(--muted); line-height: 1.5; font-size: 15px; }
+    .label { display: inline-block; background: var(--label); padding: 6px 10px; border-radius: 30px; font-size: 12px; }
     section { margin-top: 26px; }
     h2 { font-size: 18px; margin: 0 0 14px; }
-    article { background: white; border: 1px solid #dbe5de; border-radius: 12px; padding: 16px; margin: 10px 0; }
-    article p { margin: 8px 0 0; color: #50645b; line-height: 1.45; font-size: 14px; }
-    .time { color: #50645b; font-size: 12px; margin-left: 8px; }
-    button { font: inherit; border: 0; border-radius: 8px; color: white; background: #216143; padding: 10px 14px; cursor: pointer; }
-    button:focus-visible { outline: 3px solid #d39520; outline-offset: 3px; }
-    #note-status { font-size: 14px; color: #216143; }
+    article { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 10px 0; }
+    article p { margin: 8px 0 0; color: var(--muted); line-height: 1.45; font-size: 14px; }
+    .time { color: var(--muted); font-size: 12px; margin-left: 8px; }
+    button { font: inherit; border: 0; border-radius: 8px; color: var(--on-brand); background: var(--brand); padding: 10px 14px; cursor: pointer; }
+    button:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    #note-status { font-size: 14px; color: var(--brand); }
   </style>
 </head>
 <body><div id="app"><div id="demo-service">

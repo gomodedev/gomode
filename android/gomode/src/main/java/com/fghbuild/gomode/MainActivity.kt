@@ -3,6 +3,7 @@ package com.fghbuild.gomode
 
 import android.app.KeyguardManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
 import androidx.activity.ComponentActivity
@@ -147,6 +148,14 @@ class MainActivity : ComponentActivity() {
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) startCarCall()
         notificationDestination = ServiceNotificationPublisher.destination(intent)
         modelDownloadRequested = intent.getBooleanExtra(EXTRA_MODEL_DOWNLOAD, false)
+    }
+
+    // Keep the current screen and its edits when Android changes appearance.
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        theme.rebase()
+        window.setBackgroundDrawableResource(R.color.gomode_paper)
+        enableEdgeToEdge()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -305,14 +314,14 @@ internal fun LockedCarCall(
                         onClick = onEnd,
                         modifier = Modifier.fillMaxWidth().testTag("car_dial_end"),
                         colors =
-                            ButtonDefaults.buttonColors(
-                                containerColor =
-                                    if (failed) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.error
-                                    },
-                            ),
+                            if (failed) {
+                                ButtonDefaults.buttonColors()
+                            } else {
+                                ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError,
+                                )
+                            },
                     ) {
                         Icon(
                             if (failed) Icons.Filled.Close else Icons.Filled.CallEnd,

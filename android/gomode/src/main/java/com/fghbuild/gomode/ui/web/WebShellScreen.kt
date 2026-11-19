@@ -3,6 +3,7 @@
 // The shell enables touch pinch zoom and hides WebView's on-screen zoom buttons. WebView applies a
 // document's user-scalable=no and maximum-scale, so hosted pages that must stay zoomable keep the
 // default viewport.
+// WebView derives prefers-color-scheme from the app's Android theme. The hosted page owns its palette.
 package com.fghbuild.gomode.ui.web
 
 import android.annotation.SuppressLint
@@ -10,6 +11,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Message
@@ -45,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.viewinterop.AndroidView
@@ -72,6 +75,7 @@ internal fun WebShellScreen(
     onSharedAuthInvalidated: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     val page =
         remember(serviceSession) {
             serviceSession.page(context)
@@ -98,6 +102,7 @@ internal fun WebShellScreen(
             { mediaPermissionLauncher.launch(it) },
             { fileChooserLauncher.launch(it) },
         )
+        page.updateAppearance(configuration)
     }
     DisposableEffect(page, context) {
         onDispose { page.detach(attachment) }
@@ -151,6 +156,7 @@ internal class ServiceWebPage(
     private val applicationContext = context.applicationContext
     private val pageContext = android.content.MutableContextWrapper(applicationContext)
     private val context: Context get() = pageContext.baseContext
+    private var pageNightMode = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
     private val scope =
         kotlinx.coroutines.CoroutineScope(
             kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate,
@@ -601,6 +607,14 @@ internal class ServiceWebPage(
         onSharedAuthInvalidated = sharedAuthInvalidated
         launchMediaPermissions = mediaLauncher
         launchFileChooser = fileLauncher
+    }
+
+    fun updateAppearance(configuration: Configuration) {
+        val nightMode = configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (nightMode == pageNightMode) return
+        pageNightMode = nightMode
+        // Retained pages may be detached when Android delivers the configuration change.
+        webView.dispatchConfigurationChanged(configuration)
     }
 
     fun detach(expectedOwner: Any) {
