@@ -40,7 +40,27 @@ try {
     }
     & go -C (Join-Path $PSScriptRoot '..') install -ldflags='-H=windowsgui' ./cmd/voice-gateway
     if ($LASTEXITCODE -ne 0) { throw "Go install failed with exit code $LASTEXITCODE." }
-    if ($installedExe -ne $exe) { Copy-Item -LiteralPath $installedExe -Destination $exe -Force }
+    if ($installedExe -ne $exe) {
+        # Windows cannot overwrite an image that is still mapped, for example by
+        # a scanner after the gateway exits, but can rename it. The gateway's
+        # autoupdate startup removes this reserved sibling; see
+        # autoupdate/platform_windows.go.
+        $old = "$exe.autoupdate-old"
+        $staged = Join-Path $installDir ('.voice-gateway-' + [Guid]::NewGuid().ToString('N') + '.exe')
+        Copy-Item -LiteralPath $installedExe -Destination $staged
+        try {
+            if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force }
+            Move-Item -LiteralPath $exe -Destination $old
+            try {
+                Move-Item -LiteralPath $staged -Destination $exe
+            } catch {
+                Move-Item -LiteralPath $old -Destination $exe
+                throw
+            }
+        } finally {
+            if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+        }
+    }
 } finally {
     # Restart the task even when stopping, building, or copying fails, so a
     # failed rebuild keeps the previous executable running instead of leaving
