@@ -49,8 +49,9 @@ import java.util.regex.Pattern
 
 @RunWith(AndroidJUnit4::class)
 class WebShellSmokeTest : GoModeE2eTestBase() {
-    // The real prompt pauses the Activity and answers before it resumes. The emulator camera cannot
-    // open in WebView, so the microphone covers the shared camera and microphone path.
+    // The real prompt pauses the Activity and answers before it resumes; the page stays visible under it.
+    // The emulator camera cannot open in WebView, so the microphone covers the shared camera and
+    // microphone path.
     @Test
     @DeniedMicrophonePermission
     fun hostedMicrophoneCaptureStartsWhenTheAndroidPromptIsAllowed() {
@@ -69,14 +70,16 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
             """.trimIndent()
         }
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        requireNotNull(
-            device.wait(
-                Until.findObject(By.res(Pattern.compile(".*:id/permission_allow_foreground_only_button"))),
-                GOMODE_DEFAULT_TIMEOUT_MS,
-            ),
-        ) { "Microphone permission prompt did not appear" }.click()
-        // The Activity resume that settles the answer runs on the Compose test clock.
-        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { js("window.capture") != "\"pending\"" }
+        val allow =
+            requireNotNull(
+                device.wait(
+                    Until.findObject(By.res(Pattern.compile(".*:id/permission_allow_foreground_only_button"))),
+                    GOMODE_DEFAULT_TIMEOUT_MS,
+                ),
+            ) { "Microphone permission prompt did not appear" }
+        assertEquals("true", js("goModeHost.isPageVisible() && goModeHost.isMediaAllowed()"))
+        allow.click()
+        waitForDom("hosted capture settles after the prompt") { "window.capture !== 'pending'" }
         assertEquals("\"live\"", js("window.capture"))
     }
 
@@ -557,6 +560,7 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
 
             tapDomElement("#picker")
             pickDownload(name)
+            waitForDom("page is visible again after the picker") { "goModeHost.isPageVisible()" }
             waitForDom("file input received the picked document") {
                 "window.picked === ${"$name|image/png|$size".jsString()}"
             }

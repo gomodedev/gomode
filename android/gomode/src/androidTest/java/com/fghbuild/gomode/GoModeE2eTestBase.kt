@@ -3,6 +3,7 @@ package com.fghbuild.gomode
 
 import android.Manifest
 import android.webkit.WebView
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -124,11 +125,22 @@ abstract class GoModeE2eTestBase {
         script: () -> String,
     ) {
         val condition = script()
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
-        while (System.nanoTime() < deadline) {
-            if (js(wrapDomHelpers(condition)) == "true") return
-            Thread.sleep(POLL_INTERVAL_MS)
-        }
+        var nextPoll = 0L
+        // Waiting through Compose advances the test clock, so lifecycle and visibility effects keep
+        // running; a sleeping wait would freeze them. JavaScript still runs at most once per interval.
+        val met =
+            try {
+                composeRule.waitUntil(timeoutMs) {
+                    val now = System.nanoTime()
+                    if (now < nextPoll) return@waitUntil false
+                    nextPoll = now + TimeUnit.MILLISECONDS.toNanos(POLL_INTERVAL_MS)
+                    js(wrapDomHelpers(condition)) == "true"
+                }
+                true
+            } catch (_: ComposeTimeoutException) {
+                false
+            }
+        if (met) return
         val bodyText = js("document.body?.innerText.slice(0, 1000) ?? ''")
         error("Timed out waiting for DOM condition '$description': $condition\nBody: $bodyText")
     }

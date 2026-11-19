@@ -10,7 +10,7 @@
 //
 // Hidden pages stay authenticated and can publish frontend declarations. Native permission
 // requests, file pickers, JavaScript dialogs, external windows, and cross-origin navigation require
-// a selected page in a resumed, unlocked shell; otherwise the entry needs attention. Hidden pages
+// a selected page in a started, unlocked shell; otherwise the entry needs attention. Hidden pages
 // are paused individually, cannot take focus, mute audio, and stop hosted camera and microphone
 // captures, including cloned and removed tracks. Retention requires WebView audio muting and
 // document-start capture-guard support; unsupported WebView versions fail closed with an update

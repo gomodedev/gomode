@@ -53,7 +53,7 @@ internal class WebMediaPermissions(
         return missing
     }
 
-    // Android answers before the Activity resumes, so the answer waits for settle().
+    // Android may answer while the page is hidden, so the answer waits for settle().
     fun onPermissionsResult() {
         pending?.answered = true
     }

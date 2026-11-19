@@ -103,10 +103,12 @@ internal fun WebShellScreen(
         onDispose { page.detach(attachment) }
     }
     val visibilityScope = rememberCoroutineScope()
-    androidx.lifecycle.compose.LifecycleResumeEffect(page, visible, showWhenLocked) {
+    // A started Activity stays visible under the dialogs and sheets it opens, such as permission
+    // prompts and passkey sheets; pausing for them must not hide the page.
+    androidx.lifecycle.compose.LifecycleStartEffect(page, visible, showWhenLocked) {
         val visibilityJob =
             visibilityScope.launch {
-                // Keyguard dismissal can settle after the Activity resumes.
+                // Keyguard dismissal can settle after the Activity starts.
                 while (isActive && visible) {
                     page.setHostVisible(
                         attachment,
@@ -119,7 +121,7 @@ internal fun WebShellScreen(
                     delay(250)
                 }
             }
-        onPauseOrDispose {
+        onStopOrDispose {
             visibilityJob.cancel()
             page.setHostVisible(attachment, false)
         }
@@ -175,9 +177,9 @@ internal class ServiceWebPage(
     private var recoveryLoadInProgress = false
     private var appliedReloadToken: Int? = null
 
-    // Native prompts cover the Activity, so a file chooser or media permission request stays open across
-    // the pause it causes. Only the attached owner's result completes it; detaching the owner, navigating,
-    // or closing the page cancels it.
+    // A full-screen picker stops the Activity and hides the page, so a file chooser or media permission
+    // request stays open while hidden. Only the attached owner's result completes it; detaching the owner,
+    // navigating, or closing the page cancels it.
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var mediaPermissions = WebMediaPermissions(applicationContext)
     private var attachment: Any? = null
@@ -621,7 +623,7 @@ internal class ServiceWebPage(
         uris: Array<Uri>,
     ) {
         if (attachment !== owner) return
-        // Android delivers the result before onResume marks the page visible again.
+        // Android delivers the result before the started Activity marks the page visible again.
         val keyguardLocked = context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
         fileChooserCallback?.onReceiveValue(if (keyguardLocked) emptyArray() else uris)
         fileChooserCallback = null
@@ -680,7 +682,7 @@ internal class ServiceWebPage(
             webView.clearFocus()
             webView.onPause()
         }
-        // The permission prompt paused the Activity; decide its answer once capture is allowed again.
+        // Android may answer while the page is hidden; decide once capture is allowed again.
         if (nativeAllowed) mediaPermissions.settle()
     }
 
