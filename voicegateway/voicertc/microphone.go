@@ -34,14 +34,8 @@ type micAudioClock struct {
 	sequence  uint16
 	timestamp uint32
 	deadline  time.Time
-	rate      int
-}
-
-func (c *micAudioClock) sampleRate() int {
-	if c.rate > 0 {
-		return c.rate
-	}
-	return voicegateway.MicrophoneSampleRate
+	// rate is the decoded PCM rate the backend selected.
+	rate int
 }
 
 func (c *micAudioClock) newer(sequence uint16) bool {
@@ -53,13 +47,13 @@ func (c *micAudioClock) receive(sequence uint16, timestamp uint32, samples int, 
 	if c.started {
 		delta := int32(timestamp - c.timestamp) //nolint:gosec // RTP timestamp comparison wraps at 32 bits.
 		if delta > 0 {
-			gap = min(int(delta)/(opusRTPClockRate/c.sampleRate()), c.sampleRate())
+			gap = min(int(delta)/(opusRTPClockRate/c.rate), c.rate)
 		}
 	}
 	c.started = true
 	c.sequence = sequence
-	c.timestamp = timestamp + uint32(samples*(opusRTPClockRate/c.sampleRate())) //nolint:gosec // Decoded packets are bounded to 120ms; RTP timestamps wrap.
-	c.deadline = now.Add(time.Duration(samples)*time.Second/time.Duration(c.sampleRate()) + micIdleGrace)
+	c.timestamp = timestamp + uint32(samples*(opusRTPClockRate/c.rate)) //nolint:gosec // Decoded packets are bounded to 120ms; RTP timestamps wrap.
+	c.deadline = now.Add(time.Duration(samples)*time.Second/time.Duration(c.rate) + micIdleGrace)
 	return gap
 }
 
@@ -70,8 +64,8 @@ func (c *micAudioClock) idle(now time.Time) int {
 	frames := int64(now.Sub(c.deadline)/frameDuration) + 1
 	c.deadline = c.deadline.Add(time.Duration(frames) * frameDuration)
 	c.timestamp += uint32(frames * (opusRTPClockRate / 50)) //nolint:gosec // RTP media time intentionally wraps, including across long idle gaps.
-	maxGap := c.sampleRate() * int(maxMicGapDuration/time.Second)
-	return int(min(frames*int64(c.sampleRate())/50, int64(maxGap)))
+	maxGap := c.rate * int(maxMicGapDuration/time.Second)
+	return int(min(frames*int64(c.rate)/50, int64(maxGap)))
 }
 
 // audioRxLoop decodes Opus RTP and advances backend silence timers during DTX.
@@ -87,7 +81,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	}
 	rate := backend.inputSampleRate()
 	if rate == 0 {
-		rate = voicegateway.MicrophoneSampleRate
+		rate = voicegateway.LocalSpeechSampleRate
 	}
 	dec, err := newDecoder(rate)
 	if err != nil {

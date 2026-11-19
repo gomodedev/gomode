@@ -307,7 +307,7 @@ func TestRealtimeBridgeSessionSerializesSends(t *testing.T) {
 	release := make(chan struct{})
 	peer.sendRelease = release
 	peer.sendStarted = make(chan struct{}, 1)
-	s := &realtimeBridgeSession{ctx: t.Context(), realtime: peer, audioGate: newRealtimeAudioGate(voicegateway.MicrophoneSampleRate, realtimeAudioServer)}
+	s := &realtimeBridgeSession{ctx: t.Context(), realtime: peer, audioGate: newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioServer)}
 	micDone := make(chan error, 1)
 	go func() { micDone <- s.acceptMicPCM(t.Context(), testPCM(120, 2000)) }()
 	select {

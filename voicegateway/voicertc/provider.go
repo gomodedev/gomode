@@ -208,7 +208,7 @@ func (s *realtimeBridgeSession) inputSampleRate() int {
 	rt := s.realtime
 	s.mu.Unlock()
 	if rt == nil {
-		return voicegateway.MicrophoneSampleRate
+		return voicegateway.LocalSpeechSampleRate
 	}
 	return rt.Info().InputFormat.SampleRate
 }

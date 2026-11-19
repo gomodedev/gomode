@@ -80,7 +80,7 @@ type liveASR struct {
 //
 // The rate comes from voicegateway.TranscriptionSampleRate. A provider without
 // a qualified transcription session, such as Whistle or NeMo-Speech, receives
-// voicegateway.MicrophoneSampleRate, which both accept.
+// voicegateway.LocalSpeechSampleRate, which both accept.
 func newLiveASR(p genai.Provider, model string) *liveASR {
 	score := p.Scoreboard()
 	declined := slices.ContainsFunc(score.Realtime, func(r scoreboard.Realtime) bool {
@@ -89,7 +89,7 @@ func newLiveASR(p genai.Provider, model string) *liveASR {
 	})
 	rate := voicegateway.TranscriptionSampleRate(score, model)
 	if rate == 0 {
-		rate = voicegateway.MicrophoneSampleRate
+		rate = voicegateway.LocalSpeechSampleRate
 	}
 	return &liveASR{provider: p, model: model, languages: liveASRLanguages(p, model), inputLanguage: !declined, rate: rate}
 }

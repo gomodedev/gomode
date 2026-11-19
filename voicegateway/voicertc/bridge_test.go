@@ -605,7 +605,7 @@ func (s *fakeBackendSession) acceptClientMessage(ctx context.Context, _ []byte) 
 }
 
 func (s *fakeBackendSession) inputSampleRate() int {
-	return voicegateway.MicrophoneSampleRate
+	return voicegateway.LocalSpeechSampleRate
 }
 
 func (s *fakeBackendSession) acceptMicPCM(_ context.Context, pcm []byte) error {

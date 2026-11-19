@@ -28,7 +28,7 @@ func (s *stagedLlamaSession) close() error {
 
 func (c *genaiConversation) userAudio(ctx context.Context, pcm []byte) (llmStep, error) {
 	// Whole-utterance inference is bounded to thirty seconds per user message.
-	if len(pcm) == 0 || len(pcm)%2 != 0 || len(pcm) > 30*voicegateway.MicrophoneSampleRate*2 {
+	if len(pcm) == 0 || len(pcm)%2 != 0 || len(pcm) > 30*voicegateway.LocalSpeechSampleRate*2 {
 		return llmStep{}, errors.New("staged audio input must contain at most 30 seconds of mono PCM16")
 	}
 	wav := make([]byte, 44+len(pcm))
@@ -38,8 +38,8 @@ func (c *genaiConversation) userAudio(ctx context.Context, pcm []byte) (llmStep,
 	binary.LittleEndian.PutUint32(wav[16:], 16)
 	binary.LittleEndian.PutUint16(wav[20:], 1)
 	binary.LittleEndian.PutUint16(wav[22:], 1)
-	binary.LittleEndian.PutUint32(wav[24:], voicegateway.MicrophoneSampleRate)
-	binary.LittleEndian.PutUint32(wav[28:], voicegateway.MicrophoneSampleRate*2)
+	binary.LittleEndian.PutUint32(wav[24:], voicegateway.LocalSpeechSampleRate)
+	binary.LittleEndian.PutUint32(wav[28:], voicegateway.LocalSpeechSampleRate*2)
 	binary.LittleEndian.PutUint16(wav[32:], 2)
 	binary.LittleEndian.PutUint16(wav[34:], 16)
 	copy(wav[36:], "data")

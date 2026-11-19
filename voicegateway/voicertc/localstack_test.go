@@ -87,7 +87,7 @@ func TestEnergyVAD(t *testing.T) {
 
 	t.Run("speech then silence yields an utterance", func(t *testing.T) {
 		t.Parallel()
-		v := &energyVAD{}
+		v := newEnergyVAD(voicegateway.LocalSpeechSampleRate)
 		utt, active := v.push(loudPCM(200))
 		if utt != nil {
 			t.Fatalf("utterance during speech = %d bytes, want nil", len(utt))
@@ -106,7 +106,7 @@ func TestEnergyVAD(t *testing.T) {
 
 	t.Run("too-short speech is discarded", func(t *testing.T) {
 		t.Parallel()
-		v := &energyVAD{}
+		v := newEnergyVAD(voicegateway.LocalSpeechSampleRate)
 		v.push(loudPCM(vadFrameMS * 2)) // 40ms < vadMinSpeechMS
 		utt, _ := v.push(silencePCM(vadSilenceHangoverMS + vadFrameMS))
 		if utt != nil {
@@ -116,7 +116,7 @@ func TestEnergyVAD(t *testing.T) {
 
 	t.Run("leading silence is dropped", func(t *testing.T) {
 		t.Parallel()
-		v := &energyVAD{}
+		v := newEnergyVAD(voicegateway.LocalSpeechSampleRate)
 		utt, active := v.push(silencePCM(200))
 		if utt != nil || active {
 			t.Fatalf("silence produced utterance=%v active=%v, want nil/false", utt != nil, active)
@@ -2079,7 +2079,7 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func loudPCM(ms int) []byte {
-	return loudPCMAt(voicegateway.MicrophoneSampleRate, ms)
+	return loudPCMAt(voicegateway.LocalSpeechSampleRate, ms)
 }
 
 // loudPCMAt is a 300 Hz tone of ms milliseconds at rate.
@@ -2094,7 +2094,7 @@ func loudPCMAt(rate, ms int) []byte {
 }
 
 func silencePCM(ms int) []byte {
-	return make([]byte, voicegateway.MicrophoneSampleRate*2*ms/1000)
+	return make([]byte, voicegateway.LocalSpeechSampleRate*2*ms/1000)
 }
 
 type echoLLM struct{}

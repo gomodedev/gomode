@@ -31,12 +31,11 @@ import (
 // pacing; real model adapters arrive in a later phase.
 const (
 	vadFrameMS           = 20
-	vadFrameBytes        = voicegateway.MicrophoneSampleRate * 2 * vadFrameMS / 1000 // 640 bytes @16kHz mono
 	vadRMSThreshold      = 500.0
 	vadSilenceHangoverMS = 200
 	vadMinSpeechMS       = 100
-	// vadMaxUtteranceBytes bounds a direct-audio utterance to 30 seconds.
-	vadMaxUtteranceBytes = 30 * voicegateway.MicrophoneSampleRate * 2
+	// vadMaxUtteranceMS bounds a direct-audio utterance to 30 seconds.
+	vadMaxUtteranceMS = 30_000
 	// ttsChunkBytes is one 20ms frame of backend PCM output, fed to the sink.
 	ttsChunkBytes = backendOutputFrameBytes
 )
@@ -275,7 +274,7 @@ func (b *localStackRuntime) newSession(ctx context.Context, sessionID string, si
 	}
 	s.liveGate = newRealtimeAudioGate(s.inputSampleRate(), realtimeAudioManual)
 	if b.directAudio {
-		s.vad = &energyVAD{}
+		s.vad = newEnergyVAD(s.inputSampleRate())
 	}
 	return s
 }
@@ -452,12 +451,12 @@ func (s *localStackSession) checkLanguage(lang string) error {
 }
 
 // inputSampleRate is the recognizer's rate with live recognition; the energy
-// VAD and direct audio run at voicegateway.MicrophoneSampleRate.
+// VAD and direct audio run at voicegateway.LocalSpeechSampleRate.
 func (s *localStackSession) inputSampleRate() int {
 	if s.liveASR != nil {
 		return s.liveASR.rate
 	}
-	return voicegateway.MicrophoneSampleRate
+	return voicegateway.LocalSpeechSampleRate
 }
 
 func (s *localStackSession) acceptMicPCM(ctx context.Context, pcm []byte) error {
@@ -959,30 +958,38 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 
 // energyVAD is a simple RMS-energy voice activity detector with a silence
 // hangover. It is a placeholder until a real VAD/segmentation model is wired in.
-// An utterance beyond vadMaxUtteranceBytes retains one excess frame so its
+// It works at any PCM rate; only its frame and utterance sizes depend on it.
+// An utterance beyond vadMaxUtteranceMS retains one excess frame so its
 // consumer can reject overlong speech explicitly instead of accepting a
 // truncated command.
 type energyVAD struct {
-	leftover  []byte
-	utterance []byte
-	speaking  bool
-	speechMS  int
-	silenceMS int
+	frameBytes        int
+	maxUtteranceBytes int
+	leftover          []byte
+	utterance         []byte
+	speaking          bool
+	speechMS          int
+	silenceMS         int
 }
 
-// push consumes S16LE mono PCM at voicegateway.MicrophoneSampleRate. It returns a completed
+// newEnergyVAD returns a detector for S16LE mono PCM at rate.
+func newEnergyVAD(rate int) *energyVAD {
+	return &energyVAD{frameBytes: rate * 2 * vadFrameMS / 1000, maxUtteranceBytes: rate * 2 * vadMaxUtteranceMS / 1000}
+}
+
+// push consumes S16LE mono PCM at the detector's rate. It returns a completed
 // utterance when end-of-speech is detected, and whether speech is active for
 // barge-in detection.
 func (v *energyVAD) push(pcm []byte) ([]byte, bool) {
 	v.leftover = append(v.leftover, pcm...)
-	for len(v.leftover) >= vadFrameBytes {
-		frame := v.leftover[:vadFrameBytes]
-		v.leftover = v.leftover[vadFrameBytes:]
+	for len(v.leftover) >= v.frameBytes {
+		frame := v.leftover[:v.frameBytes]
+		v.leftover = v.leftover[v.frameBytes:]
 		if frameRMS(frame) > vadRMSThreshold {
 			v.speaking = true
 			v.speechMS += vadFrameMS
 			v.silenceMS = 0
-			if len(v.utterance) <= vadMaxUtteranceBytes {
+			if len(v.utterance) <= v.maxUtteranceBytes {
 				v.utterance = append(v.utterance, frame...)
 			}
 			continue
@@ -991,7 +998,7 @@ func (v *energyVAD) push(pcm []byte) ([]byte, bool) {
 			continue // drop leading silence
 		}
 		v.silenceMS += vadFrameMS
-		if len(v.utterance) <= vadMaxUtteranceBytes {
+		if len(v.utterance) <= v.maxUtteranceBytes {
 			v.utterance = append(v.utterance, frame...)
 		}
 		if v.silenceMS >= vadSilenceHangoverMS {

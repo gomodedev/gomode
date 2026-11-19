@@ -122,7 +122,7 @@ func (b *llamaRealtimeBackend) connect(ctx context.Context, id string, sink back
 		return &stagedLlamaSession{backendSession: b.staged.newSession(ctx, id, sink, false), slots: b.slots}, nil
 	}
 	life, cancel := context.WithCancel(ctx)
-	return &llamaRealtimeSession{backend: b, id: id, sink: sink, playback: playback, ctx: life, cancel: cancel, gate: newRealtimeAudioGate(voicegateway.MicrophoneSampleRate, realtimeAudioManual)}, nil
+	return &llamaRealtimeSession{backend: b, id: id, sink: sink, playback: playback, ctx: life, cancel: cancel, gate: newRealtimeAudioGate(voicegateway.LocalSpeechSampleRate, realtimeAudioManual)}, nil
 }
 
 type realtimePendingInput struct {
@@ -343,7 +343,7 @@ func (s *llamaRealtimeSession) acceptClientMessage(ctx context.Context, data []b
 }
 
 func (s *llamaRealtimeSession) inputSampleRate() int {
-	return voicegateway.MicrophoneSampleRate
+	return voicegateway.LocalSpeechSampleRate
 }
 
 func (s *llamaRealtimeSession) acceptMicPCM(ctx context.Context, pcm []byte) (err error) {
@@ -414,7 +414,7 @@ func (s *llamaRealtimeSession) enqueueLocked(input genai.RealtimeInputContent, t
 	// Share a 15-second PCM budget across audio, text, and control records.
 	// Charge control records as well, bounding allocations even without audio.
 	size = max(size, 64)
-	for s.pendingBytes+size > 15*voicegateway.MicrophoneSampleRate*2 {
+	for s.pendingBytes+size > 15*voicegateway.LocalSpeechSampleRate*2 {
 		var oldest *realtimeMicrophoneTurn
 		for i := range s.pending {
 			if mic := s.pending[i].microphone; mic != nil && !mic.sent {

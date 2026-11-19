@@ -140,7 +140,7 @@ func newFakeTranscription() *fakeTranscription {
 }
 
 func (s *fakeTranscription) Info() genai.RealtimeSessionInfo {
-	return genai.RealtimeSessionInfo{InputFormat: genai.AudioFormat{SampleRate: voicegateway.MicrophoneSampleRate}, InputModalities: []genai.Modality{genai.ModalityAudio}, TurnDetection: genai.RealtimeTurnManual, Capabilities: genai.RealtimeCapabilities{AudioCommit: true}}
+	return genai.RealtimeSessionInfo{InputFormat: genai.AudioFormat{SampleRate: voicegateway.LocalSpeechSampleRate}, InputModalities: []genai.Modality{genai.ModalityAudio}, TurnDetection: genai.RealtimeTurnManual, Capabilities: genai.RealtimeCapabilities{AudioCommit: true}}
 }
 
 func (s *fakeTranscription) Send(_ context.Context, in genai.RealtimeInput) error {
@@ -318,8 +318,8 @@ func TestLiveASR(t *testing.T) {
 				s, _, _ := newLiveTestSession(t, newLiveASR(&fakeTranscriber{score: tc.score, sessions: sessions}, "model"), "fr")
 				startSpeech(t, s)
 				audio := session.audioOption(t)
-				if audio.InputLanguage != tc.want || audio.InputFormat.SampleRate != voicegateway.MicrophoneSampleRate {
-					t.Fatalf("audio option %+v, want language %q at %d Hz", audio, tc.want, voicegateway.MicrophoneSampleRate)
+				if audio.InputLanguage != tc.want || audio.InputFormat.SampleRate != voicegateway.LocalSpeechSampleRate {
+					t.Fatalf("audio option %+v, want language %q at %d Hz", audio, tc.want, voicegateway.LocalSpeechSampleRate)
 				}
 			})
 		}
@@ -556,8 +556,8 @@ func TestLiveASR(t *testing.T) {
 				remote := peer(t, func(ctx context.Context, ws *websocket.Conn) {
 					writeGeminiFixture(t, ctx, ws, `{"type":"session.created"}`)
 					update := readGeminiFixture(t, ctx, ws)
-					if session, _ := update["session"].(map[string]any); session["language"] != "fr-FR" || session["sample_rate"] != float64(voicegateway.MicrophoneSampleRate) {
-						t.Errorf("session.update %v, want fr-FR at %d Hz", update, voicegateway.MicrophoneSampleRate)
+					if session, _ := update["session"].(map[string]any); session["language"] != "fr-FR" || session["sample_rate"] != float64(voicegateway.LocalSpeechSampleRate) {
+						t.Errorf("session.update %v, want fr-FR at %d Hz", update, voicegateway.LocalSpeechSampleRate)
 					}
 					writeGeminiFixture(t, ctx, ws, `{"type":"session.updated"}`)
 					if typ, _, err := ws.Read(ctx); err != nil || typ != websocket.MessageBinary {
@@ -635,8 +635,8 @@ func TestLiveASR(t *testing.T) {
 			// The peer follows vosk-server's protocol: a configuration, then
 			// one result per binary PCM message and per end of input.
 			remote := peer(t, func(ctx context.Context, ws *websocket.Conn) {
-				if config := readGeminiFixture(t, ctx, ws); !reflect.DeepEqual(config, map[string]any{"config": map[string]any{"sample_rate": float64(voicegateway.MicrophoneSampleRate)}}) {
-					t.Errorf("config %v, want %d Hz", config, voicegateway.MicrophoneSampleRate)
+				if config := readGeminiFixture(t, ctx, ws); !reflect.DeepEqual(config, map[string]any{"config": map[string]any{"sample_rate": float64(voicegateway.LocalSpeechSampleRate)}}) {
+					t.Errorf("config %v, want %d Hz", config, voicegateway.LocalSpeechSampleRate)
 				}
 				for {
 					typ, data, err := ws.Read(ctx)
@@ -674,8 +674,8 @@ func TestLiveASR(t *testing.T) {
 			remote := peer(t, func(ctx context.Context, ws *websocket.Conn) {
 				writeGeminiFixture(t, ctx, ws, `{"type":"session.created","session":`+session+`}`)
 				update := readGeminiFixture(t, ctx, ws)
-				if cfg, _ := update["session"].(map[string]any); cfg["language"] != "fr" || cfg["audio_format"].(map[string]any)["sample_rate"] != float64(voicegateway.MicrophoneSampleRate) {
-					t.Errorf("session.update %v, want French at %d Hz", update, voicegateway.MicrophoneSampleRate)
+				if cfg, _ := update["session"].(map[string]any); cfg["language"] != "fr" || cfg["audio_format"].(map[string]any)["sample_rate"] != float64(voicegateway.LocalSpeechSampleRate) {
+					t.Errorf("session.update %v, want French at %d Hz", update, voicegateway.LocalSpeechSampleRate)
 				}
 				writeGeminiFixture(t, ctx, ws, `{"type":"session.updated","session":`+session+`}`)
 				for msg := readGeminiFixture(t, ctx, ws); msg != nil && msg["type"] != "input_audio.append"; msg = readGeminiFixture(t, ctx, ws) {

@@ -104,7 +104,7 @@ func TestGeminiAudioGate(t *testing.T) {
 }
 
 func testPCM(ms int, amplitude uint16) []byte {
-	return testPCMAtRate(ms, amplitude, voicegateway.MicrophoneSampleRate)
+	return testPCMAtRate(ms, amplitude, voicegateway.LocalSpeechSampleRate)
 }
 
 func testPCMAtRate(ms int, amplitude uint16, rate int) []byte {
