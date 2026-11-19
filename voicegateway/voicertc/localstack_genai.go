@@ -233,7 +233,7 @@ func nemoSpeechEndpoint(ctx context.Context, remote string, model nemospeech.Mod
 //
 // Sessions are genai transcription sessions over vosk.Client: each 20 ms
 // message yields a draft or, at a pause Vosk detects, a phrase. The client has
-// no qualified scoreboard, so liveASR feeds micSampleRate and sends the
+// no qualified scoreboard, so liveASR feeds voicegateway.MicrophoneSampleRate and sends the
 // session language, which the model's single language must match.
 func voskEndpoint(ctx context.Context, remote string, model vosk.Model, launch serverLauncher) (localStackEndpoint, error) {
 	var runtime io.Closer

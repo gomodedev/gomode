@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers"
@@ -1524,7 +1526,7 @@ data: [DONE]
 		TextOnly: true,
 		LLM:      voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: llmServer.URL + "/v1/chat/completions", Model: "test-model"}},
 	}}
-	bridge, err := NewBridge(t.Context(), &config, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
+	bridge, err := NewBridge(t.Context(), &config, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2077,7 +2079,7 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func loudPCM(ms int) []byte {
-	return loudPCMAt(micSampleRate, ms)
+	return loudPCMAt(voicegateway.MicrophoneSampleRate, ms)
 }
 
 // loudPCMAt is a 300 Hz tone of ms milliseconds at rate.
@@ -2092,7 +2094,7 @@ func loudPCMAt(rate, ms int) []byte {
 }
 
 func silencePCM(ms int) []byte {
-	return make([]byte, micSampleRate*2*ms/1000)
+	return make([]byte, voicegateway.MicrophoneSampleRate*2*ms/1000)
 }
 
 type echoLLM struct{}

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gomodedev/gomode/httpserver/geoip/data"
+	geoipdata "github.com/gomodedev/gomode/httpserver/geoip/data/v1"
 )
 
 type prefixFetchSpy struct {
@@ -99,7 +99,7 @@ func loadTestOrigin(t *testing.T, dir, name string, fetch *prefixFetchSpy) *urlO
 
 func writeOriginCache(t *testing.T, dir, name string, updated time.Time, prefixes []string) {
 	path := filepath.Join(dir, "ip-origins.json")
-	raw, err := json.Marshal(map[string]data.Entry{name: {Updated: updated, Prefixes: prefixes}})
+	raw, err := json.Marshal(map[string]geoipdata.Entry{name: {Updated: updated, Prefixes: prefixes}})
 	if err != nil {
 		t.Fatalf("marshal origin cache: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestOriginCacheHistorical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var disk map[string]data.Entry
+	var disk map[string]geoipdata.Entry
 	if err := json.Unmarshal(raw, &disk); err != nil {
 		t.Fatal(err)
 	}

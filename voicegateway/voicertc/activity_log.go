@@ -11,8 +11,9 @@ import (
 	"sync"
 	"time"
 
-	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data/v1"
 
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -56,8 +57,11 @@ func (l *activityLog) record(source activitydata.Source, data []byte) error {
 	record, err := json.Marshal(activitydata.Record{
 		Timestamp: time.Now().UTC().Round(time.Millisecond),
 		Source:    source,
-		Kind:      string(envelope.Kind),
-		Message:   data,
+		// Every recorded message has the voicev2 shape decoded above: callers
+		// record client messages after clientProtocolMessage.
+		Protocol: voiceapi.ProtocolV2.String(),
+		Kind:     string(envelope.Kind),
+		Message:  data,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal voice activity record: %w", err)

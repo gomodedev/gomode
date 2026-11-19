@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data/v1"
 
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
@@ -75,7 +75,7 @@ func TestActivityLog(t *testing.T) {
 		if err := json.Unmarshal(line, &fields); err != nil {
 			t.Fatal(err)
 		}
-		if len(fields) != 4 || fields["ts"] == nil || fields["src"] == nil || fields["kind"] == nil || fields["msg"] == nil {
+		if len(fields) != 5 || fields["ts"] == nil || fields["src"] == nil || string(fields["protocol"]) != `"v2"` || fields["kind"] == nil || fields["msg"] == nil {
 			t.Fatalf("activity record shape = %s", line)
 		}
 		var record activitydata.Record

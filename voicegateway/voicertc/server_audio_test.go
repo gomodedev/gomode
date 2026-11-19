@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
+	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -103,7 +104,7 @@ func TestGeminiAudioGate(t *testing.T) {
 }
 
 func testPCM(ms int, amplitude uint16) []byte {
-	return testPCMAtRate(ms, amplitude, micSampleRate)
+	return testPCMAtRate(ms, amplitude, voicegateway.MicrophoneSampleRate)
 }
 
 func testPCMAtRate(ms int, amplitude uint16, rate int) []byte {

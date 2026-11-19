@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data/v1"
 
 	"github.com/coder/websocket"
 
@@ -124,13 +124,13 @@ func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		case <-sessionCtx.Done():
 			return nil
 		}
-		if err := log.record(activitydata.SourceClient, data); err != nil {
-			slog.ErrorContext(sessionCtx, "voicertc: activity log write failed", "session", sessionID, "err", err)
-			sink.sendGatewayError(sessionCtx, "activity log: "+err.Error())
-			return nil
-		}
 		normalized, err := clientProtocolMessage(protocol, data)
 		if err == nil {
+			if logErr := log.record(activitydata.SourceClient, normalized); logErr != nil {
+				slog.ErrorContext(sessionCtx, "voicertc: activity log write failed", "session", sessionID, "err", logErr)
+				sink.sendGatewayError(sessionCtx, "activity log: "+logErr.Error())
+				return nil
+			}
 			err = sess.acceptClientMessage(sessionCtx, normalized)
 		}
 		if err != nil {

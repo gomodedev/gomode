@@ -3,10 +3,13 @@
 package voicertc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,6 +20,7 @@ import (
 	"github.com/gomodedev/gomode/voicegateway"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data/v1"
 	"github.com/maruel/genai"
 )
 
@@ -186,6 +190,11 @@ func TestPublishedTextSessions(t *testing.T) {
 				}
 				writeMessage(t, ctx, conn, map[string]any{"kind": "session.setup", "voice": map[string]any{"name": "", "language": "en-US"}, "includeReasoning": true})
 				expectKind(t, ctx, conn, voicev2.MessageKindSessionReady)
+				// The setup is recorded before the backend starts, so it is on disk once ready arrives.
+				setup := recordedSetup(t, bridge.activityLogDir)
+				if setup.Protocol != "v2" || bytes.Contains(setup.Message, []byte("includeReasoning")) != (version == voiceapi.ProtocolV2) {
+					t.Fatalf("recorded setup = %s %s, want the normalized v2 shape", setup.Protocol, setup.Message)
+				}
 				select {
 				case got := <-llm.reasoning:
 					if got != (version == voiceapi.ProtocolV2) {
@@ -228,4 +237,25 @@ func TestPublishedTextSessions(t *testing.T) {
 			})
 		}
 	}
+}
+
+// recordedSetup returns the only session.setup record in dir's single activity log.
+func recordedSetup(t *testing.T, dir string) activitydata.Record {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("activity logs = %v, %v", paths, err)
+	}
+	data, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		var record activitydata.Record
+		if len(line) != 0 && json.Unmarshal(line, &record) == nil && record.Kind == string(voicev2.MessageKindSessionSetup) {
+			return record
+		}
+	}
+	t.Fatalf("no session.setup in %s", data)
+	return activitydata.Record{}
 }

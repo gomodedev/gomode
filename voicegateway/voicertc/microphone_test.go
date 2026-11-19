@@ -5,6 +5,8 @@ package voicertc
 import (
 	"testing"
 	"time"
+
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestMicAudioClock(t *testing.T) {
@@ -65,7 +67,7 @@ func TestMicAudioClock(t *testing.T) {
 	})
 	t.Run("turn endings during sparse packets", func(t *testing.T) {
 		var c micAudioClock
-		g := newRealtimeAudioGate(micSampleRate, realtimeAudioServer)
+		g := newRealtimeAudioGate(voicegateway.MicrophoneSampleRate, realtimeAudioServer)
 		var v energyVAD
 		now := time.Now()
 		for i := range 10 {

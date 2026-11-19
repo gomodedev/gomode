@@ -1,5 +1,7 @@
 // Adapts the frozen v1 event contract at RTC and text transport boundaries.
 
+// TODO(2026-11-26): delete this file with voiceapi.ProtocolV1; see its removal condition.
+
 package voicertc
 
 import (

@@ -310,7 +310,7 @@ func (s *negotiatedStackSession) inputSampleRate() int {
 	s.op.Lock()
 	defer s.op.Unlock()
 	if s.session == nil {
-		return micSampleRate
+		return voicegateway.MicrophoneSampleRate
 	}
 	return s.session.inputSampleRate()
 }

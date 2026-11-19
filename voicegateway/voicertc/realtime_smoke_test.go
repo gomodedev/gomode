@@ -185,8 +185,8 @@ func generateSmokeAudio(ctx context.Context, t *testing.T, cacheRoot string) []b
 		t.Fatalf("llama-tts: %v", err)
 	}
 	pcm, rate := readPCM16WAV(t, path)
-	if rate != micSampleRate {
-		pcm = resamplePCM16(pcm, rate, micSampleRate)
+	if rate != voicegateway.MicrophoneSampleRate {
+		pcm = resamplePCM16(pcm, rate, voicegateway.MicrophoneSampleRate)
 	}
 	return pcm
 }

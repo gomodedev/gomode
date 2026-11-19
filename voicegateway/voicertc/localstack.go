@@ -23,6 +23,7 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/language/display"
 
+	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -30,12 +31,12 @@ import (
 // pacing; real model adapters arrive in a later phase.
 const (
 	vadFrameMS           = 20
-	vadFrameBytes        = micSampleRate * 2 * vadFrameMS / 1000 // 640 bytes @16kHz mono
+	vadFrameBytes        = voicegateway.MicrophoneSampleRate * 2 * vadFrameMS / 1000 // 640 bytes @16kHz mono
 	vadRMSThreshold      = 500.0
 	vadSilenceHangoverMS = 200
 	vadMinSpeechMS       = 100
 	// vadMaxUtteranceBytes bounds a direct-audio utterance to 30 seconds.
-	vadMaxUtteranceBytes = 30 * micSampleRate * 2
+	vadMaxUtteranceBytes = 30 * voicegateway.MicrophoneSampleRate * 2
 	// ttsChunkBytes is one 20ms frame of backend PCM output, fed to the sink.
 	ttsChunkBytes = backendOutputFrameBytes
 )
@@ -451,12 +452,12 @@ func (s *localStackSession) checkLanguage(lang string) error {
 }
 
 // inputSampleRate is the recognizer's rate with live recognition; the energy
-// VAD and direct audio run at micSampleRate.
+// VAD and direct audio run at voicegateway.MicrophoneSampleRate.
 func (s *localStackSession) inputSampleRate() int {
 	if s.liveASR != nil {
 		return s.liveASR.rate
 	}
-	return micSampleRate
+	return voicegateway.MicrophoneSampleRate
 }
 
 func (s *localStackSession) acceptMicPCM(ctx context.Context, pcm []byte) error {
@@ -969,7 +970,7 @@ type energyVAD struct {
 	silenceMS int
 }
 
-// push consumes S16LE mono PCM at micSampleRate. It returns a completed
+// push consumes S16LE mono PCM at voicegateway.MicrophoneSampleRate. It returns a completed
 // utterance when end-of-speech is detected, and whether speech is active for
 // barge-in detection.
 func (v *energyVAD) push(pcm []byte) ([]byte, bool) {

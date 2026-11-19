@@ -5,6 +5,8 @@ package voicertc
 import (
 	"math"
 	"testing"
+
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestOpusEncoder(t *testing.T) {
@@ -40,7 +42,7 @@ func TestOpusEncoder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dec, err := newDecoder(micSampleRate)
+			dec, err := newDecoder(voicegateway.MicrophoneSampleRate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -52,8 +54,8 @@ func TestOpusEncoder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(pcm) != micSampleRate/50 {
-				t.Fatalf("samples = %d, want %d", len(pcm), micSampleRate/50)
+			if len(pcm) != voicegateway.MicrophoneSampleRate/50 {
+				t.Fatalf("samples = %d, want %d", len(pcm), voicegateway.MicrophoneSampleRate/50)
 			}
 			var energy float64
 			for _, s := range pcm {
@@ -69,7 +71,7 @@ func TestOpusEncoder(t *testing.T) {
 func TestOpusDecoder(t *testing.T) {
 	t.Run("Decode", func(t *testing.T) {
 		t.Run("dtx packet decodes one quiet frame", func(t *testing.T) {
-			d, err := newDecoder(micSampleRate)
+			d, err := newDecoder(voicegateway.MicrophoneSampleRate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,8 +82,8 @@ func TestOpusDecoder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(pcm) != micSampleRate/50 {
-				t.Fatalf("samples = %d, want %d", len(pcm), micSampleRate/50)
+			if len(pcm) != voicegateway.MicrophoneSampleRate/50 {
+				t.Fatalf("samples = %d, want %d", len(pcm), voicegateway.MicrophoneSampleRate/50)
 			}
 			for i, s := range pcm {
 				if s < -100 || s > 100 {
@@ -105,7 +107,7 @@ func TestOpusDecoder(t *testing.T) {
 		})
 
 		t.Run("truncated packet is an error", func(t *testing.T) {
-			d, err := newDecoder(micSampleRate)
+			d, err := newDecoder(voicegateway.MicrophoneSampleRate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +118,7 @@ func TestOpusDecoder(t *testing.T) {
 		})
 
 		t.Run("empty packet is an error", func(t *testing.T) {
-			d, err := newDecoder(micSampleRate)
+			d, err := newDecoder(voicegateway.MicrophoneSampleRate)
 			if err != nil {
 				t.Fatal(err)
 			}

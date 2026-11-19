@@ -1,5 +1,5 @@
-// Package data defines the on-disk named IP-origin cache.
-package data
+// Package v1 defines version 1 of the on-disk named IP-origin cache.
+package v1
 
 import "time"
 

@@ -34,6 +34,8 @@ import (
 	"testing"
 	"time"
 
+	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/maruel/genai"
 	"github.com/maruel/genaipy/providers/kittentts"
 	"github.com/maruel/genaipy/providers/kittentts/kittenttssrv"
@@ -318,7 +320,7 @@ func TestSmokeVoiceGatewayToolCall(t *testing.T) {
 	}
 
 	startup := time.Now()
-	bridge, err := NewBridge(runtimeCtx, &cfg, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
+	bridge, err := NewBridge(runtimeCtx, &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	t.Logf("local stack startup: %s", smokeElapsed(startup))
 	if err != nil {
 		t.Fatal(err)
@@ -652,10 +654,10 @@ func upsample24PCMTo48Samples(pcm []byte, trailingSilenceMS int) []int16 {
 
 func downsample24to16(pcm []byte) []byte {
 	samples24 := len(pcm) / 2
-	samples16 := samples24 * micSampleRate / backendOutputSampleRate
+	samples16 := samples24 * voicegateway.MicrophoneSampleRate / backendOutputSampleRate
 	out := make([]byte, samples16*2)
 	for i := range samples16 {
-		src := i * backendOutputSampleRate / micSampleRate
+		src := i * backendOutputSampleRate / voicegateway.MicrophoneSampleRate
 		copy(out[i*2:], pcm[src*2:src*2+2])
 	}
 	return out

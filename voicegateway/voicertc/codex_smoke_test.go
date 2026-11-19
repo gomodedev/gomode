@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/coder/websocket"
 	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
@@ -41,7 +43,7 @@ func TestSmokeCodexSubscriptionTextSession(t *testing.T) {
 	if len(cfg.LLM) != 1 {
 		t.Fatal("configured Codex subscription unavailable; a file-backed Codex login is required")
 	}
-	bridge, err := NewBridge(ctx, &cfg, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
+	bridge, err := NewBridge(ctx, &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +153,7 @@ func TestSmokeChatTokenUsage(t *testing.T) {
 			t.Cleanup(cancel)
 			config := voicegateway.ResolvedConfig{Runtime: testRuntime}
 			config.Realtime, config.Pipelines, config.LLM = nil, nil, []voicegateway.LLMConfig{choice}
-			bridge, err := NewBridge(ctx, &config, voicegateway.WebRTCConfig{DisableUPnP: true}, t.TempDir())
+			bridge, err := NewBridge(ctx, &config, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

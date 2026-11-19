@@ -14,23 +14,23 @@ import (
 // RealtimeConfig configures a native audio pipeline. For llama.cpp, endpoint
 // capacity is an operator-declared reservation limit, not discovery.
 type RealtimeConfig struct {
-	ID    string `toml:"id"`
-	Label string `toml:"label"`
+	ID    string
+	Label string
 	ModelConfig
 
 	// Staged uses llama.cpp chat generation with audio input and thinking,
 	// followed by speech synthesis on the same model instead of realtime output.
 	// Resolve selects effort "medium" when omitted.
-	Staged bool `toml:"staged"`
+	Staged bool
 
-	CacheDir string `toml:"cache_dir"`
-	Threads  int    `toml:"threads"`
+	CacheDir string
+	Threads  int
 	// Slots is 1 to 16; Resolve selects 1 when omitted.
-	Slots int `toml:"slots"`
+	Slots int
 	// ContextSize is tokens per slot, 512 to 131072, and is required for a
 	// managed server. A realtime conversation that outgrows it ends.
-	ContextSize     int   `toml:"context_size"`
-	MaxOutputTokens int64 `toml:"max_output_tokens"`
+	ContextSize     int
+	MaxOutputTokens int64
 }
 
 // CacheDirectory returns the configured managed runtime cache or its platform default.

@@ -40,6 +40,7 @@ func run() error {
 		apisdkgen.NewAPI("sdk/oauth", "OAuthSDK",
 			apisdkgen.NewVersion("v1", "oauth", oauth.SDKAPI)),
 		apisdkgen.NewAPI("sdk/voicegateway", "VoiceGatewaySDK",
+			// TODO(2026-11-26): drop v1 with voiceapi.ProtocolV1; see its removal condition.
 			apisdkgen.NewVersion("v1", "voicegateway/api/v1", voicev1.SDKAPI),
 			apisdkgen.NewVersion("v2", "voicegateway/api/v2", voicev2.SDKAPI)),
 	} {

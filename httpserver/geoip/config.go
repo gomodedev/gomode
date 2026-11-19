@@ -16,8 +16,8 @@ import (
 // Config selects optional country enrichment and origin filtering. Immutable
 // after startup. Hosts own database path expansion and the cache directory path.
 type Config struct {
-	DB           string   `toml:"geo_db"`
-	AllowOrigins []string `toml:"allow_origins"`
+	DB           string
+	AllowOrigins []string
 }
 
 // Validate checks origin tokens and requires geo_db when filtering by country.

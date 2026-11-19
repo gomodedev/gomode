@@ -22,10 +22,12 @@ import (
 	"sync"
 	"time"
 
+	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/genaipy/providers/kittentts"
 
-	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data"
+	activitydata "github.com/gomodedev/gomode/voicegateway/voicertc/data/v1"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
@@ -39,9 +41,6 @@ import (
 const (
 	// sessionLifetime caps a session at 30 minutes. Activity does not extend it.
 	sessionLifetime = 30 * time.Minute
-
-	// micSampleRate is the default decoded microphone PCM rate.
-	micSampleRate = voicegateway.MicrophoneSampleRate
 
 	// backendOutputSampleRate is the assistant PCM rate consumed by the RTP encoder.
 	backendOutputSampleRate = 24000
@@ -117,7 +116,7 @@ type Bridge struct {
 // Choice discovery and transport setup happen during construction. Managed local
 // model runtimes load on first use through the shared capacity and idle-eviction
 // pool. A construction failure closes all backends already initialized.
-func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, webrtc voicegateway.WebRTCConfig, activityLogDir string) (*Bridge, error) {
+func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, webrtc configdata.WebRTC, activityLogDir string) (*Bridge, error) {
 	if activityLogDir == "" {
 		return nil, errors.New("voice activity log directory is required")
 	}
@@ -195,7 +194,7 @@ func NewBridge(ctx context.Context, cfg *voicegateway.ResolvedConfig, webrtc voi
 	return b, nil
 }
 
-func newBridgeWithBackend(ctx context.Context, backend backendConnector, webrtc voicegateway.WebRTCConfig, activityLogDir string) (*Bridge, error) {
+func newBridgeWithBackend(ctx context.Context, backend backendConnector, webrtc configdata.WebRTC, activityLogDir string) (*Bridge, error) {
 	if backend == nil {
 		return nil, errors.New("voice backend is required")
 	}
@@ -461,13 +460,13 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 			if backendSession == nil {
 				return
 			}
-			if err := sess.activityLog.record(activitydata.SourceClient, msg.Data); err != nil {
-				slog.ErrorContext(sessionCtx, "voicertc: activity log write failed", "session", sess.id, "err", err)
-				sess.sendGatewayError(sessionCtx, "activity log: "+err.Error())
-				return
-			}
 			data, err := clientProtocolMessage(sess.protocol, msg.Data)
 			if err == nil {
+				if logErr := sess.activityLog.record(activitydata.SourceClient, data); logErr != nil {
+					slog.ErrorContext(sessionCtx, "voicertc: activity log write failed", "session", sess.id, "err", logErr)
+					sess.sendGatewayError(sessionCtx, "activity log: "+logErr.Error())
+					return
+				}
 				err = backendSession.acceptClientMessage(sessionCtx, data)
 			}
 			if err != nil {

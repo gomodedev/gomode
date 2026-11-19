@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gomodedev/gomode/httpserver/geoip/data"
+	geoipdata "github.com/gomodedev/gomode/httpserver/geoip/data/v1"
 )
 
 const originCacheMaxAge = 24 * time.Hour
@@ -19,13 +19,13 @@ const originCacheMaxAge = 24 * time.Hour
 type originCache struct {
 	mu   sync.Mutex
 	path string
-	data map[string]data.Entry
+	data map[string]geoipdata.Entry
 }
 
 // openOriginCache discards malformed files atomically so a refetch can rebuild
 // them. Missing files are empty; other filesystem errors are returned.
 func openOriginCache(path string) (*originCache, error) {
-	c := &originCache{path: path, data: make(map[string]data.Entry)}
+	c := &originCache{path: path, data: make(map[string]geoipdata.Entry)}
 	f, err := os.Open(path) //nolint:gosec // Operator-owned cache path.
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -38,7 +38,7 @@ func openOriginCache(path string) (*originCache, error) {
 	if err != nil && !errors.Is(err, errDocumentTooLarge) {
 		return c, err
 	}
-	var disk map[string]data.Entry
+	var disk map[string]geoipdata.Entry
 	if err == nil {
 		err = json.Unmarshal(raw, &disk)
 	}
@@ -90,7 +90,7 @@ func (c *originCache) set(name string, prefixes []netip.Prefix) error {
 	for _, p := range prefixes {
 		prefixStrings = append(prefixStrings, p.Masked().String())
 	}
-	c.data[name] = data.Entry{Updated: time.Now(), Prefixes: prefixStrings}
+	c.data[name] = geoipdata.Entry{Updated: time.Now(), Prefixes: prefixStrings}
 	return c.flushLocked()
 }
 

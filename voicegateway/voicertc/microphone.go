@@ -10,6 +10,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/gomodedev/gomode/voicegateway"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -40,7 +41,7 @@ func (c *micAudioClock) sampleRate() int {
 	if c.rate > 0 {
 		return c.rate
 	}
-	return micSampleRate
+	return voicegateway.MicrophoneSampleRate
 }
 
 func (c *micAudioClock) newer(sequence uint16) bool {
@@ -86,7 +87,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	}
 	rate := backend.inputSampleRate()
 	if rate == 0 {
-		rate = micSampleRate
+		rate = voicegateway.MicrophoneSampleRate
 	}
 	dec, err := newDecoder(rate)
 	if err != nil {

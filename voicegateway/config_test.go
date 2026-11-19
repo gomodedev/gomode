@@ -14,12 +14,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
+
+	"github.com/gomodedev/gomode/httpserver/geoip"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/base"
 	"github.com/maruel/genai/providers"
@@ -27,7 +31,6 @@ import (
 	"github.com/maruel/genai/providers/openrouter"
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/vosk"
-	"github.com/pelletier/go-toml/v2"
 )
 
 // testRuntime holds the limits Resolve selects when they are omitted.
@@ -37,66 +40,56 @@ func TestConfig(t *testing.T) {
 	t.Parallel()
 	t.Run("Resolve", func(t *testing.T) {
 		t.Parallel()
-		t.Run("embedded host schema", func(t *testing.T) {
+		t.Run("declarations", func(t *testing.T) {
 			t.Parallel()
-			type hostConfig struct {
-				Config  Config `toml:"voice-gateway"`
-				Address string `toml:"address"`
-			}
-			var host hostConfig
-			decoder := toml.NewDecoder(strings.NewReader(`address = "127.0.0.1:9000"
-[[voice-gateway.realtime]]
+			cfg, err := parseConfig([]byte(`[[realtime]]
 id = "native"
 label = "Native"
 provider = "gemini"
 model = "gemini-3.8-live"
-[[voice-gateway.llm]]
+[[llm]]
 id = "zulu"
 label = "Zulu"
 provider = "deepseek"
 model = "reasoning-z"
-[[voice-gateway.llm]]
+[[llm]]
 id = "alpha"
 label = "Alpha"
 provider = "deepseek"
 model = "reasoning-a"
-[[voice-gateway.asr]]
+[[asr]]
 id = "recognition"
 provider = "mistral"
 model = "voxtral-mini-transcribe-realtime-3"
-[[voice-gateway.asr]]
+[[asr]]
 id = "alternate"
 provider = "mistral"
 model = "voxtral-mini-transcribe-realtime-latest"
-[[voice-gateway.tts]]
+[[tts]]
 id = "speech"
 provider = "gemini"
 model = "gemini-3.8-flash-lite-tts"
 voice = "Kore"
-[[voice-gateway.tts]]
+[[tts]]
 id = "alternate"
 provider = "gemini"
 model = "gemini-3.8-flash-lite-tts"
 voice = "Orus"
-[[voice-gateway.voice]]
+[[voice]]
 id = "mixed-preset"
 label = "Mixed preset"
 asr = "recognition"
 llm = "zulu"
 tts = "speech"
-`))
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&host); err != nil {
-				t.Fatal(err)
-			}
-			if host.Address != "127.0.0.1:9000" {
-				t.Fatalf("host address = %q", host.Address)
-			}
-			before, err := json.Marshal(host.Config)
+`), "voice-choices.toml")
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolved, err := host.Config.Resolve()
+			before, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := cfg.Resolve()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +109,7 @@ tts = "speech"
 			if preset.LLM.Model != "reasoning-z" || preset.ASR.Engine != ASREngineGenAI || preset.TTS.Engine != TTSEngineGenAI || preset.TTS.Voice != "Kore" {
 				t.Fatalf("preset = %+v", preset)
 			}
-			after, err := json.Marshal(host.Config)
+			after, err := json.Marshal(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +117,7 @@ tts = "speech"
 				t.Fatal("resolution changed host declarations")
 			}
 			resolved.Realtime[0].Label = "Changed snapshot"
-			if host.Config.Realtime[0].Label != "Native" {
+			if cfg.Realtime[0].Label != "Native" {
 				t.Fatal("resolved realtime slice aliases host declarations")
 			}
 		})
@@ -988,7 +981,7 @@ public_key = %q
 		}
 		t.Run("invalid", func(t *testing.T) {
 			for _, raw := range []string{"turn:relay.example:3478", "stun.example:3478", "stun:", "stun:host:0", "stun:host:x", "stun://host"} {
-				cfg := ServerConfig{WebRTCConfig: WebRTCConfig{STUNServers: []string{raw}}}
+				cfg := ServerConfig{WebRTC: configdata.WebRTC{STUNServers: []string{raw}}}
 				if err := cfg.Validate(); err == nil || !strings.HasPrefix(err.Error(), "server.stun_servers[0]: ") {
 					t.Errorf("%q: error = %v", raw, err)
 				}
@@ -1933,4 +1926,126 @@ func loadResolvedConfig(t *testing.T, path string) ResolvedConfig {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// TestConfigEveryKey reads one value for every config.toml and voice-choices.toml
+// key, so a key the schema decodes but the conversion drops fails here.
+func TestConfigEveryKey(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	geoDB := filepath.Join(dir, "geo.mmdb")
+	settings := `auto_update = "10 3 * * *"
+[server]
+geo_db = "` + filepath.ToSlash(geoDB) + `"
+allow_origins = ["10.0.0.0/8"]
+webrtc_udp_port = 40000
+stun_servers = ["stun:stun.example.com:3478"]
+disable_upnp = true
+http = ":8080"
+external_url = "https://voice.example.com"
+trusted_proxies = ["192.0.2.0/24"]
+debug_frontend = true
+log_level = "debug"
+[[trusted_issuers]]
+service = "example"
+issuer = "https://issuer.example.com"
+public_key = "key"
+oauth = true
+scope = "voice"
+[debug]
+trace = "trace.out"
+`
+	choices := `[local_stack_runtime]
+idle_timeout_seconds = 60
+max_instances = 2
+[[realtime]]
+id = "native"
+label = "Native"
+llamacppsrv = true
+provider = "llamacpp"
+auth = "codex"
+remote = "http://127.0.0.1:8081"
+model = "org/model"
+effort = "high"
+openrouter_sort = "latency"
+api_key_name = "REALTIME_KEY"
+staged = true
+cache_dir = "cache"
+threads = 4
+slots = 3
+context_size = 4096
+max_output_tokens = 512
+[[llm]]
+id = "chat"
+label = "Chat"
+provider = "openaicompatible"
+model = "chat-model"
+api_key_name = "CHAT_KEY"
+context_size = 8192
+[[asr]]
+id = "ears"
+label = "Ears"
+engine = "vosk"
+provider = "p"
+remote = "ws://127.0.0.1:2700"
+model = "vosk-model"
+context_size = 1024
+[[tts]]
+id = "mouth"
+label = "Mouth"
+engine = "kittentts"
+provider = "p"
+remote = "r"
+model = "kitten"
+voice = "Kore"
+context_size = 2048
+[[voice]]
+id = "preset"
+label = "Preset"
+asr = "ears"
+llm = "chat"
+tts = "mouth"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ConfigFileName), []byte(choices), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := configFile{
+		Config: Config{
+			Runtime: RuntimeConfig{IdleTimeoutSeconds: 60, MaxInstances: 2},
+			Realtime: []RealtimeConfig{{
+				ID: "native", Label: "Native",
+				ModelConfig: ModelConfig{
+					LlamaCPPServer: true, Provider: "llamacpp", Auth: "codex", Remote: "http://127.0.0.1:8081", Model: "org/model",
+					Effort: "high", OpenRouterSort: "latency", APIKeyName: "REALTIME_KEY",
+				},
+				Staged: true, CacheDir: "cache", Threads: 4, Slots: 3, ContextSize: 4096, MaxOutputTokens: 512,
+			}},
+			ASR:   []ASRConfig{{ID: "ears", Label: "Ears", Engine: ASREngineVosk, Provider: "p", Remote: "ws://127.0.0.1:2700", Model: "vosk-model", ContextSize: 1024}},
+			LLM:   []LLMConfig{{ID: "chat", Label: "Chat", ModelConfig: ModelConfig{Provider: "openaicompatible", Model: "chat-model", APIKeyName: "CHAT_KEY"}, ContextSize: 8192}},
+			TTS:   []TTSConfig{{ID: "mouth", Label: "Mouth", Engine: TTSEngineKittenTTS, Provider: "p", Remote: "r", Model: "kitten", Voice: "Kore", ContextSize: 2048}},
+			Voice: []VoiceConfig{{ID: "preset", Label: "Preset", ASR: "ears", LLM: "chat", TTS: "mouth"}},
+		},
+		AutoUpdate: "10 3 * * *",
+		Server: ServerConfig{
+			Config:         geoip.Config{DB: geoDB, AllowOrigins: []string{"10.0.0.0/8"}},
+			WebRTC:         configdata.WebRTC{UDPPort: 40000, STUNServers: []string{"stun:stun.example.com:3478"}, DisableUPnP: true},
+			HTTP:           ":8080",
+			ExternalURL:    "https://voice.example.com",
+			TrustedProxies: []string{"192.0.2.0/24"},
+			DebugFrontend:  true,
+			LogLevel:       slog.LevelDebug,
+		},
+		TrustedIssuers: []TrustedIssuerConfig{{Service: "example", Issuer: "https://issuer.example.com", PublicKey: "key", OAuth: true, Scope: "voice"}},
+		Debug:          DebugConfig{Trace: "trace.out"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoadConfig() =\n%+v\nwant\n%+v", got, want)
+	}
 }

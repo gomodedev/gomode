@@ -1,5 +1,7 @@
 // Preserves the published v1 HTTP contract over current gateway backends.
 
+// TODO(2026-11-26): delete this file with voiceapi.ProtocolV1; see its removal condition.
+
 package voicegateway
 
 import (

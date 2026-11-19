@@ -1,5 +1,8 @@
 // Exported request and response types for the voice gateway API.
 
+// Package v1 is the voice gateway contract published with Go Mode v0.3.0.
+//
+// TODO(2026-11-26): delete this package with voiceapi.ProtocolV1; see its removal condition.
 package v1
 
 import (

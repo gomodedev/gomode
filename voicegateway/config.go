@@ -12,13 +12,11 @@ import (
 	"io/fs"
 	"iter"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +35,7 @@ import (
 	"github.com/gomodedev/gomode/autoupdate"
 	"github.com/gomodedev/gomode/httpserver"
 	"github.com/gomodedev/gomode/httpserver/geoip"
+	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
 )
 
 // Config declares reusable voice stages and presets. ReadConfig loads it from
@@ -59,27 +58,27 @@ import (
 // disappears. Before creating the bridge it calls
 // Available, checks caller cancellation, and validates the filtered result; an
 // empty catalog prevents startup. It passes the resolved configuration and a
-// validated WebRTCConfig to voicertc.NewBridge. The host owns its listener,
+// validated configdata.WebRTC to voicertc.NewBridge. The host owns its listener,
 // deployment mode, authentication, session admission, and the private
 // directory and lifetime of transcript activity logs.
 type Config struct {
-	Runtime  RuntimeConfig    `toml:"local_stack_runtime"`
-	Realtime []RealtimeConfig `toml:"realtime"`
+	Runtime  RuntimeConfig
+	Realtime []RealtimeConfig
 	// ASR, LLM, and TTS entries are offered in declaration order.
-	ASR   []ASRConfig   `toml:"asr"`
-	LLM   []LLMConfig   `toml:"llm"`
-	TTS   []TTSConfig   `toml:"tts"`
-	Voice []VoiceConfig `toml:"voice"`
+	ASR   []ASRConfig
+	LLM   []LLMConfig
+	TTS   []TTSConfig
+	Voice []VoiceConfig
 }
 
 // VoiceConfig names the stages composed into one preset by their ids. ASR and
 // TTS are optional; an omitted stage requires client-owned speech.
 type VoiceConfig struct {
-	ID    string `toml:"id"`
-	Label string `toml:"label"`
-	ASR   string `toml:"asr"`
-	LLM   string `toml:"llm"`
-	TTS   string `toml:"tts"`
+	ID    string
+	Label string
+	ASR   string
+	LLM   string
+	TTS   string
 }
 
 // ResolvedConfig holds effective runtime settings produced by Config.Resolve.
@@ -323,27 +322,27 @@ func (c *ModelConfig) usesDefaultProviderEndpoint() bool {
 // an openaicompatible endpoint.
 type ModelConfig struct {
 	// LlamaCPPServer starts a managed llama.cpp server instead of connecting to Remote.
-	LlamaCPPServer bool   `toml:"llamacppsrv"`
-	Provider       string `toml:"provider"`
+	LlamaCPPServer bool
+	Provider       string
 	// Auth selects the existing Codex subscription when set to "codex" on
 	// openai or openairesponses. Empty preserves API-key authentication.
-	Auth openairesponses.Auth `toml:"auth"`
+	Auth openairesponses.Auth
 	// Remote is a server origin, except for openaicompatible, which requires the
 	// complete chat completions endpoint URL, including its path.
-	Remote string `toml:"remote"`
-	Model  string `toml:"model"`
+	Remote string
+	Model  string
 	// Effort selects off, low, medium, high, xhigh, or max. Empty
 	// omits the effort option, preserving provider defaults. Supported levels
 	// depend on the provider and model; off requests the lowest supported effort.
-	Effort genai.EffortLevel `toml:"effort"`
+	Effort genai.EffortLevel
 	// OpenRouterSort prioritizes OpenRouter providers by latency, price, or
 	// throughput. Empty preserves OpenRouter's default routing.
-	OpenRouterSort openrouter.ProviderSort `toml:"openrouter_sort"`
+	OpenRouterSort openrouter.ProviderSort
 	// APIKeyName names the environment variable containing the bearer token
 	// for an openaicompatible endpoint. The credential is never stored in TOML.
 	// A named variable must be nonempty in the gateway process environment.
 	// Authenticated requests, including redirects, are confined to Remote.
-	APIKeyName string `toml:"api_key_name"`
+	APIKeyName string
 }
 
 // NewProvider constructs the configured client and identifies subscription
@@ -461,13 +460,13 @@ func (c *ModelConfig) validate(prefix string) error {
 // Clients may provide speech or select independently configured gateway stages.
 // Only selected gateway stages initialize their models and workers.
 type LLMConfig struct {
-	ID    string `toml:"id"`
-	Label string `toml:"label"`
+	ID    string
+	Label string
 	ModelConfig
 	// ContextSize is the managed llama.cpp context in tokens, 512 to 262144,
 	// and is required for a managed server. Conversation history is kept
 	// whole, so requests that outgrow it fail.
-	ContextSize int `toml:"context_size"`
+	ContextSize int
 }
 
 func (c *LLMConfig) validate() error {
@@ -481,11 +480,11 @@ func (c *LLMConfig) validateAs(prefix string) error {
 // configFile holds standalone listeners and issuer policy beside the voice
 // declarations that LoadConfig reads with ReadConfig.
 type configFile struct {
-	Config         Config                `toml:"-"`
-	AutoUpdate     string                `toml:"auto_update"`
-	Server         ServerConfig          `toml:"server"`
-	TrustedIssuers []TrustedIssuerConfig `toml:"trusted_issuers"`
-	Debug          DebugConfig           `toml:"debug"`
+	Config         Config
+	AutoUpdate     string
+	Server         ServerConfig
+	TrustedIssuers []TrustedIssuerConfig
+	Debug          DebugConfig
 }
 
 // Resolve validates the standalone settings and resolves shared voice declarations.
@@ -588,16 +587,17 @@ func LoadConfig(path string) (configFile, error) {
 	if err != nil {
 		return configFile{}, fmt.Errorf("read config: %w", err)
 	}
-	cfg := configFile{AutoUpdate: autoupdate.DefaultSchedule, Server: ServerConfig{HTTP: ":3479", WebRTCConfig: NewWebRTCConfig()}}
+	file := configdata.File{AutoUpdate: autoupdate.DefaultSchedule, Server: configdata.Server{HTTP: ":3479", WebRTC: NewWebRTCConfig()}}
 	dec := toml.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
+	if err := dec.Decode(&file); err != nil {
 		if e, ok := errors.AsType[*toml.DecodeError](err); ok {
 			line, column := e.Position()
 			return configFile{}, fmt.Errorf("parse %s:%d:%d: %w", path, line, column, err)
 		}
 		return configFile{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+	cfg := configFileFromTOML(&file)
 	if err := cfg.Server.Config.Validate(); err != nil {
 		return configFile{}, fmt.Errorf("server.%w", err)
 	}
@@ -658,17 +658,82 @@ var defaultConfig []byte
 
 // parseConfig decodes declarations from data; name identifies its source in errors.
 func parseConfig(data []byte, name string) (Config, error) {
-	var cfg Config
+	var choices configdata.Choices
 	dec := toml.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
+	if err := dec.Decode(&choices); err != nil {
 		if e, ok := errors.AsType[*toml.DecodeError](err); ok {
 			line, column := e.Position()
 			return Config{}, fmt.Errorf("parse %s:%d:%d: %w", name, line, column, err)
 		}
 		return Config{}, fmt.Errorf("parse %s: %w", name, err)
 	}
-	return cfg, nil
+	return configFromTOML(&choices), nil
+}
+
+// configFileFromTOML converts config.toml settings; LoadConfig adds the voice declarations.
+func configFileFromTOML(f *configdata.File) configFile {
+	s := &f.Server
+	return configFile{
+		AutoUpdate: f.AutoUpdate,
+		Server: ServerConfig{
+			Config:         geoip.Config{DB: s.GeoDB, AllowOrigins: s.AllowOrigins},
+			WebRTC:         s.WebRTC,
+			HTTP:           s.HTTP,
+			ExternalURL:    s.ExternalURL,
+			TrustedProxies: s.TrustedProxies,
+			DebugFrontend:  s.DebugFrontend,
+			LogLevel:       s.LogLevel,
+		},
+		TrustedIssuers: convertSlice(f.TrustedIssuers, func(t *configdata.TrustedIssuer) TrustedIssuerConfig {
+			return TrustedIssuerConfig{Service: t.Service, Issuer: t.Issuer, PublicKey: t.PublicKey, OAuth: t.OAuth, Scope: t.Scope}
+		}),
+		Debug: DebugConfig{Trace: f.Debug.Trace},
+	}
+}
+
+// configFromTOML converts voice declarations, keeping absent tables nil.
+func configFromTOML(c *configdata.Choices) Config {
+	return Config{
+		Runtime: RuntimeConfig{IdleTimeoutSeconds: c.Runtime.IdleTimeoutSeconds, MaxInstances: c.Runtime.MaxInstances},
+		Realtime: convertSlice(c.Realtime, func(r *configdata.Realtime) RealtimeConfig {
+			return RealtimeConfig{
+				ID: r.ID, Label: r.Label, ModelConfig: modelFromTOML(&r.ModelSettings), Staged: r.Staged, CacheDir: r.CacheDir,
+				Threads: r.Threads, Slots: r.Slots, ContextSize: r.ContextSize, MaxOutputTokens: r.MaxOutputTokens,
+			}
+		}),
+		ASR: convertSlice(c.ASR, func(a *configdata.ASR) ASRConfig {
+			return ASRConfig{ID: a.ID, Label: a.Label, Engine: ASREngine(a.Engine), Provider: a.Provider, Remote: a.Remote, Model: a.Model, ContextSize: a.ContextSize}
+		}),
+		LLM: convertSlice(c.LLM, func(l *configdata.LLM) LLMConfig {
+			return LLMConfig{ID: l.ID, Label: l.Label, ModelConfig: modelFromTOML(&l.ModelSettings), ContextSize: l.ContextSize}
+		}),
+		TTS: convertSlice(c.TTS, func(t *configdata.TTS) TTSConfig {
+			return TTSConfig{ID: t.ID, Label: t.Label, Engine: TTSEngine(t.Engine), Provider: t.Provider, Remote: t.Remote, Model: t.Model, Voice: t.Voice, ContextSize: t.ContextSize}
+		}),
+		Voice: convertSlice(c.Voice, func(v *configdata.Voice) VoiceConfig {
+			return VoiceConfig{ID: v.ID, Label: v.Label, ASR: v.ASR, LLM: v.LLM, TTS: v.TTS}
+		}),
+	}
+}
+
+func modelFromTOML(m *configdata.ModelSettings) ModelConfig {
+	return ModelConfig{
+		LlamaCPPServer: m.LlamaCPPServer, Provider: m.Provider, Auth: openairesponses.Auth(m.Auth), Remote: m.Remote, Model: m.Model,
+		Effort: genai.EffortLevel(m.Effort), OpenRouterSort: openrouter.ProviderSort(m.OpenRouterSort), APIKeyName: m.APIKeyName,
+	}
+}
+
+// convertSlice maps in through f, keeping nil for an absent TOML array.
+func convertSlice[S, T any](in []S, f func(*S) T) []T {
+	if in == nil {
+		return nil
+	}
+	out := make([]T, len(in))
+	for i := range in {
+		out[i] = f(&in[i])
+	}
+	return out
 }
 
 // DefaultConfigPath returns the canonical standalone voice gateway config path.
@@ -757,21 +822,21 @@ func (n ids) add(position, label, id string) error {
 // DebugConfig configures standalone execution tracing.
 type DebugConfig struct {
 	// Trace is the output file for a Go execution trace; empty disables tracing.
-	Trace string `toml:"trace"`
+	Trace string
 }
 
 // ServerConfig configures gateway listeners, HTTP policies and standalone logging.
 type ServerConfig struct {
 	geoip.Config
-	WebRTCConfig
-	HTTP string `toml:"http"`
+	configdata.WebRTC
+	HTTP string
 	// ExternalURL is the expected public HTTP(S) origin. Empty accepts the request authority.
-	ExternalURL string `toml:"external_url"`
+	ExternalURL string
 	// TrustedProxies lists direct proxy CIDRs allowed to supply client IP headers.
-	TrustedProxies []string `toml:"trusted_proxies"`
+	TrustedProxies []string
 	// DebugFrontend enables the unauthenticated live-test UI on the API listener.
-	DebugFrontend bool       `toml:"debug_frontend"`
-	LogLevel      slog.Level `toml:"log_level"`
+	DebugFrontend bool
+	LogLevel      slog.Level
 }
 
 // Validate checks HTTP policies and the WebRTC listener.
@@ -787,69 +852,16 @@ func (c *ServerConfig) Validate() error {
 	if _, err := httpserver.ParseTrustedProxies(c.TrustedProxies); err != nil {
 		return fmt.Errorf("server.trusted_proxies: %w", err)
 	}
-	if err := c.WebRTCConfig.Validate(); err != nil {
+	if err := c.WebRTC.Validate(); err != nil {
 		return fmt.Errorf("server.%w", err)
 	}
 	return nil
 }
 
-// WebRTCConfig configures the gateway's WebRTC media listener and the STUN
-// servers its clients use. The standalone gateway reads it from [server]; a
-// host embeds it in its own TOML section, starting from NewWebRTCConfig so an
-// omitted key keeps its default.
-type WebRTCConfig struct {
-	// UDPPort is the ICE UDP mux port; 0 selects an ephemeral port.
-	UDPPort int `toml:"webrtc_udp_port"`
-	// STUNServers lists the stun: or stuns: URLs WebRTC clients use to learn
-	// their public address. The gateway advertises them in its voice choices
-	// and runs no STUN itself. Empty means clients gather host candidates only,
-	// which suffices when clients can reach the gateway's advertised UDP
-	// endpoint: the gateway learns each client's address from its checks.
-	STUNServers []string `toml:"stun_servers"`
-	// DisableUPnP skips the UPnP UDP mapping the gateway otherwise requests
-	// from the LAN router at startup, along with its SSDP search of up to two
-	// seconds. Disable it when clients reach the UDP port without it, or when
-	// the router must not open ports on the gateway's behalf.
-	DisableUPnP bool `toml:"disable_upnp"`
-}
-
 // NewWebRTCConfig returns the defaults: an ephemeral port and Google's public
 // STUN server.
-func NewWebRTCConfig() WebRTCConfig {
-	return WebRTCConfig{STUNServers: []string{"stun:stun.l.google.com:19302"}}
-}
-
-// Validate checks the port range and STUN URLs. Errors name the TOML keys
-// without a section; callers prefix their section.
-func (c *WebRTCConfig) Validate() error {
-	if c.UDPPort < 0 || c.UDPPort > 65535 {
-		return fmt.Errorf("webrtc_udp_port must be between 0 and 65535, got %d", c.UDPPort)
-	}
-	for i, raw := range c.STUNServers {
-		if err := validateSTUNURL(raw); err != nil {
-			return fmt.Errorf("stun_servers[%d]: %w", i, err)
-		}
-	}
-	return nil
-}
-
-// validateSTUNURL accepts RFC 7064 stun: and stuns: URIs with an explicit host.
-func validateSTUNURL(raw string) error {
-	scheme, rest, ok := strings.Cut(raw, ":")
-	if !ok || (scheme != "stun" && scheme != "stuns") {
-		return fmt.Errorf("%q needs the stun or stuns scheme", raw)
-	}
-	host := rest
-	if h, port, err := net.SplitHostPort(rest); err == nil {
-		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("%q has an invalid port", raw)
-		}
-		host = h
-	}
-	if host == "" || strings.ContainsAny(host, "/?#@ ") {
-		return fmt.Errorf("%q must name a host", raw)
-	}
-	return nil
+func NewWebRTCConfig() configdata.WebRTC {
+	return configdata.WebRTC{STUNServers: []string{"stun:stun.l.google.com:19302"}}
 }
 
 // RuntimeConfig bounds loaded pipelines, LLMs, and native llama.cpp
@@ -858,10 +870,10 @@ func validateSTUNURL(raw string) error {
 type RuntimeConfig struct {
 	// IdleTimeoutSeconds starts when the last session closes. Resolve selects
 	// 3600 when omitted.
-	IdleTimeoutSeconds int `toml:"idle_timeout_seconds"`
+	IdleTimeoutSeconds int
 	// MaxInstances counts complete choices, including ASR/LLM/TTS. Resolve
 	// selects 1 when omitted.
-	MaxInstances int `toml:"max_instances"`
+	MaxInstances int
 }
 
 // PipelineConfig composes recognition, language generation, and synthesis adapters.
@@ -871,21 +883,21 @@ type RuntimeConfig struct {
 // explicit engine/model selection, except for the ASR engines documented below.
 type PipelineConfig struct {
 	// ID is the [[voice]] id; it is empty for combinations composed per session.
-	ID    string `toml:"id"`
-	Label string `toml:"label"`
+	ID    string
+	Label string
 	// TextOnly disables gateway speech processing. Clients transcribe and speak;
 	// the choice serves text sessions only and never initializes ASR or TTS.
 	// ASR and TTS settings must be omitted when TextOnly is true.
-	TextOnly bool      `toml:"text_only"`
-	ASR      ASRConfig `toml:"asr"`
+	TextOnly bool
+	ASR      ASRConfig
 	// LLM must support function tools. Its endpoint receives transcripts, the
 	// system instruction, and service-item context, even when speech stays local.
-	LLM LLMConfig `toml:"llm"`
-	TTS TTSConfig `toml:"tts"`
+	LLM LLMConfig
+	TTS TTSConfig
 	// UnavailableASR and UnavailableTTS retain choice identity while filtering
 	// speech capabilities after provider availability checks.
-	UnavailableASR bool `toml:"-"`
-	UnavailableTTS bool `toml:"-"`
+	UnavailableASR bool
+	UnavailableTTS bool
 }
 
 func (c *PipelineConfig) validate() error {
@@ -911,15 +923,15 @@ func (c *PipelineConfig) validate() error {
 // Provider is used only by the genai engine, and Remote only by the genai,
 // nemospeech and vosk engines.
 type ASRConfig struct {
-	ID       string    `toml:"id"`
-	Label    string    `toml:"label"`
-	Engine   ASREngine `toml:"engine"`
-	Provider string    `toml:"provider"`
-	Remote   string    `toml:"remote"`
-	Model    string    `toml:"model"`
+	ID       string
+	Label    string
+	Engine   ASREngine
+	Provider string
+	Remote   string
+	Model    string
 	// ContextSize is the managed llama.cpp context in tokens, 512 to 262144,
 	// and is required for a managed server. Each session carries one utterance.
-	ContextSize int `toml:"context_size"`
+	ContextSize int
 }
 
 // ASREngine selects how utterances are transcribed.
@@ -956,16 +968,16 @@ const (
 // fixed-voice models and model defaults then select the speaker.
 // Provider and Remote are used only by the genai engine.
 type TTSConfig struct {
-	ID       string    `toml:"id"`
-	Label    string    `toml:"label"`
-	Engine   TTSEngine `toml:"engine"`
-	Provider string    `toml:"provider"`
-	Remote   string    `toml:"remote"`
-	Model    string    `toml:"model"`
-	Voice    string    `toml:"voice"`
+	ID       string
+	Label    string
+	Engine   TTSEngine
+	Provider string
+	Remote   string
+	Model    string
+	Voice    string
 	// ContextSize is the managed llama.cpp context in tokens, 512 to 262144,
 	// and is required for a managed server. Each request carries one reply.
-	ContextSize int `toml:"context_size"`
+	ContextSize int
 }
 
 // TTSEngine selects how assistant text is synthesized.
@@ -1132,20 +1144,20 @@ const DefaultVoiceScope = "voice.session"
 // access token through issuer metadata discovery and its published JWKS.
 type TrustedIssuerConfig struct {
 	// Service is the service kind allowed to issue tokens, for example "example".
-	Service string `toml:"service"`
+	Service string
 	// Issuer is the backend origin that owns the signing key.
 	//
 	// It must match the service authorization base URL and the token backend origin.
-	Issuer string `toml:"issuer"`
+	Issuer string
 	// PublicKey is the imported Ed25519 public key used to verify scoped tokens from issuer.
 	//
 	// The expected format is the value returned by gomode.EncodeServiceSigningPublicKey.
-	PublicKey string `toml:"public_key"`
+	PublicKey string
 	// OAuth enables OAuth 2.0 access token verification through discovery and JWKS.
-	OAuth bool `toml:"oauth"`
+	OAuth bool
 	// Scope is the OAuth scope a token must carry. It defaults to
 	// DefaultVoiceScope when empty.
-	Scope string `toml:"scope"`
+	Scope string
 }
 
 // OAuthScope returns the scope an OAuth token from this issuer must carry.

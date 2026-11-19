@@ -108,7 +108,7 @@ func newHandler(issuers []TrustedIssuerConfig, bridge MediaBridgeProvider, textS
 		}
 	}
 	mux := http.NewServeMux()
-	for _, version := range []voiceapi.ProtocolVersion{voiceapi.ProtocolV1, voiceapi.ProtocolV2} {
+	for _, version := range voiceapi.ProtocolVersions() {
 		prefix := "/api/voicegateway/" + version.String() + "/voice"
 		register := func(pattern string, handle http.HandlerFunc) {
 			mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {

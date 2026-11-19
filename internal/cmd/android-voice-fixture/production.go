@@ -18,6 +18,8 @@ import (
 	"os"
 	"time"
 
+	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/gomodedev/gomode/voicegateway"
 	"github.com/gomodedev/gomode/voicegateway/voicertc"
 )
@@ -65,7 +67,7 @@ func newProductionGateway(ctx context.Context, f *fixture) (*productionGateway, 
 	// Host candidates only: the emulator's user-mode network reaches the host's
 	// interface addresses, and the gateway learns the client's from its checks.
 	// The emulator needs no router mapping, so startup skips the SSDP search.
-	bridge, err := voicertc.NewBridge(ctx, &resolved, voicegateway.WebRTCConfig{DisableUPnP: true}, logDir)
+	bridge, err := voicertc.NewBridge(ctx, &resolved, configdata.WebRTC{DisableUPnP: true}, logDir)
 	if err != nil {
 		return nil, errors.Join(err, model.Close(), os.RemoveAll(logDir))
 	}

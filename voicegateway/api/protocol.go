@@ -14,8 +14,18 @@ const (
 	// ProtocolV2 is the current gateway contract and the default for direct bridge calls.
 	ProtocolV2 ProtocolVersion = iota
 	// ProtocolV1 is the gateway contract published with Go Mode v0.3.0.
+	//
+	// TODO(2026-11-26): delete v1 once this date has passed and two release tags contain v2.
+	// v0.4.0 is the first such tag. Delete ProtocolV1, api/v1, both compat.go adapters, the v1
+	// SDK in sdk/voicegateway, and their tests.
 	ProtocolV1
 )
+
+// ProtocolVersions returns the published gateway contracts, oldest first. Hosts
+// mount one route prefix per entry, so retiring a version needs no host edit.
+func ProtocolVersions() []ProtocolVersion {
+	return []ProtocolVersion{ProtocolV1, ProtocolV2}
+}
 
 // String returns the route version name.
 func (v ProtocolVersion) String() string {
