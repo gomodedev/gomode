@@ -303,7 +303,10 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
             composeRule.onAllNodesWithTag("gomode-web-shell").fetchSemanticsNodes().isNotEmpty()
         }
         waitForSettingsButton()
-        composeRule.onNodeWithTag("gomode-voice-connect").assertExists()
+        // Voice turns connectable only after bootstrap, auth, and the frontend report ready.
+        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
+            composeRule.onAllNodesWithTag("gomode-voice-connect").fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test
