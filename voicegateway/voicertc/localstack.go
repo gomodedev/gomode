@@ -33,7 +33,7 @@ const (
 	vadRMSThreshold      = 500.0
 	vadSilenceHangoverMS = 200
 	vadMinSpeechMS       = 100
-	// vadMaxUtteranceMS bounds a direct-audio utterance to 30 seconds.
+	// vadMaxUtteranceMS bounds a staged-audio utterance to 30 seconds.
 	vadMaxUtteranceMS = 30_000
 	// ttsChunkBytes is one 20ms frame of backend PCM output, fed to the sink.
 	ttsChunkBytes = backendOutputFrameBytes
@@ -233,9 +233,9 @@ func (b *localStackBackend) newTextSession(ctx context.Context, sessionID string
 
 // localStackRuntime owns the loaded VAD→ASR→LLM→TTS adapters and their clients.
 type localStackRuntime struct {
-	// directAudio sends each energyVAD utterance to the conversation as audio,
-	// with no recognition stage.
-	directAudio bool
+	// stagedAudio sends each energyVAD utterance to the conversation as audio,
+	// with no recognition stage, for a staged llama.cpp realtime choice.
+	stagedAudio bool
 	liveASR     *liveASR
 	llm         llmAdapter
 	tts         ttsAdapter
@@ -265,16 +265,16 @@ func (b *localStackRuntime) newSession(ctx context.Context, sessionID string, si
 		liveASR:       b.liveASR,
 		llm:           b.llm,
 		tts:           b.tts,
-		clientInput:   b.liveASR == nil && !b.directAudio,
+		clientInput:   b.liveASR == nil && !b.stagedAudio,
 		clientOutput:  clientOutput || b.tts == nil,
-		directAudio:   b.directAudio,
+		stagedAudio:   b.stagedAudio,
 		outstanding:   make(map[string]sessionToolCall),
 		livePending:   make(map[string]*liveUtterance),
 	}
 	switch {
 	case s.liveASR != nil:
 		s.liveGate = newRealtimeAudioGate(s.liveASR.rate, realtimeAudioManual)
-	case s.directAudio:
+	case s.stagedAudio:
 		s.vad = newEnergyVAD(defaultInputSampleRate)
 	}
 	return s
@@ -311,7 +311,7 @@ type localStackSession struct {
 	clientOutput bool
 	// micActive detects onset even after generation is idle while client playback continues.
 	micActive   bool
-	directAudio bool
+	stagedAudio bool
 
 	turns *errgroup.Group
 	// events serializes admission, generation commits and tool dispatch, never streaming.
@@ -357,7 +357,7 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 		if err := applySessionPolicy(&msg); err != nil {
 			return err
 		}
-		if s.directAudio && msg.Voice.Name != "" {
+		if s.stagedAudio && msg.Voice.Name != "" {
 			return errors.New("staged LFM3 audio does not support voice selection")
 		}
 		lang := baseLanguage(msg.Voice.Language)
@@ -455,7 +455,7 @@ func (s *localStackSession) checkLanguage(lang string) error {
 }
 
 // defaultInputSampleRate is the microphone rate where no model fixes one: the
-// energy VAD with direct audio, whose WAV header carries the rate for
+// energy VAD with staged audio, whose WAV header carries the rate for
 // llama.cpp to resample, and a live recognizer without a qualified
 // transcription session rate, such as Whistle, NeMo-Speech or Vosk, which all
 // accept it. 16 kHz matches LFM3's audio encoder and keeps buffered utterances
@@ -463,14 +463,14 @@ func (s *localStackSession) checkLanguage(lang string) error {
 const defaultInputSampleRate = 16000
 
 // inputSampleRate is the recognizer's rate with live recognition, and
-// defaultInputSampleRate with direct audio, where the LLM hears the energy
+// defaultInputSampleRate with staged audio, where the LLM hears the energy
 // VAD's utterances. Client recognition accepts no microphone audio, so it has
 // no rate.
 func (s *localStackSession) inputSampleRate() int {
 	switch {
 	case s.liveASR != nil:
 		return s.liveASR.rate
-	case s.directAudio:
+	case s.stagedAudio:
 		return defaultInputSampleRate
 	default:
 		return 0
@@ -563,7 +563,7 @@ func (s *localStackSession) startUserMessage(ctx context.Context, text string) {
 	s.startAdmittedStep(turnCtx, conv, step, cancel, true)
 }
 
-// startTurn sends a direct-audio utterance to the conversation.
+// startTurn sends a staged-audio utterance to the conversation.
 func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	s.events.Lock()
 	defer s.events.Unlock()
@@ -644,7 +644,7 @@ func (s *localStackSession) handleTextStep(ctx context.Context, conv llmConversa
 }
 
 func (s *localStackSession) handleLLMStep(ctx context.Context, conv llmConversation, step llmStep, responseID string) {
-	if s.directAudio {
+	if s.stagedAudio {
 		// The same model slot serves chat and TTS. Drain and release generation
 		// before synthesis, and speak only a final answer without tool calls.
 		for output := range step.stream {

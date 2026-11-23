@@ -730,11 +730,11 @@ func TestLocalStackResponseCorrelation(t *testing.T) {
 			t.Fatalf("continuation totals=%+v", reports[1])
 		}
 	})
-	t.Run("direct audio", func(t *testing.T) {
+	t.Run("staged audio", func(t *testing.T) {
 		t.Parallel()
 		sink := &correlationSink{events: make(chan struct{}, 1)}
 		release := make(chan struct{})
-		runtime := &localStackRuntime{tts: delayedCorrelationTTS{release: release}, directAudio: true}
+		runtime := &localStackRuntime{tts: delayedCorrelationTTS{release: release}, stagedAudio: true}
 		s := runtime.newSession(t.Context(), "late-speech", sink, false)
 		var once sync.Once
 		t.Cleanup(func() {

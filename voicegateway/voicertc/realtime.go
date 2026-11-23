@@ -90,7 +90,7 @@ func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfi
 	b.provider = provider
 	if cfg.Staged {
 		b.staged = &localStackRuntime{
-			directAudio: true,
+			stagedAudio: true,
 			llm:         &genaiLLMAdapter{provider: provider, effort: cfg.Effort, audioInput: true, maxOutputTokens: cfg.MaxOutputTokens},
 			// Staged sessions support English only: the fixed TTS language
 			// rejects any other at session.setup.
