@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
@@ -44,7 +45,7 @@ func TestLocalStackModelsForConfigCodex(t *testing.T) {
 	base.DefaultTransport = transport
 	t.Cleanup(func() { base.DefaultTransport = previousTransport })
 	cfg := &voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openai", Auth: openairesponses.AuthCodex, Model: "gpt-6-luna", Effort: genai.EffortLow}}}
-	models, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
+	models, err := localStackModelsForConfigWithStarter(t.Context(), testlog.New(t), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
 		t.Fatal("subscription LLM started a managed runtime")
 		return nil, errors.New("unexpected managed runtime")
 	}))
@@ -212,7 +213,7 @@ func TestNemoSpeechEndpoint(t *testing.T) {
 		for _, name := range []string{"HOME", "XDG_CACHE_HOME", "LocalAppData"} {
 			t.Setenv(name, "")
 		}
-		p := newLocalStackPool(newTestLogger(t), testRuntime)
+		p := newLocalStackPool(testlog.New(t), testRuntime)
 		p.recognition = []voicegateway.ASRConfig{{ID: "parakeet", Engine: voicegateway.ASREngineNemoSpeech, Model: "parakeet-tdt"}}
 		b := p.llmBackend(poolTestConfig("llm").LLM)
 		t.Cleanup(func() {

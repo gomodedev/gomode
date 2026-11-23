@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 type upnpWANConnectionFake struct {
@@ -95,7 +97,7 @@ func TestTryMapUPnPUDP(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		client := &upnpWANConnectionFake{externalIP: "203.0.113.10"}
-		mapping, err := tryMapUPnPUDP(t.Context(), newTestLogger(t), client, "192.168.1.20", 3478)
+		mapping, err := tryMapUPnPUDP(t.Context(), testlog.New(t), client, "192.168.1.20", 3478)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +124,7 @@ func TestTryMapUPnPUDP(t *testing.T) {
 	t.Run("valid add any", func(t *testing.T) {
 		t.Parallel()
 		client := &upnpWANAnyPortConnectionFake{externalIP: "203.0.113.10", exactErr: errors.New("port in use"), reservedPort: 40000}
-		mapping, err := tryMapUPnPUDP(t.Context(), newTestLogger(t), client, "192.168.1.20", 3478)
+		mapping, err := tryMapUPnPUDP(t.Context(), testlog.New(t), client, "192.168.1.20", 3478)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +147,7 @@ func TestTryMapUPnPUDP(t *testing.T) {
 		client := &upnpWANConnectionFake{externalIP: "not-an-ip"}
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		_, err := tryMapUPnPUDP(ctx, newTestLogger(t), client, "192.168.1.20", 3478)
+		_, err := tryMapUPnPUDP(ctx, testlog.New(t), client, "192.168.1.20", 3478)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -166,7 +168,7 @@ func TestUpnpMapping(t *testing.T) {
 	t.Run("refresh surfaces error", func(t *testing.T) {
 		t.Parallel()
 		client := &upnpWANConnectionFake{addErr: errors.New("boom")}
-		mapping := &upnpMapping{log: newTestLogger(t), client: client, externalPort: 40000, internalPort: 3478}
+		mapping := &upnpMapping{log: testlog.New(t), client: client, externalPort: 40000, internalPort: 3478}
 		err := mapping.refresh(t.Context(), "192.168.1.20")
 		if err == nil {
 			t.Fatal("expected error")
@@ -188,7 +190,7 @@ func TestMapUPnPUDP(t *testing.T) {
 	t.Parallel()
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
-		_, err := mapUPnPUDP(t.Context(), newTestLogger(t), net.ParseIP("192.168.1.20"), 0)
+		_, err := mapUPnPUDP(t.Context(), testlog.New(t), net.ParseIP("192.168.1.20"), 0)
 		if err == nil {
 			t.Fatal("expected error")
 		}

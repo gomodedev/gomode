@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"iter"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -37,8 +38,9 @@ import (
 // remote access. The address includes the actual port assigned by the listener.
 // An explicit externalURL permits proxy access to a loopback listener; the caller
 // must enforce that expected origin. These routes have no host authentication;
-// anyone who can reach the listener can use the configured voice backends.
-func NewHandler(addr net.Addr, externalURL string, bridge voicegateway.MediaBridge, text voicegateway.TextSessionServer) (http.Handler, error) {
+// anyone who can reach the listener can use the configured voice backends. log
+// receives MCP and voice request failures.
+func NewHandler(log *slog.Logger, addr net.Addr, externalURL string, bridge voicegateway.MediaBridge, text voicegateway.TextSessionServer) (http.Handler, error) {
 	origin, err := httpserver.CanonicalOrigin(externalURL)
 	if err != nil {
 		return nil, err
@@ -72,9 +74,9 @@ func NewHandler(addr net.Addr, externalURL string, bridge voicegateway.MediaBrid
 	mux := http.NewServeMux()
 	mux.Handle("GET /.well-known/gomode.json", discovery)
 	registry := newRegistry()
-	mh := &mcp.Handler{Registry: registry, ServerInfo: mcp.Implementation{Name: "voice-gateway", Version: "1.0.0"}}
+	mh := &mcp.Handler{Log: log, Registry: registry, ServerInfo: mcp.Implementation{Name: "voice-gateway", Version: "1.0.0"}}
 	mux.HandleFunc("/api/mcp", mh.HandleMCP)
-	mux.Handle("/test/api/voicegateway/", http.StripPrefix("/test", voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return bridge }, text)))
+	mux.Handle("/test/api/voicegateway/", http.StripPrefix("/test", voicegateway.NewEmbeddedHandler(log, func() voicegateway.MediaBridge { return bridge }, text)))
 	assets := &assetHandler{dist: dist}
 	mux.Handle("GET /{$}", assets)
 	mux.Handle("GET /assets/", assets)

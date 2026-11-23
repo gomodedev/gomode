@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/voicegateway"
 )
 
@@ -23,7 +24,7 @@ func TestSmokeLlamaSpeech(t *testing.T) {
 		TTS:   voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M", Voice: "female"},
 	}
 	startup := time.Now()
-	runtime, err := localStackRuntimeForConfig(t.Context(), newTestLogger(t), &cfg, startTestServer(t))
+	runtime, err := localStackRuntimeForConfig(t.Context(), testlog.New(t), &cfg, startTestServer(t))
 	t.Logf("managed speech stack setup: %s", time.Since(startup))
 	if err != nil {
 		t.Fatal(err)

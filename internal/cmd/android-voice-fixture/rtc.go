@@ -139,7 +139,7 @@ func (f *fixture) handleOffer(w http.ResponseWriter, r *http.Request) {
 	answer, id, err := f.answer(r.Context(), req.SDP)
 	if err != nil {
 		f.log.WarnContext(r.Context(), "offer failed", "err", err)
-		voiceapi.WriteError(w, http.StatusBadRequest, voiceapi.CodeVoiceOfferFailed, "invalid fixture offer")
+		voiceapi.WriteError(f.log, w, http.StatusBadRequest, voiceapi.CodeVoiceOfferFailed, "invalid fixture offer")
 		return
 	}
 	writeJSON(w, voicev2.VoiceRTCAnswerResp{SDP: answer, SessionID: id})

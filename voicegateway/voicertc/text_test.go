@@ -22,6 +22,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/internal/voicetest"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
@@ -277,7 +278,7 @@ func buildTestTextBridge(t *testing.T, llm llmAdapter) *Bridge {
 		t.Fatal(choiceErr)
 	}
 	return &Bridge{
-		log:            newTestLogger(t),
+		log:            testlog.New(t),
 		backends:       map[string]backendConnector{"default": backend},
 		choices:        choices,
 		activityLogDir: t.TempDir(),
@@ -330,7 +331,7 @@ func TestTextSinkEscalatesLogFailure(t *testing.T) {
 	}
 	conn := <-accepted
 	sessionCtx, sessionCancel := context.WithCancel(t.Context())
-	sink := &textSink{log: newTestLogger(t), conn: conn, activityLog: log, cancel: sessionCancel}
+	sink := &textSink{log: testlog.New(t), conn: conn, activityLog: log, cancel: sessionCancel}
 	t.Cleanup(func() {
 		sessionCancel()
 		_ = client.CloseNow()

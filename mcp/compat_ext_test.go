@@ -10,13 +10,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/mcp"
 	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
 // compatTestHandler returns a Handler backed by the shared fake registry.
-func compatTestHandler() *mcp.Handler {
-	return &mcp.Handler{Registry: mcptest.FakeRegistry{}, ServerInfo: mcp.Implementation{Name: "example", Version: "test"}}
+func compatTestHandler(t testing.TB) *mcp.Handler {
+	return &mcp.Handler{Log: testlog.New(t), Registry: mcptest.FakeRegistry{}, ServerInfo: mcp.Implementation{Name: "example", Version: "test"}}
 }
 
 func postCompat(t *testing.T, h *mcp.Handler, body string) (*httptest.ResponseRecorder, mcp.JSONRPCResponse) {
@@ -60,7 +61,7 @@ func TestCompatHandler(t *testing.T) {
 	for _, c := range clients {
 		t.Run(c.name+"_initialize", func(t *testing.T) {
 			t.Parallel()
-			h := compatTestHandler()
+			h := compatTestHandler(t)
 			w, resp := postCompat(t, h, c.initialize)
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", w.Code)
@@ -90,7 +91,7 @@ func TestCompatHandler(t *testing.T) {
 	// the _meta-nested params that the native 2026-07-28 endpoint enforces.
 	t.Run("notifications_initialized_no_body", func(t *testing.T) {
 		t.Parallel()
-		h := compatTestHandler()
+		h := compatTestHandler(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/example/v1/mcp",
 			strings.NewReader(`{"method":"notifications/initialized","jsonrpc":"2.0"}`))
 		w := httptest.NewRecorder()
@@ -105,7 +106,7 @@ func TestCompatHandler(t *testing.T) {
 
 	t.Run("tools_list", func(t *testing.T) {
 		t.Parallel()
-		h := compatTestHandler()
+		h := compatTestHandler(t)
 		// Codex sends tools/list with a _meta progressToken; it must be tolerated.
 		_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"progressToken":0}}}`)
 		if resp.Error != nil {
@@ -127,7 +128,7 @@ func TestCompatHandler(t *testing.T) {
 
 	t.Run("tools_call", func(t *testing.T) {
 		t.Parallel()
-		h := compatTestHandler()
+		h := compatTestHandler(t)
 		_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{}}}`)
 		if resp.Error != nil {
 			t.Fatalf("unexpected error: %#v", resp.Error)
@@ -152,7 +153,7 @@ func TestCompatHandler(t *testing.T) {
 			Structured: mcp.ErrorOutput{Error: "unknown repository"},
 			IsError:    true,
 		}
-		h := &mcp.Handler{Registry: mcptest.FakeRegistry{CallResult: &result}, ServerInfo: mcp.Implementation{Name: "example", Version: "test"}}
+		h := &mcp.Handler{Log: testlog.New(t), Registry: mcptest.FakeRegistry{CallResult: &result}, ServerInfo: mcp.Implementation{Name: "example", Version: "test"}}
 		_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{}}}`)
 		if resp.Error != nil {
 			t.Fatalf("unexpected error: %#v", resp.Error)
@@ -171,7 +172,7 @@ func TestCompatHandler(t *testing.T) {
 	// so the released path must answer it with a released-shaped result.
 	t.Run("resources_list", func(t *testing.T) {
 		t.Parallel()
-		h := compatTestHandler()
+		h := compatTestHandler(t)
 		_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":4,"method":"resources/list","params":{}}`)
 		if resp.Error != nil {
 			t.Fatalf("unexpected error: %#v", resp.Error)
@@ -204,7 +205,7 @@ func TestCompatHandler(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 
-				h := &mcp.Handler{Registry: mcptest.FakeRegistry{ListErr: tc.err}, ServerInfo: mcp.Implementation{Name: "example", Version: "test"}}
+				h := &mcp.Handler{Log: testlog.New(t), Registry: mcptest.FakeRegistry{ListErr: tc.err}, ServerInfo: mcp.Implementation{Name: "example", Version: "test"}}
 				_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":4,"method":"resources/list","params":{`+tc.params+`}}`)
 				if resp.Error == nil || resp.Error.Code != tc.want {
 					t.Fatalf("error = %#v, want code %d", resp.Error, tc.want)
@@ -215,7 +216,7 @@ func TestCompatHandler(t *testing.T) {
 
 	t.Run("resources_read", func(t *testing.T) {
 		t.Parallel()
-		h := compatTestHandler()
+		h := compatTestHandler(t)
 		_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"example://tasks"}}`)
 		if resp.Error != nil {
 			t.Fatalf("unexpected error: %#v", resp.Error)
@@ -229,7 +230,7 @@ func TestCompatHandler(t *testing.T) {
 
 	t.Run("get_returns_405", func(t *testing.T) {
 		t.Parallel()
-		h := compatTestHandler()
+		h := compatTestHandler(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/example/v1/mcp", nil)
 		req.Header.Set("Accept", "text/event-stream")
 		w := httptest.NewRecorder()
@@ -241,7 +242,7 @@ func TestCompatHandler(t *testing.T) {
 
 	t.Run("unknown_method", func(t *testing.T) {
 		t.Parallel()
-		h := compatTestHandler()
+		h := compatTestHandler(t)
 		_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}`)
 		if resp.Error == nil || resp.Error.Code != mcp.MethodNotFoundCode {
 			t.Fatalf("error = %#v, want method not found", resp.Error)

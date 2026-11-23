@@ -33,6 +33,7 @@ const productionReply = "Production gateway reply."
 // model weights. The synthetic gateway on the main listener stays in control
 // of scripted media and failures; this one proves production behavior.
 type productionGateway struct {
+	log    *slog.Logger
 	bridge *voicertc.Bridge
 	model  *http.Server
 	logDir string
@@ -71,7 +72,7 @@ func newProductionGateway(ctx context.Context, f *fixture) (*productionGateway, 
 	if err != nil {
 		return nil, errors.Join(err, model.Close(), os.RemoveAll(logDir))
 	}
-	return &productionGateway{bridge: bridge, model: model, logDir: logDir}, nil
+	return &productionGateway{log: f.log, bridge: bridge, model: model, logDir: logDir}, nil
 }
 
 // routes serves the production gateway API and the fixture's service routes, so
@@ -79,7 +80,7 @@ func newProductionGateway(ctx context.Context, f *fixture) (*productionGateway, 
 // settings and MCP endpoint.
 func (g *productionGateway) routes(service http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/api/voicegateway/", voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return g.bridge }, g.bridge))
+	mux.Handle("/api/voicegateway/", voicegateway.NewEmbeddedHandler(g.log, func() voicegateway.MediaBridge { return g.bridge }, g.bridge))
 	mux.Handle("/", service)
 	return mux
 }

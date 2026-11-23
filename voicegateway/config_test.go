@@ -21,6 +21,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
 
 	"github.com/gomodedev/gomode/httpserver/geoip"
@@ -679,7 +680,7 @@ tts = "speech"`)
 			if cfg.Pipelines[0].TTS.Engine != TTSEngineGenAI || cfg.Pipelines[0].TTS.Voice != "" {
 				t.Fatalf("synthesis = %+v", cfg.Pipelines[0].TTS)
 			}
-			if got := cfg.Available(t.Context()); len(got.Pipelines) != 1 {
+			if got := cfg.Available(t.Context(), testlog.New(t)); len(got.Pipelines) != 1 {
 				t.Fatal("managed speech choice was hidden")
 			}
 		})
@@ -726,7 +727,7 @@ tts = "alternative"
 				t.Fatalf("model change did not affect both choices: %+v", changed)
 			}
 			t.Setenv("GOMODE_NAMED_STAGE_TEST_KEY", "")
-			available := cfg.Available(t.Context())
+			available := cfg.Available(t.Context(), testlog.New(t))
 			if len(available.LLM) != 0 || len(available.Pipelines) != 0 {
 				t.Fatalf("choices with missing credential remain available: %+v", available)
 			}
@@ -1172,7 +1173,7 @@ func TestResolvedConfig(t *testing.T) {
 				},
 				Synthesis: []TTSConfig{{ID: "tts", Engine: TTSEngineGenAI, Provider: "gemini", Model: "tts", Voice: "Kore"}},
 			}
-			got := cfg.Available(t.Context())
+			got := cfg.Available(t.Context(), testlog.New(t))
 			if len(got.LLM) != 1 || len(got.Recognition) != 1 || got.Recognition[0].Provider != "llamacpp" || len(got.Synthesis) != 0 {
 				t.Fatalf("available stages = %+v", got)
 			}
@@ -1188,7 +1189,7 @@ func TestResolvedConfig(t *testing.T) {
 			}}
 			t.Cleanup(func() { providers.All["mistral"] = previous })
 			cfg := ResolvedConfig{Runtime: testRuntime, Pipelines: []PipelineConfig{{ID: "mixed", Label: "Mixed", LLM: LLMConfig{ModelConfig: ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "reasoning"}, ContextSize: 65536}, ASR: ASRConfig{Engine: ASREngineGenAI, Provider: "mistral", Model: "voxtral-mini-transcribe-realtime-3"}, TTS: TTSConfig{Engine: TTSEngineGenAI, Provider: "gemini", Model: "gemini-3.8-flash-lite-tts", Voice: "Kore"}}}}
-			available := cfg.Available(t.Context())
+			available := cfg.Available(t.Context(), testlog.New(t))
 			if len(available.Pipelines) != 1 || available.Pipelines[0].UnavailableASR || !available.Pipelines[0].UnavailableTTS {
 				t.Fatalf("available speech = %+v", available.Pipelines)
 			}
@@ -1206,7 +1207,7 @@ func TestResolvedConfig(t *testing.T) {
 			if err := cfg.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			if got := cfg.Available(t.Context()); len(got.LLM) != 1 {
+			if got := cfg.Available(t.Context(), testlog.New(t)); len(got.LLM) != 1 {
 				t.Fatalf("available choices = %+v", got.LLM)
 			}
 		})
@@ -1240,7 +1241,7 @@ func TestResolvedConfig(t *testing.T) {
 						t.Cleanup(cancel)
 					}
 					started := time.Now()
-					got := cfg.Available(ctx)
+					got := cfg.Available(ctx, testlog.New(t))
 					if len(got.LLM) != 1 || got.LLM[0].Label != "Healthy" {
 						t.Fatalf("available choices = %+v", got.LLM)
 					}
@@ -1581,9 +1582,6 @@ func testResolvedConfigAvailableAuthentication(t *testing.T) {
 			})
 			t.Cleanup(func() { base.DefaultTransport = previousTransport })
 			var logs bytes.Buffer
-			previousLogger := slog.Default()
-			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previousLogger) })
 			cfg := loadResolvedConfig(t, ConfigFileName)
 			var luna []LLMConfig
 			for _, choice := range cfg.LLM {
@@ -1596,7 +1594,7 @@ func testResolvedConfigAvailableAuthentication(t *testing.T) {
 			if err := cfg.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			got := cfg.Available(t.Context())
+			got := cfg.Available(t.Context(), slog.New(slog.NewJSONHandler(&logs, nil)))
 			if len(got.LLM) != 1 || got.LLM[0].Auth != tc.wantAuth {
 				t.Fatalf("available choices = %+v", got.LLM)
 			}

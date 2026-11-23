@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/mcp"
 	"github.com/gomodedev/gomode/mcp/mcptest"
 )
@@ -112,7 +113,7 @@ func TestReleasedResourceNotifications(t *testing.T) {
 			registry := &compatStreamRegistry{changed: make(chan struct{}), stopped: make(chan struct{}, 4)}
 			sessions := mcp.NewSessionStore(func(ctx context.Context) (string, error) { return ctx.Value(compatOwnerKey{}).(string), nil })
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				h := &mcp.Handler{Registry: registry, Sessions: sessions}
+				h := &mcp.Handler{Log: testlog.New(t), Registry: registry, Sessions: sessions}
 				h.HandleMCP(w, r.WithContext(context.WithValue(r.Context(), compatOwnerKey{}, r.Header.Get("Authorization"))))
 			}))
 			t.Cleanup(server.Close)

@@ -173,6 +173,8 @@ type Handler struct {
 	// request-local registry authorization. Hosts may share it across handlers.
 	// A nil store keeps released clients stateless.
 	Sessions *SessionStore
+	// Log receives request failures and stream diagnostics. It is required.
+	Log *slog.Logger
 }
 
 // HandleMCP handles one MCP HTTP request, dispatching to the native
@@ -221,7 +223,7 @@ func (h *Handler) handleNative(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		rpcErr := rpcError(InvalidRequestCode, "Method not allowed")
-		logMCPFailure(r, http.StatusMethodNotAllowed, nil, rpcErr, nil)
+		h.logMCPFailure(r, http.StatusMethodNotAllowed, nil, rpcErr, nil)
 		h.writeResponse(w, http.StatusMethodNotAllowed, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
 		return
 	}
@@ -230,13 +232,13 @@ func (h *Handler) handleNative(w http.ResponseWriter, r *http.Request) {
 	d.DisallowUnknownFields()
 	if err := d.Decode(&req); err != nil {
 		rpcErr := rpcError(ParseErrorCode, "Parse error")
-		logMCPFailure(r, http.StatusBadRequest, nil, rpcErr, err)
+		h.logMCPFailure(r, http.StatusBadRequest, nil, rpcErr, err)
 		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
 		return
 	}
 	if req.JSONRPC != jsonRPCVersion || req.Method == "" || !validJSONRPCRequestID(req.ID) {
 		rpcErr := rpcError(InvalidRequestCode, "Invalid Request")
-		logMCPFailure(r, http.StatusBadRequest, &req, rpcErr, nil)
+		h.logMCPFailure(r, http.StatusBadRequest, &req, rpcErr, nil)
 		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
@@ -245,14 +247,14 @@ func (h *Handler) handleNative(w http.ResponseWriter, r *http.Request) {
 	// MCP it reaches dispatch, whose protocol errors use the transport status
 	// mandated by the 2026-07-28 Streamable HTTP binding.
 	if status, rpcErr := validateMCPRequest(r, &req); rpcErr != nil {
-		logMCPFailure(r, status, &req, rpcErr, nil)
+		h.logMCPFailure(r, status, &req, rpcErr, nil)
 		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
 	if req.Method == MethodSubscriptionsListen {
 		if rpcErr := h.handleSubscription(r.Context(), w, req.ID, req.Params); rpcErr != nil {
 			status := rpcHTTPStatus(rpcErr)
-			logMCPFailure(r, status, &req, rpcErr, nil)
+			h.logMCPFailure(r, status, &req, rpcErr, nil)
 			h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		}
 		return
@@ -260,7 +262,7 @@ func (h *Handler) handleNative(w http.ResponseWriter, r *http.Request) {
 	result, rpcErr := h.dispatch(r.Context(), req.Method, req.Params, r.Header)
 	if rpcErr != nil {
 		status := rpcHTTPStatus(rpcErr)
-		logMCPFailure(r, status, &req, rpcErr, nil)
+		h.logMCPFailure(r, status, &req, rpcErr, nil)
 		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
@@ -419,7 +421,7 @@ func (h *Handler) writeResponse(w http.ResponseWriter, status int, resp JSONRPCR
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Warn("write mcp response", "err", err)
+		h.Log.Warn("write mcp response", "err", err)
 	}
 }
 
@@ -492,7 +494,7 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 	out := sse.New(stream)
 	w.WriteHeader(http.StatusOK)
 	if err := writeMCPNotification(out, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsAcknowledged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
-		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
+		h.Log.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
 		return nil
 	}
 	if !h.writeInitialSubscriptionState(ctx, out, subID, p.Notifications, initialReads) {
@@ -542,20 +544,20 @@ func (h *Handler) readInitialSubscriptionState(ctx context.Context, params *Subs
 func (h *Handler) writeInitialSubscriptionState(ctx context.Context, stream *sse.Stream, subID string, filter SubscriptionFilter, reads map[string]subscriptionInitialRead) bool {
 	if filter.ResourcesListChanged {
 		if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
-			slog.WarnContext(ctx, "write mcp initial resources list notification", "err", err)
+			h.Log.WarnContext(ctx, "write mcp initial resources list notification", "err", err)
 			return false
 		}
 	}
 	for _, uri := range filter.ResourceSubscriptions {
 		read := reads[uri]
 		if read.readErr != nil {
-			slog.WarnContext(ctx, "read mcp subscription initial state", "uri", uri, "err", read.readErr)
+			h.Log.WarnContext(ctx, "read mcp subscription initial state", "uri", uri, "err", read.readErr)
 		} else if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsInitialState, Params: SubscriptionsInitialStateParams{Meta: mcpSubscriptionMeta(subID), URI: uri, Contents: read.contents}}); err != nil {
-			slog.WarnContext(ctx, "write mcp initial subscription state notification", "err", err)
+			h.Log.WarnContext(ctx, "write mcp initial subscription state notification", "err", err)
 			return false
 		}
 		if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
-			slog.WarnContext(ctx, "write mcp initial resource update notification", "err", err)
+			h.Log.WarnContext(ctx, "write mcp initial resource update notification", "err", err)
 			return false
 		}
 	}
@@ -571,19 +573,19 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, stream *s
 	filter := params.Notifications
 	for update, err := range changes {
 		if err != nil {
-			slog.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
+			h.Log.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
 			return
 		}
 		if update.KeepAlive {
 			if err := stream.KeepAlive(); err != nil {
-				slog.WarnContext(ctx, "write mcp subscription heartbeat", "err", err)
+				h.Log.WarnContext(ctx, "write mcp subscription heartbeat", "err", err)
 				return
 			}
 			continue
 		}
 		if update.ResourcesListChanged && filter.ResourcesListChanged {
 			if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
-				slog.WarnContext(ctx, "write mcp resources notification", "err", err)
+				h.Log.WarnContext(ctx, "write mcp resources notification", "err", err)
 				return
 			}
 		}
@@ -593,7 +595,7 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, stream *s
 			}
 
 			if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
-				slog.WarnContext(ctx, "write mcp resource update notification", "err", err)
+				h.Log.WarnContext(ctx, "write mcp resource update notification", "err", err)
 				return
 			}
 		}
@@ -612,7 +614,7 @@ func mcpSubscriptionMeta(id string) MetaObject {
 	return MetaObject{"io.modelcontextprotocol/subscriptionId": id}
 }
 
-func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSONRPCError, err any) {
+func (h *Handler) logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSONRPCError, err any) {
 	attrs := []any{
 		"status", status,
 		"http_method", r.Method,
@@ -635,7 +637,7 @@ func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSO
 	if err != nil {
 		attrs = append(attrs, "err", err)
 	}
-	slog.ErrorContext(r.Context(), "mcp request failed", attrs...)
+	h.Log.ErrorContext(r.Context(), "mcp request failed", attrs...)
 }
 
 func writeMCPNotification(stream *sse.Stream, msg JSONRPCNotification) error {
@@ -730,7 +732,7 @@ func (h *Handler) handleCompat(w http.ResponseWriter, r *http.Request) {
 	}
 	result, rpcErr := h.dispatchCompat(r.Context(), req.Method, req.Params)
 	if rpcErr != nil {
-		logMCPFailure(r, http.StatusOK, &req, rpcErr, nil)
+		h.logMCPFailure(r, http.StatusOK, &req, rpcErr, nil)
 		h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}

@@ -20,6 +20,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/invopop/jsonschema"
 	schemavalidator "github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -51,8 +52,10 @@ func (r *metadataRegistry) SubscribeResourceUpdates(_ context.Context, params *S
 	}, nil
 }
 
-func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replace the process logger.
-	t.Run("HandleMCP", func(t *testing.T) { //nolint:paralleltest // HandleMCP cases replace the process logger.
+func TestHandler(t *testing.T) {
+	t.Parallel()
+	t.Run("HandleMCP", func(t *testing.T) {
+		t.Parallel()
 		t.Run("subscription setup cleanup on error", func(t *testing.T) {
 			for _, tc := range []struct {
 				name     string
@@ -69,7 +72,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				t.Run(tc.name, func(t *testing.T) {
 					synctest.Test(t, func(t *testing.T) {
 						registry := &registrationTestRegistry{subscriptionTestRegistry: newSubscriptionTestRegistry(), released: make(chan struct{}), setupErr: tc.setupErr}
-						h := &Handler{Registry: registry}
+						h := &Handler{Log: testlog.New(t), Registry: registry}
 						notifications := fmt.Sprintf(`"notifications":{"resourceSubscriptions":["test://resource"],"resourcesListChanged":%t}`, tc.list)
 						req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", strings.NewReader(nativeMCPRequestJSON("subscriptions/listen", notifications)))
 						req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
@@ -120,7 +123,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 					t.Run("error/registration", func(t *testing.T) {
 						synctest.Test(t, func(t *testing.T) {
 							reg := &registrationTestRegistry{subscriptionTestRegistry: newSubscriptionTestRegistry(), released: make(chan struct{}), setupErr: true}
-							h := &Handler{Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
+							h := &Handler{Log: testlog.New(t), Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
 							req := request(t, h, t.Context(), version)
 							w := httptest.NewRecorder()
 							h.HandleMCP(w, req)
@@ -148,7 +151,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 					t.Run("error/initial flush", func(t *testing.T) {
 						synctest.Test(t, func(t *testing.T) {
 							reg := &registrationTestRegistry{subscriptionTestRegistry: newSubscriptionTestRegistry(), released: make(chan struct{})}
-							h := &Handler{Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
+							h := &Handler{Log: testlog.New(t), Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
 							req := request(t, h, t.Context(), version)
 							w := &registrationFlushWriter{ResponseRecorder: httptest.NewRecorder(), registry: reg}
 							h.HandleMCP(w, req)
@@ -170,7 +173,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 						synctest.Test(t, func(t *testing.T) {
 							ctx, cancel := context.WithCancel(t.Context())
 							reg := &registrationTestRegistry{subscriptionTestRegistry: newSubscriptionTestRegistry(), released: make(chan struct{}), setup: cancel}
-							h := &Handler{Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
+							h := &Handler{Log: testlog.New(t), Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
 							req := request(t, h, ctx, version)
 							w := httptest.NewRecorder()
 							h.HandleMCP(w, req)
@@ -188,7 +191,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 					t.Run("valid/filter replacement during setup", func(t *testing.T) {
 						synctest.Test(t, func(t *testing.T) {
 							reg := &filterReplacingRegistry{subscriptionTestRegistry: newSubscriptionTestRegistry()}
-							h := &Handler{Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
+							h := &Handler{Log: testlog.New(t), Registry: reg, Sessions: NewSessionStore(func(context.Context) (string, error) { return "owner", nil })}
 							req := request(t, h, t.Context(), version)
 							reg.replace = func() {
 								post := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}`))
@@ -233,7 +236,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 						case "resource read":
 							reg.read = cancel
 						}
-						h := &Handler{Registry: reg}
+						h := &Handler{Log: testlog.New(t), Registry: reg}
 						req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp", strings.NewReader(nativeMCPRequestJSON("subscriptions/listen", `"notifications":{"resourcesListChanged":true,"resourceSubscriptions":["test://resource"]}`)))
 						req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
 						req.Header.Set("Mcp-Method", string(MethodSubscriptionsListen))
@@ -265,7 +268,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 		t.Run("protocol", func(t *testing.T) {
 			t.Run("successful tool result omits metadata", func(t *testing.T) {
 				registry := &subscriptionTestRegistry{callResult: RawToolResult{Structured: TextOutput{Result: "ok"}}}
-				h := &Handler{Registry: registry}
+				h := &Handler{Log: testlog.New(t), Registry: registry}
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/example/v1/mcp", strings.NewReader(nativeMCPRequestJSON("tools/call", `"name":"echo","arguments":{}`)))
 				req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
 				req.Header.Set("Mcp-Method", string(MethodToolsCall))
@@ -293,7 +296,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				}
 				registry := &subscriptionTestRegistry{}
 				registry.callResult = result
-				h := &Handler{Registry: registry}
+				h := &Handler{Log: testlog.New(t), Registry: registry}
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/example/v1/mcp", strings.NewReader(nativeMCPRequestJSON("tools/call", `"name":"echo","arguments":{}`)))
 				req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
 				req.Header.Set("Mcp-Method", string(MethodToolsCall))
@@ -320,14 +323,9 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				}
 			})
 
-			//nolint:paralleltest // parent runs serially on purpose; see doc comment.
 			t.Run("error logs failure", func(t *testing.T) {
 				var logBuf bytes.Buffer
-				oldDefault := slog.Default()
-				slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, nil)))
-				t.Cleanup(func() { slog.SetDefault(oldDefault) })
-
-				h := &Handler{}
+				h := &Handler{Log: slog.New(slog.NewJSONHandler(&logBuf, nil))}
 				req := httptest.NewRequestWithContext(
 					t.Context(),
 					http.MethodPost,
@@ -358,7 +356,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 
 			t.Run("subscription initial state and resource update", func(t *testing.T) {
 				registry := newSubscriptionTestRegistry()
-				h := &Handler{Registry: registry, ServerInfo: Implementation{Name: "test", Version: "1.0.0"}}
+				h := &Handler{Log: testlog.New(t), Registry: registry, ServerInfo: Implementation{Name: "test", Version: "1.0.0"}}
 				r := openSubscriptionStream(t, h, "test://resource", true)
 
 				ack := readSSEMessage(t, r)
@@ -436,7 +434,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 			t.Run("subscription initial state falls back to re-read on read failure", func(t *testing.T) {
 				registry := newSubscriptionTestRegistry()
 				registry.readErr = errors.New("resource read unavailable")
-				h := &Handler{Registry: registry, ServerInfo: Implementation{Name: "test", Version: "1.0.0"}}
+				h := &Handler{Log: testlog.New(t), Registry: registry, ServerInfo: Implementation{Name: "test", Version: "1.0.0"}}
 				r := openSubscriptionStream(t, h, "test://resource", false)
 
 				ack := readSSEMessage(t, r)
@@ -462,7 +460,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				t.Run("invalid released metadata", func(t *testing.T) {
 					t.Parallel()
 					r := &metadataRegistry{Registry: &subscriptionTestRegistry{}}
-					h := &Handler{Registry: r}
+					h := &Handler{Log: testlog.New(t), Registry: r}
 					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"_meta":{"openai/session":123}}}`))
 					w := httptest.NewRecorder()
 					h.HandleMCP(w, req)
@@ -478,7 +476,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 					t.Run(method, func(t *testing.T) {
 						t.Parallel()
 						r := &metadataRegistry{Registry: &subscriptionTestRegistry{}}
-						h := &Handler{Registry: r}
+						h := &Handler{Log: testlog.New(t), Registry: r}
 						for _, session := range []string{"conversation-one", "conversation-two", ""} {
 							body := nativeMCPRequestJSON(method, "")
 							var request JSONRPCRequest
@@ -513,7 +511,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				t.Run(version, func(t *testing.T) {
 					t.Parallel()
 					r := &metadataRegistry{Registry: &subscriptionTestRegistry{}}
-					h := &Handler{Registry: r}
+					h := &Handler{Log: testlog.New(t), Registry: r}
 					body := `{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"test://resource","_meta":{"openai/userLocation":{"timezone":"America/Toronto"},"example/hint":42}}}`
 					if version == ProtocolVersion {
 						body = strings.Replace(body, `"_meta":{`, `"_meta":{"io.modelcontextprotocol/protocolVersion":"`+ProtocolVersion+`","io.modelcontextprotocol/clientInfo":{"name":"test","version":"1"},"io.modelcontextprotocol/clientCapabilities":{},`, 1)
@@ -534,7 +532,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 			t.Run("subscription snapshot metadata and queued invalidation", func(t *testing.T) {
 				t.Parallel()
 				r := &metadataRegistry{Registry: &subscriptionTestRegistry{}}
-				h := &Handler{Registry: r}
+				h := &Handler{Log: testlog.New(t), Registry: r}
 				body := `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","params":{"notifications":{"resourceSubscriptions":["test://resource"]},"_meta":{"io.modelcontextprotocol/protocolVersion":"` + ProtocolVersion + `","io.modelcontextprotocol/clientInfo":{"name":"test","version":"1"},"io.modelcontextprotocol/clientCapabilities":{},"openai/session":"conversation-one","openai/userLocation":{"timezone":"Asia/Kolkata"}}}}`
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", strings.NewReader(body))
 				req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
@@ -560,7 +558,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				t.Run(version, func(t *testing.T) {
 					t.Parallel()
 					r := &metadataRegistry{Registry: &subscriptionTestRegistry{}}
-					h := &Handler{Registry: r}
+					h := &Handler{Log: testlog.New(t), Registry: r}
 					for _, extra := range []string{`,"openai/userLocation":{"timezone":"America/Toronto"},"openai/locale":"fr-CA","openai/organization":"org-1","openai/session":"conversation-1","openai/subject":"user-1","openai/userAgent":"client/1","example/hint":42`, ""} {
 						body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello"},"requestState":"resume","inputResponses":{"answer":"yes"},"_meta":{"progressToken":"progress"` + extra + `}}}`
 						if version == ProtocolVersion {
@@ -637,7 +635,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				}
 				return response
 			}
-			h := &Handler{Registry: registry}
+			h := &Handler{Log: testlog.New(t), Registry: registry}
 			discovery := request(h, MethodServerDiscover, "")
 			result, ok := discovery.Result.(map[string]any)
 			if !ok {
@@ -701,7 +699,7 @@ func TestHandler(t *testing.T) { //nolint:paralleltest // HandleMCP cases replac
 				}
 				return capabilities
 			}
-			h := &Handler{Registry: &subscriptionTestRegistry{}}
+			h := &Handler{Log: testlog.New(t), Registry: &subscriptionTestRegistry{}}
 			if extensions, present := discoverCapabilities(h)["extensions"]; present {
 				t.Fatalf("opt-out extensions advertised: %#v", extensions)
 			}

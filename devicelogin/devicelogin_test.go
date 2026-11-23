@@ -16,10 +16,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
-func TestWrite(t *testing.T) { //nolint:paralleltest // Captures the process-wide slog logger.
-	for _, tc := range []struct { //nolint:paralleltest // These cases replace the process logger.
+func TestWrite(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
 		name string
 		body any
 		fail bool
@@ -28,16 +31,15 @@ func TestWrite(t *testing.T) { //nolint:paralleltest // Captures the process-wid
 		{name: "connection", body: StartResponse{DeviceCode: "private-device-secret"}, fail: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
+			s := &Server{log: slog.New(slog.NewJSONHandler(&logs, nil))}
 			recorder := httptest.NewRecorder()
 			w := http.ResponseWriter(recorder)
 			if tc.fail {
 				w = &failingWriter{ResponseWriter: recorder}
 			}
-			write(t.Context(), w, http.StatusOK, tc.body)
+			s.write(t.Context(), w, http.StatusOK, tc.body)
 			var entry map[string]any
 			if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
 				t.Fatalf("missing response failure log: %v", err)
@@ -176,9 +178,9 @@ func (h *completionHost) Audit(ctx context.Context, e *AuditEvent) error {
 	return nil
 }
 
-func fixture() (*Server, *atomic.Int32, *atomic.Int32) {
+func fixture(t testing.TB) (*Server, *atomic.Int32, *atomic.Int32) {
 	h := &testHost{subject: "user", session: &testSession{cookie: "session=normal", body: `{"status":"ok"}`}}
-	return New(h), &h.sessions, &h.audits
+	return New(testlog.New(t), h), &h.sessions, &h.audits
 }
 func call(t *testing.T, f http.HandlerFunc, body any, auth, csrf string) *httptest.ResponseRecorder {
 	b, err := json.Marshal(body)
@@ -219,7 +221,7 @@ func TestServer(t *testing.T) {
 	t.Run("concurrency", testServerConcurrency)
 	t.Run("completion", testServerCompletion)
 	t.Run("approved session and single use", func(t *testing.T) {
-		s, sessions, audits := fixture()
+		s, sessions, audits := fixture(t)
 		subject := "user\x00approver-session"
 		host := s.host.(*testHost)
 		host.subject = subject
@@ -251,7 +253,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("denial", func(t *testing.T) {
-		s, sessions, audits := fixture()
+		s, sessions, audits := fixture(t)
 		v := start(t, s)
 		s.engine.codes[normalize(v.UserCode)].NextPoll = time.Time{}
 		d := lookup(t, s, v.UserCode)
@@ -265,7 +267,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("expiry", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		v := start(t, s)
 		s.engine.codes[normalize(v.UserCode)].ExpiresAt = time.Now().Add(-time.Second)
 		w := call(t, s.Poll, map[string]string{"device_code": v.DeviceCode}, "", "")
@@ -274,7 +276,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("slow down", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		v := start(t, s)
 		s.engine.codes[normalize(v.UserCode)].NextPoll = time.Time{}
 		for i, code := range []string{"authorization_pending", "slow_down", "slow_down"} {
@@ -285,7 +287,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("csrf and authentication", func(t *testing.T) {
-		s, _, audits := fixture()
+		s, _, audits := fixture(t)
 		v := start(t, s)
 		lookup(t, s, v.UserCode)
 		for _, auth := range []string{"", "user"} {
@@ -299,7 +301,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("ineligible and policy recheck", func(t *testing.T) {
-		s, sessions, _ := fixture()
+		s, sessions, _ := fixture(t)
 		v := start(t, s)
 		s.engine.codes[normalize(v.UserCode)].NextPoll = time.Time{}
 		d := lookup(t, s, v.UserCode)
@@ -315,7 +317,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("lockout", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		v := start(t, s)
 		for range 20 {
 			call(t, s.Lookup, map[string]string{"user_code": "wrong"}, "user", "")
@@ -326,7 +328,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("start limits", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		for range 10 {
 			start(t, s)
 		}
@@ -336,7 +338,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("global lockout", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		s.engine.limits["lookup"] = limit{count: 1000, until: time.Now().Add(time.Minute), lockedUntil: time.Now().Add(10 * time.Minute)}
 		w := call(t, s.Lookup, map[string]string{"user_code": "wrong"}, "user", "")
 		if w.Code != 429 {
@@ -344,7 +346,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("disabled", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		s.host.(*testHost).disabled = true
 		for _, f := range []http.HandlerFunc{s.Start, s.Poll, s.Lookup, s.Approve} {
 			w := call(t, f, struct{}{}, "user", "")
@@ -354,7 +356,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("audit failure", func(t *testing.T) {
-		s, sessions, _ := fixture()
+		s, sessions, _ := fixture(t)
 		v := start(t, s)
 		s.engine.codes[normalize(v.UserCode)].NextPoll = time.Time{}
 		d := lookup(t, s, v.UserCode)
@@ -365,7 +367,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("first poll interval", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		v := start(t, s)
 		w := call(t, s.Poll, map[string]string{"device_code": v.DeviceCode}, "", "")
 		if !bytes.Contains(w.Body.Bytes(), []byte("slow_down")) {
@@ -373,7 +375,7 @@ func TestServer(t *testing.T) {
 		}
 	})
 	t.Run("bounded JSON and method", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		for _, body := range []string{"{} {}", "{} broken", "{\"extra\":true}", "{\"extra\":\"" + string(bytes.Repeat([]byte("x"), 4096)) + "\"}"} {
 			r := httptest.NewRequest(http.MethodPost, "https://host.test/", bytes.NewBufferString(body))
 			r.Header.Set("Content-Type", "application/json")
@@ -392,7 +394,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("lockout survives counting window boundary", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		s.engine.limits["lookup:192.0.2.42"] = limit{count: 19, until: time.Now().Add(time.Second)}
 		call(t, s.Lookup, map[string]string{"user_code": "wrong"}, "user", "")
 		b := s.engine.limits["lookup:192.0.2.42"]
@@ -405,7 +407,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("concurrent redemption", func(t *testing.T) {
-		s, sessions, _ := fixture()
+		s, sessions, _ := fixture(t)
 		v := start(t, s)
 		s.engine.codes[normalize(v.UserCode)].NextPoll = time.Time{}
 		d := lookup(t, s, v.UserCode)
@@ -447,7 +449,7 @@ func (w *blockingWriter) WriteHeader(status int) {
 
 func testServerConcurrency(t *testing.T) {
 	t.Run("audit reservation", func(t *testing.T) {
-		s, sessions, audits := fixture()
+		s, sessions, audits := fixture(t)
 		first := start(t, s)
 		second := start(t, s)
 		d := lookup(t, s, first.UserCode)
@@ -486,7 +488,7 @@ func testServerConcurrency(t *testing.T) {
 		}
 	})
 	t.Run("expiry during audit", func(t *testing.T) {
-		s, sessions, _ := fixture()
+		s, sessions, _ := fixture(t)
 		v := start(t, s)
 		d := lookup(t, s, v.UserCode)
 		entered, release := make(chan struct{}), make(chan struct{})
@@ -514,7 +516,7 @@ func testServerConcurrency(t *testing.T) {
 		}
 	})
 	t.Run("audit failure releases reservation", func(t *testing.T) {
-		s, sessions, _ := fixture()
+		s, sessions, _ := fixture(t)
 		v := start(t, s)
 		d := lookup(t, s, v.UserCode)
 		s.host.(*testHost).auditErr = errors.New("disk")
@@ -531,7 +533,7 @@ func testServerConcurrency(t *testing.T) {
 	t.Run("responses", func(t *testing.T) {
 		for _, name := range []string{"start", "lookup", "approve"} {
 			t.Run(name, func(t *testing.T) {
-				s, _, _ := fixture()
+				s, _, _ := fixture(t)
 				v := start(t, s)
 				d := lookup(t, s, v.UserCode)
 				f := s.Start
@@ -569,7 +571,7 @@ func testServerConcurrency(t *testing.T) {
 		}
 	})
 	t.Run("verification URL", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		v := start(t, s)
 		entered, release := make(chan struct{}), make(chan struct{})
 		unblock := sync.OnceFunc(func() { close(release) })
@@ -620,7 +622,7 @@ func (w *failingWriter) Write([]byte) (int, error) { return 0, errors.New("conne
 
 func testServerCompletion(t *testing.T) {
 	t.Run("cleanup starts with a fresh deadline", func(t *testing.T) {
-		s, _, _ := fixture()
+		s, _, _ := fixture(t)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		session := &testSession{}
@@ -631,7 +633,7 @@ func testServerCompletion(t *testing.T) {
 	})
 	for _, failure := range []string{"none", "before creation", "after creation", "write", "issuance audit", "created audit", "response audit", "cancel", "cancel during write", "cancel during outcome audit", "write and revoke"} {
 		t.Run(failure, func(t *testing.T) {
-			s, _, _ := fixture()
+			s, _, _ := fixture(t)
 			v := start(t, s)
 			if v.RequestID == "" || v.RequestID == v.DeviceCode || v.RequestID == v.UserCode {
 				t.Fatal("missing independent request ID")

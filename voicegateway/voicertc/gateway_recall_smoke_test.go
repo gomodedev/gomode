@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -23,7 +24,7 @@ func TestSmokeGatewayServerFocusRecall(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	t.Cleanup(cancel)
 	sink := &realtimeEventSink{events: make(chan struct{}, 1)}
-	backend := &realtimeBridgeBackend{log: newTestLogger(t), provider: "gemini", apiKey: key, model: "gemini-3.8-live"}
+	backend := &realtimeBridgeBackend{log: testlog.New(t), provider: "gemini", apiKey: key, model: "gemini-3.8-live"}
 	session, err := backend.connect(ctx, "synthetic-server-focus-recall", sink)
 	if err != nil {
 		t.Fatal(strings.ReplaceAll(err.Error(), key, "[redacted]"))
@@ -121,7 +122,7 @@ func TestSmokeGeminiBridgeSession(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 		t.Cleanup(cancel)
 		sink := &realtimeEventSink{events: make(chan struct{}, 1)}
-		backend := &realtimeBridgeBackend{log: newTestLogger(t), provider: "gemini", apiKey: key, model: "gemini-3.8-live"}
+		backend := &realtimeBridgeBackend{log: testlog.New(t), provider: "gemini", apiKey: key, model: "gemini-3.8-live"}
 		session, err := backend.connect(ctx, "gateway-tools-audio", sink)
 		if err != nil {
 			t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/oauth"
 	"github.com/gomodedev/gomode/oauth/oauthverify"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
@@ -179,7 +180,7 @@ func testOAuthOfferValid(t *testing.T) {
 	tiA := newOAuthTestIssuer(t, keyA)
 	tiB := newOAuthTestIssuer(t, keyB)
 	cfg := oauthConfig(t, tiA, tiB)
-	handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+	handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +203,7 @@ func testOAuthOfferRejectsUnknownIssuerBeforeFetch(t *testing.T) {
 	key := newOAuthTestKey(t, "key-a")
 	ti := newOAuthTestIssuer(t, key)
 	cfg := oauthConfig(t, ti)
-	handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+	handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +231,7 @@ func testOAuthOfferJWKSRotation(t *testing.T) {
 		RefreshCooldown: time.Second,
 	})
 	cfg := oauthConfig(t, ti)
-	handler := newHandler(cfg.TrustedIssuers, func() MediaBridge { return &fakeMediaBridge{} }, nil, true, true, verifier)
+	handler := newHandler(testlog.New(t), cfg.TrustedIssuers, func() MediaBridge { return &fakeMediaBridge{} }, nil, true, true, verifier)
 
 	old := ti.authorization(t, oldKey, "voice.session", now.Add(time.Minute))
 	if w := offerWithService(t, handler, old); w.Code != http.StatusOK {
@@ -253,7 +254,7 @@ func testOAuthOfferRejections(t *testing.T) {
 	key := newOAuthTestKey(t, "key-a")
 	ti := newOAuthTestIssuer(t, key)
 	cfg := oauthConfig(t, ti)
-	handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+	handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +286,7 @@ func testOAuthOfferMixedWithScopedIssuer(t *testing.T) {
 	ti := newOAuthTestIssuer(t, key)
 	cfg, scoped := testServiceAuth(t)
 	cfg.TrustedIssuers = append(cfg.TrustedIssuers, TrustedIssuerConfig{Service: "example", Issuer: ti.issuer, OAuth: true})
-	handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+	handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

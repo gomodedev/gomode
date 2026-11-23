@@ -142,8 +142,8 @@ func (c *ResolvedConfig) Choices() iter.Seq2[ChoiceName, Choice] {
 // local endpoints remain selectable without probing their default servers.
 // Probes share a one-minute deadline, shortened by earlier caller cancellation.
 // Validate the result if no choices would prevent startup. Availability does not
-// guarantee access to a model.
-func (c *ResolvedConfig) Available(ctx context.Context) ResolvedConfig {
+// guarantee access to a model. log receives the warnings.
+func (c *ResolvedConfig) Available(ctx context.Context, log *slog.Logger) ResolvedConfig {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	configured := make(map[providerProbeKey]struct{})
@@ -198,7 +198,7 @@ func (c *ResolvedConfig) Available(ctx context.Context) ResolvedConfig {
 			mu.Unlock()
 			if p != nil {
 				if err := p.Close(); err != nil {
-					slog.WarnContext(ctx, "close provider availability probe", "provider", key.provider, "auth", key.auth, "err", err)
+					log.WarnContext(ctx, "close provider availability probe", "provider", key.provider, "auth", key.auth, "err", err)
 				}
 			}
 		})
@@ -214,7 +214,7 @@ func (c *ResolvedConfig) Available(ctx context.Context) ResolvedConfig {
 			err = fmt.Errorf("environment variable %s named by api_key_name is empty", c.APIKeyName)
 		}
 		if err != nil {
-			slog.WarnContext(ctx, "hiding voice choice: provider unavailable", "label", label, "provider", c.Provider, "auth", c.Auth, "err", err)
+			log.WarnContext(ctx, "hiding voice choice: provider unavailable", "label", label, "provider", c.Provider, "auth", c.Auth, "err", err)
 		}
 		return err != nil
 	}

@@ -34,6 +34,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
 
 	"github.com/maruel/genai"
@@ -320,13 +321,13 @@ func TestSmokeVoiceGatewayToolCall(t *testing.T) {
 	}
 
 	startup := time.Now()
-	bridge, err := NewBridge(runtimeCtx, newTestLogger(t), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+	bridge, err := NewBridge(runtimeCtx, testlog.New(t), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	t.Logf("local stack startup: %s", smokeElapsed(startup))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { bridge.CloseAll(runtimeCtx) })
-	handler, err := voicegateway.NewHandler(issuers, bridge, nil)
+	handler, err := voicegateway.NewHandler(testlog.New(t), issuers, bridge, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +679,7 @@ func pcmS16LEEnergy(pcm []byte) float64 {
 
 // startTestServer starts managed servers that log to t.
 func startTestServer(t testing.TB) serverLauncher {
-	log := newTestLogger(t)
+	log := testlog.New(t)
 	return func(ctx context.Context, spec serverSpec) (managedServer, error) {
 		return startServer(ctx, log, spec)
 	}

@@ -68,25 +68,25 @@ func (h *handler) bindChoiceProtocol(r *http.Request, choiceID string) *http.Req
 	return r.WithContext(voiceapi.WithSessionProtocol(r.Context(), p))
 }
 
-func writeDiagnostics(w http.ResponseWriter, r *http.Request, bridge MediaBridge, report voicev2.VoiceRTCDiagnosticsResp) {
+func (h *handler) writeDiagnostics(w http.ResponseWriter, r *http.Request, bridge MediaBridge, report voicev2.VoiceRTCDiagnosticsResp) {
 	if voiceapi.SessionProtocolFromContext(r.Context()).Version != voiceapi.ProtocolV1 {
-		voiceapi.WriteJSON(w, http.StatusOK, report)
+		voiceapi.WriteJSON(h.log, w, http.StatusOK, report)
 		return
 	}
 	// Decode through the frozen schema so new diagnostic fields cannot escape
 	// into v1 as its current counterpart evolves.
 	data, err := json.Marshal(report)
 	if err != nil {
-		voiceapi.WriteError(w, http.StatusInternalServerError, voiceapi.CodeVoiceOfferFailed, "encode voice diagnostics")
+		voiceapi.WriteError(h.log, w, http.StatusInternalServerError, voiceapi.CodeVoiceOfferFailed, "encode voice diagnostics")
 		return
 	}
 	var old voicev1.VoiceRTCDiagnosticsResp
 	if err := json.Unmarshal(data, &old); err != nil {
-		voiceapi.WriteError(w, http.StatusInternalServerError, voiceapi.CodeVoiceOfferFailed, "convert voice diagnostics")
+		voiceapi.WriteError(h.log, w, http.StatusInternalServerError, voiceapi.CodeVoiceOfferFailed, "convert voice diagnostics")
 		return
 	}
 	if provider, ok := bridge.(VoiceRTCErrorProvider); ok {
 		old.Server.LastError = provider.VoiceRTCError(report.SessionID)
 	}
-	voiceapi.WriteJSON(w, http.StatusOK, old)
+	voiceapi.WriteJSON(h.log, w, http.StatusOK, old)
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
 )
@@ -33,7 +34,7 @@ func TestPublishedVoiceContract(t *testing.T) {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
 			bridge := &protocolBridgeSpy{}
-			h := NewEmbeddedHandler(func() MediaBridge { return bridge }, bridge)
+			h := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return bridge }, bridge)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/voicegateway/"+version+"/voice/choices", http.NoBody))
 			if w.Code != http.StatusOK {
@@ -112,7 +113,7 @@ func TestTextTicketVersionBinding(t *testing.T) {
 		t.Run(version.String(), func(t *testing.T) {
 			t.Parallel()
 			calls := 0
-			h := NewEmbeddedHandler(nil, textSessionServerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			h := NewEmbeddedHandler(testlog.New(t), nil, textSessionServerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 				calls++
 				p := voiceapi.SessionProtocolFromContext(ctx)
 				if p.Version != version || r.Header.Get("Sec-WebSocket-Protocol") != version.TextSubprotocol() {

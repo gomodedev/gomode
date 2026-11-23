@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -237,7 +236,7 @@ func (h *Handler) handleCompatStream(w http.ResponseWriter, r *http.Request) {
 		}
 		rpcErr := registryError(err)
 		status := rpcHTTPStatus(rpcErr)
-		logMCPFailure(r, status, nil, rpcErr, err)
+		h.logMCPFailure(r, status, nil, rpcErr, err)
 		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
 		return
 	}
@@ -245,7 +244,7 @@ func (h *Handler) handleCompatStream(w http.ResponseWriter, r *http.Request) {
 	for {
 		changed, err := h.streamCompatResources(stream, subscription)
 		if err != nil {
-			slog.WarnContext(ctx, "released MCP notification stream stopped", "err", err)
+			h.Log.WarnContext(ctx, "released MCP notification stream stopped", "err", err)
 			return
 		}
 		if !changed || ctx.Err() != nil {
@@ -253,7 +252,7 @@ func (h *Handler) handleCompatStream(w http.ResponseWriter, r *http.Request) {
 		}
 		subscription, err = h.subscribeCompatResources(ctx, session)
 		if err != nil {
-			slog.WarnContext(ctx, "rearm released MCP notification stream", "err", err)
+			h.Log.WarnContext(ctx, "rearm released MCP notification stream", "err", err)
 			return
 		}
 	}

@@ -148,7 +148,7 @@ func mainImpl(args []string) (err error) {
 			err = errors.Join(err, apiListener.Close())
 		}
 	}()
-	resolved = resolved.Available(ctx)
+	resolved = resolved.Available(ctx, log)
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
@@ -173,12 +173,12 @@ func mainImpl(args []string) (err error) {
 	// Text sessions are additive: a text client drives the same backend while
 	// WebRTC clients keep their audio session. A bridge whose backend has no
 	// language model answers the route with 503.
-	handler, err := voicegateway.NewHandler(cfg.TrustedIssuers, bridge, bridge)
+	handler, err := voicegateway.NewHandler(log, cfg.TrustedIssuers, bridge, bridge)
 	if err != nil {
 		return err
 	}
 	if cfg.Server.DebugFrontend {
-		frontendHandler, err := gatewayfrontend.NewHandler(apiListener.Addr(), cfg.Server.ExternalURL, bridge, bridge)
+		frontendHandler, err := gatewayfrontend.NewHandler(log, apiListener.Addr(), cfg.Server.ExternalURL, bridge, bridge)
 		if err != nil {
 			return err
 		}

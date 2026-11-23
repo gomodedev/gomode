@@ -32,6 +32,7 @@ import (
 	"github.com/maruel/genaipy/providers/vosk"
 	"github.com/maruel/genaipy/providers/whistle"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -222,7 +223,7 @@ func (s *fakeTranscription) audioOption(t *testing.T) *genai.RealtimeOptionAudio
 func newLiveTestSession(t *testing.T, a *liveASR, lang string) (*localStackSession, *captureSink, *fakeConversation) {
 	sink := &captureSink{changed: make(chan struct{}, 1)}
 	conv := &fakeConversation{}
-	s := (&localStackRuntime{log: newTestLogger(t), liveASR: a}).newSession(t.Context(), "live", sink, true)
+	s := (&localStackRuntime{log: testlog.New(t), liveASR: a}).newSession(t.Context(), "live", sink, true)
 	s.conv = conv
 	s.language = lang
 	t.Cleanup(func() {

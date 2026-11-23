@@ -92,13 +92,15 @@ type LookupResponse struct {
 // Server owns a bounded in-memory device login store. Use one Server per host process.
 // Multi-instance hosts need sticky routing for these endpoints. Codes expire in ten minutes.
 type Server struct {
+	log    *slog.Logger
 	host   Host
 	engine *engine
 }
 
-// New creates a pairing server. The host must be initialized and nonnil.
-func New(host Host) *Server {
-	return &Server{host: host, engine: newEngine()}
+// New creates a pairing server. The host must be initialized and nonnil. log
+// receives response, revocation and audit failures.
+func New(log *slog.Logger, host Host) *Server {
+	return &Server{log: log, host: host, engine: newEngine()}
 }
 
 // Start creates a code. Per-IP and global creation budgets also bound memory and abuse.
@@ -107,16 +109,16 @@ func (s *Server) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct{}
-	if !decode(w, r, &in) {
+	if !s.decode(w, r, &in) {
 		return
 	}
 	v, err := s.engine.start(s.host.ClientIP(r), r.UserAgent())
 	if err != nil {
-		failProtocol(r.Context(), w, err)
+		s.failProtocol(r.Context(), w, err)
 		return
 	}
 	v.VerificationURI = s.host.VerificationURL(r)
-	write(r.Context(), w, http.StatusOK, v)
+	s.write(r.Context(), w, http.StatusOK, v)
 }
 
 // Poll consumes an approval before attempting session creation. Every completion
@@ -128,27 +130,27 @@ func (s *Server) Poll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in pollRequest
-	if !decode(w, r, &in) {
+	if !s.decode(w, r, &in) {
 		return
 	}
 	p, err := s.engine.poll(in.DeviceCode)
 	if err != nil {
-		failProtocol(r.Context(), w, err)
+		s.failProtocol(r.Context(), w, err)
 		return
 	}
 	event := AuditEvent{RequestID: p.id, Subject: p.Subject, Approved: true, IP: p.ip, UserAgent: p.agent, CreatedAt: p.CreatedAt}
 	if s.host.Eligible(r.Context(), p.Subject) != nil {
 		event.Kind = AuditSessionFailed
 		if s.host.Audit(r.Context(), &event) != nil {
-			fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
+			s.fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
 			return
 		}
-		fail(r.Context(), w, http.StatusForbidden, "access_denied")
+		s.fail(r.Context(), w, http.StatusForbidden, "access_denied")
 		return
 	}
 	event.Kind = AuditIssuanceStarted
 	if r.Context().Err() != nil || s.host.Audit(r.Context(), &event) != nil {
-		fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
+		s.fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
 		return
 	}
 	session, createErr := s.host.CreateSession(r, p.Subject)
@@ -163,7 +165,7 @@ func (s *Server) Poll(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.host.Audit(ctx, &event) != nil {
 			s.revoke(ctx, session, event)
-			fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
+			s.fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
 			return
 		}
 	}
@@ -174,10 +176,10 @@ func (s *Server) Poll(w http.ResponseWriter, r *http.Request) {
 			s.revoke(ctx, session, event)
 		}
 		if auditErr != nil {
-			fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
+			s.fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
 			return
 		}
-		fail(r.Context(), w, http.StatusInternalServerError, "session_failed")
+		s.fail(r.Context(), w, http.StatusInternalServerError, "session_failed")
 		return
 	}
 	out := &sessionWriter{ResponseWriter: w}
@@ -188,7 +190,7 @@ func (s *Server) Poll(w http.ResponseWriter, r *http.Request) {
 	}
 	auditErr := s.host.Audit(ctx, &event)
 	if auditErr != nil {
-		slog.ErrorContext(ctx, "Device session response audit failed", "requestID", event.RequestID, "sessionID", event.SessionID)
+		s.log.ErrorContext(ctx, "Device session response audit failed", "requestID", event.RequestID, "sessionID", event.SessionID)
 	}
 	if event.Kind == AuditResponseFailed || auditErr != nil || r.Context().Err() != nil {
 		s.revoke(ctx, session, event)
@@ -200,7 +202,7 @@ func (s *Server) Poll(w http.ResponseWriter, r *http.Request) {
 			if auditErr != nil {
 				code = "audit_failed"
 			}
-			fail(r.Context(), w, http.StatusInternalServerError, code)
+			s.fail(r.Context(), w, http.StatusInternalServerError, code)
 		}
 	}
 }
@@ -212,10 +214,10 @@ func (s *Server) revoke(ctx context.Context, session Session, event AuditEvent) 
 	event.Kind = AuditSessionRevoked
 	if session.Revoke(ctx) != nil {
 		event.Kind = AuditRevocationFailed
-		slog.ErrorContext(ctx, "Device session revocation failed", "requestID", event.RequestID, "sessionID", event.SessionID)
+		s.log.ErrorContext(ctx, "Device session revocation failed", "requestID", event.RequestID, "sessionID", event.SessionID)
 	}
 	if s.host.Audit(ctx, &event) != nil {
-		slog.ErrorContext(ctx, "Device session cleanup audit failed", "requestID", event.RequestID, "sessionID", event.SessionID)
+		s.log.ErrorContext(ctx, "Device session cleanup audit failed", "requestID", event.RequestID, "sessionID", event.SessionID)
 	}
 }
 
@@ -253,15 +255,15 @@ func (s *Server) Lookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in lookupRequest
-	if !decode(w, r, &in) {
+	if !s.decode(w, r, &in) {
 		return
 	}
 	v, err := s.engine.lookup(s.host.ClientIP(r), in.UserCode, subject)
 	if err != nil {
-		failProtocol(r.Context(), w, err)
+		s.failProtocol(r.Context(), w, err)
 		return
 	}
-	write(r.Context(), w, http.StatusOK, v)
+	s.write(r.Context(), w, http.StatusOK, v)
 }
 
 // Approve records an explicit approval or denial. X-Device-Login-CSRF must contain
@@ -275,29 +277,29 @@ func (s *Server) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in approveRequest
-	if !decode(w, r, &in) {
+	if !s.decode(w, r, &in) {
 		return
 	}
 	if in.Approve == nil {
-		fail(r.Context(), w, http.StatusBadRequest, "invalid_request")
+		s.fail(r.Context(), w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	p, err := s.engine.reserveDecision(s.host.ClientIP(r), in.UserCode, subject, r.Header.Get("X-Device-Login-CSRF"))
 	if err != nil {
-		failProtocol(r.Context(), w, err)
+		s.failProtocol(r.Context(), w, err)
 		return
 	}
 	auditErr := s.host.Audit(r.Context(), &AuditEvent{RequestID: p.id, Kind: AuditDecision, Subject: subject, Approved: *in.Approve, IP: p.ip, UserAgent: p.agent, CreatedAt: p.CreatedAt})
 	v, err := s.engine.finishDecision(p, subject, *in.Approve, auditErr == nil && r.Context().Err() == nil)
 	if err != nil {
-		failProtocol(r.Context(), w, err)
+		s.failProtocol(r.Context(), w, err)
 		return
 	}
 	if auditErr != nil || r.Context().Err() != nil {
-		fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
+		s.fail(r.Context(), w, http.StatusInternalServerError, "audit_failed")
 		return
 	}
-	write(r.Context(), w, http.StatusOK, approveResponse{State: string(v)})
+	s.write(r.Context(), w, http.StatusOK, approveResponse{State: string(v)})
 }
 
 type pollRequest struct {
@@ -325,11 +327,11 @@ type errorResponse struct {
 func (s *Server) approver(w http.ResponseWriter, r *http.Request) (string, bool) {
 	subject, err := s.host.Identify(r)
 	if err != nil || subject == "" {
-		fail(r.Context(), w, http.StatusUnauthorized, "login_required")
+		s.fail(r.Context(), w, http.StatusUnauthorized, "login_required")
 		return "", false
 	}
 	if s.host.Eligible(r.Context(), subject) != nil {
-		fail(r.Context(), w, http.StatusForbidden, "access_denied")
+		s.fail(r.Context(), w, http.StatusForbidden, "access_denied")
 		return "", false
 	}
 	return subject, true
@@ -340,17 +342,17 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if !s.host.Enabled() {
-		fail(r.Context(), w, http.StatusNotFound, "disabled")
+		s.fail(r.Context(), w, http.StatusNotFound, "disabled")
 		return false
 	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		fail(r.Context(), w, http.StatusMethodNotAllowed, "invalid_request")
+		s.fail(r.Context(), w, http.StatusMethodNotAllowed, "invalid_request")
 		return false
 	}
 	return true
 }
-func failProtocol(ctx context.Context, w http.ResponseWriter, err *protocolError) {
+func (s *Server) failProtocol(ctx context.Context, w http.ResponseWriter, err *protocolError) {
 	status := http.StatusBadRequest
 	switch err.code {
 	case errRateLimited:
@@ -361,37 +363,37 @@ func failProtocol(ctx context.Context, w http.ResponseWriter, err *protocolError
 		status = http.StatusForbidden
 	}
 	if err.code == errSlowDown {
-		write(ctx, w, status, errorResponse{Error: string(err.code), Interval: err.interval})
+		s.write(ctx, w, status, errorResponse{Error: string(err.code), Interval: err.interval})
 		return
 	}
-	fail(ctx, w, status, string(err.code))
+	s.fail(ctx, w, status, string(err.code))
 }
 
-func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+func (s *Server) decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	if strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/json" {
-		fail(r.Context(), w, http.StatusUnsupportedMediaType, "invalid_request")
+		s.fail(r.Context(), w, http.StatusUnsupportedMediaType, "invalid_request")
 		return false
 	}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048))
 	d.DisallowUnknownFields()
 	if d.Decode(v) != nil {
-		fail(r.Context(), w, http.StatusBadRequest, "invalid_request")
+		s.fail(r.Context(), w, http.StatusBadRequest, "invalid_request")
 		return false
 	}
 	var extra any
 	if !errors.Is(d.Decode(&extra), io.EOF) {
-		fail(r.Context(), w, http.StatusBadRequest, "invalid_request")
+		s.fail(r.Context(), w, http.StatusBadRequest, "invalid_request")
 		return false
 	}
 	return true
 }
-func fail(ctx context.Context, w http.ResponseWriter, status int, code string) {
-	write(ctx, w, status, errorResponse{Error: code})
+func (s *Server) fail(ctx context.Context, w http.ResponseWriter, status int, code string) {
+	s.write(ctx, w, status, errorResponse{Error: code})
 }
-func write(ctx context.Context, w http.ResponseWriter, status int, v any) {
+func (s *Server) write(ctx context.Context, w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.ErrorContext(ctx, "Device login response failed", "err", err, "status", status)
+		s.log.ErrorContext(ctx, "Device login response failed", "err", err, "status", status)
 	}
 }

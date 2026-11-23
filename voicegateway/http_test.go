@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/internal/testlog"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
@@ -54,7 +55,7 @@ func TestNewHandler(t *testing.T) {
 	t.Parallel()
 	t.Run("invalid issuer policy", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewHandler([]TrustedIssuerConfig{{Service: "example", Issuer: "https://service.example.com", PublicKey: "invalid"}}, nil, nil)
+		_, err := NewHandler(testlog.New(t), []TrustedIssuerConfig{{Service: "example", Issuer: "https://service.example.com", PublicKey: "invalid"}}, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "trusted_issuers[0].public_key") {
 			t.Fatalf("invalid handler issuer = %v", err)
 		}
@@ -62,7 +63,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("standalone session operations require bound authorization", func(t *testing.T) {
 		t.Parallel()
 		cfg, serviceJSON := testServiceAuth(t)
-		handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +106,7 @@ func TestNewHandler(t *testing.T) {
 		t.Parallel()
 		cfg := configFile{}
 		cfg.TrustedIssuers = []TrustedIssuerConfig{{Service: "example", Issuer: "https://service.example.com", OAuth: true}}
-		handler, err := NewHandler(cfg.TrustedIssuers, nil, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +140,7 @@ func TestNewHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/voicegateway/v2/voice/health", http.NoBody)
 		cfg := configFile{}
-		handler, err := NewHandler(cfg.TrustedIssuers, nil, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +162,7 @@ func TestNewHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v2/voice/rtc/offer", strings.NewReader(`{}`))
 		cfg := configFile{}
-		handler, err := NewHandler(cfg.TrustedIssuers, nil, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +175,7 @@ func TestNewHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v2/voice/rtc/offer", strings.NewReader(`{"sdp":"offer"}`))
 		cfg := configFile{}
-		handler, err := NewHandler(cfg.TrustedIssuers, nil, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -213,7 +214,7 @@ func TestNewHandler(t *testing.T) {
 			Issuer:    "https://service.example.com",
 			PublicKey: encodedPublicKey,
 		}}
-		handler, err := NewHandler(cfg.TrustedIssuers, nil, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -225,7 +226,7 @@ func TestNewHandler(t *testing.T) {
 		t.Parallel()
 		cfg, service := testServiceAuth(t)
 		var bridge *fakeMediaBridge
-		handler, err := NewHandler(cfg.TrustedIssuers, bridge, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, bridge, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,7 +247,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("offer succeeds with trusted service", func(t *testing.T) {
 		t.Parallel()
 		cfg, service := testServiceAuth(t)
-		handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -276,7 +277,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("offer reports a semantic backend failure", func(t *testing.T) {
 		t.Parallel()
 		cfg, service := testServiceAuth(t)
-		handler, err := NewHandler(cfg.TrustedIssuers, &failingMediaBridge{}, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &failingMediaBridge{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +290,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("offer rejects untrusted service", func(t *testing.T) {
 		t.Parallel()
 		cfg := configFile{}
-		handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -302,7 +303,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("offer rejects token without voice capability", func(t *testing.T) {
 		t.Parallel()
 		cfg, service := testServiceAuth(t, "other")
-		handler, err := NewHandler(cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
+		handler, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -317,7 +318,7 @@ func TestNewEmbeddedHandler(t *testing.T) {
 	t.Parallel()
 	t.Run("offer accepts sdp without service authorization", func(t *testing.T) {
 		t.Parallel()
-		handler := NewEmbeddedHandler(func() MediaBridge { return &fakeMediaBridge{} }, nil)
+		handler := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return &fakeMediaBridge{} }, nil)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v2/voice/rtc/offer", strings.NewReader(`{"sdp":"offer"}`))
 		handler.ServeHTTP(w, req)
@@ -335,7 +336,7 @@ func TestNewEmbeddedHandler(t *testing.T) {
 
 	t.Run("diagnostics returns structured issue", func(t *testing.T) {
 		t.Parallel()
-		handler := NewEmbeddedHandler(func() MediaBridge { return &fakeMediaBridge{} }, nil)
+		handler := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return &fakeMediaBridge{} }, nil)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v2/voice/rtc/session-1/diagnostics", strings.NewReader(`{"client":{"iceConnectionState":"failed"}}`))
 		handler.ServeHTTP(w, req)
@@ -356,7 +357,7 @@ func TestNewEmbeddedHandler(t *testing.T) {
 
 	t.Run("diagnostics reports unavailable bridge", func(t *testing.T) {
 		t.Parallel()
-		handler := NewEmbeddedHandler(func() MediaBridge { return nil }, nil)
+		handler := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return nil }, nil)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v2/voice/rtc/session-1/diagnostics", strings.NewReader(`{}`))
 		handler.ServeHTTP(w, req)
@@ -375,7 +376,7 @@ func TestNewEmbeddedHandler(t *testing.T) {
 	t.Run("close reports unavailable bridge", func(t *testing.T) {
 		t.Parallel()
 
-		handler := NewEmbeddedHandler(func() MediaBridge { return nil }, nil)
+		handler := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return nil }, nil)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v2/voice/rtc/session-1", http.NoBody)
 		handler.ServeHTTP(w, req)
@@ -384,7 +385,7 @@ func TestNewEmbeddedHandler(t *testing.T) {
 
 	t.Run("health is standalone only", func(t *testing.T) {
 		t.Parallel()
-		handler := NewEmbeddedHandler(func() MediaBridge { return &fakeMediaBridge{} }, nil)
+		handler := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return &fakeMediaBridge{} }, nil)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/voicegateway/v2/voice/health", http.NoBody)
 		handler.ServeHTTP(w, req)
@@ -538,7 +539,7 @@ func TestVoiceChoices(t *testing.T) {
 				if tc.text {
 					text = b
 				}
-				h := NewEmbeddedHandler(func() MediaBridge { return media }, text)
+				h := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return media }, text)
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/voicegateway/v2/voice/choices", http.NoBody))
 				var got voicev2.VoiceChoicesResp
@@ -586,7 +587,7 @@ func TestVoiceChoices(t *testing.T) {
 			},
 		}
 		b := &choiceBridge{choices: &catalog}
-		h := NewEmbeddedHandler(func() MediaBridge { return b }, b)
+		h := NewEmbeddedHandler(testlog.New(t), func() MediaBridge { return b }, b)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/voicegateway/v2/voice/choices", http.NoBody))
 		var got voicev2.VoiceChoicesResp
@@ -599,7 +600,7 @@ func TestVoiceChoices(t *testing.T) {
 	})
 	b := &choiceBridge{}
 	cfg, service := testServiceAuth(t)
-	h, err := NewHandler(cfg.TrustedIssuers, b, b)
+	h, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, b, b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,7 +693,7 @@ func TestEmbeddedChoiceCapabilities(t *testing.T) {
 	t.Run("named text server without media", func(t *testing.T) {
 		t.Parallel()
 		text := &choiceBridge{}
-		h := NewEmbeddedHandler(nil, text)
+		h := NewEmbeddedHandler(testlog.New(t), nil, text)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/voicegateway/v2/voice/choices", http.NoBody))
 		var choices voicev2.VoiceChoicesResp
@@ -744,7 +745,7 @@ func TestEmbeddedChoiceCapabilities(t *testing.T) {
 					return nil
 				})
 			}
-			h := NewEmbeddedHandler(media, text)
+			h := NewEmbeddedHandler(testlog.New(t), media, text)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/voicegateway/v2/voice/choices", http.NoBody))
 			var choices voicev2.VoiceChoicesResp

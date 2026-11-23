@@ -16,6 +16,7 @@ import (
 	"github.com/maruel/genaipy/providers/nemospeech"
 	"github.com/maruel/genaipy/providers/vosk"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/voicegateway"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
@@ -45,7 +46,7 @@ func TestSmokeLiveASR(t *testing.T) {
 		"fr": "Je voudrais réserver une table pour deux ce soir.",
 	} {
 		var pcm []byte
-		for chunk, err := range (&geminiTTSAdapter{log: newTestLogger(t), client: tts, voice: "Kore"}).synthesize(t.Context(), lang, "", text) {
+		for chunk, err := range (&geminiTTSAdapter{log: testlog.New(t), client: tts, voice: "Kore"}).synthesize(t.Context(), lang, "", text) {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -139,7 +140,7 @@ func TestSmokeLiveASR(t *testing.T) {
 // rejected the utterance. The session closes when t ends.
 func smokeLiveUtterance(t *testing.T, a *liveASR, lang string, pcm []byte) ([]string, string, string) {
 	sink := &captureSink{changed: make(chan struct{}, 1)}
-	s := (&localStackRuntime{log: newTestLogger(t), liveASR: a}).newSession(t.Context(), "smoke", sink, true)
+	s := (&localStackRuntime{log: testlog.New(t), liveASR: a}).newSession(t.Context(), "smoke", sink, true)
 	s.conv = &fakeConversation{}
 	s.language = lang
 	t.Cleanup(func() {

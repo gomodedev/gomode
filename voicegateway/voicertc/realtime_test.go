@@ -20,6 +20,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
 
 	"github.com/coder/websocket"
@@ -193,7 +194,7 @@ func newRealtimePolicySession(t *testing.T, paused bool) (*llamaRealtimeSession,
 		p.terminalRead = make(chan struct{})
 		p.terminalRelease = make(chan struct{})
 	}
-	b := &llamaRealtimeBackend{log: newTestLogger(t), slots: make(chan struct{}, 1)}
+	b := &llamaRealtimeBackend{log: testlog.New(t), slots: make(chan struct{}, 1)}
 	b.slots <- struct{}{}
 	sink := &realtimeEventSink{events: make(chan struct{}, 1)}
 	s := &llamaRealtimeSession{backend: b, ctx: ctx, cancel: cancel, sink: sink, playback: sink, rt: p, gate: newRealtimeAudioGate(defaultInputSampleRate, realtimeAudioManual)}
@@ -292,7 +293,7 @@ func TestLlamaRealtimeSession(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		peer := newRealtimePeer()
 		sink := &realtimePacedSink{realtimeEventSink: realtimeEventSink{events: make(chan struct{}, 1)}}
-		backend := &llamaRealtimeBackend{log: newTestLogger(t), slots: make(chan struct{}, 1)}
+		backend := &llamaRealtimeBackend{log: testlog.New(t), slots: make(chan struct{}, 1)}
 		backend.slots <- struct{}{}
 		s := &llamaRealtimeSession{backend: backend, ctx: ctx, cancel: cancel, sink: sink, playback: sink, rt: peer, gate: newRealtimeAudioGate(defaultInputSampleRate, realtimeAudioManual)}
 		s.workers.Go(s.receive)
@@ -1159,7 +1160,7 @@ func TestLlamaRealtimeSession(t *testing.T) {
 							close(closed)
 						}))
 						t.Cleanup(srv.Close)
-						b, err := newLlamaRealtimeBackend(t.Context(), newTestLogger(t), voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: srv.URL}, Slots: 1})
+						b, err := newLlamaRealtimeBackend(t.Context(), testlog.New(t), voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: srv.URL}, Slots: 1})
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -1203,7 +1204,7 @@ func TestLlamaRealtimeSession(t *testing.T) {
 			})
 			t.Run("setup deadline", func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
-					b := &llamaRealtimeBackend{log: newTestLogger(t), provider: stalledRealtimeProvider{}, slots: make(chan struct{}, 1)}
+					b := &llamaRealtimeBackend{log: testlog.New(t), provider: stalledRealtimeProvider{}, slots: make(chan struct{}, 1)}
 					sink := &realtimeEventSink{events: make(chan struct{}, 1)}
 					session, err := b.connect(t.Context(), "deadline", sink)
 					if err != nil {
@@ -1235,7 +1236,7 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		t.Cleanup(cancel)
 		// The contributed staged choice; setup fails before any model request.
-		b, err := newLlamaRealtimeBackend(ctx, newTestLogger(t), voicegateway.RealtimeConfig{
+		b, err := newLlamaRealtimeBackend(ctx, testlog.New(t), voicegateway.RealtimeConfig{
 			ID:          "lfm3-audio-staged",
 			ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: "http://127.0.0.1:1", Model: "LiquidAI/LFM3-Audio-2B-GGUF/LFM3-Audio-2B-Q4_K_M.gguf"},
 			Slots:       1,
@@ -1245,7 +1246,7 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 			t.Fatal(err)
 		}
 		// CloseAll closes b only once the bridge exists.
-		br, err := newBridgeWithBackend(ctx, newTestLogger(t), b, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+		br, err := newBridgeWithBackend(ctx, testlog.New(t), b, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 		if err != nil {
 			t.Fatal(errors.Join(err, b.Close()))
 		}
@@ -1324,7 +1325,7 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 			}
 		}))
 		t.Cleanup(srv.Close)
-		b, err := newLlamaRealtimeBackend(t.Context(), newTestLogger(t), voicegateway.RealtimeConfig{
+		b, err := newLlamaRealtimeBackend(t.Context(), testlog.New(t), voicegateway.RealtimeConfig{
 			ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: srv.URL, Effort: "medium"}, Slots: 1, Staged: true,
 		})
 		if err != nil {
@@ -1419,7 +1420,7 @@ func TestLlamaRealtimeBackend(t *testing.T) {
 		})
 	})
 	t.Run("connect", func(t *testing.T) {
-		b := &llamaRealtimeBackend{log: newTestLogger(t), slots: make(chan struct{}, 1)}
+		b := &llamaRealtimeBackend{log: testlog.New(t), slots: make(chan struct{}, 1)}
 		s, err := b.connect(t.Context(), "one", &realtimeEventSink{events: make(chan struct{}, 1)})
 		if err != nil {
 			t.Fatal(err)

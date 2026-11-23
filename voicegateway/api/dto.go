@@ -79,18 +79,19 @@ type ErrorDetails struct {
 	Message string `json:"message"`
 }
 
-// WriteJSON writes v as a JSON response with the given HTTP status.
-func WriteJSON(w http.ResponseWriter, status int, v any) {
+// WriteJSON writes v as a JSON response with the given HTTP status. log receives
+// encoding failures.
+func WriteJSON(log *slog.Logger, w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("json encode", "err", err)
+		log.Error("json encode", "err", err)
 	}
 }
 
 // WriteError writes a JSON error response with the given HTTP status and code.
-func WriteError(w http.ResponseWriter, status int, code ErrorCode, message string) {
-	WriteJSON(w, status, ErrorResponse{
+func WriteError(log *slog.Logger, w http.ResponseWriter, status int, code ErrorCode, message string) {
+	WriteJSON(log, w, status, ErrorResponse{
 		Error: ErrorDetails{
 			Code:    code,
 			Message: message,

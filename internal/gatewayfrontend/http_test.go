@@ -17,13 +17,14 @@ import (
 	"github.com/andybalholm/brotli"
 
 	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/mcp"
 	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestNewHandler(t *testing.T) {
 	t.Parallel()
-	h, err := NewHandler(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3480}, "", nil, nil)
+	h, err := NewHandler(testlog.New(t), &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3480}, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +194,7 @@ func TestNewHandler(t *testing.T) {
 		}
 	})
 	t.Run("host API remains separate", func(t *testing.T) {
-		api, err := voicegateway.NewHandler(nil, nil, nil)
+		api, err := voicegateway.NewHandler(testlog.New(t), nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +223,7 @@ func TestRemoteFrontend(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = ln.Close() })
-			h, err := NewHandler(ln.Addr(), "", nil, nil)
+			h, err := NewHandler(testlog.New(t), ln.Addr(), "", nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,11 +308,11 @@ func TestRegistry(t *testing.T) {
 
 func TestProxyFrontend(t *testing.T) {
 	t.Parallel()
-	frontend, err := NewHandler(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3479}, "https://Voice.Example:443/", nil, nil)
+	frontend, err := NewHandler(testlog.New(t), &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3479}, "https://Voice.Example:443/", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	api, err := voicegateway.NewHandler(nil, nil, nil)
+	api, err := voicegateway.NewHandler(testlog.New(t), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

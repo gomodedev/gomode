@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genaipy/providers/kittentts/kittenttssrv"
@@ -82,7 +83,7 @@ func geminiSmokeTTS(model string) func(t *testing.T) ttsAdapter {
 				t.Error(err)
 			}
 		})
-		return &geminiTTSAdapter{log: newTestLogger(t), client: c, voice: "Kore"}
+		return &geminiTTSAdapter{log: testlog.New(t), client: c, voice: "Kore"}
 	}
 }
 

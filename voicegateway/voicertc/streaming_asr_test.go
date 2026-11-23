@@ -12,6 +12,7 @@ import (
 
 	"github.com/maruel/genai"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -25,7 +26,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 		sessions <- b
 		sink := &captureSink{changed: make(chan struct{}, 1)}
 		conv := &fakeConversation{}
-		runtime := &localStackRuntime{log: newTestLogger(t), liveASR: newFakeLiveASR(sessions)}
+		runtime := &localStackRuntime{log: testlog.New(t), liveASR: newFakeLiveASR(sessions)}
 		s := runtime.newSession(t.Context(), "live", sink, true)
 		s.conv = conv
 		t.Cleanup(func() {
@@ -100,7 +101,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 		sessions <- a
 		sink := &captureSink{changed: make(chan struct{}, 1)}
 		conv := &fakeConversation{}
-		s := (&localStackRuntime{log: newTestLogger(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "cancel", sink, true)
+		s := (&localStackRuntime{log: testlog.New(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "cancel", sink, true)
 		s.conv = conv
 		t.Cleanup(func() {
 			if err := s.close(); err != nil {
@@ -145,7 +146,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 					sessions <- b
 					sessions <- c
 					sink := &captureSink{changed: make(chan struct{}, 1)}
-					s := (&localStackRuntime{log: newTestLogger(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "ordered", sink, true)
+					s := (&localStackRuntime{log: testlog.New(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "ordered", sink, true)
 					s.conv = &fakeConversation{}
 					t.Cleanup(func() {
 						if err := s.close(); err != nil {
@@ -210,7 +211,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 			sessions <- a
 			sink := &captureSink{changed: make(chan struct{}, 1)}
 			conv := &fakeConversation{}
-			s := (&localStackRuntime{log: newTestLogger(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "timeout", sink, true)
+			s := (&localStackRuntime{log: testlog.New(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "timeout", sink, true)
 			s.conv = conv
 			t.Cleanup(func() {
 				if err := s.close(); err != nil {
@@ -254,7 +255,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			sessions := make(chan *fakeTranscription, 2*liveASRMaxRecognizing)
 			sink := &captureSink{changed: make(chan struct{}, 1)}
-			s := (&localStackRuntime{log: newTestLogger(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "bound", sink, true)
+			s := (&localStackRuntime{log: testlog.New(t), liveASR: newFakeLiveASR(sessions)}).newSession(t.Context(), "bound", sink, true)
 			s.conv = &fakeConversation{}
 			t.Cleanup(func() {
 				if err := s.close(); err != nil {
@@ -304,7 +305,7 @@ func testLocalStackSessionLiveTranscription(t *testing.T) {
 				t.Parallel()
 				synctest.Test(t, func(t *testing.T) {
 					sink := &captureSink{changed: make(chan struct{}, 1)}
-					s := (&localStackRuntime{log: newTestLogger(t), liveASR: tc.asr()}).newSession(t.Context(), "bounded", sink, true)
+					s := (&localStackRuntime{log: testlog.New(t), liveASR: tc.asr()}).newSession(t.Context(), "bounded", sink, true)
 					s.conv = &fakeConversation{}
 					t.Cleanup(func() {
 						if err := s.close(); err != nil {

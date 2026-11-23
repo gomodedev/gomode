@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
 	"github.com/maruel/genai/providers/llamacpp"
@@ -33,7 +34,7 @@ func nativeTTSClient(t *testing.T, provider string, handler http.HandlerFunc) tt
 				t.Error(err)
 			}
 		})
-		return &llamaTTSAdapter{log: newTestLogger(t), client: p, voice: "female"}
+		return &llamaTTSAdapter{log: testlog.New(t), client: p, voice: "female"}
 	}
 	target, err := url.Parse(srv.URL)
 	if err != nil {
@@ -50,7 +51,7 @@ func nativeTTSClient(t *testing.T, provider string, handler http.HandlerFunc) tt
 			t.Error(err)
 		}
 	})
-	return &geminiTTSAdapter{log: newTestLogger(t), client: p, voice: "Kore"}
+	return &geminiTTSAdapter{log: testlog.New(t), client: p, voice: "Kore"}
 }
 
 func TestLlamaTTSAdapter(t *testing.T) {

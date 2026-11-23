@@ -712,13 +712,13 @@ func (b *Bridge) ServeTextSession(ctx context.Context, w http.ResponseWriter, r 
 func (b *Bridge) ServeTextChoice(ctx context.Context, w http.ResponseWriter, r *http.Request, choiceID string) error {
 	connector, err := b.choiceBackend(choiceID, voicev2.VoiceTransportText)
 	if err != nil {
-		voiceapi.WriteError(w, http.StatusBadRequest, voiceapi.CodeBadRequest, err.Error())
+		voiceapi.WriteError(b.log, w, http.StatusBadRequest, voiceapi.CodeBadRequest, err.Error())
 		return err
 	}
 	backend, ok := connector.(*localStackBackend)
 	if !ok {
 		err := errors.New("configured voice backend does not serve text sessions")
-		voiceapi.WriteError(w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, err.Error())
+		voiceapi.WriteError(b.log, w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, err.Error())
 		return err
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
@@ -729,7 +729,7 @@ func (b *Bridge) ServeTextChoice(ctx context.Context, w http.ResponseWriter, r *
 	b.textMu.Lock()
 	if b.textCtx.Err() != nil {
 		b.textMu.Unlock()
-		voiceapi.WriteError(w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, "voice gateway is shutting down")
+		voiceapi.WriteError(b.log, w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, "voice gateway is shutting down")
 		return errors.New("voice gateway is shutting down")
 	}
 	if b.textActive == 0 {

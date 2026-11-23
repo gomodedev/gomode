@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/voicegateway"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
@@ -117,11 +118,11 @@ func TestServerProtocolMessage(t *testing.T) {
 		}
 	})
 
-	sess := &session{log: newTestLogger(t), protocol: p}
+	sess := &session{log: testlog.New(t), protocol: p}
 	if err := sess.deliverGatewayMessage(out); err != nil {
 		t.Fatal(err)
 	}
-	bridge := &Bridge{log: newTestLogger(t), sessions: map[string]*session{"one": sess}}
+	bridge := &Bridge{log: testlog.New(t), sessions: map[string]*session{"one": sess}}
 	if got := bridge.VoiceRTCError("one"); got != "failed" {
 		t.Fatalf("retained diagnostics error = %q", got)
 	}
@@ -153,7 +154,7 @@ func TestPublishedTextSessions(t *testing.T) {
 				t.Cleanup(cancel)
 				llm := protocolLLMSpy{reasoning: make(chan bool, 1)}
 				bridge := newTestTextBridge(t, llm)
-				h := voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return bridge }, bridge)
+				h := voicegateway.NewEmbeddedHandler(testlog.New(t), func() voicegateway.MediaBridge { return bridge }, bridge)
 				server := httptest.NewServer(h)
 				t.Cleanup(server.Close)
 				prefix := server.URL + "/api/voicegateway/" + version.String() + "/voice/text"
