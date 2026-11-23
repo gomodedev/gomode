@@ -14,6 +14,7 @@ import android.os.ParcelFileDescriptor
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -48,6 +49,7 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.util.Base64
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 @RunWith(AndroidJUnit4::class)
 class CarDialInterceptionTest {
@@ -1386,12 +1388,7 @@ class CarDialInterceptionTest {
         // CarDialSettingTest owns the prerequisite states and disable/enable; this proves
         // Android's real permission dialog and role chooser, and live role-loss detection.
         clickNativeText("Allow microphone")
-        val permission =
-            device.wait(
-                Until.findObject(By.res("com.android.permissioncontroller", "permission_allow_foreground_only_button")),
-                5_000,
-            )
-        requireNotNull(permission) { "Android microphone permission dialog did not open" }.click()
+        allowMicrophoneInSystemDialog()
         clickNativeText("Enable dial-to-start")
         acceptRoleChooser()
         scrollToText("Dial-to-start is on.")
@@ -1405,6 +1402,35 @@ class CarDialInterceptionTest {
         scrollToText("Dial-to-start is on.")
         scrollToText("Go Mode: +1-867-555-0100")
         scrollToText("Create contacts")
+    }
+
+    private fun allowMicrophoneInSystemDialog() {
+        val resourceID = Pattern.compile(".*:id/permission_allow_foreground_only_button")
+        val button =
+            device.wait(
+                {
+                    findNode { node ->
+                        node.isEnabled && node.viewIdResourceName?.let { resourceID.matcher(it).matches() } == true
+                    }
+                },
+                5_000,
+            )
+        requireNotNull(button) { "Android microphone permission dialog did not open" }
+        // The accessibility node can be visible before the window is ready for coordinate taps.
+        assertTrue(
+            "Android microphone permission button rejected the click",
+            button.performAction(AccessibilityNodeInfo.ACTION_CLICK),
+        )
+        assertTrue(
+            "Android microphone permission dialog did not close",
+            device.wait(Until.gone(By.res(resourceID)), 5_000),
+        )
+        assertEquals(
+            "Android did not grant microphone permission",
+            PackageManager.PERMISSION_GRANTED,
+            context.packageManager.checkPermission(Manifest.permission.RECORD_AUDIO, APP),
+        )
+        awaitMainActivityResumed()
     }
 
     private fun redirectionEnabled(): Boolean =
@@ -1450,12 +1476,8 @@ class CarDialInterceptionTest {
         throw AssertionError("Native control not found: $text; visible: ${visibleText()}")
     }
 
-    private fun findNode(
-        matches: (android.view.accessibility.AccessibilityNodeInfo) -> Boolean,
-    ): android.view.accessibility.AccessibilityNodeInfo? {
-        fun find(
-            node: android.view.accessibility.AccessibilityNodeInfo,
-        ): android.view.accessibility.AccessibilityNodeInfo? {
+    private fun findNode(matches: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        fun find(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
             if (matches(node)) return node
             repeat(node.childCount) { index -> node.getChild(index)?.let { find(it)?.let { match -> return match } } }
             return null
@@ -1466,7 +1488,7 @@ class CarDialInterceptionTest {
     private fun visibleText(): String {
         val text = mutableListOf<String>()
 
-        fun collect(node: android.view.accessibility.AccessibilityNodeInfo) {
+        fun collect(node: AccessibilityNodeInfo) {
             node.text?.toString()?.let(text::add)
             repeat(node.childCount) { index -> node.getChild(index)?.let(::collect) }
         }
@@ -1481,7 +1503,7 @@ class CarDialInterceptionTest {
         if (scroll) scrollToText(text)
         var button = requireNotNull(findNode { it.text?.toString() == text }) { visibleText() }
         while (!button.isClickable && button.parent != null) button = button.parent
-        button.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+        button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
 
     private fun acceptRoleChooser() {
