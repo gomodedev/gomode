@@ -61,8 +61,9 @@ Mode extensions to them. Go symbols that hosts import follow module tags.
 A breaking change ships as version N+1 beside version N:
 
 - Breaking: remove or rename a field, route, or enum value; change a type,
-  unit, default, or meaning; make an optional field required; reject input
-  that version N accepts. Adding an optional field or a route is not breaking.
+  unit, or meaning; make an optional field required; reject input that
+  version N accepts. Adding an optional field or a route, or changing a
+  default, is not breaking.
 - Copy the vN package to vN+1 and change the copy. `voicegateway/api/v2`
   beside `api/v1`, with `voicegateway/compat.go` and
   `voicegateway/voicertc/compat.go`, is the reference.
