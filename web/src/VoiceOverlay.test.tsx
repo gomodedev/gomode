@@ -196,6 +196,35 @@ describe("VoiceOverlay status", () => {
     expect(entry?.querySelector("time")?.getAttribute("datetime")).toBe(new Date(1_760_000_000_000).toISOString());
   });
 
+  it("dismisses a timeout by keyboard, keeps it in history, and shows a later timeout", async () => {
+    const message = "Voice connection timed out.";
+    const failure = { at: 1_760_000_000_000, message };
+    voiceSession.setState((s) => ({ ...s, error: message, errorHistory: [failure] }));
+    render(() => <VoiceOverlay />);
+    const user = userEvent.setup();
+    const connect = screen.getByRole("button", { name: "Connect voice assistant" });
+    const dismiss = screen.getByRole("button", { name: "Dismiss voice error" });
+    connect.focus();
+    await user.tab();
+    expect(dismiss).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(connect).toHaveFocus();
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(disconnectMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByText("Previous errors (1)"));
+    expect(within(screen.getByRole("list")).getByText(message)).toBeVisible();
+    await user.click(connect);
+    expect(connectMock).toHaveBeenCalledOnce();
+    voiceSession.setState((s) => ({
+      ...s,
+      error: message,
+      errorHistory: [{ ...failure, at: failure.at + 1 }, failure],
+    }));
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+  });
+
   it("does not repeat the failure the panel already shows", () => {
     voiceSession.setState((s) => ({
       ...s,
@@ -530,6 +559,25 @@ describe("VoiceOverlay status", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Voice settings" }));
     expect(screen.getAllByText(error).filter((el) => !el.closest("[hidden]"))).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Close voice settings" })).toBeInTheDocument();
+  });
+
+  it("keeps a dismissed shared failure in its settings field without repeating the notice", async () => {
+    const error = "The selected voice choice is unavailable";
+    voiceSession.setState((s) => ({ ...s, error, choicesError: error }));
+    render(() => <VoiceOverlay />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Dismiss voice error" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Voice settings" }));
+    const settings = screen.getByRole("region", { name: "Voice settings" });
+    expect(within(settings).getByText(error)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Close voice settings" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    voiceSession.setState((s) => ({ ...s, choicesError: "Voice gateway unavailable." }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Voice gateway unavailable.");
+    await user.click(screen.getByRole("button", { name: "Dismiss voice error" }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("does not show cloud audio-device errors during browser speech", () => {
@@ -1031,6 +1079,11 @@ describe("VoiceOverlay connection", () => {
     }));
     expect(screen.queryByText("Connexion vocale échouée")).toBeNull();
     expect(screen.getByText("HTTP 401 Bearer secret-token")).toBeInTheDocument();
+
+    voiceSession.setState((s) => ({ ...s, error: "" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Connexion vocale échouée");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss voice error" }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("keeps detailed transport errors for the default English overlay", () => {

@@ -191,9 +191,10 @@
 }
 
 .errorPanel {
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.25rem;
-  padding-top: 0.5rem;
 }
 
 .errorHistory {

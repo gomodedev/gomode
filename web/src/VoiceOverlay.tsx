@@ -104,6 +104,8 @@ export default function VoiceOverlay(props: {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const hasUsage = () => session.state.connected || session.state.usage !== null || session.state.transcript.length > 0;
   const [settingsError, setSettingsError] = createSignal<string | null>(null);
+  const [dismissedSettingsError, setDismissedSettingsError] = createSignal<string | null>(null);
+  createEffect(on(settingsError, () => setDismissedSettingsError(null), { defer: true }));
   const [languageError, setLanguageError] = createSignal<string | null>(null);
   const settingsId = createUniqueId();
   const audioHelpId = createUniqueId();
@@ -121,6 +123,17 @@ export default function VoiceOverlay(props: {
     if (settingsTrigger?.isConnected) settingsTrigger.focus();
     else panelRef?.querySelector<HTMLButtonElement>("button[aria-controls]")?.focus();
   };
+  const dismissSettingsError = (error: string) => {
+    setDismissedSettingsError(error);
+    connectButtonRef?.focus();
+  };
+  const dismissConnectionError = () => {
+    // Keep a matching settings diagnostic at its control without repeating it in the overlay.
+    if (settingsError() === session.state.error) setDismissedSettingsError(settingsError());
+    session.dismissError();
+    connectButtonRef?.focus();
+  };
+  const dismissErrorLabel = () => messages().dismissError ?? defaultVoiceMessages.dismissError;
   const SettingsButton = () => (
     <button
       type="button"
@@ -445,14 +458,12 @@ export default function VoiceOverlay(props: {
             when={
               session.state.error !== null &&
               !(settingsOpen() && settingsError() === session.state.error) &&
-              session.state.error
+              (session.state.error || messages().connectionFailed)
             }
             keyed
           >
             {(err) => (
-              <div role="alert" class={`${styles.errorPanel} ${styles.statusError}`}>
-                {err || messages().connectionFailed}
-              </div>
+              <ErrorNotice message={err} dismissLabel={dismissErrorLabel()} onDismiss={dismissConnectionError} />
             )}
           </Show>
           <Show
@@ -487,18 +498,27 @@ export default function VoiceOverlay(props: {
                   {(entry) => (
                     <li>
                       <time dateTime={new Date(entry.at).toISOString()}>{formatErrorTime(entry.at)}</time>
-                      <span>{entry.message}</span>
+                      <span>{entry.message || messages().connectionFailed}</span>
                     </li>
                   )}
                 </For>
               </ul>
             </details>
           </Show>
-          <Show when={!settingsOpen() && settingsError() !== session.state.error && settingsError()}>
+          <Show
+            when={
+              !settingsOpen() &&
+              settingsError() !== session.state.error &&
+              settingsError() !== dismissedSettingsError() &&
+              settingsError()
+            }
+          >
             {(error) => (
-              <p role="alert" class={styles.statusError}>
-                {error()}
-              </p>
+              <ErrorNotice
+                message={error()}
+                dismissLabel={dismissErrorLabel()}
+                onDismiss={() => dismissSettingsError(error())}
+              />
             )}
           </Show>
           <Show when={hasUsage() && session.state.showUsageStats && (isActive() || transcriptExpanded())}>
@@ -568,6 +588,25 @@ function UsagePanel(props: { usage: VoiceUsage | null; messages: Accessor<VoiceM
         </Show>
       </div>
     </>
+  );
+}
+
+function ErrorNotice(props: { message: string; dismissLabel: string; onDismiss: () => void }) {
+  return (
+    <div class={styles.errorPanel}>
+      <span role="alert" class={styles.statusError}>
+        {props.message}
+      </span>
+      <button
+        type="button"
+        class={controls.control}
+        aria-label={props.dismissLabel}
+        title={props.dismissLabel}
+        onClick={() => props.onDismiss()}
+      >
+        <VoiceIcon name="close" />
+      </button>
+    </div>
   );
 }
 

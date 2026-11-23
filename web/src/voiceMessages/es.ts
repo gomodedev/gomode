@@ -54,6 +54,7 @@ export const voiceMessages: VoiceMessages = {
   showTranscript: "Mostrar transcripción",
   connect: "Conectar asistente de voz",
   connectionFailed: "Error de conexión de voz",
+  dismissError: "Descartar error de voz",
   endSession: "Finalizar sesión de voz",
   listening: "Escuchando…",
   microphone: "Micrófono",

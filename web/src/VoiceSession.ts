@@ -2320,6 +2320,13 @@ export class VoiceSession {
     });
   }
 
+  /** Dismiss the current failure while keeping the retained error history. */
+  dismissError(): void {
+    this._update((s) => {
+      s.error = null;
+    });
+  }
+
   setMicrophoneMode(mode: MicrophoneMode): void {
     this._update((s) => {
       s.microphoneMode = mode;
