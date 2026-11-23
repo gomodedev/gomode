@@ -1992,7 +1992,10 @@ func TestBridge(t *testing.T) {
 func TestSession(t *testing.T) {
 	t.Run("client close", func(t *testing.T) {
 		b := &sessionContextConnector{ctx: make(chan context.Context, 1)}
-		client := dialVoiceRTCClient(t.Context(), t, newTestBridge(t.Context(), t, b).HandleOffer)
+		bridge := newTestBridge(t.Context(), t, b)
+		// Session cleanup outlives its context; later subtests capture the default logger.
+		t.Cleanup(func() { bridge.CloseAll(t.Context()) })
+		client := dialVoiceRTCClient(t.Context(), t, bridge.HandleOffer)
 		client.send(t.Context(), t, &voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: "local", Language: "en"}})
 		ctx := <-b.ctx
 		if err := client.pc.Close(); err != nil {
