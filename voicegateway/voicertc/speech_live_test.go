@@ -222,7 +222,7 @@ func (s *fakeTranscription) audioOption(t *testing.T) *genai.RealtimeOptionAudio
 func newLiveTestSession(t *testing.T, a *liveASR, lang string) (*localStackSession, *captureSink, *fakeConversation) {
 	sink := &captureSink{changed: make(chan struct{}, 1)}
 	conv := &fakeConversation{}
-	s := (&localStackRuntime{liveASR: a}).newSession(t.Context(), "live", sink, true)
+	s := (&localStackRuntime{log: newTestLogger(t), liveASR: a}).newSession(t.Context(), "live", sink, true)
 	s.conv = conv
 	s.language = lang
 	t.Cleanup(func() {

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"log/slog"
 	"net"
 	"time"
 
@@ -81,13 +80,13 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	rate := backend.inputSampleRate()
 	if rate == 0 {
 		// Clients that recognize speech themselves send no microphone track.
-		slog.WarnContext(ctx, "voicertc: microphone track for a session without microphone input", "session", s.id)
+		s.log.WarnContext(ctx, "voicertc: microphone track for a session without microphone input", "session", s.id)
 		s.sendGatewayError(ctx, "microphone: this session accepts no microphone audio")
 		return
 	}
 	dec, err := newDecoder(rate)
 	if err != nil {
-		slog.ErrorContext(ctx, "voicertc: decoder init failed", "session", s.id, "err", err)
+		s.log.ErrorContext(ctx, "voicertc: decoder init failed", "session", s.id, "err", err)
 		s.sendGatewayError(ctx, "microphone: codec failed to initialise")
 		return
 	}
@@ -111,7 +110,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		var gap int
 		if readErr != nil {
 			if e, ok := errors.AsType[net.Error](readErr); !ok || !e.Timeout() {
-				slog.WarnContext(ctx, "voicertc: audio read failed", "session", s.id, "err", readErr)
+				s.log.WarnContext(ctx, "voicertc: audio read failed", "session", s.id, "err", readErr)
 				s.sendGatewayError(ctx, "microphone: "+readErr.Error())
 				return
 			}
@@ -122,7 +121,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 			}
 			pcm, err = dec.Decode(pkt.Payload)
 			if err != nil {
-				slog.DebugContext(ctx, "voicertc: opus decode failed", "session", s.id, "err", err)
+				s.log.DebugContext(ctx, "voicertc: opus decode failed", "session", s.id, "err", err)
 				continue
 			}
 			gap = clock.receive(pkt.SequenceNumber, pkt.Timestamp, len(pcm), time.Now())
@@ -130,7 +129,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		for gap > 0 {
 			n := min(gap*2, len(silence))
 			if err := backend.acceptMicPCM(ctx, silence[:n]); err != nil {
-				slog.WarnContext(ctx, "voicertc: silence→backend write failed", "session", s.id, "err", err)
+				s.log.WarnContext(ctx, "voicertc: silence→backend write failed", "session", s.id, "err", err)
 				return
 			}
 			gap -= n / 2
@@ -143,7 +142,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 			binary.LittleEndian.PutUint16(data[i*2:], uint16(sample)) //nolint:gosec // PCM int16→uint16 reinterpret.
 		}
 		if err := backend.acceptMicPCM(ctx, data); err != nil {
-			slog.WarnContext(ctx, "voicertc: audio→backend write failed", "session", s.id, "err", err)
+			s.log.WarnContext(ctx, "voicertc: audio→backend write failed", "session", s.id, "err", err)
 			return
 		}
 	}

@@ -40,11 +40,20 @@ import (
 )
 
 // newTestBridge returns a bridge on an ephemeral UDP port without UPnP.
+// newTestLogger writes to the test's log, so output shows beside its test and a
+// goroutine that logs after the test ends panics.
+func newTestLogger(t testing.TB) *slog.Logger {
+	return slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+// newTestBridge closes the bridge at cleanup, which waits for its sessions to
+// finish. Tests that call CloseAll themselves build with newBridgeWithBackend.
 func newTestBridge(ctx context.Context, t *testing.T, backend backendConnector) *Bridge {
-	b, err := newBridgeWithBackend(ctx, backend, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+	b, err := newBridgeWithBackend(ctx, newTestLogger(t), backend, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { b.CloseAll(ctx) })
 	return b
 }
 
@@ -155,7 +164,7 @@ func TestNewBridge(t *testing.T) {
 	t.Run("NewBridge", func(t *testing.T) {
 		t.Parallel()
 		stun := []string{"stun:stun.example:3478"}
-		b, err := NewBridge(t.Context(), cfg, configdata.WebRTC{STUNServers: stun, DisableUPnP: true}, t.TempDir())
+		b, err := NewBridge(t.Context(), newTestLogger(t), cfg, configdata.WebRTC{STUNServers: stun, DisableUPnP: true}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +176,7 @@ func TestNewBridge(t *testing.T) {
 
 	t.Run("PeerConnection", func(t *testing.T) {
 		t.Parallel()
-		b, err := NewBridge(t.Context(), cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+		b, err := NewBridge(t.Context(), newTestLogger(t), cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -208,7 +217,7 @@ func TestBackendForConfigGeminiModel(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			backend, err := backendForConfig(&voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "gemini", Model: tc.model}}, newLocalStackPool(testRuntime))
+			backend, err := backendForConfig(newTestLogger(t), &voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "gemini", Model: tc.model}}, newLocalStackPool(newTestLogger(t), testRuntime))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -231,7 +240,7 @@ func TestBackendForConfigOpenAI(t *testing.T) {
 	t.Run("missing key", func(t *testing.T) {
 		t.Setenv("OPENAI_API_KEY", "")
 
-		if _, err := backendForConfig(&voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openai", Model: "gpt-realtime-2.1-mini"}}, newLocalStackPool(testRuntime)); err == nil {
+		if _, err := backendForConfig(newTestLogger(t), &voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openai", Model: "gpt-realtime-2.1-mini"}}, newLocalStackPool(newTestLogger(t), testRuntime)); err == nil {
 			t.Fatal("accepted a missing OPENAI_API_KEY")
 		}
 	})
@@ -246,7 +255,7 @@ func TestBackendForConfigOpenAI(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("OPENAI_API_KEY", "test-key")
 
-			backend, err := backendForConfig(&voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openai", Model: tc.model}}, newLocalStackPool(testRuntime))
+			backend, err := backendForConfig(newTestLogger(t), &voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openai", Model: tc.model}}, newLocalStackPool(newTestLogger(t), testRuntime))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -394,7 +403,10 @@ func TestBackendConnector(t *testing.T) {
 	t.Run("NewBridgeWithBackend", func(t *testing.T) {
 		t.Parallel()
 		backend := &fakeBackendConnector{}
-		b := newTestBridge(t.Context(), t, backend)
+		b, err := newBridgeWithBackend(t.Context(), newTestLogger(t), backend, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
 		b.CloseAll(t.Context())
 		if !backend.closed {
 			t.Fatal("backend was not closed by CloseAll")
@@ -404,7 +416,7 @@ func TestBackendConnector(t *testing.T) {
 	t.Run("NewBridgeWithBackendBindsUDPAndDefersAPI", func(t *testing.T) {
 		t.Parallel()
 		backend := &fakeBackendConnector{}
-		b, err := newBridgeWithBackend(t.Context(), backend, configdata.WebRTC{}, t.TempDir())
+		b, err := newBridgeWithBackend(t.Context(), newTestLogger(t), backend, configdata.WebRTC{}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -425,9 +437,10 @@ func TestBackendConnector(t *testing.T) {
 
 	t.Run("DiagnosticsSurfacesUDPMappingError", func(t *testing.T) {
 		t.Parallel()
-		mapping := &upnpMapping{}
+		mapping := &upnpMapping{log: newTestLogger(t)}
 		mapping.setRefreshErr(errors.New("refresh failed"))
 		b := &Bridge{
+			log:         newTestLogger(t),
 			upnpMapping: mapping,
 			advertisedEndpoints: []udpCandidate{{
 				host: net.ParseIP("192.168.1.20"),
@@ -447,7 +460,7 @@ func TestBackendConnector(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = activityLog.close() })
-		sess := &session{id: "test-session", activityLog: activityLog, cancel: func(error) {}}
+		sess := &session{log: newTestLogger(t), id: "test-session", activityLog: activityLog, cancel: func(error) {}}
 		backend := &fakeBackendConnector{}
 		backendSession, err := backend.connect(t.Context(), sess.id, sess)
 		if err != nil {
@@ -474,7 +487,6 @@ func TestBrowserOpusDTX(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	t.Cleanup(cancel)
 	b := newTestBridge(ctx, t, &fakeBackendConnector{})
-	t.Cleanup(func() { b.CloseAll(ctx) })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "text/html")
@@ -771,7 +783,10 @@ func testBridgeChoiceRuntime(t *testing.T) {
 	second := &fakeBackendConnector{}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	t.Cleanup(cancel)
-	b := newTestBridge(ctx, t, first)
+	b, err := newBridgeWithBackend(ctx, newTestLogger(t), first, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	var firstID, secondID string
 	t.Cleanup(func() {
 		b.CloseAll(ctx)
@@ -821,7 +836,6 @@ type voiceRTCOffer func(ctx context.Context, sdp string) (sdpAnswer, sessionID s
 
 func newVoiceRTCTestSession(ctx context.Context, t *testing.T, b backendConnector) *voiceRTCTestSession {
 	br := newTestBridge(ctx, t, b)
-	t.Cleanup(func() { br.CloseAll(ctx) })
 	return connectVoiceRTCClient(ctx, t, br.HandleOffer, &voicev2.SessionSetup{
 		Kind:  voicev2.MessageKindSessionSetup,
 		Voice: voicev2.VoiceConfig{Name: "local", Language: "en"},
@@ -1321,7 +1335,7 @@ func TestBridge(t *testing.T) {
 				Recognition: []voicegateway.ASRConfig{{ID: "recognition", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "recognition"}},
 				Pipelines:   []voicegateway.PipelineConfig{{ID: "preset", Label: "Preset", ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "preset-recognition"}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "preset-llm"}}}},
 			}
-			b, err := NewBridge(t.Context(), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+			b, err := NewBridge(t.Context(), newTestLogger(t), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1348,7 +1362,7 @@ func TestBridge(t *testing.T) {
 					{ID: "kitten", Engine: voicegateway.TTSEngineKittenTTS, Model: "KittenML/kitten-tts-2", Voice: "Luna"},
 				},
 			}
-			b, err := NewBridge(t.Context(), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+			b, err := NewBridge(t.Context(), newTestLogger(t), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1400,17 +1414,16 @@ func TestBridge(t *testing.T) {
 			// default is undocumented.
 			defaultVoice string
 		}{
-			{name: "Gemini audio", backend: &realtimeBridgeBackend{provider: "gemini", apiKey: "test", model: "gemini-3.8-live"}, voice: "orus"},
-			{name: "OpenAI alias", backend: &realtimeBridgeBackend{provider: "openai", apiKey: "test", model: "gpt-realtime-2.1-mini"}, voice: "marin", defaultVoice: "alloy"},
-			{name: "OpenAI Responses", backend: &realtimeBridgeBackend{provider: "openairesponses", apiKey: "test", model: "gpt-realtime-2.1"}, voice: "cedar", defaultVoice: "alloy"},
-			{name: "unknown model", backend: &realtimeBridgeBackend{provider: "openai", apiKey: "test", model: "unknown"}},
+			{name: "Gemini audio", backend: &realtimeBridgeBackend{log: newTestLogger(t), provider: "gemini", apiKey: "test", model: "gemini-3.8-live"}, voice: "orus"},
+			{name: "OpenAI alias", backend: &realtimeBridgeBackend{log: newTestLogger(t), provider: "openai", apiKey: "test", model: "gpt-realtime-2.1-mini"}, voice: "marin", defaultVoice: "alloy"},
+			{name: "OpenAI Responses", backend: &realtimeBridgeBackend{log: newTestLogger(t), provider: "openairesponses", apiKey: "test", model: "gpt-realtime-2.1"}, voice: "cedar", defaultVoice: "alloy"},
+			{name: "unknown model", backend: &realtimeBridgeBackend{log: newTestLogger(t), provider: "openai", apiKey: "test", model: "unknown"}},
 			{name: "local audio", backend: newTestLocalStackBackend(t, newFixedLiveASR("test"), &smokeLLM{text: "test"}, placeholderTTS{})},
 			{name: "local text", backend: newTestLocalStackBackend(t, nil, &smokeLLM{text: "test"}, nil)},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				b := newTestBridge(t.Context(), t, tc.backend)
-				t.Cleanup(func() { b.CloseAll(t.Context()) })
 				first := b.VoiceChoices()
 				ch := first.Choices[0]
 				if tc.voice == "" {
@@ -1453,7 +1466,6 @@ func TestBridge(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			t.Cleanup(cancel)
 			b := newTestBridge(ctx, t, &fakeBackendConnector{})
-			t.Cleanup(func() { b.CloseAll(ctx) })
 			for _, pt := range []webrtc.PayloadType{109, 111} {
 				m := &webrtc.MediaEngine{}
 				// An ordinary client offer omits usedtx and may use a payload number
@@ -1729,7 +1741,7 @@ func TestBridge(t *testing.T) {
 			if choiceErr != nil {
 				t.Fatal(choiceErr)
 			}
-			bridge := &Bridge{backends: map[string]backendConnector{"default": textlessBackend{}}, choices: choices}
+			bridge := &Bridge{log: newTestLogger(t), backends: map[string]backendConnector{"default": textlessBackend{}}, choices: choices}
 			rec := httptest.NewRecorder()
 			err := bridge.ServeTextSession(t.Context(), rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody))
 			if err == nil {
@@ -1765,7 +1777,7 @@ func TestBridge(t *testing.T) {
 		t.Run("records activity", func(t *testing.T) {
 			t.Parallel()
 			conv := &fakeConversation{userStep: fakeLLMStep{deltas: []string{"hi"}, reply: llmReply{text: "hi"}}}
-			bridge := newTestTextBridge(t, fixedConversationLLM{conv: conv})
+			bridge := buildTestTextBridge(t, fixedConversationLLM{conv: conv})
 			conn := dialTextSession(t, bridge)
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			t.Cleanup(cancel)
@@ -1810,8 +1822,8 @@ func TestBridge(t *testing.T) {
 				t.Cleanup(func() { close(blocked.release) })
 				ctx, cancel := context.WithCancelCause(t.Context())
 				t.Cleanup(func() { cancel(nil) })
-				b := &Bridge{sessions: make(map[string]*session)}
-				sess := &session{id: "first", cancel: cancel, backend: blocked}
+				b := &Bridge{log: newTestLogger(t), sessions: make(map[string]*session)}
+				sess := &session{log: newTestLogger(t), id: "first", cancel: cancel, backend: blocked}
 				b.registerSession(ctx, sess)
 				start := time.Now()
 				b.Close(sess.id)
@@ -1831,7 +1843,7 @@ func TestBridge(t *testing.T) {
 		t.Parallel()
 		t.Run("text session", func(t *testing.T) {
 			t.Parallel()
-			bridge := newTestTextBridge(t, fixedConversationLLM{conv: &fakeConversation{}})
+			bridge := buildTestTextBridge(t, fixedConversationLLM{conv: &fakeConversation{}})
 			conn := dialTextSession(t, bridge)
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			t.Cleanup(cancel)
@@ -1861,6 +1873,7 @@ func TestBridge(t *testing.T) {
 				t.Fatal(choiceErr)
 			}
 			bridge := &Bridge{
+				log:            newTestLogger(t),
 				backends:       map[string]backendConnector{"default": backend},
 				choices:        choices,
 				activityLogDir: t.TempDir(),
@@ -1898,13 +1911,14 @@ func TestBridge(t *testing.T) {
 			unblock := sync.OnceFunc(func() { close(blocked.release) })
 			t.Cleanup(unblock)
 			b := &Bridge{
+				log:      newTestLogger(t),
 				backends: map[string]backendConnector{"default": backend},
 				textCtx:  textCtx, textCancel: textCancel,
 				sessions: make(map[string]*session),
 			}
 			ctx, cancel := context.WithCancelCause(t.Context())
 			t.Cleanup(func() { cancel(nil) })
-			b.registerSession(ctx, &session{id: "first", cancel: cancel, backend: blocked})
+			b.registerSession(ctx, &session{log: newTestLogger(t), id: "first", cancel: cancel, backend: blocked})
 			var wg sync.WaitGroup
 			t.Cleanup(func() {
 				unblock()
@@ -1958,6 +1972,7 @@ func TestBridge(t *testing.T) {
 			t.Fatal(choiceErr)
 		}
 		b := &Bridge{
+			log:        newTestLogger(t),
 			backends:   map[string]backendConnector{"default": backend},
 			choices:    choices,
 			textCtx:    textCtx,
@@ -1967,7 +1982,7 @@ func TestBridge(t *testing.T) {
 		for _, id := range []string{"first", "second"} {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			t.Cleanup(func() { cancel(nil) })
-			b.registerSession(ctx, &session{id: id, cancel: cancel})
+			b.registerSession(ctx, &session{log: newTestLogger(t), id: id, cancel: cancel})
 		}
 		closed := make(map[string]int)
 		b.SetOnSessionClosed(func(id string) {
@@ -1993,8 +2008,6 @@ func TestSession(t *testing.T) {
 	t.Run("client close", func(t *testing.T) {
 		b := &sessionContextConnector{ctx: make(chan context.Context, 1)}
 		bridge := newTestBridge(t.Context(), t, b)
-		// Session cleanup outlives its context; later subtests capture the default logger.
-		t.Cleanup(func() { bridge.CloseAll(t.Context()) })
 		client := dialVoiceRTCClient(t.Context(), t, bridge.HandleOffer)
 		client.send(t.Context(), t, &voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: "local", Language: "en"}})
 		ctx := <-b.ctx
@@ -2008,11 +2021,8 @@ func TestSession(t *testing.T) {
 	})
 	t.Run("close", func(t *testing.T) {
 		var logs bytes.Buffer
-		prior := slog.Default()
-		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-		t.Cleanup(func() { slog.SetDefault(prior) })
 		backend := &fakeBackendSession{closeErr: errors.New("realtime transport cleanup failed")}
-		s := &session{id: "cleanup", backend: backend}
+		s := &session{log: slog.New(slog.NewJSONHandler(&logs, nil)), id: "cleanup", backend: backend}
 		s.close()
 		var record map[string]any
 		if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
@@ -2024,7 +2034,7 @@ func TestSession(t *testing.T) {
 	})
 	t.Run("audioRxLoop", func(t *testing.T) {
 		t.Run("client recognition rejects a microphone track", func(t *testing.T) {
-			backend := (&localStackRuntime{llm: echoLLM{}}).newSession(t.Context(), "client-recognition", nil, true)
+			backend := (&localStackRuntime{log: newTestLogger(t), llm: echoLLM{}}).newSession(t.Context(), "client-recognition", nil, true)
 			log, err := openActivityLog(t.TempDir(), "client-recognition")
 			if err != nil {
 				t.Fatal(err)
@@ -2034,7 +2044,7 @@ func TestSession(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			s := &session{id: "client-recognition", backend: backend, activityLog: log}
+			s := &session{log: newTestLogger(t), id: "client-recognition", backend: backend, activityLog: log}
 			// The loop returns before reading a track when the backend has no rate.
 			s.audioRxLoop(t.Context(), nil)
 			if want := "microphone: this session accepts no microphone audio"; s.lastError != want {
@@ -2065,7 +2075,7 @@ func TestSession(t *testing.T) {
 		}
 		synctest.Test(t, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
-			s := &session{audioTrack: track, activityLog: log, cancel: cancel}
+			s := &session{log: newTestLogger(t), audioTrack: track, activityLog: log, cancel: cancel}
 			var workers sync.WaitGroup
 			workers.Go(func() { s.audioSendLoop(ctx, enc) })
 			t.Cleanup(func() { cancel(nil); workers.Wait() })
@@ -2098,7 +2108,7 @@ func TestSession(t *testing.T) {
 	})
 
 	t.Run("clearAssistantAudio", func(t *testing.T) {
-		s := &session{}
+		s := &session{log: newTestLogger(t)}
 		s.addAssistantSpeechPCM(make([]byte, 2*backendOutputFrameBytes))
 		s.finishAssistantSpeech()
 		if !s.assistantAudioPending() {
@@ -2117,7 +2127,7 @@ func TestSession(t *testing.T) {
 		if len(events) != 0 {
 			t.Fatalf("cleared stream emitted completion: %v", events)
 		}
-		legacy := &session{}
+		legacy := &session{log: newTestLogger(t)}
 		legacy.addAssistantPCM([]byte{1, 0})
 		if legacy.audioSpeech != nil {
 			t.Fatal("legacy backend opted into new speech policy")
@@ -2148,7 +2158,7 @@ func TestBackendForConfigChat(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	backend, err := backendForConfig(&cfg.LLM[0], newLocalStackPool(cfg.Runtime))
+	backend, err := backendForConfig(newTestLogger(t), &cfg.LLM[0], newLocalStackPool(newTestLogger(t), cfg.Runtime))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2189,7 +2199,7 @@ func testBridgeConfiguredChoices(t *testing.T) {
 		},
 		LLM: []voicegateway.LLMConfig{{ID: "chat", Label: "Chat", ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "https://example.com/v1/chat/completions", Model: "model-a"}}},
 	}
-	bridge, err := NewBridge(t.Context(), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+	bridge, err := NewBridge(t.Context(), newTestLogger(t), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

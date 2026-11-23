@@ -32,7 +32,7 @@ const (
 // The WebSocket carries the same JSON messages as the RTC voice-gateway data
 // channel. websocket.Accept writes its own HTTP error response when the upgrade
 // fails, so a returned error is for logging only.
-func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Request, sessionID, activityLogDir string, backend *localStackBackend) error {
+func serveTextSession(ctx context.Context, log *slog.Logger, w http.ResponseWriter, r *http.Request, sessionID, activityLogDir string, backend *localStackBackend) error {
 	protocol := voiceapi.SessionProtocolFromContext(ctx)
 	if !protocol.Version.AcceptsTextSubprotocol(r.Header.Values("Sec-WebSocket-Protocol")) {
 		http.Error(w, "text subprotocol does not match route version", http.StatusBadRequest)
@@ -43,20 +43,20 @@ func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return fmt.Errorf("accept text session: %w", err)
 	}
 	defer func() { _ = conn.CloseNow() }()
-	log, err := openActivityLog(activityLogDir, sessionID)
+	activity, err := openActivityLog(activityLogDir, sessionID)
 	if err != nil {
 		_ = conn.Close(websocket.StatusInternalError, "open voice activity log")
 		return fmt.Errorf("open voice activity log: %w", err)
 	}
 	defer func() {
-		if err := log.close(); err != nil {
-			slog.WarnContext(ctx, "voicertc: close text activity log", "err", err)
+		if err := activity.close(); err != nil {
+			log.WarnContext(ctx, "voicertc: close text activity log", "err", err)
 		}
 	}()
 	conn.SetReadLimit(textReadLimit)
 	sessionCtx, cancel := context.WithTimeout(ctx, sessionLifetime)
 	defer cancel()
-	sink := &textSink{conn: conn, cancel: cancel, log: log, protocol: protocol}
+	sink := &textSink{conn: conn, cancel: cancel, log: log, activityLog: activity, protocol: protocol}
 	// Keep reading during cold startup so a disconnected client cancels model
 	// downloads and capacity waits. One queued message bounds client buffering.
 	incoming := make(chan []byte, 1)
@@ -69,7 +69,7 @@ func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Reques
 			if err != nil {
 				status := websocket.CloseStatus(err)
 				if sessionCtx.Err() == nil && status != websocket.StatusNormalClosure && status != websocket.StatusGoingAway {
-					slog.InfoContext(sessionCtx, "voicertc: text session closed", "err", err)
+					log.InfoContext(sessionCtx, "voicertc: text session closed", "err", err)
 				}
 				return
 			}
@@ -113,7 +113,7 @@ func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	}
 	defer func() {
 		if err := sess.close(); err != nil {
-			slog.WarnContext(sessionCtx, "voicertc: close text session", "err", err)
+			log.WarnContext(sessionCtx, "voicertc: close text session", "err", err)
 		}
 	}()
 	started := false
@@ -126,8 +126,8 @@ func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		}
 		normalized, err := clientProtocolMessage(protocol, data)
 		if err == nil {
-			if logErr := log.record(activitydata.SourceClient, normalized); logErr != nil {
-				slog.ErrorContext(sessionCtx, "voicertc: activity log write failed", "session", sessionID, "err", logErr)
+			if logErr := activity.record(activitydata.SourceClient, normalized); logErr != nil {
+				log.ErrorContext(sessionCtx, "voicertc: activity log write failed", "session", sessionID, "err", logErr)
 				sink.sendGatewayError(sessionCtx, "activity log: "+logErr.Error())
 				return nil
 			}
@@ -140,7 +140,7 @@ func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Reques
 			if sessionCtx.Err() != nil {
 				return err
 			}
-			slog.WarnContext(sessionCtx, "voicertc: text session message", "err", err)
+			log.WarnContext(sessionCtx, "voicertc: text session message", "err", err)
 			sink.sendGatewayError(sessionCtx, "session: "+err.Error())
 			return nil
 		}
@@ -155,7 +155,9 @@ func serveTextSession(ctx context.Context, w http.ResponseWriter, r *http.Reques
 type textSink struct {
 	protocol voiceapi.SessionProtocol
 	cancel   context.CancelFunc
-	log      *activityLog
+	// log reports transport failures; activityLog records the conversation.
+	log         *slog.Logger
+	activityLog *activityLog
 
 	mu   sync.Mutex
 	conn *websocket.Conn
@@ -166,7 +168,7 @@ func (s *textSink) backendReady(ctx context.Context) {
 }
 
 func (s *textSink) sendGatewayMessage(ctx context.Context, data []byte) error {
-	if err := s.log.record(activitydata.SourceGateway, data); err != nil {
+	if err := s.activityLog.record(activitydata.SourceGateway, data); err != nil {
 		s.reportUnrecordedError(ctx, fmt.Sprintf("activity log: %v", err))
 		return err
 	}
@@ -179,7 +181,7 @@ func (s *textSink) reportUnrecordedError(ctx context.Context, message string) {
 		Kind:    voicev2.MessageKindError,
 		Message: message,
 	})); err != nil {
-		slog.WarnContext(ctx, "voicertc: deliver text gateway error failed", "err", err)
+		s.log.WarnContext(ctx, "voicertc: deliver text gateway error failed", "err", err)
 	}
 	s.cancel()
 }
@@ -221,7 +223,7 @@ func (s *textSink) reportError(ctx context.Context, message string, recoverable 
 		Message:     message,
 		Recoverable: recoverable,
 	})); err != nil {
-		slog.WarnContext(sendCtx, "voicertc: report text gateway error failed", "err", err)
+		s.log.WarnContext(sendCtx, "voicertc: report text gateway error failed", "err", err)
 	}
 }
 

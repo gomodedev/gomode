@@ -33,7 +33,7 @@ func nativeTTSClient(t *testing.T, provider string, handler http.HandlerFunc) tt
 				t.Error(err)
 			}
 		})
-		return &llamaTTSAdapter{client: p, voice: "female"}
+		return &llamaTTSAdapter{log: newTestLogger(t), client: p, voice: "female"}
 	}
 	target, err := url.Parse(srv.URL)
 	if err != nil {
@@ -50,7 +50,7 @@ func nativeTTSClient(t *testing.T, provider string, handler http.HandlerFunc) tt
 			t.Error(err)
 		}
 	})
-	return &geminiTTSAdapter{client: p, voice: "Kore"}
+	return &geminiTTSAdapter{log: newTestLogger(t), client: p, voice: "Kore"}
 }
 
 func TestLlamaTTSAdapter(t *testing.T) {

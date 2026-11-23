@@ -53,7 +53,7 @@ func stackVariant(t *testing.T, b *localStackBackend, speech voicev2.SpeechConfi
 
 // newTestLocalStackBackend seeds a lazy choice with controlled loaded adapters.
 func newTestLocalStackBackend(t *testing.T, asr *liveASR, llm llmAdapter, tts ttsAdapter) *localStackBackend {
-	p := newLocalStackPool(testRuntime)
+	p := newLocalStackPool(newTestLogger(t), testRuntime)
 	cfg := voicegateway.PipelineConfig{TextOnly: asr == nil && tts == nil}
 	if asr != nil {
 		cfg.ASR = voicegateway.ASRConfig{Engine: voicegateway.ASREngineWhistle}
@@ -64,7 +64,7 @@ func newTestLocalStackBackend(t *testing.T, asr *liveASR, llm llmAdapter, tts tt
 	b := p.backend(cfg)
 	for _, variant := range b.variants {
 		_, cancel := context.WithCancelCause(t.Context())
-		runtime := &localStackRuntime{llm: llm}
+		runtime := &localStackRuntime{log: newTestLogger(t), llm: llm}
 		if variant.speech.Input == voicev2.SpeechLocationGateway {
 			runtime.liveASR = asr
 		}
@@ -132,7 +132,7 @@ func TestLocalStackSession(t *testing.T) {
 		t.Parallel()
 		p := &fakeGenAIProvider{firstReplies: []genai.Reply{{Text: "Build is waiting."}}}
 		sink := &captureSink{}
-		sess := (&localStackRuntime{llm: &genaiLLMAdapter{provider: p}}).newSession(t.Context(), "notification", sink, true)
+		sess := (&localStackRuntime{log: newTestLogger(t), llm: &genaiLLMAdapter{provider: p}}).newSession(t.Context(), "notification", sink, true)
 		t.Cleanup(func() { _ = sess.close() })
 		for _, data := range []string{
 			`{"kind":"session.setup"}`,
@@ -160,7 +160,7 @@ func TestLocalStackSession(t *testing.T) {
 	t.Run("reasoning output is session scoped", func(t *testing.T) {
 		t.Parallel()
 		p := &fakeGenAIProvider{firstReplies: []genai.Reply{{Text: "Hello."}}}
-		runtime := &localStackRuntime{llm: &genaiLLMAdapter{provider: p}}
+		runtime := &localStackRuntime{log: newTestLogger(t), llm: &genaiLLMAdapter{provider: p}}
 		for _, include := range []bool{true, false} {
 			sess := runtime.newSession(t.Context(), "reasoning", &captureSink{}, true)
 			t.Cleanup(func() { _ = sess.close() })
@@ -191,7 +191,7 @@ func TestLocalStackSession(t *testing.T) {
 					cancel()
 				}
 				sink := &captureSink{}
-				s := &localStackSession{id: "llm-error", sink: sink, baseCtx: t.Context()}
+				s := &localStackSession{log: newTestLogger(t), id: "llm-error", sink: sink, baseCtx: t.Context()}
 				step := newLLMStep(nil, llmReply{}, errors.New("http 400: upstream refused the request"))
 				s.handleTextStep(ctx, &fakeConversation{}, step, "")
 				if cancelled {
@@ -528,6 +528,7 @@ func TestLocalStackSession(t *testing.T) {
 			releaseSecondChunk := make(chan struct{})
 			sink := &captureSink{}
 			s := &localStackSession{
+				log:     newTestLogger(t),
 				id:      "tts-stream",
 				sink:    sink,
 				baseCtx: t.Context(),
@@ -565,6 +566,7 @@ func TestLocalStackSession(t *testing.T) {
 			ttsCalled := make(chan struct{})
 			sink := &captureSink{}
 			s := &localStackSession{
+				log:     newTestLogger(t),
 				id:      "tts-error",
 				sink:    sink,
 				baseCtx: t.Context(),
@@ -625,7 +627,7 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("language", func(t *testing.T) {
 		t.Parallel()
-		runtime := &localStackRuntime{llm: &genaiLLMAdapter{provider: &fakeGenAIProvider{}}}
+		runtime := &localStackRuntime{log: newTestLogger(t), llm: &genaiLLMAdapter{provider: &fakeGenAIProvider{}}}
 		sess := runtime.newSession(t.Context(), "language", &captureSink{}, true)
 		t.Cleanup(func() { _ = sess.close() })
 		setup := mustJSON(t, voicev2.SessionSetup{
@@ -654,7 +656,7 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("closed session rejects turns", func(t *testing.T) {
 		t.Parallel()
-		runtime := &localStackRuntime{llm: fixedConversationLLM{conv: &fakeConversation{}}}
+		runtime := &localStackRuntime{log: newTestLogger(t), llm: fixedConversationLLM{conv: &fakeConversation{}}}
 		sess := runtime.newSession(t.Context(), "closed", &captureSink{}, true)
 		setup, err := json.Marshal(voicev2.SessionSetup{
 			Kind:    voicev2.MessageKindSessionSetup,
@@ -682,7 +684,7 @@ func TestLocalStackResponseCorrelation(t *testing.T) {
 			usage:        genai.Usage{InputTokens: 10, OutputTokens: 2},
 		}
 		sink := &correlationSink{events: make(chan struct{}, 1)}
-		runtime := &localStackRuntime{llm: &genaiLLMAdapter{provider: p}}
+		runtime := &localStackRuntime{log: newTestLogger(t), llm: &genaiLLMAdapter{provider: p}}
 		s := runtime.newSession(t.Context(), "continuation", sink, true)
 		t.Cleanup(func() {
 			if err := s.close(); err != nil {
@@ -734,7 +736,7 @@ func TestLocalStackResponseCorrelation(t *testing.T) {
 		t.Parallel()
 		sink := &correlationSink{events: make(chan struct{}, 1)}
 		release := make(chan struct{})
-		runtime := &localStackRuntime{tts: delayedCorrelationTTS{release: release}, stagedAudio: true}
+		runtime := &localStackRuntime{log: newTestLogger(t), tts: delayedCorrelationTTS{release: release}, stagedAudio: true}
 		s := runtime.newSession(t.Context(), "late-speech", sink, false)
 		var once sync.Once
 		t.Cleanup(func() {
@@ -861,7 +863,7 @@ func TestLocalStackReasoning(t *testing.T) {
 
 	t.Run("client speech", func(t *testing.T) {
 		t.Parallel()
-		runtime := &localStackRuntime{llm: fixedConversationLLM{conv: reasoningConversation{}}}
+		runtime := &localStackRuntime{log: newTestLogger(t), llm: fixedConversationLLM{conv: reasoningConversation{}}}
 		sink := &captureSink{}
 		sess := runtime.newSession(t.Context(), "reasoning text", sink, true)
 		t.Cleanup(func() { _ = sess.close() })
@@ -946,7 +948,7 @@ func TestLocalStackSessionScopedErrors(t *testing.T) {
 	t.Run("conversation admission", func(t *testing.T) {
 		t.Parallel()
 		sink := &captureSink{}
-		s := &localStackSession{id: "admission", sink: sink, baseCtx: t.Context(), conv: &failingConversation{
+		s := &localStackSession{log: newTestLogger(t), id: "admission", sink: sink, baseCtx: t.Context(), conv: &failingConversation{
 			userErr: errors.New("http 400: bad request\nwith detail"),
 		}}
 		s.startUserMessage(t.Context(), "hello")
@@ -959,6 +961,7 @@ func TestLocalStackSessionScopedErrors(t *testing.T) {
 		t.Parallel()
 		sink := &captureSink{}
 		s := &localStackSession{
+			log:         newTestLogger(t),
 			id:          "tool-admission",
 			sink:        sink,
 			baseCtx:     t.Context(),
@@ -973,7 +976,7 @@ func TestLocalStackSessionScopedErrors(t *testing.T) {
 	t.Run("tool result mismatch", func(t *testing.T) {
 		t.Parallel()
 		sink := &captureSink{}
-		s := &localStackSession{id: "tool-mismatch", sink: sink, baseCtx: t.Context()}
+		s := &localStackSession{log: newTestLogger(t), id: "tool-mismatch", sink: sink, baseCtx: t.Context()}
 		s.deliverToolResult(t.Context(), toolResultMsg{id: "call-1", name: "lookup"})
 		if got := errorOf(t, sink).Message; got != "tool: unknown, duplicate or mismatched result" {
 			t.Fatalf("message = %q", got)
@@ -1336,7 +1339,7 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 		var startedModels []string
 		var contextSizes, slots []int
 		var servers []*fakeManagedLlamaServer
-		models, err := localStackModelsForConfigWithStarter(t.Context(), &voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "owner/asr", ContextSize: 8192, Slots: 4}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}, TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768}}, func(_ context.Context, spec serverSpec) (managedServer, error) {
+		models, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), &voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "owner/asr", ContextSize: 8192, Slots: 4}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}, TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768}}, func(_ context.Context, spec serverSpec) (managedServer, error) {
 			if spec.engine != engineLlamaCPP {
 				return nil, fmt.Errorf("unexpected managed server %+v", spec)
 			}
@@ -1399,7 +1402,7 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 			LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536},
 			TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "owner/tts", ContextSize: 32768},
 		}
-		_, err := localStackModelsForConfigWithStarter(t.Context(), &cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
+		_, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), &cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 			if model == "owner/tts" {
 				return nil, sentinel
 			}
@@ -1439,7 +1442,7 @@ func TestLocalStackGeminiSpeech(t *testing.T) { //nolint:paralleltest // Replace
 		t.Fatal(err)
 	}
 	var models []string
-	runtime, err := localStackModelsForConfigWithStarter(t.Context(), &cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
+	runtime, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), &cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 		models = append(models, model)
 		return &fakeManagedLlamaServer{url: "http://localhost:8080"}, nil
 	}))
@@ -1490,7 +1493,7 @@ func TestLocalStackTextOnly(t *testing.T) {
 	cfg := &voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "owner/chat"}, ContextSize: 65536}}
 	var started []string
 	server := &fakeManagedLlamaServer{url: "http://127.0.0.1:12345"}
-	models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
+	models, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), cfg, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 		started = append(started, model)
 		return server, nil
 	}))
@@ -1534,7 +1537,7 @@ data: [DONE]
 		TextOnly: true,
 		LLM:      voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: llmServer.URL + "/v1/chat/completions", Model: "test-model"}},
 	}}
-	bridge, err := NewBridge(t.Context(), &config, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+	bridge, err := NewBridge(t.Context(), newTestLogger(t), &config, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1609,7 +1612,7 @@ func TestLocalStackProviderCleanup(t *testing.T) {
 			ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: asrName},
 			LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: llmName}},
 		}
-		models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, nil)
+		models, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), cfg, nil)
 		return models, created, err
 	}
 	t.Run("shutdown", func(t *testing.T) {
@@ -1658,7 +1661,7 @@ func TestLocalStackProviderCleanup(t *testing.T) {
 				return nil, initErr
 			}}
 			cfg := &voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: asrName}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "unknown"}}}
-			if _, err := localStackModelsForConfigWithStarter(t.Context(), cfg, nil); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+			if _, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), cfg, nil); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 				t.Fatalf("unknown LLM = %v", err)
 			}
 		})
@@ -1824,7 +1827,7 @@ func TestLocalStackModelsForConfigOpenAICompatible(t *testing.T) {
 				ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: srv.URL + "/asr", Model: "asr"},
 				LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: srv.URL + "/v1/chat/completions", Model: "qwen3-8-27b", APIKeyName: envName}},
 			}
-			models, err := localStackModelsForConfigWithStarter(t.Context(), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
+			models, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
 				t.Fatal("remote LLM must not start a managed model")
 				return nil, errors.New("unexpected managed model startup")
 			}))
@@ -1872,7 +1875,7 @@ func TestLocalStackModelsForConfigOpenAICompatible(t *testing.T) {
 	t.Run("missing key fails before starting models", func(t *testing.T) {
 		t.Setenv(envName, "")
 		cfg := &voicegateway.PipelineConfig{LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "openaicompatible", Remote: "https://example.com/v1/chat/completions", APIKeyName: envName}}}
-		_, err := localStackModelsForConfigWithStarter(t.Context(), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
+		_, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), cfg, llamaLauncher(func(context.Context, string, int) (managedServer, error) {
 			t.Fatal("missing key must fail before starting a managed model")
 			return nil, errors.New("unexpected managed model startup")
 		}))
@@ -2470,7 +2473,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				recognitions := make(chan *fakeTranscription, 1)
 				recognitions <- recognition
 				tts := languageTTS{got: make(chan string, 16)}
-				runtime := &localStackRuntime{liveASR: newFakeLiveASR(recognitions), llm: echoLLM{}, tts: tts}
+				runtime := &localStackRuntime{log: newTestLogger(t), liveASR: newFakeLiveASR(recognitions), llm: echoLLM{}, tts: tts}
 				s := runtime.newSession(t.Context(), "language", &captureSink{}, false)
 				t.Cleanup(func() { _ = s.close() })
 				if err := setup(t, s, tc.tag); err != nil {
@@ -2511,7 +2514,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					s := (&localStackRuntime{llm: echoLLM{}, tts: tts}).newSession(t.Context(), "voice", &captureSink{}, false)
+					s := (&localStackRuntime{log: newTestLogger(t), llm: echoLLM{}, tts: tts}).newSession(t.Context(), "voice", &captureSink{}, false)
 					t.Cleanup(func() { _ = s.close() })
 					setup := voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: tc.voice, Language: tc.tag}}
 					if err := s.acceptClientMessage(t.Context(), mustJSON(t, setup)); err != nil {
@@ -2531,7 +2534,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 		})
 		t.Run("Qwen3-TTS from another repository", func(t *testing.T) {
 			t.Parallel()
-			runtime := &localStackRuntime{llm: echoLLM{}, tts: newQwen3TTSFake(t, "someone/Qwen3-TTS-Finetune-GGUF:Q8_0")}
+			runtime := &localStackRuntime{log: newTestLogger(t), llm: echoLLM{}, tts: newQwen3TTSFake(t, "someone/Qwen3-TTS-Finetune-GGUF:Q8_0")}
 			s := runtime.newSession(t.Context(), "language", &captureSink{}, false)
 			t.Cleanup(func() { _ = s.close() })
 			if err := setup(t, s, "fr-FR"); err != nil {
@@ -2540,7 +2543,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 		})
 		t.Run("client synthesis skips the gateway voice", func(t *testing.T) {
 			t.Parallel()
-			runtime := &localStackRuntime{llm: echoLLM{}, tts: &llamaTTSAdapter{model: "LiquidAI/LFM3-Audio-2B-GGUF", lang: "en"}}
+			runtime := &localStackRuntime{log: newTestLogger(t), llm: echoLLM{}, tts: &llamaTTSAdapter{log: newTestLogger(t), model: "LiquidAI/LFM3-Audio-2B-GGUF", lang: "en"}}
 			s := runtime.newSession(t.Context(), "language", &captureSink{}, true)
 			t.Cleanup(func() { _ = s.close() })
 			if err := setup(t, s, "fr-FR"); err != nil {
@@ -2559,7 +2562,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 				t.Fatal(err)
 			}
 			sink := &captureSink{}
-			runtime := &localStackRuntime{liveASR: newLiveASR(p, p.ModelID()), llm: echoLLM{}}
+			runtime := &localStackRuntime{log: newTestLogger(t), liveASR: newLiveASR(p, p.ModelID()), llm: echoLLM{}}
 			s := runtime.newSession(t.Context(), "language", sink, true)
 			t.Cleanup(func() { _ = s.close() })
 			if err := setup(t, s, "fil-PH"); err != nil {
@@ -2620,7 +2623,7 @@ func testLocalStackSessionLanguage(t *testing.T) {
 			} {
 				t.Run(tc.want, func(t *testing.T) {
 					t.Parallel()
-					runtime := &localStackRuntime{llm: echoLLM{}, tts: tc.tts}
+					runtime := &localStackRuntime{log: newTestLogger(t), llm: echoLLM{}, tts: tc.tts}
 					if tc.asr != nil {
 						runtime.liveASR = newLiveASR(tc.asr, tc.asr.ModelID())
 					}
@@ -2672,7 +2675,7 @@ func newQwen3TTSFake(t *testing.T, model string) *llamaTTSAdapter {
 			t.Error(err)
 		}
 	})
-	a, err := newLlamaTTSAdapter(t.Context(), p, model, "")
+	a, err := newLlamaTTSAdapter(t.Context(), newTestLogger(t), p, model, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,6 +23,7 @@ import (
 
 // realtimeBridgeBackend retains gateway policy; genai owns provider transport.
 type realtimeBridgeBackend struct {
+	log      *slog.Logger
 	provider string
 	remote   string
 	apiKey   string
@@ -455,21 +456,21 @@ func (s *realtimeBridgeSession) receive(rt genai.RealtimeSession) genai.Realtime
 				return nil
 			}
 			if s.resumeHandle == "" {
-				slog.WarnContext(s.ctx, "voicertc: provider receive failed", "session", s.id, "provider", scope, "err", err)
+				s.backend.log.WarnContext(s.ctx, "voicertc: provider receive failed", "session", s.id, "provider", scope, "err", err)
 				s.sink.sendGatewayError(s.ctx, scope+": "+err.Error())
 				return nil
 			}
-			slog.WarnContext(s.ctx, "voicertc: provider connection lost; resuming", "session", s.id, "provider", scope, "go_away", s.goAway, "lossless", s.resumable, "err", err)
+			s.backend.log.WarnContext(s.ctx, "voicertc: provider connection lost; resuming", "session", s.id, "provider", scope, "go_away", s.goAway, "lossless", s.resumable, "err", err)
 			return s.resume(rt)
 		}
 		if err := s.handleEvent(&event); err != nil {
-			slog.WarnContext(s.ctx, "voicertc: gateway delivery failed", "session", s.id, "provider", scope, "err", err)
+			s.backend.log.WarnContext(s.ctx, "voicertc: gateway delivery failed", "session", s.id, "provider", scope, "err", err)
 			s.sink.sendGatewayError(s.ctx, "session: "+err.Error())
 			s.sink.cancelSession()
 			return nil
 		}
 		if s.goAway && s.resumable {
-			slog.InfoContext(s.ctx, "voicertc: provider connection ending; resuming", "session", s.id, "provider", scope)
+			s.backend.log.InfoContext(s.ctx, "voicertc: provider connection ending; resuming", "session", s.id, "provider", scope)
 			return s.resume(rt)
 		}
 	}
@@ -490,7 +491,7 @@ func (s *realtimeBridgeSession) resume(old genai.RealtimeSession) genai.Realtime
 	s.outputTranscript.text.Reset()
 	if err := s.abandonTurn(); err != nil {
 		s.publish(nil)
-		slog.WarnContext(s.ctx, "voicertc: gateway delivery failed", "session", s.id, "provider", scope, "err", err)
+		s.backend.log.WarnContext(s.ctx, "voicertc: gateway delivery failed", "session", s.id, "provider", scope, "err", err)
 		s.sink.sendGatewayError(s.ctx, "session: "+err.Error())
 		s.sink.cancelSession()
 		return nil
@@ -499,7 +500,7 @@ func (s *realtimeBridgeSession) resume(old genai.RealtimeSession) genai.Realtime
 	if err != nil {
 		s.publish(nil)
 		if s.ctx.Err() == nil {
-			slog.WarnContext(s.ctx, "voicertc: provider resume failed", "session", s.id, "provider", scope, "err", err)
+			s.backend.log.WarnContext(s.ctx, "voicertc: provider resume failed", "session", s.id, "provider", scope, "err", err)
 			s.sink.sendGatewayError(s.ctx, scope+": resume: "+err.Error())
 		}
 		return nil
@@ -510,7 +511,7 @@ func (s *realtimeBridgeSession) resume(old genai.RealtimeSession) genai.Realtime
 		return nil
 	}
 	if err := old.Close(); err != nil {
-		slog.InfoContext(s.ctx, "voicertc: replaced provider connection close failed", "session", s.id, "provider", scope, "err", err)
+		s.backend.log.InfoContext(s.ctx, "voicertc: replaced provider connection close failed", "session", s.id, "provider", scope, "err", err)
 	}
 	return rt
 }
@@ -607,7 +608,7 @@ func (s *realtimeBridgeSession) handleEvent(event *genai.RealtimeEvent) error {
 			}
 			out = append(out, mustGatewayServerMessage(&voicev2.Interrupted{Kind: voicev2.MessageKindInterrupted, Source: voicev2.InterruptSourceTool, Message: "tool call cancelled"}))
 		case *gemini.GoAway:
-			slog.InfoContext(s.ctx, "voicertc: provider connection ending", "session", s.id, "provider", s.backend.errorScope(), "time_left", e.TimeLeft)
+			s.backend.log.InfoContext(s.ctx, "voicertc: provider connection ending", "session", s.id, "provider", s.backend.errorScope(), "time_left", e.TimeLeft)
 			s.goAway = true
 		case *gemini.Resumption:
 			// An empty handle marks a point that cannot be resumed without loss;

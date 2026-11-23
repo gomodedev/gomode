@@ -41,10 +41,8 @@ func TestServeTextSessionCloseLogging(t *testing.T) { //nolint:paralleltest // T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
 			bridge := newTestTextBridge(t, fixedConversationLLM{conv: &fakeConversation{}})
+			bridge.log = slog.New(slog.NewTextHandler(&logs, nil))
 			done := make(chan error, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				done <- bridge.ServeTextSession(r.Context(), w, r)
@@ -261,7 +259,16 @@ func (c *blockingFirstConversation) toolResult(context.Context, string, string, 
 
 func (c *blockingFirstConversation) addContext(string) {}
 
+// newTestTextBridge closes the bridge at cleanup, which waits for its text
+// sessions: httptest does not wait for hijacked WebSocket handlers. Tests that
+// call CloseAll themselves use buildTestTextBridge.
 func newTestTextBridge(t *testing.T, llm llmAdapter) *Bridge {
+	b := buildTestTextBridge(t, llm)
+	t.Cleanup(func() { b.CloseAll(t.Context()) })
+	return b
+}
+
+func buildTestTextBridge(t *testing.T, llm llmAdapter) *Bridge {
 	textCtx, textCancel := context.WithCancel(t.Context())
 	t.Cleanup(textCancel)
 	backend := newTestLocalStackBackend(t, nil, llm, nil)
@@ -270,6 +277,7 @@ func newTestTextBridge(t *testing.T, llm llmAdapter) *Bridge {
 		t.Fatal(choiceErr)
 	}
 	return &Bridge{
+		log:            newTestLogger(t),
 		backends:       map[string]backendConnector{"default": backend},
 		choices:        choices,
 		activityLogDir: t.TempDir(),
@@ -322,7 +330,7 @@ func TestTextSinkEscalatesLogFailure(t *testing.T) {
 	}
 	conn := <-accepted
 	sessionCtx, sessionCancel := context.WithCancel(t.Context())
-	sink := &textSink{conn: conn, log: log, cancel: sessionCancel}
+	sink := &textSink{log: newTestLogger(t), conn: conn, activityLog: log, cancel: sessionCancel}
 	t.Cleanup(func() {
 		sessionCancel()
 		_ = client.CloseNow()

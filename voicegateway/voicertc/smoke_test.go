@@ -109,7 +109,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 				t.Fatal("TTS did not produce ASR input")
 			}
 			startup := time.Now()
-			endpoint, err := nemoSpeechEndpoint(runtimeCtx, "", nemospeech.ParakeetTDT, startServer)
+			endpoint, err := nemoSpeechEndpoint(runtimeCtx, "", nemospeech.ParakeetTDT, startTestServer(t))
 			t.Logf("managed Parakeet TDT startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 			if err != nil {
 				t.Fatal(err)
@@ -137,7 +137,7 @@ func TestSmokeVoiceRTCLocalAudio(t *testing.T) {
 
 	t.Run("LLM", func(t *testing.T) {
 		startup := time.Now()
-		endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL", 32768, 1, startServer)
+		endpoint, err := localStackLlamaEndpoint(runtimeCtx, "", "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL", 32768, 1, startTestServer(t))
 		t.Logf("managed Gemma startup setup time, excluded from latency measurements: %s", smokeElapsed(startup))
 		if err != nil {
 			t.Fatal(err)
@@ -320,7 +320,7 @@ func TestSmokeVoiceGatewayToolCall(t *testing.T) {
 	}
 
 	startup := time.Now()
-	bridge, err := NewBridge(runtimeCtx, &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
+	bridge, err := NewBridge(runtimeCtx, newTestLogger(t), &cfg, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
 	t.Logf("local stack startup: %s", smokeElapsed(startup))
 	if err != nil {
 		t.Fatal(err)
@@ -674,4 +674,12 @@ func pcmS16LEEnergy(pcm []byte) float64 {
 		energy += float64(sample) * float64(sample)
 	}
 	return math.Sqrt(energy / float64(samples))
+}
+
+// startTestServer starts managed servers that log to t.
+func startTestServer(t testing.TB) serverLauncher {
+	log := newTestLogger(t)
+	return func(ctx context.Context, spec serverSpec) (managedServer, error) {
+		return startServer(ctx, log, spec)
+	}
 }

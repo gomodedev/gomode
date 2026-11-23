@@ -17,7 +17,8 @@ import (
 // load completion triggers; a capacity eviction defers it so the stack taking
 // the slot can adopt the evicted stack's servers.
 type sharedServers struct {
-	launch serverLauncher
+	log    *slog.Logger
+	launch serverStarter
 	wg     sync.WaitGroup
 
 	mu      sync.Mutex
@@ -36,8 +37,8 @@ type sharedServer struct {
 	refs int
 }
 
-func newSharedServers(launch serverLauncher) *sharedServers {
-	return &sharedServers{launch: launch, entries: map[serverSpec]*sharedServer{}}
+func newSharedServers(log *slog.Logger, launch serverStarter) *sharedServers {
+	return &sharedServers{log: log, launch: launch, entries: map[serverSpec]*sharedServer{}}
 }
 
 // acquire is a serverLauncher. The server outlives ctx, which only
@@ -54,7 +55,7 @@ func (s *sharedServers) acquire(ctx context.Context, spec serverSpec) (managedSe
 		e = &sharedServer{spec: spec, ready: make(chan struct{}), cancel: cancel}
 		s.entries[spec] = e
 		s.wg.Go(func() {
-			srv, err := s.launch(runCtx, spec)
+			srv, err := s.launch(runCtx, s.log, spec)
 			s.mu.Lock()
 			e.srv, e.err = srv, err
 			if err != nil && s.entries[spec] == e {
@@ -161,7 +162,7 @@ func (s *sharedServers) stop(servers ...*sharedServer) {
 		err := e.srv.Close()
 		e.cancel()
 		if err != nil {
-			slog.Error("voicertc: stop shared server", "engine", e.spec.engine, "model", e.spec.model, "err", err)
+			s.log.Error("voicertc: stop shared server", "engine", e.spec.engine, "model", e.spec.model, "err", err)
 		}
 	}
 }

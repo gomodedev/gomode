@@ -5,7 +5,6 @@ package voicertc
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -71,7 +70,7 @@ func (s *localStackSession) acceptLiveMicPCM(pcm []byte) error {
 			u.cancel()
 			s.clearLiveDraft(u.id)
 			connected := u.connected.Load()
-			slog.WarnContext(s.baseCtx, "voicertc: live ASR queue full", "session", s.id, "utterance", u.id, "connected", connected, "age", time.Since(u.started))
+			s.log.WarnContext(s.baseCtx, "voicertc: live ASR queue full", "session", s.id, "utterance", u.id, "connected", connected, "age", time.Since(u.started))
 			err := errors.New("speech recognition fell behind; please repeat")
 			if !connected {
 				err = errors.New("no speech recognizer became available; please repeat")
@@ -94,7 +93,7 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 		return nil
 	}
 	if s.liveRecognizing >= liveASRMaxRecognizing {
-		slog.WarnContext(s.baseCtx, "voicertc: live ASR recognizers exhausted", "session", s.id, "recognizing", s.liveRecognizing, "pending", len(s.livePending))
+		s.log.WarnContext(s.baseCtx, "voicertc: live ASR recognizers exhausted", "session", s.id, "recognizing", s.liveRecognizing, "pending", len(s.livePending))
 		s.reportTurnError("asr", errors.New("speech recognition is busy with earlier utterances; please repeat"))
 		return nil
 	}

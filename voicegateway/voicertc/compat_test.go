@@ -117,11 +117,11 @@ func TestServerProtocolMessage(t *testing.T) {
 		}
 	})
 
-	sess := &session{protocol: p}
+	sess := &session{log: newTestLogger(t), protocol: p}
 	if err := sess.deliverGatewayMessage(out); err != nil {
 		t.Fatal(err)
 	}
-	bridge := &Bridge{sessions: map[string]*session{"one": sess}}
+	bridge := &Bridge{log: newTestLogger(t), sessions: map[string]*session{"one": sess}}
 	if got := bridge.VoiceRTCError("one"); got != "failed" {
 		t.Fatalf("retained diagnostics error = %q", got)
 	}

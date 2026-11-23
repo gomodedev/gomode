@@ -45,7 +45,7 @@ func TestSmokeLiveASR(t *testing.T) {
 		"fr": "Je voudrais réserver une table pour deux ce soir.",
 	} {
 		var pcm []byte
-		for chunk, err := range (&geminiTTSAdapter{client: tts, voice: "Kore"}).synthesize(t.Context(), lang, "", text) {
+		for chunk, err := range (&geminiTTSAdapter{log: newTestLogger(t), client: tts, voice: "Kore"}).synthesize(t.Context(), lang, "", text) {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -55,12 +55,12 @@ func TestSmokeLiveASR(t *testing.T) {
 	}
 	resolve := func(provider, model string) func(context.Context) (localStackEndpoint, error) {
 		return func(ctx context.Context) (localStackEndpoint, error) {
-			return resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: provider, Model: model}, 32768, 1, startServer)
+			return resolveLocalStackEndpoint(ctx, voicegateway.ModelConfig{Provider: provider, Model: model}, 32768, 1, startTestServer(t))
 		}
 	}
 	nemo := func(model nemospeech.Model) func(context.Context) (localStackEndpoint, error) {
 		return func(ctx context.Context) (localStackEndpoint, error) {
-			return nemoSpeechEndpoint(ctx, "", model, startServer)
+			return nemoSpeechEndpoint(ctx, "", model, startTestServer(t))
 		}
 	}
 	for _, row := range []struct {
@@ -82,7 +82,7 @@ func TestSmokeLiveASR(t *testing.T) {
 		{model: string(nemospeech.ParakeetCTC), endpoint: nemo(nemospeech.ParakeetCTC), mismatched: true},
 		{model: string(nemospeech.ParakeetTDT), endpoint: nemo(nemospeech.ParakeetTDT), finalOnly: true},
 		{model: string(vosk.English), endpoint: func(ctx context.Context) (localStackEndpoint, error) {
-			return voskEndpoint(ctx, "", vosk.English, startServer)
+			return voskEndpoint(ctx, "", vosk.English, startTestServer(t))
 		}},
 	} {
 		t.Run(row.model, func(t *testing.T) {
@@ -139,7 +139,7 @@ func TestSmokeLiveASR(t *testing.T) {
 // rejected the utterance. The session closes when t ends.
 func smokeLiveUtterance(t *testing.T, a *liveASR, lang string, pcm []byte) ([]string, string, string) {
 	sink := &captureSink{changed: make(chan struct{}, 1)}
-	s := (&localStackRuntime{liveASR: a}).newSession(t.Context(), "smoke", sink, true)
+	s := (&localStackRuntime{log: newTestLogger(t), liveASR: a}).newSession(t.Context(), "smoke", sink, true)
 	s.conv = &fakeConversation{}
 	s.language = lang
 	t.Cleanup(func() {

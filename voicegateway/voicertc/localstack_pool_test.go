@@ -38,8 +38,8 @@ func TestLocalStackPool(t *testing.T) {
 	t.Parallel()
 	t.Run("native audio defers initialization", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
-		b, err := backendForConfig(&voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
+		b, err := backendForConfig(newTestLogger(t), &voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{
 			Provider: "llamacpp", Remote: "http://localhost:1", Model: "audio-model",
 		}}, p)
 		if err != nil {
@@ -56,7 +56,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("native audio lifecycle", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 10, MaxInstances: 1})
+			p := newLocalStackPool(newTestLogger(t), voicegateway.RuntimeConfig{IdleTimeoutSeconds: 10, MaxInstances: 1})
 			b := p.realtimeBackend(voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{
 				Provider: "llamacpp", Remote: "http://localhost:1", Model: "audio-model",
 			}, Slots: 1})
@@ -104,7 +104,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("native audio shares capacity with text", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(testRuntime)
+			p := newLocalStackPool(newTestLogger(t), testRuntime)
 			a := p.realtimeBackend(voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{
 				Provider: "llamacpp", Remote: "http://localhost:1", Model: "audio-model",
 			}, Slots: 1})
@@ -134,7 +134,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("progress survives eviction before acquisition", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(testRuntime)
+			p := newLocalStackPool(newTestLogger(t), testRuntime)
 			a, b := p.backend(poolTestConfig("one")), p.backend(poolTestConfig("two"))
 			t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 			if _, err := stackVariant(t, a, clientSpeechConfig()).acquire(t.Context()); err != nil {
@@ -180,7 +180,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("worker exit replaces the stack", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(testRuntime)
+			p := newLocalStackPool(newTestLogger(t), testRuntime)
 			b := p.backend(poolTestConfig("crash"))
 			t.Cleanup(func() { _ = b.Close() })
 			l := stackVariant(t, b, clientSpeechConfig())
@@ -189,7 +189,7 @@ func TestLocalStackPool(t *testing.T) {
 			// The surviving worker stops only after the session learned why.
 			var notifiedFirst atomic.Bool
 			survivor := &fakeServer{done: make(chan struct{}), stopping: func() { notifiedFirst.Store(first.wasCanceled()) }}
-			crashed := &localStackRuntime{llm: echoLLM{}, runtime: joinClosers(worker, survivor)}
+			crashed := &localStackRuntime{log: newTestLogger(t), llm: echoLLM{}, runtime: joinClosers(worker, survivor)}
 			var logs bytes.Buffer
 			l.log = slog.New(slog.NewJSONHandler(&logs, nil))
 			p.mu.Lock()
@@ -262,7 +262,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("progress names the loading step at once and repeats it", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(testRuntime)
+			p := newLocalStackPool(newTestLogger(t), testRuntime)
 			a := p.backend(poolTestConfig("one"))
 			l := stackVariant(t, a, clientSpeechConfig())
 			// Hold the stack in its loading state, as acquire does while starting.
@@ -317,13 +317,13 @@ func TestLocalStackPool(t *testing.T) {
 					<-r.Context().Done()
 				}))
 				t.Cleanup(model.Close)
-				p := newLocalStackPool(testRuntime)
+				p := newLocalStackPool(newTestLogger(t), testRuntime)
 				b := p.backend(voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: model.URL, Model: "chat"}}})
 				t.Cleanup(func() { _ = b.Close() })
 				done := make(chan error, 1)
 				logDir := t.TempDir()
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					done <- serveTextSession(r.Context(), w, r, "cancel-loading", logDir, b)
+					done <- serveTextSession(r.Context(), newTestLogger(t), w, r, "cancel-loading", logDir, b)
 				}))
 				t.Cleanup(server.Close)
 				conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
@@ -384,7 +384,7 @@ func TestLocalStackPool(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		}))
 		t.Cleanup(model.Close)
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		b := p.backend(voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: model.URL, Model: "chat"}}})
 		t.Cleanup(func() { _ = b.Close() })
 		l := stackVariant(t, b, clientSpeechConfig())
@@ -436,7 +436,7 @@ func TestLocalStackPool(t *testing.T) {
 			close(aborted)
 		}))
 		t.Cleanup(model.Close)
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		slow := p.backend(voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: model.URL, Model: "chat"}}})
 		other := p.backend(poolTestConfig("other"))
 		t.Cleanup(func() { _ = slow.Close(); _ = other.Close() })
@@ -485,7 +485,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("progress while waiting for capacity", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(testRuntime)
+			p := newLocalStackPool(newTestLogger(t), testRuntime)
 			a, b := p.backend(poolTestConfig("one")), p.backend(poolTestConfig("two"))
 			t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 			if _, err := stackVariant(t, a, clientSpeechConfig()).acquire(t.Context()); err != nil {
@@ -529,7 +529,7 @@ func TestLocalStackPool(t *testing.T) {
 			<-r.Context().Done()
 		}))
 		t.Cleanup(server.Close)
-		p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 2})
+		p := newLocalStackPool(newTestLogger(t), voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 2})
 		cfg := voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: server.URL, Model: "chat"}}}
 		a, b := p.backend(cfg), p.backend(cfg)
 		t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
@@ -563,7 +563,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("reuse and idle expiry", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 10, MaxInstances: 1})
+			p := newLocalStackPool(newTestLogger(t), voicegateway.RuntimeConfig{IdleTimeoutSeconds: 10, MaxInstances: 1})
 			b := p.backend(poolTestConfig("one"))
 			t.Cleanup(func() { _ = b.Close() })
 			if stackVariant(t, b, clientSpeechConfig()).loaded != nil {
@@ -603,7 +603,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("capacity pins sessions and evicts idle choices", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(testRuntime)
+			p := newLocalStackPool(newTestLogger(t), testRuntime)
 			a, b := p.backend(poolTestConfig("one")), p.backend(poolTestConfig("two"))
 			t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 			first, err := stackVariant(t, a, clientSpeechConfig()).acquire(t.Context())
@@ -636,7 +636,7 @@ func TestLocalStackPool(t *testing.T) {
 	})
 	t.Run("failed stop of an evicted choice keeps the new session", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		a, b := p.backend(poolTestConfig("one")), p.backend(poolTestConfig("two"))
 		t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 		evicted := stackVariant(t, a, clientSpeechConfig())
@@ -660,7 +660,7 @@ func TestLocalStackPool(t *testing.T) {
 	t.Run("cancel capacity wait", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			p := newLocalStackPool(testRuntime)
+			p := newLocalStackPool(newTestLogger(t), testRuntime)
 			a, b := p.backend(poolTestConfig("one")), p.backend(poolTestConfig("two"))
 			t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 			if _, err := stackVariant(t, a, clientSpeechConfig()).acquire(t.Context()); err != nil {
@@ -693,7 +693,7 @@ func TestLocalStackPool(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		}))
 		t.Cleanup(server.Close)
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		b := p.backend(voicegateway.PipelineConfig{TextOnly: true, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", Remote: server.URL, Model: "chat"}}})
 		t.Cleanup(func() { _ = b.Close() })
 		if _, err := stackVariant(t, b, clientSpeechConfig()).acquire(t.Context()); err == nil {
@@ -791,7 +791,7 @@ func TestLocalStackBackend(t *testing.T) {
 			LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "llm"}, ContextSize: 65536},
 			TTS: voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "tts", ContextSize: 32768},
 		}
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		b := p.backend(cfg)
 		t.Cleanup(func() { _ = b.Close() })
 		// The TTS adapter reads the vocabulary of its server at startup.
@@ -820,7 +820,7 @@ func TestLocalStackBackend(t *testing.T) {
 				t.Fatalf("missing mode %+v", tc.mode)
 			}
 			var started []string
-			models, err := localStackModelsForConfigWithStarter(t.Context(), variant, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
+			models, err := localStackModelsForConfigWithStarter(t.Context(), newTestLogger(t), variant, llamaLauncher(func(_ context.Context, model string, _ int) (managedServer, error) {
 				started = append(started, model)
 				return &fakeManagedLlamaServer{url: tts.URL}, nil
 			}))
@@ -837,7 +837,7 @@ func TestLocalStackBackend(t *testing.T) {
 	})
 	t.Run("unsupported setup does not initialize native or composed models", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		local := p.backend(poolTestConfig("text"))
 		native := p.realtimeBackend(voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "must-not-start"}})
 		t.Cleanup(func() { _ = local.Close(); _ = native.Close() })
@@ -883,7 +883,7 @@ func TestLocalStackBackend(t *testing.T) {
 		cfg.TextOnly = false
 		cfg.ASR = voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "openaicompatible", Remote: "http://localhost:1/chat", Model: "asr"}
 		cfg.TTS = voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: health.URL, Model: "tts", Voice: "voice"}
-		p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
+		p := newLocalStackPool(newTestLogger(t), voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
 		b := p.backend(cfg)
 		t.Cleanup(func() { _ = b.Close() })
 		a, err := b.connect(t.Context(), "input", &captureSink{})
@@ -933,7 +933,7 @@ func TestMixedSpeechCapabilities(t *testing.T) {
 		TTS:            voicegateway.TTSConfig{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "tts", Voice: "voice"},
 		UnavailableTTS: true,
 	}
-	p := newLocalStackPool(testRuntime)
+	p := newLocalStackPool(newTestLogger(t), testRuntime)
 	b := p.backend(cfg)
 	t.Cleanup(func() { _ = b.Close() })
 	choice, err := backendChoice(t.Context(), b, "mixed", "Mixed")
@@ -1086,7 +1086,7 @@ func TestIndependentSpeechStages(t *testing.T) {
 			}
 		}))
 		t.Cleanup(server.Close)
-		p := newLocalStackPool(voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
+		p := newLocalStackPool(newTestLogger(t), voicegateway.RuntimeConfig{IdleTimeoutSeconds: 3600, MaxInstances: 1})
 		p.recognition = []voicegateway.ASRConfig{
 			{ID: "asr-a", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: recognizer("asr-a"), Model: "asr-a"},
 			{ID: "asr-b", Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Remote: recognizer("asr-b"), Model: "asr-b"},
@@ -1142,7 +1142,7 @@ func TestIndependentSpeechStages(t *testing.T) {
 	})
 	t.Run("indivisible choices reject overrides before startup", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		fixed := p.backend(voicegateway.PipelineConfig{ASR: voicegateway.ASRConfig{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "asr", ContextSize: 32768}, LLM: voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "llm"}, ContextSize: 65536}})
 		native := p.realtimeBackend(voicegateway.RealtimeConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "audio"}})
 		t.Cleanup(func() { _ = fixed.Close(); _ = native.Close() })
@@ -1166,7 +1166,7 @@ func TestIndependentSpeechStages(t *testing.T) {
 	})
 	t.Run("canceled startup releases dynamic reservation", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		p.recognition = []voicegateway.ASRConfig{{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "asr", ContextSize: 32768}}
 		b := p.llmBackend(voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "llm"}, ContextSize: 65536})
 		t.Cleanup(func() { _ = b.Close() })
@@ -1188,7 +1188,7 @@ func TestIndependentSpeechStages(t *testing.T) {
 	})
 	t.Run("invalid selection never loads models", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		p.recognition = []voicegateway.ASRConfig{{Engine: voicegateway.ASREngineGenAI, Provider: "llamacpp", Model: "must-not-start", ContextSize: 32768}}
 		p.synthesis = []voicegateway.TTSConfig{{Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Model: "must-not-start", ContextSize: 32768}}
 		b := p.llmBackend(voicegateway.LLMConfig{ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "must-not-start"}, ContextSize: 65536})
@@ -1217,7 +1217,7 @@ func TestIndependentSpeechStages(t *testing.T) {
 	})
 	t.Run("synthesis selection shares and releases cold dynamic entries", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		p.synthesis = []voicegateway.TTSConfig{
 			{ID: "tts-a", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "tts-a", Voice: "a"},
 			{ID: "tts-b", Engine: voicegateway.TTSEngineGenAI, Provider: "llamacpp", Remote: "http://localhost:1", Model: "tts-b", Voice: "b"},
@@ -1310,11 +1310,11 @@ func TestLocalStackPoolSharedServers(t *testing.T) {
 	t.Parallel()
 	t.Run("choice switch keeps servers both choices need", func(t *testing.T) {
 		t.Parallel()
-		p := newLocalStackPool(testRuntime)
+		p := newLocalStackPool(newTestLogger(t), testRuntime)
 		var mu sync.Mutex
 		servers := map[string]*closeSignalServer{}
 		starts := map[string]int{}
-		p.servers.launch = func(_ context.Context, spec serverSpec) (managedServer, error) {
+		p.servers.launch = func(_ context.Context, _ *slog.Logger, spec serverSpec) (managedServer, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			starts[spec.model]++

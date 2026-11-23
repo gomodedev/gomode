@@ -233,6 +233,7 @@ func (b *localStackBackend) newTextSession(ctx context.Context, sessionID string
 
 // localStackRuntime owns the loaded VAD→ASR→LLM→TTS adapters and their clients.
 type localStackRuntime struct {
+	log *slog.Logger
 	// stagedAudio sends each energyVAD utterance to the conversation as audio,
 	// with no recognition stage, for a staged llama.cpp realtime choice.
 	stagedAudio bool
@@ -257,6 +258,7 @@ func (b *localStackRuntime) newSession(ctx context.Context, sessionID string, si
 	sessionCtx, cancel := context.WithCancel(ctx)
 	turns, sessionCtx := errgroup.WithContext(sessionCtx)
 	s := &localStackSession{
+		log:           b.log,
 		id:            sessionID,
 		sink:          sink,
 		baseCtx:       sessionCtx,
@@ -295,6 +297,7 @@ type sessionToolCall struct {
 // localStackSession owns one half-duplex voice session: queues, cancellation,
 // and tool-call correlation are all local to the backend.
 type localStackSession struct {
+	log     *slog.Logger
 	usage   usageTracker
 	id      string
 	sink    backendSink
@@ -799,7 +802,7 @@ func (s *localStackSession) speakFragments(ctx, turnCtx context.Context, fragmen
 				return
 			}
 			if !textEmitted {
-				slog.InfoContext(ctx, "voicertc: local stack tts first audio", "session", s.id, "fragment", fragmentIndex, "latency", time.Since(ttsStart), "chars", len([]rune(text)))
+				s.log.InfoContext(ctx, "voicertc: local stack tts first audio", "session", s.id, "fragment", fragmentIndex, "latency", time.Since(ttsStart), "chars", len([]rune(text)))
 				if !started {
 					started = true
 					audioStartedAt = time.Now()
@@ -927,7 +930,7 @@ func (s *localStackSession) warnTurn(ctx context.Context, stage string, err erro
 	if ctx.Err() != nil {
 		return
 	}
-	slog.WarnContext(s.baseCtx, "voicertc: local stack turn failed", "session", s.id, "stage", stage, "err", err) //nolint:contextcheck // turn goroutines run on the session lifetime context
+	s.log.WarnContext(s.baseCtx, "voicertc: local stack turn failed", "session", s.id, "stage", stage, "err", err) //nolint:contextcheck // turn goroutines run on the session lifetime context
 	s.reportTurnError(stage, err)
 }
 

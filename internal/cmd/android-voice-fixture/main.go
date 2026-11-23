@@ -410,8 +410,7 @@ func main() {
 	rtcIP := flag.String("rtc-ip", "", "host candidate address visible from the emulator (10.0.2.2)")
 	flag.Parse()
 	f := &fixture{rtcIP: *rtcIP}
-	// voicertc logs through the default logger; the recorder exposes its
-	// session cleanup causes to tests.
+	// The recorder exposes the bridge's session cleanup causes to tests.
 	log := slog.New(cleanupRecorder{Handler: slog.NewTextHandler(os.Stderr, nil), fixture: f})
 	slog.SetDefault(log)
 	f.log = log

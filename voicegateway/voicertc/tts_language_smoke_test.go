@@ -22,7 +22,7 @@ import (
 func TestSmokeTTSLanguage(t *testing.T) {
 	isolateSmokeHost(t)
 	const text = "Je voudrais réserver une table pour deux ce soir."
-	endpoint, err := nemoSpeechEndpoint(t.Context(), "", nemospeech.ParakeetTDT, startServer)
+	endpoint, err := nemoSpeechEndpoint(t.Context(), "", nemospeech.ParakeetTDT, startTestServer(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func geminiSmokeTTS(model string) func(t *testing.T) ttsAdapter {
 				t.Error(err)
 			}
 		})
-		return &geminiTTSAdapter{client: c, voice: "Kore"}
+		return &geminiTTSAdapter{log: newTestLogger(t), client: c, voice: "Kore"}
 	}
 }
 

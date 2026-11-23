@@ -36,6 +36,7 @@ func (b *lazyLlamaRealtimeBackend) connect(ctx context.Context, id string, sink 
 }
 
 type llamaRealtimeBackend struct {
+	log      *slog.Logger
 	provider genai.Provider
 	runtime  io.Closer
 	cfg      voicegateway.RealtimeConfig
@@ -43,8 +44,8 @@ type llamaRealtimeBackend struct {
 	staged   *localStackRuntime
 }
 
-func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfig) (*llamaRealtimeBackend, error) {
-	b := &llamaRealtimeBackend{cfg: cfg, slots: make(chan struct{}, cfg.Slots)}
+func newLlamaRealtimeBackend(ctx context.Context, log *slog.Logger, cfg voicegateway.RealtimeConfig) (*llamaRealtimeBackend, error) {
+	b := &llamaRealtimeBackend{log: log, cfg: cfg, slots: make(chan struct{}, cfg.Slots)}
 	remote := cfg.Remote
 	if remote == "" {
 		parts := strings.SplitN(cfg.Model, "/", 3)
@@ -71,7 +72,7 @@ func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfi
 			Slots:       cfg.Slots,
 			ContextSize: cfg.ContextSize,
 			Args:        args,
-			LogOutput:   slog.NewLogLogger(slog.Default().Handler(), slog.LevelDebug).Writer(),
+			LogOutput:   slog.NewLogLogger(log.Handler(), slog.LevelDebug).Writer(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("start realtime runtime: %w", err)
@@ -90,11 +91,12 @@ func newLlamaRealtimeBackend(ctx context.Context, cfg voicegateway.RealtimeConfi
 	b.provider = provider
 	if cfg.Staged {
 		b.staged = &localStackRuntime{
+			log:         log,
 			stagedAudio: true,
 			llm:         &genaiLLMAdapter{provider: provider, effort: cfg.Effort, audioInput: true, maxOutputTokens: cfg.MaxOutputTokens},
 			// Staged sessions support English only: the fixed TTS language
 			// rejects any other at session.setup.
-			tts: &llamaTTSAdapter{client: provider.(*llamacpp.Client), model: cmp.Or(cfg.Model, cfg.ID), lang: "en"},
+			tts: &llamaTTSAdapter{log: log, client: provider.(*llamacpp.Client), model: cmp.Or(cfg.Model, cfg.ID), lang: "en"},
 		}
 	}
 	return b, nil
@@ -468,7 +470,7 @@ func (s *llamaRealtimeSession) dropMicrophoneLocked(turn *realtimeMicrophoneTurn
 	clear(s.pending[len(kept):])
 	s.pending = kept
 	s.pendingBytes -= dropped
-	slog.WarnContext(s.ctx, "llama.cpp realtime: dropped unsent microphone turn", "session", s.id, "queued_bytes", dropped)
+	s.backend.log.WarnContext(s.ctx, "llama.cpp realtime: dropped unsent microphone turn", "session", s.id, "queued_bytes", dropped)
 	s.sink.sendTurnError(s.ctx, "Microphone input was skipped because the model fell behind. Please repeat it.")
 }
 
@@ -575,7 +577,7 @@ func (s *llamaRealtimeSession) resultLocked(ctx context.Context, msg *voicev2.To
 	}
 	s.resultBytes += len(value)
 	s.results[msg.ID] = genai.ToolCallResult{ID: msg.ID, Name: msg.Name, Result: value}
-	slog.InfoContext(s.ctx, "llama.cpp realtime: tool result received", "session", s.id, "id", msg.ID, "name", msg.Name, "bytes", len(value), "received", len(s.results), "expected", len(s.tools))
+	s.backend.log.InfoContext(s.ctx, "llama.cpp realtime: tool result received", "session", s.id, "id", msg.ID, "name", msg.Name, "bytes", len(value), "received", len(s.results), "expected", len(s.tools))
 	return s.finishToolsLocked(ctx)
 }
 
@@ -590,7 +592,7 @@ func (s *llamaRealtimeSession) finishToolsLocked(ctx context.Context) error {
 	if err := s.rt.Send(ctx, genai.RealtimeInputContent{ToolResults: results}); err != nil {
 		return err
 	}
-	slog.InfoContext(s.ctx, "llama.cpp realtime: continuing after tool results", "session", s.id, "count", len(results), "bytes", s.resultBytes)
+	s.backend.log.InfoContext(s.ctx, "llama.cpp realtime: continuing after tool results", "session", s.id, "count", len(results), "bytes", s.resultBytes)
 	s.tools = nil
 	s.results = nil
 	s.resultBytes = 0
@@ -615,7 +617,7 @@ func (s *llamaRealtimeSession) receive() {
 		if err != nil {
 			if s.ctx.Err() == nil {
 				// Provider and decoding errors may include private tool content.
-				slog.ErrorContext(s.ctx, "llama.cpp realtime: session failed", "session", s.id, "error_type", fmt.Sprintf("%T", err), "timeout", errors.Is(err, context.DeadlineExceeded))
+				s.backend.log.ErrorContext(s.ctx, "llama.cpp realtime: session failed", "session", s.id, "error_type", fmt.Sprintf("%T", err), "timeout", errors.Is(err, context.DeadlineExceeded))
 				s.sink.sendGatewayError(s.ctx, "llama.cpp: "+err.Error())
 				s.sink.cancelSession()
 				s.cancel()
@@ -658,7 +660,7 @@ func (s *llamaRealtimeSession) eventLocked(event *genai.RealtimeEvent) error {
 		s.tools = event.Content.ToolCalls
 		for i := range s.tools {
 			call := &s.tools[i]
-			slog.InfoContext(s.ctx, "llama.cpp realtime: tool call", "session", s.id, "id", call.ID, "name", call.Name)
+			s.backend.log.InfoContext(s.ctx, "llama.cpp realtime: tool call", "session", s.id, "id", call.ID, "name", call.Name)
 			if err := s.sendLocked(&voicev2.ToolCall{Kind: voicev2.MessageKindToolCall, ID: call.ID, Name: call.Name, Args: json.RawMessage(call.Arguments)}); err != nil {
 				return err
 			}

@@ -280,7 +280,7 @@ func TestRealtimeBridgeSessionReportsProviderErrorsAsRecoverable(t *testing.T) {
 	s := &realtimeBridgeSession{
 		ctx:     t.Context(),
 		sink:    sink,
-		backend: &realtimeBridgeBackend{provider: "openai"},
+		backend: &realtimeBridgeBackend{log: newTestLogger(t), provider: "openai"},
 	}
 	if err := s.handleEvent(&genai.RealtimeEvent{
 		Kind:  genai.RealtimeEventError,
@@ -382,28 +382,28 @@ func TestGatewayRealtimeToolsCancelsDuringSend(t *testing.T) {
 func TestRealtimeBridgeBackendSetupOptions(t *testing.T) {
 	t.Parallel()
 	setup := &voicev2.SessionSetup{Voice: voicev2.VoiceConfig{Language: "fr-CA"}}
-	geminiOpts := (&realtimeBridgeBackend{provider: "gemini"}).setupOptions(setup, "handle")
+	geminiOpts := (&realtimeBridgeBackend{log: newTestLogger(t), provider: "gemini"}).setupOptions(setup, "handle")
 	if o := geminiOpts[0].(*gemini.RealtimeOption); len(geminiOpts) != 1 || !o.SessionResumption || o.ResumeHandle != "handle" || o.Compression == nil {
 		t.Fatalf("Gemini options = %+v", geminiOpts)
 	}
-	openAIOpts := (&realtimeBridgeBackend{provider: "openai"}).setupOptions(setup, "")
+	openAIOpts := (&realtimeBridgeBackend{log: newTestLogger(t), provider: "openai"}).setupOptions(setup, "")
 	if o, ok := openAIOpts[0].(*openairesponses.RealtimeOption); len(openAIOpts) != 1 || !ok || *o.Truncation != (openaibase.Truncation{Strategy: openaibase.TruncationRetentionRatio, Ratio: 0.8}) {
 		t.Fatalf("OpenAI options = %+v", openAIOpts)
 	}
 	for _, provider := range []string{"gemini", "openai"} {
-		opts := (&realtimeBridgeBackend{provider: provider, effort: genai.EffortLow}).setupOptions(setup, "")
+		opts := (&realtimeBridgeBackend{log: newTestLogger(t), provider: provider, effort: genai.EffortLow}).setupOptions(setup, "")
 		if opts[0] != genai.EffortLow {
 			t.Fatalf("%s effort option = %v", provider, opts[0])
 		}
 	}
 	setup.IncludeReasoning = true
 	for _, provider := range []string{"gemini", "openai"} {
-		opts := (&realtimeBridgeBackend{provider: provider}).setupOptions(setup, "")
+		opts := (&realtimeBridgeBackend{log: newTestLogger(t), provider: provider}).setupOptions(setup, "")
 		if opts[0] != genai.IncludeReasoning {
 			t.Fatalf("%s omitted requested reasoning output: %v", provider, opts)
 		}
 	}
-	if !(&realtimeBridgeBackend{provider: "gemini"}).inputTranscription() || (&realtimeBridgeBackend{provider: "openai"}).inputTranscription() {
+	if !(&realtimeBridgeBackend{log: newTestLogger(t), provider: "gemini"}).inputTranscription() || (&realtimeBridgeBackend{log: newTestLogger(t), provider: "openai"}).inputTranscription() {
 		t.Fatal("input transcription policy differs from the provider contract")
 	}
 }

@@ -18,6 +18,7 @@ import (
 )
 
 type localStackPool struct {
+	log         *slog.Logger
 	limits      voicegateway.RuntimeConfig
 	recognition []voicegateway.ASRConfig
 	synthesis   []voicegateway.TTSConfig
@@ -81,8 +82,8 @@ var (
 // errWorkerExited ends sessions whose stack lost a managed worker.
 var errWorkerExited = errors.New("local stack: model worker exited unexpectedly")
 
-func newLocalStackPool(limits voicegateway.RuntimeConfig) *localStackPool {
-	return &localStackPool{limits: limits, servers: newSharedServers(startServer), changed: make(chan struct{})}
+func newLocalStackPool(log *slog.Logger, limits voicegateway.RuntimeConfig) *localStackPool {
+	return &localStackPool{log: log, limits: limits, servers: newSharedServers(log, startServer), changed: make(chan struct{})}
 }
 
 func (p *localStackPool) backend(cfg voicegateway.PipelineConfig) *localStackBackend {
@@ -109,7 +110,7 @@ func (p *localStackPool) backend(cfg voicegateway.PipelineConfig) *localStackBac
 				variant.TTS = voicegateway.TTSConfig{}
 			}
 			variant.TextOnly = input == voicev2.SpeechLocationClient && output == voicev2.SpeechLocationClient
-			l := &lazyLocalStack{pool: p, cfg: &variant, log: slog.With("provider", cfg.LLM.Provider, "model", cfg.LLM.Model)}
+			l := &lazyLocalStack{pool: p, cfg: &variant, log: p.log.With("provider", cfg.LLM.Provider, "model", cfg.LLM.Model)}
 			p.entries = append(p.entries, l)
 			b.variants = append(b.variants, speechStackVariant{speech: voicev2.SpeechConfig{Input: input, Output: output}, lazy: l})
 		}
@@ -185,7 +186,7 @@ func (b *localStackBackend) selectStages(speech voicev2.SpeechConfig, setup *voi
 			return l, nil
 		}
 	}
-	l := &lazyLocalStack{pool: p, cfg: &cfg, log: slog.With("provider", cfg.LLM.Provider, "model", cfg.LLM.Model), owner: b, references: 1}
+	l := &lazyLocalStack{pool: p, cfg: &cfg, log: p.log.With("provider", cfg.LLM.Provider, "model", cfg.LLM.Model), owner: b, references: 1}
 	p.entries = append(p.entries, l)
 	return l, nil
 }
@@ -340,7 +341,7 @@ func (s *negotiatedStackSession) close() error {
 }
 
 func (p *localStackPool) realtimeBackend(cfg voicegateway.RealtimeConfig) *lazyLlamaRealtimeBackend {
-	l := &lazyLocalStack{pool: p, cfg: &cfg, log: slog.With("provider", cfg.Provider, "model", cfg.Model)}
+	l := &lazyLocalStack{pool: p, cfg: &cfg, log: p.log.With("provider", cfg.Provider, "model", cfg.Model)}
 	p.entries = append(p.entries, l)
 	return &lazyLlamaRealtimeBackend{lazy: l}
 }
@@ -500,13 +501,13 @@ func (l *lazyLocalStack) load(ctx context.Context, load *stackLoad) {
 	switch cfg := l.cfg.(type) {
 	case *voicegateway.PipelineConfig:
 		var runtime *localStackRuntime
-		runtime, err = localStackRuntimeForConfig(ctx, cfg, p.servers.acquire)
+		runtime, err = localStackRuntimeForConfig(ctx, l.log, cfg, p.servers.acquire)
 		if runtime != nil {
 			b, servers = runtime, managedServers(runtime.runtime)
 		}
 	case *voicegateway.RealtimeConfig:
 		var runtime *llamaRealtimeBackend
-		runtime, err = newLlamaRealtimeBackend(ctx, *cfg)
+		runtime, err = newLlamaRealtimeBackend(ctx, l.log, *cfg)
 		if runtime != nil {
 			b, servers = runtime, managedServers(runtime.runtime)
 		}
@@ -586,7 +587,7 @@ func (l *lazyLocalStack) idleLocked() {
 		defer p.mu.Unlock()
 		if l.loaded != nil && l.users == 0 && l.idleSince.Equal(since) {
 			if err := l.unloadLocked(false, false); err != nil {
-				slog.Error("voicertc: unload idle local stack", "err", err)
+				l.log.Error("voicertc: unload idle local stack", "err", err)
 			}
 		}
 	})

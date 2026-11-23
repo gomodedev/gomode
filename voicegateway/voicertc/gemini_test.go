@@ -57,7 +57,7 @@ func newGeminiGateway(t *testing.T, script func(context.Context, *websocket.Conn
 	}))
 	t.Cleanup(srv.Close)
 	sink := &realtimeEventSink{events: make(chan struct{}, 1)}
-	backend := &realtimeBridgeBackend{provider: "gemini", apiKey: "test-key", model: "gemini-3.8-live"}
+	backend := &realtimeBridgeBackend{log: newTestLogger(t), provider: "gemini", apiKey: "test-key", model: "gemini-3.8-live"}
 	session, err := backend.connect(t.Context(), "gateway-fixture", sink)
 	if err != nil {
 		t.Fatal(err)

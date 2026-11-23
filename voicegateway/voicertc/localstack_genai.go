@@ -47,12 +47,13 @@ import (
 // provider-backed stages use their provider's health check. Operators must warm
 // external speech models before latency-sensitive use, since the first request
 // may otherwise load or download a model.
-func localStackRuntimeForConfig(ctx context.Context, cfg *voicegateway.PipelineConfig, launch serverLauncher) (*localStackRuntime, error) {
-	models, err := localStackModelsForConfigWithStarter(ctx, cfg, launch)
+func localStackRuntimeForConfig(ctx context.Context, log *slog.Logger, cfg *voicegateway.PipelineConfig, launch serverLauncher) (*localStackRuntime, error) {
+	models, err := localStackModelsForConfigWithStarter(ctx, log, cfg, launch)
 	if err != nil {
 		return nil, err
 	}
 	b := &localStackRuntime{
+		log:     log,
 		liveASR: models.liveASR,
 		llm:     models.llm,
 		tts:     models.tts,
@@ -77,6 +78,7 @@ type localStackEndpoint struct {
 
 func localStackModelsForConfigWithStarter(
 	ctx context.Context,
+	log *slog.Logger,
 	cfg *voicegateway.PipelineConfig,
 	launch serverLauncher,
 ) (localStackModels, error) {
@@ -146,13 +148,13 @@ func localStackModelsForConfigWithStarter(
 			}
 			switch p := endpoint.provider.(type) {
 			case *llamacpp.Client:
-				a, err := newLlamaTTSAdapter(ctx, p, cfg.TTS.Model, cfg.TTS.Voice)
+				a, err := newLlamaTTSAdapter(ctx, log, p, cfg.TTS.Model, cfg.TTS.Voice)
 				if err != nil {
 					return localStackModels{}, errors.Join(err, endpoint.runtime.Close(), runtime.Close())
 				}
 				tts = a
 			case *gemini.Client:
-				tts = &geminiTTSAdapter{client: p, voice: cfg.TTS.Voice}
+				tts = &geminiTTSAdapter{log: log, client: p, voice: cfg.TTS.Voice}
 			default:
 				return localStackModels{}, errors.Join(errors.New("provider does not support dedicated speech synthesis"), endpoint.runtime.Close(), runtime.Close())
 			}
@@ -382,11 +384,15 @@ type serverSpec struct {
 // until the returned server is closed, not until ctx is canceled.
 type serverLauncher func(ctx context.Context, spec serverSpec) (managedServer, error)
 
-// startServer is the production serverLauncher.
-func startServer(ctx context.Context, spec serverSpec) (managedServer, error) {
+// serverStarter starts a process for sharedServers, which shares it among
+// leases; log receives the process's diagnostics.
+type serverStarter func(ctx context.Context, log *slog.Logger, spec serverSpec) (managedServer, error)
+
+// startServer is the production serverStarter.
+func startServer(ctx context.Context, log *slog.Logger, spec serverSpec) (managedServer, error) {
 	switch spec.engine {
 	case engineLlamaCPP:
-		return startManagedLlamaServer(ctx, spec.model, spec.contextSize, spec.slots)
+		return startManagedLlamaServer(ctx, log, spec.model, spec.contextSize, spec.slots)
 	case engineWhistle:
 		// genaipy owns the isolated uv/Python 3.12 Needle worker and disables
 		// telemetry. Needle downloads a prebuilt native engine and weights
@@ -414,7 +420,7 @@ func startServer(ctx context.Context, spec serverSpec) (managedServer, error) {
 		}
 		return srv, nil
 	case engineNemoSpeech:
-		return startNemoSpeechServer(ctx, nemospeech.Model(spec.model))
+		return startNemoSpeechServer(ctx, log, nemospeech.Model(spec.model))
 	case engineVosk:
 		// genaipy owns the model download, the uv/Python 3.12 worker and its
 		// vosk package. Each session decodes with its own recognizer over the
@@ -429,7 +435,7 @@ func startServer(ctx context.Context, spec serverSpec) (managedServer, error) {
 	return nil, fmt.Errorf("unknown managed server engine %q", spec.engine)
 }
 
-func startNemoSpeechServer(ctx context.Context, model nemospeech.Model) (managedServer, error) {
+func startNemoSpeechServer(ctx context.Context, log *slog.Logger, model nemospeech.Model) (managedServer, error) {
 	cacheBase, err := os.UserCacheDir()
 	if err != nil {
 		return nil, fmt.Errorf("get user cache dir: %w", err)
@@ -439,7 +445,7 @@ func startNemoSpeechServer(ctx context.Context, model nemospeech.Model) (managed
 	if err != nil {
 		return nil, fmt.Errorf("install NeMo-Speech.cpp: %w", err)
 	}
-	slog.InfoContext(ctx, "voicertc: starting managed NeMo-Speech.cpp", "model", model, "version", nemospeechsrv.Version)
+	log.InfoContext(ctx, "voicertc: starting managed NeMo-Speech.cpp", "model", model, "version", nemospeechsrv.Version)
 	reportStartupStage(ctx, "Server is downloading or loading "+string(model)+"…")
 	srv, err := nemospeechsrv.New(ctx, exe, model)
 	if err != nil {
@@ -460,7 +466,7 @@ func newManagedLlamaReleaseCache() *managedLlamaReleaseCache {
 	return &managedLlamaReleaseCache{gate: make(chan struct{}, 1)}
 }
 
-func startManagedLlamaServer(ctx context.Context, model string, contextSize, slots int) (managedServer, error) {
+func startManagedLlamaServer(ctx context.Context, log *slog.Logger, model string, contextSize, slots int) (managedServer, error) {
 	version := llamacppsrv.Version
 	cache, err := localStackLlamaCacheDir()
 	if err != nil {
@@ -481,15 +487,15 @@ func startManagedLlamaServer(ctx context.Context, model string, contextSize, slo
 	// Gateway sessions share each managed server; requests beyond its slots
 	// queue.
 	args := []string{"-hf", model, "--no-warmup", "--no-log-timestamps"}
-	slog.InfoContext(ctx, "voicertc: starting managed llama.cpp", "model", model, "version", version, "hostPort", hostPort, "context_size", contextSize, "slots", slots)
+	log.InfoContext(ctx, "voicertc: starting managed llama.cpp", "model", model, "version", version, "hostPort", hostPort, "context_size", contextSize, "slots", slots)
 	// llama-server downloads a missing model before loading it.
 	reportStartupStage(ctx, "Server is downloading or loading "+model+"…")
-	logger := slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)
+	logger := slog.NewLogLogger(log.Handler(), slog.LevelInfo)
 	srv, err := llamacppsrv.New(ctx, exe, &llamacppsrv.Config{HostPort: hostPort, Slots: slots, ContextSize: contextSize, Args: args, LogOutput: logger.Writer()})
 	if err != nil {
 		return nil, fmt.Errorf("start managed llama.cpp: %w", err)
 	}
-	slog.InfoContext(ctx, "voicertc: managed llama.cpp ready", "url", srv.URL())
+	log.InfoContext(ctx, "voicertc: managed llama.cpp ready", "url", srv.URL())
 	return srv, nil
 }
 

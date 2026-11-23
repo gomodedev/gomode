@@ -97,7 +97,7 @@ func TestUsageTracker(t *testing.T) {
 			event := &genai.RealtimeEvent{Kind: genai.RealtimeEventUsage, Usage: &genai.Usage{InputTokens: 42, OutputTokens: 7}}
 			var err error
 			if native {
-				s := &llamaRealtimeSession{id: "session", ctx: t.Context(), sink: sink, backend: &llamaRealtimeBackend{provider: p}}
+				s := &llamaRealtimeSession{id: "session", ctx: t.Context(), sink: sink, backend: &llamaRealtimeBackend{log: newTestLogger(t), provider: p}}
 				err = s.eventLocked(event)
 			} else {
 				s := &realtimeBridgeSession{id: "session", ctx: t.Context(), sink: sink, provider: p}
@@ -128,7 +128,7 @@ func TestGatewayResponseCorrelation(t *testing.T) {
 	t.Run("streaming after eviction", func(t *testing.T) {
 		t.Parallel()
 		sink := &captureSink{}
-		s := &llamaRealtimeSession{id: "session", ctx: t.Context(), sink: sink, backend: &llamaRealtimeBackend{provider: &fakeGenAIProvider{}}}
+		s := &llamaRealtimeSession{id: "session", ctx: t.Context(), sink: sink, backend: &llamaRealtimeBackend{log: newTestLogger(t), provider: &fakeGenAIProvider{}}}
 		for i := range documentedUsageRetention + 1 {
 			if err := s.eventLocked(&genai.RealtimeEvent{Kind: genai.RealtimeEventUsage, ResponseID: strconv.Itoa(i), Usage: &genai.Usage{InputTokens: 1}}); err != nil {
 				t.Fatal(err)
@@ -154,7 +154,7 @@ func TestGatewayResponseCorrelation(t *testing.T) {
 				var handle func(*genai.RealtimeEvent) error
 				kind := genai.RealtimeEventTranscriptOutput
 				if native {
-					s := &llamaRealtimeSession{id: "session", ctx: t.Context(), sink: sink, backend: &llamaRealtimeBackend{provider: p}}
+					s := &llamaRealtimeSession{id: "session", ctx: t.Context(), sink: sink, backend: &llamaRealtimeBackend{log: newTestLogger(t), provider: p}}
 					handle = s.eventLocked
 					kind = genai.RealtimeEventContentText
 				} else {

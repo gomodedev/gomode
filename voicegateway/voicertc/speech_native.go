@@ -30,6 +30,7 @@ import (
 // audio pipeline (tools/mtmd/mtmd-helper-gen.cpp).
 type llamaTTSAdapter struct {
 	noVoiceSelection
+	log       *slog.Logger
 	client    *llamacpp.Client
 	model     string
 	voice     string
@@ -59,7 +60,7 @@ type llamaTTSAdapter struct {
 // v1.0.0 tools/tts/README.md). Chatterbox Multilingual, whose "lang" prefixes
 // the text, needs classifier-free guidance that llama-server does not run
 // yet. The model, not the adapter, owns the language of these.
-func newLlamaTTSAdapter(ctx context.Context, c *llamacpp.Client, model, voice string) (*llamaTTSAdapter, error) {
+func newLlamaTTSAdapter(ctx context.Context, log *slog.Logger, c *llamacpp.Client, model, voice string) (*llamaTTSAdapter, error) {
 	var content strings.Builder
 	for _, name := range qwen3TTSLanguages {
 		content.WriteString(qwen3TTSLanguageToken(name))
@@ -77,7 +78,7 @@ func newLlamaTTSAdapter(ctx context.Context, c *llamacpp.Client, model, voice st
 	if languages == nil && modelRepository(model) == "LiquidAI/LFM3-Audio-2B-GGUF" {
 		languages = []string{"ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "it", "ja", "ko", "nl", "pl", "pt", "sv", "tr", "zh"}
 	}
-	return &llamaTTSAdapter{client: c, model: model, voice: voice, languages: languages}, nil
+	return &llamaTTSAdapter{log: log, client: c, model: model, voice: voice, languages: languages}, nil
 }
 
 // qwen3TTSLanguages maps session languages to Qwen3-TTS language token names
@@ -123,7 +124,7 @@ func (a *llamaTTSAdapter) synthesize(ctx context.Context, lang, _, text string) 
 			if !yield(pcm, nil) {
 				cancel()
 				if err := res.Body.Close(); err != nil {
-					slog.WarnContext(ctx, "close speech response", "err", err)
+					a.log.WarnContext(ctx, "close speech response", "err", err)
 				}
 				return
 			}
@@ -147,6 +148,7 @@ func (a *llamaTTSAdapter) synthesize(ctx context.Context, lang, _, text string) 
 type geminiTTSAdapter struct {
 	anyLanguage
 	noVoiceSelection
+	log    *slog.Logger
 	client *gemini.Client
 	voice  string
 }
@@ -196,7 +198,7 @@ func (a *geminiTTSAdapter) synthesize(ctx context.Context, lang, _, text string)
 		err = errors.Join(err, finish())
 		if stopped {
 			if err != nil && !errors.Is(err, context.Canceled) {
-				slog.WarnContext(ctx, "finish Gemini speech", "err", err)
+				a.log.WarnContext(ctx, "finish Gemini speech", "err", err)
 			}
 			return
 		}

@@ -54,6 +54,7 @@ type upnpServiceClient interface {
 }
 
 type upnpMapping struct {
+	log          *slog.Logger
 	client       upnpWANConnection
 	ip           net.IP
 	externalPort uint16
@@ -66,7 +67,7 @@ type upnpMapping struct {
 	refreshErr error
 }
 
-func mapUPnPUDP(ctx context.Context, internalIP net.IP, port int) (*upnpMapping, error) {
+func mapUPnPUDP(ctx context.Context, log *slog.Logger, internalIP net.IP, port int) (*upnpMapping, error) {
 	v4 := internalIP.To4()
 	if v4 == nil {
 		return nil, fmt.Errorf("UPnP requires an IPv4 internal address, got %s", internalIP)
@@ -78,14 +79,14 @@ func mapUPnPUDP(ctx context.Context, internalIP net.IP, port int) (*upnpMapping,
 	ctx, cancel := context.WithTimeout(ctx, upnpTimeout)
 	defer cancel()
 
-	clients, discoveryErr := discoverUPnPConnections(ctx, v4)
+	clients, discoveryErr := discoverUPnPConnections(ctx, log, v4)
 	if len(clients) == 0 {
 		return nil, upnpDiscoveryError(discoveryErr)
 	}
 
 	var attempts []error
 	for _, client := range clients {
-		mapping, err := tryMapUPnPUDP(ctx, client, v4.String(), uint16(port))
+		mapping, err := tryMapUPnPUDP(ctx, log, client, v4.String(), uint16(port))
 		if err == nil {
 			return mapping, nil
 		}
@@ -94,14 +95,14 @@ func mapUPnPUDP(ctx context.Context, internalIP net.IP, port int) (*upnpMapping,
 	return nil, fmt.Errorf("add UPnP UDP mapping %d: %w", port, errors.Join(attempts...))
 }
 
-func tryMapUPnPUDP(ctx context.Context, client upnpWANConnection, internalIP string, internalPort uint16) (*upnpMapping, error) {
-	logUPnPService(ctx, client)
-	externalPort, err := addInitialUPnPPortMapping(ctx, client, internalIP, internalPort)
+func tryMapUPnPUDP(ctx context.Context, log *slog.Logger, client upnpWANConnection, internalIP string, internalPort uint16) (*upnpMapping, error) {
+	logUPnPService(ctx, log, client)
+	externalPort, err := addInitialUPnPPortMapping(ctx, log, client, internalIP, internalPort)
 	if err != nil {
 		return nil, err
 	}
-	logUPnPPortMappings(ctx, client)
-	logUPnPSpecificPortMapping(ctx, client, externalPort)
+	logUPnPPortMappings(ctx, log, client)
+	logUPnPSpecificPortMapping(ctx, log, client, externalPort)
 	external, err := client.GetExternalIPAddressCtx(ctx)
 	if err != nil {
 		return nil, errors.Join(
@@ -117,9 +118,9 @@ func tryMapUPnPUDP(ctx context.Context, client upnpWANConnection, internalIP str
 		)
 	}
 	if ip.IsPrivate() {
-		slog.WarnContext(ctx, "UPnP gateway external address is private; voice may still fail behind double NAT", "ip", ip.String())
+		log.WarnContext(ctx, "UPnP gateway external address is private; voice may still fail behind double NAT", "ip", ip.String())
 	}
-	mapping := &upnpMapping{client: client, ip: append(net.IP(nil), ip...), externalPort: externalPort, internalPort: internalPort}
+	mapping := &upnpMapping{log: log, client: client, ip: append(net.IP(nil), ip...), externalPort: externalPort, internalPort: internalPort}
 	mapping.startRefresh(ctx, internalIP)
 	return mapping, nil
 }
@@ -134,12 +135,12 @@ func (m *upnpMapping) close(ctx context.Context) error {
 	return nil
 }
 
-func discoverUPnPConnections(ctx context.Context, hostIP net.IP) ([]upnpWANConnection, error) {
-	locations, err := discoverUPnPLocations(ctx, hostIP)
+func discoverUPnPConnections(ctx context.Context, log *slog.Logger, hostIP net.IP) ([]upnpWANConnection, error) {
+	locations, err := discoverUPnPLocations(ctx, log, hostIP)
 	clients := make([]upnpWANConnection, 0, len(locations))
 	for _, loc := range locations {
 		if routeErr := validateUPnPGatewayRoute(ctx, hostIP, loc); routeErr != nil {
-			slog.WarnContext(ctx, "voicertc: reject UPnP gateway with mismatched route source", "location", loc.String(), "hostIP", hostIP, "err", routeErr)
+			log.WarnContext(ctx, "voicertc: reject UPnP gateway with mismatched route source", "location", loc.String(), "hostIP", hostIP, "err", routeErr)
 			err = errors.Join(err, routeErr)
 			continue
 		}
@@ -211,14 +212,14 @@ func urlIPv4(loc *url.URL) (net.IP, error) {
 	return ip, nil
 }
 
-func discoverUPnPLocations(ctx context.Context, hostIP net.IP) ([]*url.URL, error) {
+func discoverUPnPLocations(ctx context.Context, log *slog.Logger, hostIP net.IP) ([]*url.URL, error) {
 	client, err := httpu.NewHTTPUClientAddr(hostIP.String())
 	if err != nil {
 		return nil, fmt.Errorf("create SSDP client on %s: %w", hostIP, err)
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			slog.WarnContext(ctx, "voicertc: close SSDP client", "err", err)
+			log.WarnContext(ctx, "voicertc: close SSDP client", "err", err)
 		}
 	}()
 	searchCtx, cancel := context.WithTimeout(ctx, upnpSSDPTimeout)
@@ -227,7 +228,7 @@ func discoverUPnPLocations(ctx context.Context, hostIP net.IP) ([]*url.URL, erro
 	if err != nil {
 		return nil, fmt.Errorf("SSDP search: %w", err)
 	}
-	defer closeSSDPResponses(ctx, responses)
+	defer closeSSDPResponses(ctx, log, responses)
 	return upnpLocationsFromResponses(responses), nil
 }
 
@@ -394,13 +395,13 @@ func rejectUPnPRedirect(_ *http.Request, _ []*http.Request) error {
 	return errors.New("UPnP HTTP redirects are not permitted")
 }
 
-func closeSSDPResponses(ctx context.Context, responses []*http.Response) {
+func closeSSDPResponses(ctx context.Context, log *slog.Logger, responses []*http.Response) {
 	for _, response := range responses {
 		if response.Body == nil {
 			continue
 		}
 		if err := response.Body.Close(); err != nil {
-			slog.WarnContext(ctx, "voicertc: close SSDP response body", "err", err)
+			log.WarnContext(ctx, "voicertc: close SSDP response body", "err", err)
 		}
 	}
 }
@@ -412,7 +413,7 @@ func upnpDiscoveryError(err error) error {
 	return fmt.Errorf("discover UPnP internet gateway: %w", err)
 }
 
-func logUPnPService(ctx context.Context, client upnpWANConnection) {
+func logUPnPService(ctx context.Context, log *slog.Logger, client upnpWANConnection) {
 	serviceClient, ok := client.(upnpServiceClient)
 	if !ok {
 		return
@@ -421,13 +422,13 @@ func logUPnPService(ctx context.Context, client upnpWANConnection) {
 	if service == nil || service.Service == nil || service.SOAPClient == nil {
 		return
 	}
-	slog.InfoContext(ctx, "voicertc: UPnP service", "location", service.Location, "serviceID", service.Service.ServiceId, "serviceType", service.Service.ServiceType, "controlURL", service.SOAPClient.EndpointURL)
+	log.InfoContext(ctx, "voicertc: UPnP service", "location", service.Location, "serviceID", service.Service.ServiceId, "serviceType", service.Service.ServiceType, "controlURL", service.SOAPClient.EndpointURL)
 }
 
-func logUPnPPortMappings(ctx context.Context, client upnpWANConnection) {
+func logUPnPPortMappings(ctx context.Context, log *slog.Logger, client upnpWANConnection) {
 	mappingClient, ok := client.(upnpWANGenericPortMappingConnection)
 	if !ok {
-		slog.InfoContext(ctx, "voicertc: UPnP gateway cannot list port mappings")
+		log.InfoContext(ctx, "voicertc: UPnP gateway cannot list port mappings")
 		return
 	}
 	for index := range uint16(64) {
@@ -435,30 +436,30 @@ func logUPnPPortMappings(ctx context.Context, client upnpWANConnection) {
 		if err != nil {
 			return
 		}
-		slog.DebugContext(ctx, "voicertc: UPnP port mapping", "index", index, "remoteHost", remoteHost, "externalPort", externalPort, "protocol", protocol, "internalPort", internalPort, "internalClient", internalClient, "enabled", enabled, "description", description, "leaseDuration", leaseDuration)
+		log.DebugContext(ctx, "voicertc: UPnP port mapping", "index", index, "remoteHost", remoteHost, "externalPort", externalPort, "protocol", protocol, "internalPort", internalPort, "internalClient", internalClient, "enabled", enabled, "description", description, "leaseDuration", leaseDuration)
 	}
-	slog.WarnContext(ctx, "voicertc: UPnP port mapping list reached limit", "limit", 64)
+	log.WarnContext(ctx, "voicertc: UPnP port mapping list reached limit", "limit", 64)
 }
 
-func logUPnPSpecificPortMapping(ctx context.Context, client upnpWANConnection, externalPort uint16) {
+func logUPnPSpecificPortMapping(ctx context.Context, log *slog.Logger, client upnpWANConnection, externalPort uint16) {
 	mappingClient, ok := client.(upnpWANSpecificPortMappingConnection)
 	if !ok {
-		slog.InfoContext(ctx, "voicertc: UPnP gateway cannot query port mapping", "externalPort", externalPort)
+		log.InfoContext(ctx, "voicertc: UPnP gateway cannot query port mapping", "externalPort", externalPort)
 		return
 	}
 	internalPort, internalClient, enabled, description, leaseDuration, err := mappingClient.GetSpecificPortMappingEntryCtx(ctx, "", externalPort, upnpProtocolUDP)
 	if err != nil {
-		slog.WarnContext(ctx, "voicertc: query UPnP port mapping", "externalPort", externalPort, "err", err)
+		log.WarnContext(ctx, "voicertc: query UPnP port mapping", "externalPort", externalPort, "err", err)
 		return
 	}
-	slog.InfoContext(ctx, "voicertc: UPnP specific port mapping", "externalPort", externalPort, "protocol", upnpProtocolUDP, "internalPort", internalPort, "internalClient", internalClient, "enabled", enabled, "description", description, "leaseDuration", leaseDuration)
+	log.InfoContext(ctx, "voicertc: UPnP specific port mapping", "externalPort", externalPort, "protocol", upnpProtocolUDP, "internalPort", internalPort, "internalClient", internalClient, "enabled", enabled, "description", description, "leaseDuration", leaseDuration)
 }
 
-func addInitialUPnPPortMapping(ctx context.Context, client upnpWANConnection, internalIP string, internalPort uint16) (uint16, error) {
+func addInitialUPnPPortMapping(ctx context.Context, log *slog.Logger, client upnpWANConnection, internalIP string, internalPort uint16) (uint16, error) {
 	leaseSeconds := uint32(upnpLeaseDuration / time.Second)
 	requestCtx, cancel := context.WithTimeout(ctx, upnpTimeout)
 	defer cancel()
-	slog.InfoContext(requestCtx, "voicertc: request UPnP exact port mapping", "externalPort", internalPort, "internalPort", internalPort, "internalClient", internalIP)
+	log.InfoContext(requestCtx, "voicertc: request UPnP exact port mapping", "externalPort", internalPort, "internalPort", internalPort, "internalClient", internalIP)
 	exactPort, exactErr := addExactUPnPPortMapping(requestCtx, client, internalIP, internalPort)
 	if exactErr == nil {
 		return exactPort, nil
@@ -467,7 +468,7 @@ func addInitialUPnPPortMapping(ctx context.Context, client upnpWANConnection, in
 	if !ok {
 		return 0, exactErr
 	}
-	slog.WarnContext(requestCtx, "voicertc: exact UPnP port mapping failed; trying any port", "externalPort", internalPort, "internalPort", internalPort, "internalClient", internalIP, "err", exactErr)
+	log.WarnContext(requestCtx, "voicertc: exact UPnP port mapping failed; trying any port", "externalPort", internalPort, "internalPort", internalPort, "internalClient", internalIP, "err", exactErr)
 	externalPort, anyErr := anyClient.AddAnyPortMappingCtx(requestCtx, "", internalPort, upnpProtocolUDP, internalPort, internalIP, true, upnpMappingDescription, leaseSeconds)
 	if anyErr != nil {
 		return 0, errors.Join(fmt.Errorf("add exact UPnP UDP mapping: %w", exactErr), fmt.Errorf("add any UPnP UDP mapping: %w", anyErr))
@@ -503,7 +504,7 @@ func (m *upnpMapping) startRefresh(ctx context.Context, internalIP string) {
 				return nil
 			case <-timer.C:
 				if err := m.refresh(refreshCtx, internalIP); err != nil {
-					slog.ErrorContext(refreshCtx, "voicertc: refresh UPnP UDP mapping", "externalPort", m.externalPort, "internalPort", m.internalPort, "err", err)
+					m.log.ErrorContext(refreshCtx, "voicertc: refresh UPnP UDP mapping", "externalPort", m.externalPort, "internalPort", m.internalPort, "err", err)
 				}
 				timer.Reset(upnpRefreshInterval)
 			}
