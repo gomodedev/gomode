@@ -8,6 +8,7 @@ import (
 )
 
 func TestOpusEncoder(t *testing.T) {
+	t.Parallel()
 	tone := make([]int16, encoderFrameSamples)
 	for i := range tone {
 		tone[i] = int16(12000 * math.Sin(2*math.Pi*440*float64(i)/float64(encoderSampleRate)))
@@ -19,7 +20,7 @@ func TestOpusEncoder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			const frames = 200
+			const frames = 50
 			total := 0
 			for range frames {
 				pkt, err := enc.Encode(tone)

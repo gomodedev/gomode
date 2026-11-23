@@ -36,6 +36,7 @@ func TestRealtimeTranscript(t *testing.T) {
 // geminiTranscriptBarrier pauses gateway delivery after genai has decoded a
 // frame, exposing the cancellation/result race without scheduling assumptions.
 func TestGatewayRealtimeTools(t *testing.T) {
+	t.Parallel()
 	t.Run("cancellation history is bounded without unsafe ID reuse", func(t *testing.T) {
 		var tools gatewayRealtimeTools
 		calls := make([]genai.ToolCall, 1024)

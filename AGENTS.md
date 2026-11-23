@@ -26,6 +26,10 @@ build-dependent Android lint, unit tests, and coverage for those inputs. Pre-pus
 runs only `make verify`. `make android-lint` and `make android-test` run their
 Android checks unconditionally. CI runs `make android-lint android-test`.
 
+Run `go test -tags=integration -run '^TestIntegration' ./...` for Go tests
+that invoke toolchains, generate RSA keys, or exercise paced WebRTC media.
+The Chromium cases use `CHROME_BIN` or `chromium` on PATH.
+
 Automatic Android checks in `fix`, `verify`, and `test` compare against upstream
 locally or `ANDROID_CHECK_BASE` when supplied. Without a usable base they run
 unconditionally. The platform-neutral CI job sets `ANDROID_CHECKS=false` because

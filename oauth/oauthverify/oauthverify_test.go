@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/rsatest"
 	"github.com/gomodedev/gomode/oauth"
 )
 
@@ -353,11 +354,7 @@ func TestVerifier(t *testing.T) {
 		})
 		t.Run("RSA", func(t *testing.T) {
 			t.Parallel()
-			priv, err := rsa.GenerateKey(rand.Reader, 2048)
-			if err != nil {
-				t.Fatal(err)
-			}
-			key := signingKey{kid: "rsa-1", alg: "RS256", priv: priv}
+			key := signingKey{kid: "rsa-1", alg: "RS256", priv: rsatest.Key(t)}
 			ti := newTestIssuer(t, key)
 			v := New(nil)
 			token := ti.token(t, key, "voice-gateway", "voice.session", time.Now().Add(time.Minute))

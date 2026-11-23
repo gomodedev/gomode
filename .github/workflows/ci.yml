@@ -42,9 +42,11 @@ jobs:
             exit 1
           fi
       - name: Test
+        run: make test
+      - name: Go integration tests
         env:
           CHROME_BIN: /usr/bin/google-chrome
-        run: make test
+        run: go test -tags=integration -run '^TestIntegration' ./...
 
   windows:
     name: Go packages (Windows)
@@ -58,4 +60,4 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test Go packages
-        run: go test ./...
+        run: go test -tags=integration ./...

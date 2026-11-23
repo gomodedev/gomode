@@ -15,6 +15,7 @@ import (
 )
 
 func testStorePrivacy(t *testing.T) {
+	t.Parallel()
 	t.Run("protected from birth under broad parent", func(t *testing.T) {
 		dir := t.TempDir()
 		setTestDACL(t, dir, "D:P(A;OICI;FA;;;WD)")
@@ -74,6 +75,7 @@ func testStorePrivacy(t *testing.T) {
 }
 
 func testStorePublicationFailure(t *testing.T) {
+	t.Parallel()
 	store := newTestPrivateStore(t)
 	store.Codes["one-time"] = v5.Code{ClientID: "client", ExpiresAt: time.Now().Add(time.Hour)}
 	if err := store.Save(); err != nil {

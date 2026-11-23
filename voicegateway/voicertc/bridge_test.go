@@ -15,10 +15,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,7 +28,6 @@ import (
 	"github.com/gomodedev/gomode/internal/testlog"
 	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
 
-	"github.com/coder/websocket"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/tphakala/go-opus/opus"
@@ -476,185 +473,6 @@ func TestBackendConnector(t *testing.T) {
 	})
 }
 
-// TestBrowserOpusDTX measures Chromium's real libwebrtc encoder.
-func TestBrowserOpusDTX(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
-	t.Cleanup(cancel)
-	b := newTestBridge(ctx, t, &fakeBackendConnector{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.Header().Set("Content-Type", "text/html")
-			if _, err := w.Write([]byte("<!doctype html><title>Opus DTX test</title>")); err != nil {
-				t.Error(err)
-			}
-			return
-		}
-		var req struct{ SDP string }
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			t.Error(err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		sdp, _, err := b.HandleOffer(r.Context(), req.SDP)
-		if err != nil {
-			t.Error(err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if got, ok := opusFmtp(sdp); !ok || got != "useinbandfec=1;usedtx=1" {
-			t.Errorf("answer opus fmtp = %q, want \"useinbandfec=1;usedtx=1\"", got)
-		}
-		// The control changes only the receive preference, keeping the same audio path.
-		if r.URL.Query().Get("dtx") == "0" {
-			sdp = strings.ReplaceAll(sdp, "usedtx=1", "usedtx=0")
-		}
-		if err := json.NewEncoder(w).Encode(map[string]string{"sdp": sdp}); err != nil {
-			t.Error(err)
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	c := newDTXBrowser(ctx, t)
-	c.navigate(srv.URL)
-	var res struct {
-		Result           struct{ Value []browserDTXResult }
-		ExceptionDetails json.RawMessage
-	}
-	c.call("Runtime.evaluate", map[string]any{
-		"expression": browserDTXMeasurement, "awaitPromise": true, "returnByValue": true,
-	}, c.session, &res)
-	if len(res.ExceptionDetails) != 0 || len(res.Result.Value) != 2 {
-		t.Fatalf("browser measurement failed: %+v", res)
-	}
-	ctl, dtx := res.Result.Value[0], res.Result.Value[1]
-	t.Logf("continuous: %+v; DTX: %+v", ctl, dtx)
-	if ctl.Quiet.Packets < 30 || dtx.Quiet.Packets*2 >= ctl.Quiet.Packets || dtx.Quiet.Bytes*2 >= ctl.Quiet.Bytes {
-		t.Fatal("DTX did not halve quiet-uplink packets and bytes")
-	}
-	if dtx.Speech.Packets < 15 || dtx.Resumed.Packets < 15 {
-		t.Fatal("DTX suppressed active or resumed speech")
-	}
-}
-
-// TestBrowserOpusMaxPlaybackRate measures Chromium's real libwebrtc encoder
-// after the gateway renegotiates its 16 kHz microphone rate.
-func TestBrowserOpusMaxPlaybackRate(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
-	t.Cleanup(cancel)
-	b := newTestBridge(ctx, t, &fakeBackendConnector{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.Header().Set("Content-Type", "text/html")
-			if _, err := w.Write([]byte("<!doctype html><title>Opus maxplaybackrate test</title>")); err != nil {
-				t.Error(err)
-			}
-			return
-		}
-		var req struct{ SDP string }
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			t.Error(err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		sdp, _, err := b.HandleOffer(r.Context(), req.SDP)
-		if err != nil {
-			t.Error(err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := json.NewEncoder(w).Encode(map[string]string{"sdp": sdp}); err != nil {
-			t.Error(err)
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	c := newDTXBrowser(ctx, t)
-	c.navigate(srv.URL)
-	var res struct {
-		Result           struct{ Value []uint64 }
-		ExceptionDetails json.RawMessage
-	}
-	c.call("Runtime.evaluate", map[string]any{
-		"expression": browserMaxPlaybackRateMeasurement, "awaitPromise": true, "returnByValue": true,
-	}, c.session, &res)
-	if len(res.ExceptionDetails) != 0 || len(res.Result.Value) != 2 {
-		t.Fatalf("browser measurement failed: %+v", res)
-	}
-	full, capped := res.Result.Value[0], res.Result.Value[1]
-	t.Logf("uplink over 1.5s: 48 kHz %d bytes; maxplaybackrate=16000 %d bytes", full, capped)
-	// libwebrtc's default Opus bitrate drops from 32 to 20 kbit/s.
-	if full == 0 || capped*4 >= full*3 {
-		t.Fatal("maxplaybackrate did not cut uplink bytes by a quarter")
-	}
-}
-
-// browserMaxPlaybackRateMeasurement sends white noise, which needs every bit the
-// encoder allows, and returns the Opus payload bytes sent over 1.5 seconds
-// without and with renegotiation.
-const browserMaxPlaybackRateMeasurement = `(async () => {
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  async function run(renegotiation) {
-    const ac = new AudioContext({sampleRate: 48000});
-    const noise = ac.createBuffer(1, 48000, 48000);
-    const samples = noise.getChannelData(0);
-    for (let i = 0; i < samples.length; i++) samples[i] = (Math.random() * 2 - 1) * 0.3;
-    const source = ac.createBufferSource();
-    source.buffer = noise;
-    source.loop = true;
-    const dest = ac.createMediaStreamDestination();
-    dest.channelCount = 1;
-    source.connect(dest);
-    const pc = new RTCPeerConnection();
-    try {
-      pc.addTrack(dest.stream.getAudioTracks()[0]);
-      const dc = pc.createDataChannel('voice-gateway');
-      const ready = new Promise((resolve, reject) => {
-        let sessionReady = false;
-        dc.onopen = () => dc.send(JSON.stringify({kind: 'session.setup', voice: {name: 'local', language: 'en'}, renegotiation}));
-        dc.onmessage = async ev => {
-          const msg = JSON.parse(ev.data);
-          if (msg.kind === 'error') reject(new Error(msg.message));
-          if (msg.kind === 'session.ready') {
-            sessionReady = true;
-            if (!renegotiation) resolve();
-          }
-          if (msg.kind === 'rtc.offer' && sessionReady) {
-            await pc.setRemoteDescription({type: 'offer', sdp: msg.sdp});
-            await pc.setLocalDescription(await pc.createAnswer());
-            dc.send(JSON.stringify({kind: 'rtc.answer', sdp: pc.localDescription.sdp}));
-            resolve();
-          }
-        };
-      });
-      source.start();
-      await ac.resume();
-      await pc.setLocalDescription(await pc.createOffer());
-      if (pc.iceGatheringState !== 'complete') await new Promise(resolve => {
-        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
-      });
-      const res = await fetch('/offer', {method: 'POST', body: JSON.stringify({sdp: pc.localDescription.sdp})});
-      if (!res.ok) throw new Error(await res.text());
-      await pc.setRemoteDescription({type: 'answer', sdp: (await res.json()).sdp});
-      await ready;
-      async function bytes() {
-        const reports = await pc.getStats();
-        const r = [...reports.values()].find(r => r.type === 'outbound-rtp' && r.kind === 'audio');
-        if (!r) throw new Error('No outbound audio stats');
-        return r.bytesSent;
-      }
-      await sleep(500);
-      const start = await bytes();
-      await sleep(1500);
-      return (await bytes()) - start;
-    } finally {
-      pc.close(); source.stop(); await ac.close();
-    }
-  }
-  return [await run(false), await run(true)];
-})()`
-
 type fakeBackendConnector struct {
 	closed   bool
 	closeErr error
@@ -704,46 +522,6 @@ func TestBackend(t *testing.T) {
 			}
 		})
 	})
-}
-
-// sessionContextConnector exposes the session context each connection receives.
-type sessionContextConnector struct {
-	fakeBackendConnector
-	ctx chan context.Context
-}
-
-func (b *sessionContextConnector) connect(ctx context.Context, id string, sink backendSink) (backendSession, error) {
-	b.ctx <- ctx
-	return b.fakeBackendConnector.connect(ctx, id, sink)
-}
-
-// kindRecordingConnector reports the kind of each client message its sessions
-// receive.
-type kindRecordingConnector struct {
-	fakeBackendConnector
-	kinds chan voicev2.MessageKind
-}
-
-func (b *kindRecordingConnector) connect(ctx context.Context, id string, sink backendSink) (backendSession, error) {
-	s, err := b.fakeBackendConnector.connect(ctx, id, sink)
-	if err != nil {
-		return nil, err
-	}
-	return &kindRecordingSession{fakeBackendSession: s.(*fakeBackendSession), kinds: b.kinds}, nil
-}
-
-type kindRecordingSession struct {
-	*fakeBackendSession
-	kinds chan voicev2.MessageKind
-}
-
-func (s *kindRecordingSession) acceptClientMessage(ctx context.Context, data []byte) error {
-	var env voicev2.MessageEnvelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return err
-	}
-	s.kinds <- env.Kind
-	return s.fakeBackendSession.acceptClientMessage(ctx, data)
 }
 
 type fakeBackendSession struct {
@@ -916,43 +694,6 @@ func TestUpsampleEdgeCases(t *testing.T) {
 	}
 	if g[0] != 0 || g[1] != 500 || g[2] != 1000 || g[3] != 1000 {
 		t.Errorf("two: got [%d %d %d %d], want [0 500 1000 1000]", g[0], g[1], g[2], g[3])
-	}
-}
-
-func testBridgeChoiceRuntime(t *testing.T) {
-	t.Parallel()
-	first := &fakeBackendConnector{}
-	second := &fakeBackendConnector{}
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-	t.Cleanup(cancel)
-	b, err := newBridgeWithBackend(ctx, testlog.New(t), first, configdata.WebRTC{DisableUPnP: true}, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var firstID, secondID string
-	t.Cleanup(func() {
-		b.CloseAll(ctx)
-		if first.session == nil || second.session == nil || first.session.id != firstID || second.session.id != secondID {
-			t.Error("sessions were not routed to their selected backends")
-		}
-		if !first.closed || !second.closed {
-			t.Fatal("shutdown did not close all choice backends")
-		}
-	})
-	b.backends["second"] = second
-	b.choices.Choices = append(b.choices.Choices, voicev2.VoiceChoice{ID: "second", Label: "Second", Transports: []voicev2.VoiceTransport{voicev2.VoiceTransportWebRTC}})
-	if _, _, err := b.HandleChoiceOffer(ctx, "", "missing"); err == nil {
-		t.Fatal("unknown choice accepted")
-	}
-	one := connectVoiceRTCClient(ctx, t, b.HandleOffer, &voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
-	two := connectVoiceRTCClient(ctx, t, func(ctx context.Context, sdp string) (string, string, error) {
-		return b.HandleChoiceOffer(ctx, sdp, "second")
-	}, &voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
-	firstID, secondID = one.sessionID, two.sessionID
-	b.Close(one.sessionID)
-	diagnostics := b.DiagnoseVoiceRTC(ctx, two.sessionID, &voicev2.VoiceRTCClientDiagnostics{})
-	if !diagnostics.Server.SessionFound {
-		t.Fatal("closing first choice closed second session")
 	}
 }
 
@@ -1219,253 +960,6 @@ func (s *voiceRTCTestSession) writeMicAudio(ctx context.Context, t *testing.T, n
 	}
 }
 
-type browserDTXResult struct {
-	Speech, Quiet, Resumed struct{ Packets, Bytes uint64 }
-}
-
-func TestDTXBrowser(t *testing.T) {
-	c := newDTXBrowser(t.Context(), t)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, _, err := c.ws.Read(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled DevTools read: %v", err)
-	}
-}
-
-// dtxBrowser owns an isolated Chromium process and its synchronous DevTools connection.
-type dtxBrowser struct {
-	t       *testing.T
-	ctx     context.Context
-	cmd     *exec.Cmd
-	ws      *websocket.Conn
-	addr    string
-	session string
-	id      int
-	loaded  bool
-	wg      sync.WaitGroup
-	exited  chan struct{}
-	exitErr error
-}
-
-func newDTXBrowser(ctx context.Context, t *testing.T) *dtxBrowser {
-	exe := os.Getenv("CHROME_BIN")
-	if exe == "" {
-		var err error
-		exe, err = exec.LookPath("chromium")
-		if err != nil {
-			t.Skip("Chromium is not installed; set CHROME_BIN or run this test on a browser-equipped host")
-		}
-	}
-	t.Logf("browser executable: %s", exe)
-	dir := t.TempDir()
-	// Cleanup owns shutdown; test cancellation must not kill Chromium before its children exit.
-	// Tests never reach external services: the resolver rule fails every name
-	// lookup, so Chromium's update, variations, and sign-in fetches cannot leave
-	// the host; only the loopback gateway stays reachable.
-	cmd := exec.Command(exe, "--headless", "--no-sandbox", "--disable-gpu", //nolint:gosec // Test executable from CHROME_BIN or LookPath, with fixed flags and a test-owned profile.
-		"--disable-background-networking", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
-		"--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=0", "--user-data-dir="+dir, "about:blank")
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	c := &dtxBrowser{t: t, ctx: ctx, cmd: cmd, exited: make(chan struct{})}
-	c.wg.Go(func() { c.exitErr = cmd.Wait(); close(c.exited) })
-	t.Cleanup(c.close)
-	for c.addr == "" {
-		data, err := os.ReadFile(filepath.Join(dir, "DevToolsActivePort")) //nolint:gosec // Chromium writes this fixed filename inside the test-owned temporary profile.
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatal(err)
-		}
-		if lines := strings.Fields(string(data)); len(lines) == 2 {
-			c.addr = "ws://127.0.0.1:" + lines[0] + lines[1]
-			break
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-c.exited:
-			t.Fatalf("Chromium exited before opening DevTools: %v", c.exitErr)
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-	ws, res, err := websocket.Dial(ctx, c.addr, nil)
-	if res != nil && res.Body != nil {
-		if err := res.Body.Close(); err != nil {
-			t.Error(err)
-		}
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.ws = ws
-	ws.SetReadLimit(1 << 20)
-	var dst struct{ TargetID string }
-	c.call("Target.createTarget", map[string]string{"url": "about:blank"}, "", &dst)
-	var att struct{ SessionID string }
-	c.call("Target.attachToTarget", map[string]any{"targetId": dst.TargetID, "flatten": true}, "", &att)
-	c.session = att.SessionID
-	return c
-}
-
-func (c *dtxBrowser) close() {
-	if c.addr != "" {
-		// A cancelled DevTools read closes its connection. Shutdown needs its own
-		// connection and deadline so a failed measurement can still stop Chromium.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.ctx), time.Second)
-		ws, res, err := websocket.Dial(ctx, c.addr, nil)
-		if res != nil && res.Body != nil {
-			if err := res.Body.Close(); err != nil {
-				c.t.Error(err)
-			}
-		}
-		if err == nil {
-			err = ws.Write(ctx, websocket.MessageText, []byte(`{"id":1000000,"method":"Browser.close"}`))
-			if err := ws.CloseNow(); err != nil {
-				c.t.Errorf("close shutdown DevTools: %v", err)
-			}
-		}
-		cancel()
-		if err != nil {
-			c.t.Errorf("request Chromium shutdown: %v", err)
-		}
-	}
-	if c.ws != nil {
-		if err := c.ws.CloseNow(); err != nil {
-			c.t.Errorf("close DevTools: %v", err)
-		}
-	}
-	select {
-	case <-c.exited:
-		if c.exitErr != nil {
-			c.t.Errorf("Chromium exit: %v", c.exitErr)
-		}
-	case <-time.After(5 * time.Second):
-		c.t.Error("Chromium did not stop within five seconds")
-		if err := c.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			c.t.Error(err)
-		}
-	}
-	c.wg.Wait()
-}
-
-func (c *dtxBrowser) navigate(u string) {
-	c.loaded = false
-	c.call("Page.enable", nil, c.session, nil)
-	c.call("Page.navigate", map[string]string{"url": u}, c.session, nil)
-	for !c.loaded {
-		c.call("Runtime.evaluate", map[string]string{"expression": "document.readyState"}, c.session, nil)
-	}
-}
-
-func (c *dtxBrowser) call(m string, p any, sid string, v any) {
-	c.id++
-	data, err := json.Marshal(struct {
-		ID        int    `json:"id"`
-		Method    string `json:"method"`
-		Params    any    `json:"params,omitempty"`
-		SessionID string `json:"sessionId,omitempty"`
-	}{c.id, m, p, sid})
-	if err != nil {
-		c.t.Fatal(err)
-	}
-	if err := c.ws.Write(c.ctx, websocket.MessageText, data); err != nil {
-		c.t.Fatalf("DevTools %s request: %v", m, err)
-	}
-	for {
-		_, data, err := c.ws.Read(c.ctx)
-		if err != nil {
-			c.t.Fatalf("DevTools %s response: %v", m, err)
-		}
-		var msg struct {
-			ID        int
-			Method    string
-			SessionID string
-			Result    json.RawMessage
-			Error     json.RawMessage
-		}
-		if err := json.Unmarshal(data, &msg); err != nil {
-			c.t.Fatal(err)
-		}
-		if msg.Method == "Page.loadEventFired" && msg.SessionID == c.session {
-			c.loaded = true
-		}
-		if msg.ID != c.id {
-			continue
-		}
-		if len(msg.Error) != 0 {
-			c.t.Fatalf("DevTools %s: %s", m, msg.Error)
-		}
-		if v != nil {
-			if err := json.Unmarshal(msg.Result, v); err != nil {
-				c.t.Fatal(err, string(msg.Result))
-			}
-		}
-		return
-	}
-}
-
-const browserDTXMeasurement = `(async () => {
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  async function run(dtx) {
-    const ac = new AudioContext({sampleRate: 48000});
-    const source = ac.createOscillator();
-    const gain = ac.createGain();
-    const dest = ac.createMediaStreamDestination();
-    dest.channelCount = 1;
-    source.frequency.value = 440;
-    gain.gain.value = 0.2;
-    source.connect(gain).connect(dest);
-    const pc = new RTCPeerConnection();
-    try {
-      pc.addTrack(dest.stream.getAudioTracks()[0]);
-      const dc = pc.createDataChannel('voice-gateway');
-      const ready = new Promise((resolve, reject) => {
-        dc.onopen = () => dc.send(JSON.stringify({kind: 'session.setup', voice: {name: 'local', language: 'en'}}));
-        dc.onmessage = ev => {
-          const msg = JSON.parse(ev.data);
-          if (msg.kind === 'session.ready') resolve();
-          if (msg.kind === 'error') reject(new Error(msg.message));
-        };
-      });
-      source.start();
-      await ac.resume();
-      await pc.setLocalDescription(await pc.createOffer());
-      if (pc.iceGatheringState !== 'complete') await new Promise(resolve => {
-        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
-      });
-      const res = await fetch('/offer?dtx=' + (dtx ? '1' : '0'), {
-        method: 'POST', body: JSON.stringify({sdp: pc.localDescription.sdp})
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const answer = await res.json();
-      await pc.setRemoteDescription({type: 'answer', sdp: answer.sdp});
-      await ready;
-      async function stats() {
-        const reports = await pc.getStats();
-        const r = [...reports.values()].find(r => r.type === 'outbound-rtp' && r.kind === 'audio');
-        if (!r) throw new Error('No outbound audio stats');
-        return {packets: r.packetsSent, bytes: r.bytesSent};
-      }
-      async function measure(ms) {
-        const a = await stats(); await sleep(ms); const b = await stats();
-        return {packets: b.packets-a.packets, bytes: b.bytes-a.bytes};
-      }
-      await sleep(300);
-      const speech = await measure(600);
-      gain.gain.value = 0;
-      await sleep(400);
-      const quiet = await measure(1200);
-      gain.gain.value = 0.2;
-      const resumed = await measure(600);
-      return {speech, quiet, resumed};
-    } finally {
-      pc.close(); source.stop(); await ac.close();
-    }
-  }
-  return Promise.all([run(false), run(true)]);
-})()`
-
 func TestBridge(t *testing.T) {
 	t.Parallel()
 	t.Run("VoiceChoices", func(t *testing.T) {
@@ -1649,60 +1143,6 @@ func TestBridge(t *testing.T) {
 
 	t.Run("Renegotiation", func(t *testing.T) {
 		t.Parallel()
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-			t.Cleanup(cancel)
-			backend := &kindRecordingConnector{kinds: make(chan voicev2.MessageKind, 8)}
-			b := newTestBridge(ctx, t, backend)
-			client := connectVoiceRTCClient(ctx, t, b.HandleOffer, &voicev2.SessionSetup{
-				Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: "local", Language: "en"}, Renegotiation: true,
-			})
-			var offer voicev2.RTCOffer
-			if err := json.Unmarshal(client.waitMessage(ctx, t, voicev2.MessageKindRTCOffer), &offer); err != nil {
-				t.Fatal(err)
-			}
-			// The fake backend takes 16 kHz microphone audio.
-			if got, ok := opusFmtp(offer.SDP); !ok || got != "useinbandfec=1;usedtx=1;maxplaybackrate=16000" {
-				t.Fatalf("rtc.offer opus fmtp = %q", got)
-			}
-			if err := client.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer.SDP}); err != nil {
-				t.Fatal(err)
-			}
-			answer, err := client.pc.CreateAnswer(nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := client.pc.SetLocalDescription(answer); err != nil {
-				t.Fatal(err)
-			}
-			client.send(ctx, t, &voicev2.RTCAnswer{Kind: voicev2.MessageKindRTCAnswer, SDP: client.pc.LocalDescription().SDP})
-			// The data channel delivers in order, so the gateway has applied the
-			// answer once the backend sees the next message.
-			client.send(ctx, t, &voicev2.ContextUpdate{Kind: voicev2.MessageKindContextUpdate})
-			for _, want := range []voicev2.MessageKind{voicev2.MessageKindSessionSetup, voicev2.MessageKindContextUpdate} {
-				select {
-				case got := <-backend.kinds:
-					if got != want {
-						t.Fatalf("backend received %s, want %s", got, want)
-					}
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-				}
-			}
-			if got := b.DiagnoseVoiceRTC(ctx, client.sessionID, nil).Server.SignalingState; got != voicev2.VoiceRTCSignalingState(webrtc.SignalingStateStable.String()) {
-				t.Fatalf("gateway signaling state %q after rtc.answer", got)
-			}
-			// The fake backend echoes microphone PCM, so audio survives renegotiation.
-			client.writeMicAudio(ctx, t, 25)
-			select {
-			case <-client.remoteAudioEnergy:
-			case err := <-client.mediaErrs:
-				t.Fatal(err)
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			}
-		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
@@ -2087,104 +1527,110 @@ func TestBridge(t *testing.T) {
 		})
 		t.Run("waits for an in-flight turn", func(t *testing.T) {
 			t.Parallel()
-			rec := &lifecycleRecorder{}
-			conv := &blockingTurnConversation{rec: rec, entered: make(chan struct{})}
-			backend := newTestLocalStackBackend(t, nil, fixedConversationLLM{conv: conv}, nil)
-			stackVariant(t, backend, clientSpeechConfig()).loaded.(*localStackRuntime).runtime = recordingBackendRuntime{rec: rec}
-			textCtx, textCancel := context.WithCancel(t.Context())
-			t.Cleanup(textCancel)
-			choices, choiceErr := defaultBackendChoices(t.Context(), backend)
-			if choiceErr != nil {
-				t.Fatal(choiceErr)
-			}
-			bridge := &Bridge{
-				log:            testlog.New(t),
-				backends:       map[string]backendConnector{"default": backend},
-				choices:        choices,
-				activityLogDir: t.TempDir(),
-				textCtx:        textCtx,
-				textCancel:     textCancel,
-			}
-			conn := dialTextSession(t, bridge)
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			t.Cleanup(cancel)
+			synctest.Test(t, func(t *testing.T) {
+				rec := &lifecycleRecorder{}
+				conv := &blockingTurnConversation{
+					rec: rec, entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{}),
+				}
+				release := sync.OnceFunc(func() { close(conv.release) })
+				backend := newTestLocalStackBackend(t, nil, fixedConversationLLM{conv: conv}, nil)
+				stackVariant(t, backend, clientSpeechConfig()).loaded.(*localStackRuntime).runtime = recordingBackendRuntime{rec: rec}
+				textCtx, textCancel := context.WithCancel(t.Context())
+				t.Cleanup(textCancel)
+				choices, choiceErr := defaultBackendChoices(t.Context(), backend)
+				if choiceErr != nil {
+					t.Fatal(choiceErr)
+				}
+				bridge := &Bridge{
+					log:            testlog.New(t),
+					backends:       map[string]backendConnector{"default": backend},
+					choices:        choices,
+					activityLogDir: t.TempDir(),
+					textCtx:        textCtx,
+					textCancel:     textCancel,
+				}
+				conn := dialTextSessionInMemory(t, bridge)
+				t.Cleanup(release)
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				t.Cleanup(cancel)
 
-			writeMessage(t, ctx, conn, voicev2.SessionSetup{
-				Kind:    voicev2.MessageKindSessionSetup,
-				Context: voicev2.Context{SystemInstruction: "be terse"},
+				writeMessage(t, ctx, conn, voicev2.SessionSetup{
+					Kind:    voicev2.MessageKindSessionSetup,
+					Context: voicev2.Context{SystemInstruction: "be terse"},
+				})
+				expectKind(t, ctx, conn, voicev2.MessageKindSessionReady)
+				writeMessage(t, ctx, conn, voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: "hi"})
+				select {
+				case <-conv.entered:
+				case <-ctx.Done():
+					t.Fatal("turn did not start")
+				}
+
+				done := make(chan struct{})
+				go func() { bridge.CloseAll(ctx); close(done) }()
+				<-conv.canceled
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("bridge closed before the canceled turn returned")
+				default:
+				}
+				release()
+				<-done
+
+				if events := rec.snapshot(); !slices.Equal(events, []string{"turn-returned", "backend-close"}) {
+					t.Fatalf("lifecycle events = %v, want [turn-returned backend-close]", events)
+				}
 			})
-			expectKind(t, ctx, conn, voicev2.MessageKindSessionReady)
-			writeMessage(t, ctx, conn, voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: "hi"})
-			select {
-			case <-conv.entered:
-			case <-ctx.Done():
-				t.Fatal("turn did not start")
-			}
-
-			bridge.CloseAll(ctx)
-
-			if events := rec.snapshot(); !slices.Equal(events, []string{"turn-returned", "backend-close"}) {
-				t.Fatalf("lifecycle events = %v, want [turn-returned backend-close]", events)
-			}
 		})
 		t.Run("waits for concurrent close", func(t *testing.T) {
 			t.Parallel()
-			backend := &fakeBackendConnector{}
-			textCtx, textCancel := context.WithCancel(t.Context())
-			t.Cleanup(textCancel)
-			blocked := &blockingCloseSession{entered: make(chan struct{}), release: make(chan struct{})}
-			unblock := sync.OnceFunc(func() { close(blocked.release) })
-			t.Cleanup(unblock)
-			b := &Bridge{
-				log:      testlog.New(t),
-				backends: map[string]backendConnector{"default": backend},
-				textCtx:  textCtx, textCancel: textCancel,
-				sessions: make(map[string]*session),
-			}
-			ctx, cancel := context.WithCancelCause(t.Context())
-			t.Cleanup(func() { cancel(nil) })
-			b.registerSession(ctx, &session{log: testlog.New(t), id: "first", cancel: cancel, backend: blocked})
-			var wg sync.WaitGroup
-			t.Cleanup(func() {
+			synctest.Test(t, func(t *testing.T) {
+				backend := &fakeBackendConnector{}
+				textCtx, textCancel := context.WithCancel(t.Context())
+				t.Cleanup(textCancel)
+				blocked := &blockingCloseSession{entered: make(chan struct{}), release: make(chan struct{})}
+				unblock := sync.OnceFunc(func() { close(blocked.release) })
+				t.Cleanup(unblock)
+				b := &Bridge{
+					log:      testlog.New(t),
+					backends: map[string]backendConnector{"default": backend},
+					textCtx:  textCtx, textCancel: textCancel,
+					sessions: make(map[string]*session),
+				}
+				ctx, cancel := context.WithCancelCause(t.Context())
+				t.Cleanup(func() { cancel(nil) })
+				b.registerSession(ctx, &session{log: testlog.New(t), id: "first", cancel: cancel, backend: blocked})
+				var wg sync.WaitGroup
+				t.Cleanup(func() {
+					unblock()
+					wg.Wait()
+				})
+				wg.Go(func() { b.Close("first") })
+				select {
+				case <-blocked.entered:
+				case <-time.After(time.Second):
+					t.Fatal("session close did not start")
+				}
+				done := make(chan struct{})
+				wg.Go(func() { b.CloseAll(t.Context()); close(done) })
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("bridge shutdown returned before session close completed")
+				default:
+				}
 				unblock()
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Fatal("bridge shutdown did not finish after session close")
+				}
 				wg.Wait()
+				if !backend.closed {
+					t.Fatal("bridge did not close backend")
+				}
 			})
-			wg.Go(func() { b.Close("first") })
-			select {
-			case <-blocked.entered:
-			case <-time.After(time.Second):
-				t.Fatal("session close did not start")
-			}
-			done := make(chan struct{})
-			wg.Go(func() { b.CloseAll(t.Context()); close(done) })
-			deadline := time.Now().Add(time.Second)
-			for {
-				b.sessionsMu.Lock()
-				closing := b.closing
-				b.sessionsMu.Unlock()
-				if closing {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("bridge shutdown did not start")
-				}
-				runtime.Gosched()
-			}
-			select {
-			case <-done:
-				t.Fatal("bridge shutdown returned before session close completed")
-			case <-time.After(100 * time.Millisecond):
-			}
-			unblock()
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Fatal("bridge shutdown did not finish after session close")
-			}
-			wg.Wait()
-			if !backend.closed {
-				t.Fatal("bridge did not close backend")
-			}
 		})
 	})
 	t.Run("SetOnSessionClosed", func(t *testing.T) {
@@ -2230,20 +1676,6 @@ func TestBridge(t *testing.T) {
 }
 
 func TestSession(t *testing.T) {
-	t.Run("client close", func(t *testing.T) {
-		b := &sessionContextConnector{ctx: make(chan context.Context, 1)}
-		bridge := newTestBridge(t.Context(), t, b)
-		client := dialVoiceRTCClient(t.Context(), t, bridge.HandleOffer)
-		client.send(t.Context(), t, &voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: "local", Language: "en"}})
-		ctx := <-b.ctx
-		if err := client.pc.Close(); err != nil {
-			t.Fatal(err)
-		}
-		<-ctx.Done()
-		if got := context.Cause(ctx); got == nil || got.Error() != "client closed the WebRTC connection" {
-			t.Fatalf("cause = %v, want the client close", got)
-		}
-	})
 	t.Run("close", func(t *testing.T) {
 		var logs bytes.Buffer
 		backend := &fakeBackendSession{closeErr: errors.New("realtime transport cleanup failed")}

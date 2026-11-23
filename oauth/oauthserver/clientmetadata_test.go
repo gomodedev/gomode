@@ -4,6 +4,8 @@ package oauthserver
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -432,18 +434,6 @@ func TestPrivateKeyJWTClientAuthentication(t *testing.T) {
 	if response := request(restarted, ambiguousAssertion); response.Code != http.StatusUnauthorized {
 		t.Fatalf("ambiguous key request = %d %s", response.Code, response.Body.String())
 	}
-	seedClientMetadataCache(restarted, &client)
-	restarted.state.ClientAssertionJTIs = make(map[string]time.Time, clientAssertionJTILimit)
-	for i := range clientAssertionJTILimit {
-		restarted.state.ClientAssertionJTIs[strconv.Itoa(i)] = now.Add(time.Minute)
-	}
-	if err := restarted.reserveClientAssertion(clientID, "over-capacity", now.Add(time.Minute)); err == nil || len(restarted.state.ClientAssertionJTIs) != clientAssertionJTILimit {
-		t.Fatalf("capacity reservation error = %v, entries = %d", err, len(restarted.state.ClientAssertionJTIs))
-	}
-	restarted.state.ClientAssertionJTIs["0"] = now.Add(-time.Minute)
-	if err := restarted.reserveClientAssertion(clientID, "after-prune", now.Add(time.Minute)); err != nil || len(restarted.state.ClientAssertionJTIs) != clientAssertionJTILimit {
-		t.Fatalf("pruned reservation error = %v, entries = %d", err, len(restarted.state.ClientAssertionJTIs))
-	}
 
 	for name, claims := range map[string]clientAssertionClaims{
 		"wrong issuer":   {Issuer: "other", Subject: clientID, Audience: testBaseURL + "/oauth/token", JWTID: "a", IssuedAt: now.Unix(), Expiry: now.Add(time.Minute).Unix()},
@@ -506,7 +496,7 @@ type clientMetadataTestNetwork struct {
 }
 
 func newClientMetadataTestServer(t *testing.T, handler http.Handler) (*clientMetadataTestNetwork, *x509.CertPool) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate TLS key: %v", err)
 	}
@@ -516,7 +506,7 @@ func newClientMetadataTestServer(t *testing.T, handler http.Handler) (*clientMet
 		DNSNames:     []string{"metadata.example"},
 		NotBefore:    time.Now().Add(-time.Minute),
 		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)

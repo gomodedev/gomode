@@ -1,8 +1,8 @@
 # Static Go analysis and formatting for the standalone Go Mode repository.
 version: "2"
 run:
-  # Lint opt-in smoke tests too; the tag only adds files.
-  build-tags: [smoke]
+  # Lint opt-in integration and smoke tests too.
+  build-tags: [integration, smoke]
   tests: true
 linters:
   enable:

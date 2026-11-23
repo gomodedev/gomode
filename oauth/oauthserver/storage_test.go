@@ -22,6 +22,7 @@ func TestStore(t *testing.T) {
 	t.Run("private signing state", testStorePrivacy)
 	t.Run("native publication failure", testStorePublicationFailure)
 	t.Run("RevokeAllUserGrants persistence failures preserve one coherent state", func(t *testing.T) {
+		t.Parallel()
 		path := t.TempDir() + "/oauth.json"
 		store, err := LoadStore(path)
 		if err != nil {

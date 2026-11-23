@@ -21,6 +21,7 @@ import (
 )
 
 func testStorePrivacy(t *testing.T) {
+	t.Parallel()
 	t.Run("restrictive umask", func(t *testing.T) {
 		if os.Getenv("GOMODE_TEST_RESTRICTIVE_UMASK") == "1" {
 			dir := t.TempDir()
@@ -46,7 +47,11 @@ func testStorePrivacy(t *testing.T) {
 			}
 			return
 		}
-		cmd := exec.CommandContext(t.Context(), "go", "test", "-count=1", "-run=^TestStore$/^private_signing_state$/^restrictive_umask$", ".")
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestStore$/^private_signing_state$/^restrictive_umask$") //nolint:gosec // Runs the current test executable with a fixed test filter.
 		cmd.Env = append(os.Environ(), "GOMODE_TEST_RESTRICTIVE_UMASK=1")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("isolated umask regression: %v\n%s", err, out)
@@ -64,6 +69,7 @@ func testStorePrivacy(t *testing.T) {
 	}
 }
 func testStorePublicationFailure(t *testing.T) {
+	t.Parallel()
 	t.Run("before publication", func(t *testing.T) {
 		store := newEmptyStore(filepath.Join(t.TempDir(), "directory"))
 		if err := os.Mkdir(store.path, 0700); err != nil {

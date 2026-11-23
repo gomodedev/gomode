@@ -115,12 +115,12 @@ func TestExchangeCode(t *testing.T) {
 			defer srv.Close()
 			defer close(done)
 
-			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 			defer cancel()
 			start := time.Now()
 			_, err := ExchangeCode(ctx, oauth.ClientConfig{TokenURL: srv.URL}, "code", "")
-			if err == nil {
-				t.Fatal("ExchangeCode succeeded against a hung provider, want timeout error")
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("ExchangeCode against a hung provider = %v, want deadline exceeded", err)
 			}
 			if elapsed := time.Since(start); elapsed > 5*time.Second {
 				t.Fatalf("ExchangeCode took %v, expected to be bounded near the context deadline", elapsed)
@@ -401,15 +401,15 @@ func TestRefreshAccessToken(t *testing.T) {
 		defer srv.Close()
 		defer close(done)
 
-		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 		defer cancel()
 		start := time.Now()
 		_, err := RefreshAccessToken(ctx, oauth.ClientConfig{TokenURL: srv.URL}, "some-rt")
-		if err == nil {
-			t.Fatal("RefreshAccessToken succeeded against hung server, want timeout error")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("RefreshAccessToken against a hung provider = %v, want deadline exceeded", err)
 		}
 		if elapsed := time.Since(start); elapsed > 5*time.Second {
-			t.Fatalf("RefreshAccessToken took %v, expected bounded near 100ms", elapsed)
+			t.Fatalf("RefreshAccessToken took %v, expected bounded near 10ms", elapsed)
 		}
 	})
 }

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gomodedev/gomode/internal/testlog"
@@ -316,37 +317,39 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("superseded turn keeps newer status", func(t *testing.T) {
 		t.Parallel()
-		llm := &blockingLLM{finished: make(chan struct{}, 2)}
-		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), llm, placeholderTTS{})
-		sink := &captureSink{}
-		sess, err := backend.connect(t.Context(), "superseded", sink)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = sess.close() })
-		if err := sess.acceptClientMessage(t.Context(), mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})); err != nil {
-			t.Fatal(err)
-		}
-		for i, text := range []string{"one", "two"} {
-			if err := sess.acceptClientMessage(t.Context(), mustJSON(t, voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: text})); err != nil {
+		synctest.Test(t, func(t *testing.T) {
+			llm := &blockingLLM{finished: make(chan struct{}, 2)}
+			backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), llm, placeholderTTS{})
+			sink := &captureSink{}
+			sess, err := backend.connect(t.Context(), "superseded", sink)
+			if err != nil {
 				t.Fatal(err)
 			}
-			waitForTurnStates(t, sink, i+1)
-		}
-		// The first turn ends after the second started; it must not report idle.
-		<-llm.finished
-		time.Sleep(100 * time.Millisecond)
-		if got := sink.turnStates(); !slices.Equal(got, []voicev2.TurnState{voicev2.TurnStateThinking, voicev2.TurnStateThinking}) {
-			t.Fatalf("turn states after superseded turn ended = %v, want two thinking", got)
-		}
-		if err := sess.acceptClientMessage(t.Context(), mustJSON(t, voicev2.TurnCancel{Kind: voicev2.MessageKindTurnCancel})); err != nil {
-			t.Fatal(err)
-		}
-		waitForTurnStates(t, sink, 3)
-		want := []voicev2.TurnState{voicev2.TurnStateThinking, voicev2.TurnStateThinking, voicev2.TurnStateIdle}
-		if got := sink.turnStates(); !slices.Equal(got, want) {
-			t.Fatalf("turn states = %v, want %v", got, want)
-		}
+			t.Cleanup(func() { _ = sess.close() })
+			if err := sess.acceptClientMessage(t.Context(), mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})); err != nil {
+				t.Fatal(err)
+			}
+			for i, text := range []string{"one", "two"} {
+				if err := sess.acceptClientMessage(t.Context(), mustJSON(t, voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: text})); err != nil {
+					t.Fatal(err)
+				}
+				waitForTurnStates(t, sink, i+1)
+			}
+			// The first turn ends after the second started; it must not report idle.
+			<-llm.finished
+			synctest.Wait()
+			if got := sink.turnStates(); !slices.Equal(got, []voicev2.TurnState{voicev2.TurnStateThinking, voicev2.TurnStateThinking}) {
+				t.Fatalf("turn states after superseded turn ended = %v, want two thinking", got)
+			}
+			if err := sess.acceptClientMessage(t.Context(), mustJSON(t, voicev2.TurnCancel{Kind: voicev2.MessageKindTurnCancel})); err != nil {
+				t.Fatal(err)
+			}
+			waitForTurnStates(t, sink, 3)
+			want := []voicev2.TurnState{voicev2.TurnStateThinking, voicev2.TurnStateThinking, voicev2.TurnStateIdle}
+			if got := sink.turnStates(); !slices.Equal(got, want) {
+				t.Fatalf("turn states = %v, want %v", got, want)
+			}
+		})
 	})
 
 	t.Run("setup includes initial context", func(t *testing.T) {
@@ -377,33 +380,35 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("user message", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), placeholderLLM{}, placeholderTTS{})
-		sink := &captureSink{}
-		sess, err := backend.connect(t.Context(), "say", sink)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = sess.close() })
+		synctest.Test(t, func(t *testing.T) {
+			backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), placeholderLLM{}, placeholderTTS{})
+			sink := &captureSink{}
+			sess, err := backend.connect(t.Context(), "say", sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sess.close() })
 
-		setup := mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
-		if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
-			t.Fatal(err)
-		}
-		msg := mustJSON(t, voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: "Say exactly one word: Ready"})
-		if err := sess.acceptClientMessage(t.Context(), msg); err != nil {
-			t.Fatal(err)
-		}
-		waitForKind(t, sink, voicev2.MessageKindSpeechEnded)
-		if !slices.Contains(sink.kinds(), voicev2.MessageKindSpeechStarted) {
-			t.Fatal("missing speech.started")
-		}
-		wantText := "You said: Say exactly one word: Ready"
-		if text := sink.assistantText(); text != wantText {
-			t.Fatalf("assistant text = %q, want %q", text, wantText)
-		}
-		if sink.pcmLen() == 0 {
-			t.Fatal("no assistant audio produced")
-		}
+			setup := mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
+			if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
+				t.Fatal(err)
+			}
+			msg := mustJSON(t, voicev2.UserMessage{Kind: voicev2.MessageKindUserMessage, Text: "Say exactly one word: Ready"})
+			if err := sess.acceptClientMessage(t.Context(), msg); err != nil {
+				t.Fatal(err)
+			}
+			waitForKind(t, sink, voicev2.MessageKindSpeechEnded)
+			if !slices.Contains(sink.kinds(), voicev2.MessageKindSpeechStarted) {
+				t.Fatal("missing speech.started")
+			}
+			wantText := "You said: Say exactly one word: Ready"
+			if text := sink.assistantText(); text != wantText {
+				t.Fatalf("assistant text = %q, want %q", text, wantText)
+			}
+			if sink.pcmLen() == 0 {
+				t.Fatal("no assistant audio produced")
+			}
+		})
 	})
 
 	t.Run("tool turn speaks streamed text before call", func(t *testing.T) {
@@ -593,37 +598,39 @@ func TestLocalStackSession(t *testing.T) {
 
 	t.Run("barge in", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t, newFixedLiveASR("interrupt test"), echoLLM{}, longTTS{ms: 800})
-		sink := &captureSink{}
-		sess, err := backend.connect(t.Context(), "barge", sink)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = sess.close() })
+		synctest.Test(t, func(t *testing.T) {
+			backend := newTestLocalStackBackend(t, newFixedLiveASR("interrupt test"), echoLLM{}, longTTS{ms: 800})
+			sink := &captureSink{}
+			sess, err := backend.connect(t.Context(), "barge", sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sess.close() })
 
-		// No tools: the echo LLM speaks immediately.
-		setup := mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
-		if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
-			t.Fatal(err)
-		}
+			// No tools: the echo LLM speaks immediately.
+			setup := mustJSON(t, voicev2.SessionSetup{Kind: voicev2.MessageKindSessionSetup})
+			if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
+				t.Fatal(err)
+			}
 
-		mustAcceptMic(t, sess, loudPCM(200))
-		mustAcceptMic(t, sess, silencePCM(vadSilenceHangoverMS+vadFrameMS))
+			mustAcceptMic(t, sess, loudPCM(200))
+			mustAcceptMic(t, sess, silencePCM(vadSilenceHangoverMS+vadFrameMS))
 
-		// Wait until the assistant is speaking, then barge in with new speech.
-		waitForKind(t, sink, voicev2.MessageKindSpeechStarted)
-		mustAcceptMic(t, sess, loudPCM(120))
+			// Wait until the assistant is speaking, then barge in with new speech.
+			waitForKind(t, sink, voicev2.MessageKindSpeechStarted)
+			mustAcceptMic(t, sess, loudPCM(120))
 
-		waitForKind(t, sink, voicev2.MessageKindInterrupted)
-		// The interrupted turn must not complete (no speech.ended afterward).
-		time.Sleep(50 * time.Millisecond)
-		kinds := sink.kinds()
-		if slices.Contains(kinds, voicev2.MessageKindSpeechEnded) {
-			t.Fatalf("kinds = %v, barge-in must cancel before speech.ended", kinds)
-		}
-		if sink.wasCanceled() {
-			t.Fatal("barge-in must not cancel the whole session")
-		}
+			waitForKind(t, sink, voicev2.MessageKindInterrupted)
+			// The interrupted turn must not complete (no speech.ended afterward).
+			synctest.Wait()
+			kinds := sink.kinds()
+			if slices.Contains(kinds, voicev2.MessageKindSpeechEnded) {
+				t.Fatalf("kinds = %v, barge-in must cancel before speech.ended", kinds)
+			}
+			if sink.wasCanceled() {
+				t.Fatal("barge-in must not cancel the whole session")
+			}
+		})
 	})
 
 	t.Run("language", func(t *testing.T) {
@@ -888,30 +895,32 @@ func TestLocalStackReasoning(t *testing.T) {
 
 	t.Run("spoken turn", func(t *testing.T) {
 		t.Parallel()
-		backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), fixedConversationLLM{conv: reasoningConversation{}}, placeholderTTS{})
-		sink := &captureSink{}
-		sess, err := backend.connect(t.Context(), "reasoning voice", sink)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = sess.close() })
-		if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
-			t.Fatal(err)
-		}
-		mustAcceptMic(t, sess, loudPCM(200))
-		mustAcceptMic(t, sess, silencePCM(vadSilenceHangoverMS+vadFrameMS))
-		waitForKind(t, sink, voicev2.MessageKindSpeechEnded)
-		kinds := sink.kinds()
-		firstReasoning, firstSpeech := slices.Index(kinds, voicev2.MessageKindReasoningDelta), slices.Index(kinds, voicev2.MessageKindSpeechStarted)
-		if firstReasoning < 0 || firstReasoning > firstSpeech {
-			t.Fatalf("kinds = %v, want reasoning before speech", kinds)
-		}
-		if got := sink.reasoningText(); got != reasoning {
-			t.Fatalf("reasoning = %q, want %q", got, reasoning)
-		}
-		if got := sink.assistantText(); got != answer {
-			t.Fatalf("spoken text = %q, want %q", got, answer)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			backend := newTestLocalStackBackend(t, newFixedLiveASR("(local speech input)"), fixedConversationLLM{conv: reasoningConversation{}}, placeholderTTS{})
+			sink := &captureSink{}
+			sess, err := backend.connect(t.Context(), "reasoning voice", sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sess.close() })
+			if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
+				t.Fatal(err)
+			}
+			mustAcceptMic(t, sess, loudPCM(200))
+			mustAcceptMic(t, sess, silencePCM(vadSilenceHangoverMS+vadFrameMS))
+			waitForKind(t, sink, voicev2.MessageKindSpeechEnded)
+			kinds := sink.kinds()
+			firstReasoning, firstSpeech := slices.Index(kinds, voicev2.MessageKindReasoningDelta), slices.Index(kinds, voicev2.MessageKindSpeechStarted)
+			if firstReasoning < 0 || firstReasoning > firstSpeech {
+				t.Fatalf("kinds = %v, want reasoning before speech", kinds)
+			}
+			if got := sink.reasoningText(); got != reasoning {
+				t.Fatalf("reasoning = %q, want %q", got, reasoning)
+			}
+			if got := sink.assistantText(); got != answer {
+				t.Fatalf("spoken text = %q, want %q", got, answer)
+			}
+		})
 	})
 }
 
@@ -1669,79 +1678,6 @@ func TestLocalStackProviderCleanup(t *testing.T) {
 	})
 }
 
-func TestVoiceRTCLocalStackPlaceholders(t *testing.T) {
-	t.Parallel()
-	t.Run("choices", testBridgeChoiceRuntime)
-
-	t.Run("ASR", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("smoke transcript"), &smokeLLM{text: "ack"}, placeholderTTS{}))
-		s.writeMicAudio(ctx, t, 24)
-		data := s.waitMessage(ctx, t, voicev2.MessageKindTranscriptDelta)
-		var msg voicev2.TranscriptDelta
-		if err := json.Unmarshal(data, &msg); err != nil {
-			t.Fatal(err)
-		}
-		if msg.Speaker != voicev2.SpeakerUser || msg.Text != "smoke transcript" {
-			t.Fatalf("transcript = %+v, want user smoke transcript", msg)
-		}
-	})
-
-	t.Run("LLM", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("hello"), &smokeLLM{text: "smoke llm response"}, placeholderTTS{}))
-		s.writeMicAudio(ctx, t, 24)
-		data := s.waitMessage(ctx, t, voicev2.MessageKindAssistantTextDelta)
-		var msg voicev2.AssistantTextDelta
-		if err := json.Unmarshal(data, &msg); err != nil {
-			t.Fatal(err)
-		}
-		if msg.Text != "smoke llm response" {
-			t.Fatalf("assistant text = %q, want smoke llm response", msg.Text)
-		}
-	})
-
-	t.Run("TTS", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("hello"), &smokeLLM{text: "smoke tts response"}, placeholderTTS{}))
-		s.writeMicAudio(ctx, t, 24)
-		s.waitMessage(ctx, t, voicev2.MessageKindSpeechStarted)
-		select {
-		case energy := <-s.remoteAudioEnergy:
-			if energy < 1_000 {
-				t.Fatalf("assistant RTP audio energy = %.0f, want audible signal", energy)
-			}
-		case err := <-s.mediaErrs:
-			t.Fatal(err)
-		case err := <-s.signalErrs:
-			t.Fatal(err)
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-	})
-	t.Run("speech with no trailing packets", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		t.Cleanup(cancel)
-		s := newVoiceRTCTestSession(ctx, t, newTestLocalStackBackend(t, newFixedLiveASR("DTX turn"), &smokeLLM{text: "ack"}, placeholderTTS{}))
-		s.writeMicAudio(ctx, t, 10)
-		started := time.Now()
-		s.waitMessage(ctx, t, voicev2.MessageKindTranscriptDelta)
-		if elapsed := time.Since(started); elapsed > time.Second {
-			t.Fatalf("turn ending took %s after the microphone stopped sending", elapsed)
-		}
-		// Speech can resume on the same track after idle synthesis.
-		s.writeMicAudio(ctx, t, 10)
-		s.waitMessage(ctx, t, voicev2.MessageKindTranscriptDelta)
-	})
-}
-
 type cleanupGenAIProvider struct {
 	fakeGenAIProvider
 
@@ -1906,13 +1842,13 @@ func (c *captureSink) backendReady(context.Context) {
 func (c *captureSink) sendGatewayMessage(_ context.Context, data []byte) error {
 	c.mu.Lock()
 	c.msgs = append(c.msgs, slices.Clone(data))
-	c.mu.Unlock()
 	if c.changed != nil {
 		select {
 		case c.changed <- struct{}{}:
 		default:
 		}
 	}
+	c.mu.Unlock()
 	return nil
 }
 
@@ -2045,25 +1981,29 @@ func decodeToolCall(t *testing.T, sink *captureSink) voicev2.ToolCall {
 }
 
 func waitForKind(t *testing.T, sink *captureSink, kind voicev2.MessageKind) {
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if slices.Contains(sink.kinds(), kind) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s; got %v", kind, sink.kinds())
+	waitForKindCount(t, sink, kind, 1)
 }
 
 func waitForKindCount(t *testing.T, sink *captureSink, kind voicev2.MessageKind, count int) {
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := kindCount(sink.kinds(), kind); got >= count {
+	sink.mu.Lock()
+	if sink.changed == nil {
+		sink.changed = make(chan struct{}, 1)
+	}
+	changed := sink.changed
+	sink.mu.Unlock()
+	timer := time.NewTimer(3 * time.Second)
+	t.Cleanup(func() { timer.Stop() })
+	for {
+		kinds := sink.kinds()
+		if kindCount(kinds, kind) >= count {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %d %s messages; got %v", count, kind, kinds)
+		}
 	}
-	t.Fatalf("timed out waiting for %d %s messages; got %v", count, kind, sink.kinds())
 }
 
 func kindCount(kinds []voicev2.MessageKind, want voicev2.MessageKind) int {

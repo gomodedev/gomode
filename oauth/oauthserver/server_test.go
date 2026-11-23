@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/gomodedev/gomode/internal/pairing"
+	"github.com/gomodedev/gomode/internal/rsatest"
 	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/oauth"
 	v5 "github.com/gomodedev/gomode/oauth/oauthserver/data/v5"
@@ -45,7 +46,27 @@ const (
 
 func TestServer(t *testing.T) {
 	t.Parallel()
+
+	t.Run("reserveClientAssertion", func(t *testing.T) {
+		t.Parallel()
+		server, _, _ := newTestFlowServer(t, "", nil)
+		now := time.Now()
+		const clientID = "https://client.example/client.json"
+		server.state.ClientAssertionJTIs = make(map[string]time.Time, clientAssertionJTILimit)
+		expires := now.Add(time.Minute)
+		for i := range clientAssertionJTILimit {
+			server.state.ClientAssertionJTIs[strconv.Itoa(i)] = expires
+		}
+		if err := server.reserveClientAssertion(clientID, "over-capacity", now.Add(time.Minute)); err == nil || len(server.state.ClientAssertionJTIs) != clientAssertionJTILimit {
+			t.Fatalf("capacity reservation error = %v, entries = %d", err, len(server.state.ClientAssertionJTIs))
+		}
+		server.state.ClientAssertionJTIs["0"] = now.Add(-time.Minute)
+		if err := server.reserveClientAssertion(clientID, "after-prune", now.Add(time.Minute)); err != nil || len(server.state.ClientAssertionJTIs) != clientAssertionJTILimit {
+			t.Fatalf("pruned reservation error = %v, entries = %d", err, len(server.state.ClientAssertionJTIs))
+		}
+	})
 	t.Run("per-user revocation removes pending authority durably", func(t *testing.T) {
+		t.Parallel()
 		user := testUser()
 		path := t.TempDir() + "/oauth.json"
 		s, h, _ := newTestFlowServer(t, path, []oauth.User{user})
@@ -65,7 +86,9 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("account authority", func(t *testing.T) {
+		t.Parallel()
 		t.Run("legacy generation survives upgrade but never retirement or failed cleanup", func(t *testing.T) {
+			t.Parallel()
 			path := t.TempDir() + "/oauth.json"
 			host := &accountAuthorityHost{user: testUser()}
 			cfg := &ServerConfig{Log: testlog.New(t), RefreshTokenStorePath: path, Session: host}
@@ -113,6 +136,7 @@ func TestServer(t *testing.T) {
 			s.Close()
 		})
 		t.Run("revocation between consent read and publication cannot create a code", func(t *testing.T) {
+			t.Parallel()
 			host := &accountAuthorityHost{user: testUser()}
 			gate := &accountAuthorityGate{SessionManager: host, entered: make(chan struct{}), release: make(chan struct{})}
 			s := newTestServer(t, &ServerConfig{Log: testlog.New(t), Session: gate})
@@ -143,8 +167,10 @@ func TestServer(t *testing.T) {
 			}
 		})
 		t.Run("late requests cannot publish after disable and reenable", func(t *testing.T) {
+			t.Parallel()
 			for _, stage := range []string{"consent", "code", "code exchange", "refresh", "device", "device exchange"} {
 				t.Run(stage, func(t *testing.T) {
+					t.Parallel()
 					host := &accountAuthorityHost{user: testUser()}
 					host.user.Authority = "original"
 					gate := &accountAuthorityGate{SessionManager: host, entered: make(chan struct{}), release: make(chan struct{})}
@@ -287,14 +313,14 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 		for _, issuer := range []string{"", "http://public.example", "https://user@example.com", "https://example.com/path", "https://example.com?", "https://example.com?query=1", "https://example.com#"} {
 			cfg := &ServerConfig{Log: testlog.New(t), Issuer: issuer}
-			applyTestServerDefaults(t, cfg)
+			applyTestServerDefaults(cfg)
 			cfg.Issuer = issuer
 			if _, err := NewServer(*cfg); err == nil {
 				t.Errorf("NewServer Issuer %q error = nil", issuer)
 			}
 		}
 		cfg := &ServerConfig{Log: testlog.New(t), Issuer: "http://127.0.0.1:2242"}
-		applyTestServerDefaults(t, cfg)
+		applyTestServerDefaults(cfg)
 		s, err := NewServer(*cfg)
 		if err != nil {
 			t.Fatalf("NewServer loopback issuer: %v", err)
@@ -308,7 +334,7 @@ func TestServer(t *testing.T) {
 			t.Fatalf("canonical issuer = %q", canonical)
 		}
 		invalidPrefix := &ServerConfig{Log: testlog.New(t), ClientIDPrefix: "https://issued.example/"}
-		applyTestServerDefaults(t, invalidPrefix)
+		applyTestServerDefaults(invalidPrefix)
 		invalidPrefix.ClientIDPrefix = "https://issued.example/"
 		if _, err := NewServer(*invalidPrefix); err == nil {
 			t.Fatal("NewServer accepted a dynamic client prefix in the CIMD namespace")
@@ -739,7 +765,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read", "write"})
 		if tokenResp.RefreshToken == "" {
@@ -763,7 +789,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -956,7 +982,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1015,7 +1041,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		challenge := testCodeChallenge()
 		form := url.Values{
 			"response_type":         {oauth.ResponseTypeCode},
@@ -1047,7 +1073,7 @@ func TestServer(t *testing.T) {
 	t.Run("authorize without user is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 		form := authorizationCodeForm("client", "https://example.com/callback", "read")
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody)
 		w := httptest.NewRecorder()
@@ -1061,7 +1087,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, ui := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"http://localhost:9999/callback"})
 		form := authorizationCodeForm(registered.ClientID, "http://localhost:9999/callback", "")
 		req := newOAuthTestRequest(t, http.MethodGet, "/oauth/authorize"+"?"+form.Encode(), http.NoBody, user)
@@ -1079,7 +1105,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://example.com/callback", []string{"read"}, "client-state")
 		if code == "" {
@@ -1091,7 +1117,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 		form := authorizationCodeForm(registered.ClientID, "https://example.com/callback", "read")
 		form.Set("state", "deny-state")
@@ -1117,7 +1143,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		form := url.Values{"consent_token": {"invalid-token"}}
 		req := newOAuthTestRequest(t, http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()), user)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1133,7 +1159,7 @@ func TestServer(t *testing.T) {
 
 		alice := testUser()
 		bob := oauth.User{ID: "usr_bob", Username: "bob", Provider: "gitlab"}
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{alice, bob})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{alice, bob})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 		consentToken := startOAuthTestConsent(t, h, alice, authorizationCodeForm(registered.ClientID, "https://example.com/callback", "read"))
 
@@ -1151,7 +1177,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read", "write"})
 
@@ -1179,7 +1205,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		revokeOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
@@ -1205,7 +1231,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 
 		form := url.Values{}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
@@ -1228,7 +1254,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 
 		form := url.Values{"token": {"not.a.valid.jwt"}}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/introspect", strings.NewReader(form.Encode()))
@@ -1251,7 +1277,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 
 		// Issue a short-lived token directly via the token service.
 		pastAud := testResourceURL
@@ -1289,7 +1315,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1321,7 +1347,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		revokeOAuthTestToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
@@ -1350,7 +1376,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1380,7 +1406,7 @@ func TestServer(t *testing.T) {
 	t.Run("introspect garbage refresh_token hint", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 
 		form := url.Values{
 			"token":           {"garbage-refresh-token"},
@@ -1406,7 +1432,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1451,7 +1477,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		owner := registerOAuthTestClient(t, h, "Token Owner", []string{"https://claude.example.com/callback"})
 		other := registerOAuthTestClient(t, h, "Other Client", []string{"https://other.example/callback"})
 		tokenResponse := authorizeOAuthTestClient(t, h, user, &owner, []string{"read"})
@@ -1477,7 +1503,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1503,7 +1529,7 @@ func TestServer(t *testing.T) {
 	t.Run("revoke garbage token returns 200", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		form := url.Values{
@@ -1522,7 +1548,7 @@ func TestServer(t *testing.T) {
 	t.Run("revoke access_token hint garbage token returns 200", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		form := url.Values{
@@ -1595,7 +1621,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read", "write"})
 
@@ -1624,7 +1650,7 @@ func TestServer(t *testing.T) {
 	t.Run("concurrent refresh redemption revokes the raced family", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		const attempts = 16
@@ -1670,7 +1696,7 @@ func TestServer(t *testing.T) {
 	t.Run("refresh signing failure does not consume token", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		currentKID := s.tokens.currentKID
@@ -1687,7 +1713,7 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -1710,7 +1736,7 @@ func TestServer(t *testing.T) {
 
 		user := testUser()
 		audit := &recordingAuditRecorder{}
-		_, h, _ := newTestFlowServerWithAudit(t, t.TempDir()+"/oauth.json", []oauth.User{user}, audit)
+		_, h, _ := newTestFlowServerWithAudit(t, "", []oauth.User{user}, audit)
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		tokenResp := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 
@@ -2001,7 +2027,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Push authorization request parameters.
@@ -2088,7 +2114,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Push PAR.
@@ -2135,7 +2161,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Push PAR.
@@ -2179,7 +2205,7 @@ func TestPAR(t *testing.T) {
 	t.Run("PAR with missing client_id returns invalid_request", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 
 		parForm := authorizationCodeForm("", "https://example.com/callback", "read")
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/par", strings.NewReader(parForm.Encode()))
@@ -2202,7 +2228,7 @@ func TestPAR(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, ui := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, ui := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"http://localhost:9999/callback"})
 
 		// Push PAR with scope=read.
@@ -2384,7 +2410,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Request device authorization.
@@ -2483,7 +2509,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 
 		// Request device authorization.
@@ -2535,7 +2561,7 @@ func TestDeviceAuthorization(t *testing.T) {
 	t.Run("device page shows form", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 
 		// GET /oauth/device — show empty form.
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/device", http.NoBody)
@@ -2569,7 +2595,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 
 		// POST /oauth/device without authenticated user.
 		form := url.Values{"user_code": {"ABCDEFGH"}}
@@ -2612,7 +2638,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 
 		// POST /oauth/device with a bogus user_code.
 		form := url.Values{"user_code": {"ZZZZZZZZ"}}
@@ -2703,7 +2729,7 @@ func TestDeviceAuthorization(t *testing.T) {
 	t.Run("device_authorization metadata includes device_code grant", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
 		addForwardedHeaders(req)
@@ -2742,7 +2768,7 @@ func TestOAuthSurfaceContainment(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		form := url.Values{
@@ -2790,7 +2816,7 @@ func TestOAuthSurfaceContainment(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
 		token := authorizeOAuthTestClient(t, h, user, &registered, []string{"read"})
 		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -2887,7 +2913,7 @@ func TestDPoP(t *testing.T) {
 
 	t.Run("ec and ed25519 token flows get dpop-bound tokens", func(t *testing.T) {
 		t.Parallel()
-		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256())
 		edPublic, edPrivate, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			t.Fatalf("generate ed25519 key: %v", err)
@@ -3028,9 +3054,9 @@ func TestDPoP(t *testing.T) {
 	t.Run("dpop proof with wrong htm rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 
 		tokenURL := testBaseURL + "/oauth/token"
 		// htm should be POST for the token endpoint, but we use GET.
@@ -3067,9 +3093,9 @@ func TestDPoP(t *testing.T) {
 	t.Run("dpop proof with wrong htu rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 
 		wrongURL := "https://evil.example.com/oauth/token"
 		dpopProof := makeDPoPProof(t, dpopKey, dpopJWKObj, "POST", wrongURL, time.Now(), "", "")
@@ -3098,9 +3124,9 @@ func TestDPoP(t *testing.T) {
 	t.Run("dpop proof expired iat rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 
 		tokenURL := testBaseURL + "/oauth/token"
 		oldTime := time.Now().Add(-10 * time.Minute)
@@ -3165,7 +3191,7 @@ func TestDPoP(t *testing.T) {
 		user := testUser()
 		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		tokenURL := testBaseURL + "/oauth/token"
 
@@ -3193,7 +3219,7 @@ func TestDPoP(t *testing.T) {
 		}
 
 		// Make another key pair and use it to prove possession of the dpop-bound token.
-		wrongKey, wrongJWKObj := testDPoPRSAKeyPair(t)
+		wrongKey, wrongJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 		protected := s.BearerAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
@@ -3215,7 +3241,7 @@ func TestDPoP(t *testing.T) {
 		user := testUser()
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		tokenURL := testBaseURL + "/oauth/token"
 
@@ -3277,7 +3303,7 @@ func TestDPoP(t *testing.T) {
 		statePath := t.TempDir() + "/oauth.json"
 		s, h, _ := newTestFlowServer(t, statePath, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		tokenURL := testBaseURL + "/oauth/token"
 
@@ -3382,7 +3408,7 @@ func TestDPoP(t *testing.T) {
 		user := testUser()
 		s, h, _ := newTestFlowServer(t, statePath, []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWK := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWK := testDPoPECKeyPair(t, elliptic.P256())
 		code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		proof := makeDPoPProof(t, dpopKey, dpopJWK, http.MethodPost, dpopTokenURL, time.Now(), "", "")
 		form := url.Values{
@@ -3436,7 +3462,7 @@ func TestDPoP(t *testing.T) {
 	t.Run("refresh token remains bound to its original key", func(t *testing.T) {
 		t.Parallel()
 		res := setupDPoPBoundToken(t)
-		wrongKey, wrongJWK := testDPoPRSAKeyPair(t)
+		wrongKey, wrongJWK := testDPoPECKeyPair(t, elliptic.P256())
 		form := url.Values{
 			"grant_type":    {oauth.GrantRefreshToken},
 			"refresh_token": {res.token.RefreshToken},
@@ -3541,7 +3567,7 @@ func TestDPoP(t *testing.T) {
 		user := testUser()
 		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-		dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+		dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 		tokenURL := testBaseURL + "/oauth/token"
 
 		// Two distinct token exchanges that reuse the same jti demonstrate proof
@@ -3580,7 +3606,7 @@ func TestDPoP(t *testing.T) {
 	t.Run("alg does not match jwk key type is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256())
 		rsaKey, rsaJWK := testDPoPRSAKeyPair(t)
 
 		// alg=ES256 with an RSA jwk.
@@ -3644,7 +3670,7 @@ func TestDPoP(t *testing.T) {
 	t.Run("valid asymmetric key types are accepted", func(t *testing.T) {
 		t.Parallel()
 
-		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256())
 		proof := makeDPoPProofSigned(t, "ES256", ecKey, ecJWK)
 		if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err != nil {
 			t.Fatalf("P-256/ES256: %v", err)
@@ -3676,13 +3702,12 @@ func TestDPoP(t *testing.T) {
 		for _, tc := range []struct {
 			alg   string
 			curve elliptic.Curve
-			crv   string
 		}{
-			{"ES256", elliptic.P256(), "P-256"},
-			{"ES384", elliptic.P384(), "P-384"},
-			{"ES512", elliptic.P521(), "P-521"},
+			{"ES256", elliptic.P256()},
+			{"ES384", elliptic.P384()},
+			{"ES512", elliptic.P521()},
 		} {
-			ecKey, ecJWK := testDPoPECKeyPair(t, tc.curve, tc.crv)
+			ecKey, ecJWK := testDPoPECKeyPair(t, tc.curve)
 			proof := makeDPoPProofSigned(t, tc.alg, ecKey, ecJWK)
 			if _, _, err := DPoPProof(httpDPoPRequest(t, proof)); err != nil {
 				t.Errorf("%s: %v", tc.alg, err)
@@ -3695,7 +3720,7 @@ func TestDPoP(t *testing.T) {
 
 		// RFC 7518 §3.4 mandates raw R||S. A DER-encoded signature is the shape a
 		// naive implementation emits; it must not be accepted.
-		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		ecKey, ecJWK := testDPoPECKeyPair(t, elliptic.P256())
 		proof := makeDPoPProofSigned(t, "ES256", ecKey, ecJWK)
 		parts := strings.Split(proof, ".")
 		digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
@@ -3714,7 +3739,7 @@ func TestDPoP(t *testing.T) {
 
 		// RFC 7518 §6.2.1.2 fixes the octet length, and an off-curve point must
 		// not reach verification at all.
-		_, ecJWK := testDPoPECKeyPair(t, elliptic.P256(), "P-256")
+		_, ecJWK := testDPoPECKeyPair(t, elliptic.P256())
 		short := *ecJWK
 		short.X = base64.RawURLEncoding.EncodeToString([]byte{1, 2, 3})
 		if _, _, err := DPoPProof(httpDPoPRequest(t, makeUnsignedDPoPProof(t, "ES256", &short))); err == nil {
@@ -3748,8 +3773,10 @@ func TestDPoPReplayState(t *testing.T) {
 		t.Parallel()
 		now := time.Now()
 		state := newEmptyStore("").snapshot()
+		state.DPoPProofs = make(map[string]time.Time, maxDPoPJTIEntries)
+		expires := now.Add(time.Minute)
 		for i := range maxDPoPJTIEntries {
-			state.DPoPProofs[strconv.Itoa(i)] = now.Add(time.Minute)
+			state.DPoPProofs[strconv.Itoa(i)] = expires
 		}
 		binding := dpopBinding{jkt: "key", jti: "overflow", iat: now.Unix()}
 		if reserveDPoPBinding(&state, binding, now) {
@@ -3764,8 +3791,10 @@ func TestDPoPReplayState(t *testing.T) {
 		t.Parallel()
 		now := time.Now()
 		state := newEmptyStore("").snapshot()
+		state.DPoPNonces = make(map[string]time.Time, maxDPoPJTIEntries)
+		expires := now.Add(time.Minute)
 		for i := range maxDPoPJTIEntries {
-			state.DPoPNonces[strconv.Itoa(i)] = now.Add(time.Minute)
+			state.DPoPNonces[strconv.Itoa(i)] = expires
 		}
 		binding := dpopBinding{jkt: "key", jti: "nonce-overflow", iat: now.Unix(), nonce: "nonce", nonceExpiresAt: now.Add(time.Minute)}
 		if reserveDPoPBinding(&state, binding, now) {
@@ -3777,24 +3806,14 @@ func TestDPoPReplayState(t *testing.T) {
 	})
 }
 
-// testDPoPRSAKeyPair generates an RSA key pair for DPoP proof tests.
 func testDPoPRSAKeyPair(t testing.TB) (*rsa.PrivateKey, *oauth.JWK) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("generate rsa key: %v", err)
-	}
-	pub := &key.PublicKey
-	jwk := oauth.JWK{
-		Kty: "RSA",
-		N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
-		E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
-	}
+	key := rsatest.Key(t)
+	jwk := oauth.RSAJWK("", &key.PublicKey)
 	return key, &jwk
 }
 
-// makeDPoPProof creates a valid DPoP proof JWT signed with the given RSA key
-// using a fresh random jti.
-func makeDPoPProof(t testing.TB, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
+// makeDPoPProof signs a DPoP proof JWT using a fresh random jti.
+func makeDPoPProof(t testing.TB, key crypto.Signer, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce string) string {
 	jti, err := randomToken()
 	if err != nil {
 		t.Fatalf("generate jti: %v", err)
@@ -3804,8 +3823,8 @@ func makeDPoPProof(t testing.TB, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu s
 
 // makeDPoPProofWithJTI creates a DPoP proof JWT with an explicit jti (which may
 // be empty to exercise the missing-jti rejection path).
-func makeDPoPProofWithJTI(t testing.TB, key *rsa.PrivateKey, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
-	header := DPoPHeader{Typ: "dpop+jwt", Alg: "RS256", JWK: *jwk}
+func makeDPoPProofWithJTI(t testing.TB, key crypto.Signer, jwk *oauth.JWK, htm, htu string, iat time.Time, accessToken, nonce, jti string) string {
+	header := DPoPHeader{Typ: "dpop+jwt", Alg: jwk.Alg, JWK: *jwk}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
 		t.Fatalf("marshal dpop header: %v", err)
@@ -3827,8 +3846,7 @@ func makeDPoPProofWithJTI(t testing.TB, key *rsa.PrivateKey, jwk *oauth.JWK, htm
 	}
 
 	parts := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
-	digest := sha256.Sum256([]byte(parts))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	signature, err := signJWS(jwk.Alg, key, []byte(parts))
 	if err != nil {
 		t.Fatalf("sign dpop proof: %v", err)
 	}
@@ -3836,25 +3854,13 @@ func makeDPoPProofWithJTI(t testing.TB, key *rsa.PrivateKey, jwk *oauth.JWK, htm
 }
 
 // testDPoPECKeyPair generates an EC key pair and its oauth.JWK for DPoP proof tests.
-func testDPoPECKeyPair(t *testing.T, curve elliptic.Curve, crv string) (*ecdsa.PrivateKey, *oauth.JWK) {
+func testDPoPECKeyPair(t *testing.T, curve elliptic.Curve) (*ecdsa.PrivateKey, *oauth.JWK) {
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		t.Fatalf("generate ec key: %v", err)
 	}
-	// PublicKey.Bytes returns the uncompressed point 0x04 || X || Y with each
-	// coordinate left-padded to the curve's fixed byte width.
-	point, err := key.PublicKey.Bytes()
-	if err != nil {
-		t.Fatalf("encode ec public key: %v", err)
-	}
-	size := (curve.Params().BitSize + 7) / 8
-	jwk := &oauth.JWK{
-		Kty: "EC",
-		Crv: crv,
-		X:   base64.RawURLEncoding.EncodeToString(point[1 : 1+size]),
-		Y:   base64.RawURLEncoding.EncodeToString(point[1+size:]),
-	}
-	return key, jwk
+	jwk := oauth.ECJWK("", &key.PublicKey)
+	return key, &jwk
 }
 
 // dpopTokenURL is the htu used by the DPoP proof test helpers.
@@ -3929,7 +3935,7 @@ func addForwardedHeaders(r *http.Request) {
 type dpopTestResources struct {
 	server     *Server
 	handler    http.Handler
-	dpopKey    *rsa.PrivateKey
+	dpopKey    *ecdsa.PrivateKey
 	dpopJWK    *oauth.JWK
 	registered oauth.RegisterResponse
 	token      oauth.TokenResponse
@@ -3939,9 +3945,9 @@ type dpopTestResources struct {
 // obtains a DPoP-bound token, and returns the pieces needed for resource tests.
 func setupDPoPBoundToken(t *testing.T) dpopTestResources {
 	user := testUser()
-	s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+	s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 	registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
-	dpopKey, dpopJWKObj := testDPoPRSAKeyPair(t)
+	dpopKey, dpopJWKObj := testDPoPECKeyPair(t, elliptic.P256())
 	code := authorizeOAuthTestCode(t, h, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 	tokenURL := testBaseURL + "/oauth/token"
 
@@ -4055,7 +4061,10 @@ func newTestServer(t *testing.T, cfgs ...*ServerConfig) *Server {
 	if len(cfgs) > 0 && cfgs[0] != nil {
 		cfg = cfgs[0]
 	}
-	applyTestServerDefaults(t, cfg)
+	if cfg.RefreshTokenStorePath == "" {
+		cfg.RefreshTokenStorePath = t.TempDir() + "/oauth.json"
+	}
+	applyTestServerDefaults(cfg)
 	s, err := NewServer(*cfg)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -4081,7 +4090,7 @@ func newTestFlowServerWithAudit(t *testing.T, path string, users []oauth.User, a
 		UI:                    ui,
 		Audit:                 audit,
 	}
-	applyTestServerDefaults(t, cfg)
+	applyTestServerDefaults(cfg)
 	s, err := NewServer(*cfg)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -4123,10 +4132,7 @@ type auditRecord struct {
 	status   string
 }
 
-func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {
-	if cfg.RefreshTokenStorePath == "" {
-		cfg.RefreshTokenStorePath = t.TempDir() + "/oauth.json"
-	}
+func applyTestServerDefaults(cfg *ServerConfig) {
 	if cfg.KeyID == "" {
 		cfg.KeyID = "test-key"
 	}
@@ -4742,7 +4748,7 @@ func TestClientLifecyclePolicy(t *testing.T) {
 	t.Run("refresh token requires requested grant", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClientRequest(t, handler, &oauth.RegisterRequest{
 			ClientName:              "Access only",
 			RedirectURIs:            []string{"https://claude.example.com/callback"},
@@ -4787,7 +4793,7 @@ func TestClientLifecyclePolicy(t *testing.T) {
 	t.Run("loopback IP ports are dynamic but localhost is exact", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		for _, test := range []struct {
 			registered string
 			requested  string
@@ -4838,7 +4844,7 @@ func TestClientLifecyclePolicy(t *testing.T) {
 	t.Run("PKCE syntax fails before code consumption", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, handler, "Client", []string{"https://claude.example.com/callback"})
 		badChallenge := authorizationCodeForm(registered.ClientID, "https://claude.example.com/callback", "read")
 		badChallenge.Set("code_challenge", "too-short")
@@ -4983,7 +4989,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		s, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 
 		// Authorize two clients to create 2 grants + 2 refresh tokens.
 		clientA := registerOAuthTestClient(t, h, "Client A", []string{"https://claude.example.com/callback"})
@@ -5016,7 +5022,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/logout", "https://example.com/callback"})
 
 		req := newOAuthTestRequest(t, http.MethodGet,
@@ -5040,7 +5046,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, h, "Test Client", []string{"https://example.com/callback"})
 
 		req := newOAuthTestRequest(t, http.MethodGet,
@@ -5065,7 +5071,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		// Without a login adapter, should return HTML page.
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/end-session", http.NoBody)
 		w := httptest.NewRecorder()
@@ -5155,7 +5161,7 @@ func TestEndSession(t *testing.T) {
 	t.Run("end_session_endpoint in discovery metadata", func(t *testing.T) {
 		t.Parallel()
 
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/.well-known/oauth-authorization-server", http.NoBody)
 		addForwardedHeaders(req)
@@ -5175,19 +5181,10 @@ func TestEndSession(t *testing.T) {
 	})
 }
 
-// newTestServerHandlerOnly creates a server and handler for management tests.
+// newTestServerHandlerOnly uses an in-memory server for requests that do not inspect storage.
 func newTestServerHandlerOnly(t *testing.T) http.Handler {
-	path := t.TempDir() + "/oauth.json"
-	cfg := &ServerConfig{
-		Log:                   testlog.New(t),
-		RefreshTokenStorePath: path,
-	}
-	applyTestServerDefaults(t, cfg)
-	s, err := NewServer(*cfg)
-	if err != nil {
-		t.Fatalf("NewServer: %v", err)
-	}
-	return newTestServerHandler(s)
+	_, handler, _ := newTestFlowServer(t, "", nil)
+	return handler
 }
 
 // readOAuthTestClient reads client registration via GET.
@@ -5230,7 +5227,7 @@ func TestOAuthInputBounds(t *testing.T) {
 	t.Run("repeated consent scopes remain valid", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		server, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
 		code := authorizeOAuthTestCode(t, handler, user, &registered, "https://claude.example.com/callback", []string{"read", "write"}, "")
 		entry, found := server.state.Codes[oauth.RefreshTokenKey(code)]
@@ -5245,7 +5242,7 @@ func TestOAuthInputBounds(t *testing.T) {
 	t.Run("duplicate token parameter is rejected before code consumption", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
 		code := authorizeOAuthTestCode(t, handler, user, &registered, "https://claude.example.com/callback", []string{"read"}, "")
 		form := url.Values{
@@ -5274,7 +5271,7 @@ func TestOAuthInputBounds(t *testing.T) {
 
 	t.Run("oversized parameter is rejected", func(t *testing.T) {
 		t.Parallel()
-		_, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		_, handler, _ := newTestFlowServer(t, "", []oauth.User{testUser()})
 		form := url.Values{"grant_type": {oauth.GrantAuthorizationCode}, "code": {strings.Repeat("x", maxOAuthParameterBytes+1)}}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -5288,7 +5285,7 @@ func TestOAuthInputBounds(t *testing.T) {
 	t.Run("pushed authorization requests are pruned and capped", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		server, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
 		now := time.Now()
 		for i := range maxPendingPARRequests {
@@ -5317,7 +5314,7 @@ func TestOAuthInputBounds(t *testing.T) {
 	t.Run("pending consents are pruned and capped", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		server, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
 		now := time.Now()
 		for i := range maxPendingConsents {
@@ -5345,7 +5342,7 @@ func TestOAuthInputBounds(t *testing.T) {
 	t.Run("pending device authorizations are capped", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		server, handler, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		server, handler, _ := newTestFlowServer(t, "", []oauth.User{user})
 		registered := registerOAuthTestClient(t, handler, "Claude", []string{"https://claude.example.com/callback"})
 		now := time.Now()
 		for i := range maxPendingDeviceCodes {
@@ -5369,7 +5366,7 @@ func TestRateLimiting(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		_, h, _ := newTestFlowServer(t, t.TempDir()+"/oauth.json", []oauth.User{user})
+		_, h, _ := newTestFlowServer(t, "", []oauth.User{user})
 
 		// Token endpoint works without rate limiter.
 		registered := registerOAuthTestClient(t, h, "Claude", []string{"https://claude.example.com/callback"})
@@ -5384,8 +5381,7 @@ func TestRateLimiting(t *testing.T) {
 
 		user := testUser()
 		lim := &inspectRateLimiter{}
-		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(t, path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, "", []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5425,8 +5421,7 @@ func TestRateLimiting(t *testing.T) {
 
 		user := testUser()
 		lim := &inspectRateLimiter{}
-		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(t, path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, "", []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5464,7 +5459,7 @@ func TestRateLimiting(t *testing.T) {
 	t.Run("unknown client IDs share a port-independent IP key", func(t *testing.T) {
 		t.Parallel()
 		lim := &inspectRateLimiter{}
-		cfg := testFlowServerConfig(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, "", []oauth.User{testUser()})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5493,7 +5488,7 @@ func TestRateLimiting(t *testing.T) {
 	t.Run("registered client keys ignore source ports", func(t *testing.T) {
 		t.Parallel()
 		limiter := &inspectRateLimiter{}
-		cfg := testFlowServerConfig(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, "", []oauth.User{testUser()})
 		cfg.RateLimiter = limiter
 		server, err := NewServer(cfg)
 		if err != nil {
@@ -5524,7 +5519,7 @@ func TestRateLimiting(t *testing.T) {
 		t.Parallel()
 
 		lim := &inspectRateLimiter{}
-		cfg := testFlowServerConfig(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, "", []oauth.User{testUser()})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5554,8 +5549,7 @@ func TestRateLimiting(t *testing.T) {
 
 		user := testUser()
 		lim := &inspectRateLimiter{}
-		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(t, path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, "", []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5584,8 +5578,7 @@ func TestRateLimiting(t *testing.T) {
 
 		user := testUser()
 		lim := &inspectRateLimiter{}
-		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(t, path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, "", []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5730,27 +5723,14 @@ func TestRateLimiting(t *testing.T) {
 		t.Parallel()
 
 		user := testUser()
-		path := t.TempDir() + "/oauth.json"
-
-		// Register clients and authorize codes with a permissive server.
-		permissive, permissiveH, _ := newTestFlowServer(t, path, []oauth.User{user})
-		clientA := registerOAuthTestClient(t, permissiveH, "Client A", []string{"https://a.example.com/callback"})
-		clientB := registerOAuthTestClient(t, permissiveH, "Client B", []string{"https://b.example.com/callback"})
-		codeA := authorizeOAuthTestCode(t, permissiveH, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
-		codeA2 := authorizeOAuthTestCode(t, permissiveH, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
-		codeB := authorizeOAuthTestCode(t, permissiveH, user, &clientB, "https://b.example.com/callback", []string{"read"}, "")
-		permissive.Close()
-
-		// Create a limited server from the same store: allow only one token
-		// request per source IP and registered client.
-		lim := &countRateLimiter{max: 1}
-		cfg := testFlowServerConfig(t, path, []oauth.User{user})
-		cfg.RateLimiter = lim
-		s, err := NewServer(cfg)
-		if err != nil {
-			t.Fatalf("NewServer: %v", err)
-		}
-		h := newTestServerHandler(s)
+		s, h, _ := newTestFlowServer(t, "", []oauth.User{user})
+		clientA := registerOAuthTestClient(t, h, "Client A", []string{"https://a.example.com/callback"})
+		clientB := registerOAuthTestClient(t, h, "Client B", []string{"https://b.example.com/callback"})
+		codeA := authorizeOAuthTestCode(t, h, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
+		codeA2 := authorizeOAuthTestCode(t, h, user, &clientA, "https://a.example.com/callback", []string{"read"}, "")
+		codeB := authorizeOAuthTestCode(t, h, user, &clientB, "https://b.example.com/callback", []string{"read"}, "")
+		// Turn on the aggregate quota for the token exchanges.
+		s.rateLimiter = &countRateLimiter{max: 1}
 
 		exchange := func(cid, code, redirectURI, remoteAddr string) int {
 			form := url.Values{

@@ -14,6 +14,7 @@ import (
 )
 
 func TestGeminiAudioGate(t *testing.T) {
+	t.Parallel()
 	t.Run("silence suppression", func(t *testing.T) {
 		received := make(chan []map[string]any, 1)
 		s, sink := newGeminiGateway(t, func(ctx context.Context, ws *websocket.Conn) {

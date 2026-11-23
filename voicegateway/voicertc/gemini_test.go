@@ -183,6 +183,7 @@ func TestGeminiBridgeBackend(t *testing.T) {
 }
 
 func TestGeminiBridgeSession(t *testing.T) {
+	t.Parallel()
 	t.Run("response usage", func(t *testing.T) {
 		s, sink := newGeminiGateway(t, func(ctx context.Context, ws *websocket.Conn) {
 			readGeminiFixture(t, ctx, ws)

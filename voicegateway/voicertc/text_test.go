@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -200,17 +201,17 @@ func (r recordingBackendRuntime) Close() error {
 
 // blockingTurnConversation blocks its turn until the turn context is cancelled.
 type blockingTurnConversation struct {
-	rec     *lifecycleRecorder
-	entered chan struct{}
-	once    sync.Once
+	rec      *lifecycleRecorder
+	entered  chan struct{}
+	canceled chan struct{}
+	release  chan struct{}
 }
 
 func (c *blockingTurnConversation) user(ctx context.Context, _ string) (llmStep, error) {
-	c.once.Do(func() { close(c.entered) })
+	close(c.entered)
 	<-ctx.Done()
-	// Delay the turn exit so a missing join is observable: without it, the
-	// backend closes before the turn records that it returned.
-	time.Sleep(50 * time.Millisecond)
+	close(c.canceled)
+	<-c.release
 	c.rec.add("turn-returned")
 	return llmStep{}, ctx.Err()
 }
@@ -367,9 +368,68 @@ func dialTextSession(t *testing.T, bridge *Bridge) *websocket.Conn {
 		}
 	}))
 	t.Cleanup(httpServer.Close)
+	return dialTextTestWebSocket(t, "ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+}
+
+// A net.Pipe keeps the HTTP upgrade and WebSocket I/O inside the virtual clock.
+func dialTextSessionInMemory(t *testing.T, bridge *Bridge) *websocket.Conn {
+	client, server := net.Pipe()
+	ln := &textTestListener{incoming: make(chan net.Conn, 1), closed: make(chan struct{})}
+	ln.incoming <- server
+	srv := &http.Server{
+		ReadHeaderTimeout: 5 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := bridge.ServeTextSession(r.Context(), w, r); err != nil {
+				t.Errorf("ServeTextSession() error = %v", err)
+			}
+		}),
+	}
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("Serve() error = %v", err)
+		}
+	})
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = srv.Close()
+		wg.Wait()
+	})
+	var dialed atomic.Bool
+	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		if dialed.Swap(true) {
+			return nil, errors.New("unexpected second text test connection")
+		}
+		return client, nil
+	}}
+	return dialTextTestWebSocket(t, "ws://text.test", &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}})
+}
+
+type textTestListener struct {
+	incoming chan net.Conn
+	closed   chan struct{}
+}
+
+func (l *textTestListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.incoming:
+		return c, nil
+	case <-l.closed:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *textTestListener) Close() error {
+	close(l.closed)
+	return nil
+}
+
+func (l *textTestListener) Addr() net.Addr { return &net.TCPAddr{} }
+
+func dialTextTestWebSocket(t *testing.T, url string, opts *websocket.DialOptions) *websocket.Conn {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	t.Cleanup(cancel)
-	conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+	conn, resp, err := websocket.Dial(ctx, url, opts)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}

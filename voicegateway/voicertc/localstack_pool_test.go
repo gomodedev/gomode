@@ -35,6 +35,17 @@ func poolTestConfig(model string) voicegateway.PipelineConfig {
 	}}}
 }
 
+// waitObservedContext signals when acquire reaches its cancellation select.
+type waitObservedContext struct {
+	context.Context
+	waiting func()
+}
+
+func (c *waitObservedContext) Done() <-chan struct{} {
+	c.waiting()
+	return c.Context.Done()
+}
+
 func TestLocalStackPool(t *testing.T) {
 	t.Parallel()
 	t.Run("native audio defers initialization", func(t *testing.T) {
@@ -451,11 +462,22 @@ func TestLocalStackPool(t *testing.T) {
 			t.Fatal("startup did not begin")
 		}
 		// A session waits on the startup, so the other choice waits too.
-		waitCtx, stopWaiting := context.WithTimeout(ctx, 200*time.Millisecond)
-		_, err := next.acquire(waitCtx)
+		waitCtx, stopWaiting := context.WithCancel(ctx)
+		t.Cleanup(stopWaiting)
+		waiting := make(chan struct{})
+		observed := &waitObservedContext{Context: waitCtx, waiting: sync.OnceFunc(func() { close(waiting) })}
+		competing := make(chan error, 1)
+		go func() { _, err := next.acquire(observed); competing <- err }()
+		select {
+		case <-waiting:
+		case err := <-competing:
+			t.Fatalf("other choice failed to wait beside an attended startup: %v", err)
+		case <-ctx.Done():
+			t.Fatal("other choice did not wait for the occupied slot")
+		}
 		stopWaiting()
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("other choice beside an attended startup = %v", err)
+		if err := <-competing; !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancel waiting choice: %v", err)
 		}
 		p.mu.Lock()
 		preempted := l.loading.preempted
