@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/voicegateway"
 )
 
@@ -47,7 +48,7 @@ func TestStartRestartWatch(t *testing.T) {
 			}
 			cfg := filepath.Join(dir, tc.file)
 			ctx, cancel := context.WithCancelCause(t.Context())
-			w, err := startRestartWatch(ctx, path, filepath.Join(dir, envFileName), cancel)
+			w, err := startRestartWatch(ctx, testlog.New(t), path, filepath.Join(dir, envFileName), cancel)
 			if err != nil {
 				cancel(nil)
 				t.Fatal(err)
@@ -87,7 +88,7 @@ func TestStartRestartWatch(t *testing.T) {
 		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "missing", "nested")
 		ctx, cancel := context.WithCancelCause(t.Context())
-		w, err := startRestartWatch(ctx, filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
+		w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
 		if err != nil {
 			cancel(nil)
 			t.Fatal(err)
@@ -115,7 +116,7 @@ func TestStartRestartWatch(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		t.Cleanup(func() { cancel(nil) })
 		dir := t.TempDir()
-		w, err := startRestartWatch(ctx, filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
+		w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +140,7 @@ func TestStartRestartWatch(t *testing.T) {
 			t.Fatal(err)
 		}
 		ctx, cancel := context.WithCancelCause(t.Context())
-		w, err := startRestartWatch(ctx, filepath.Join(cfgDir, "config.toml"), envPath, cancel)
+		w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(cfgDir, "config.toml"), envPath, cancel)
 		if err != nil {
 			cancel(nil)
 			t.Fatal(err)
@@ -247,7 +248,7 @@ func TestRestartWatchProcess(t *testing.T) { //nolint:paralleltest // Subprocess
 	}
 	ctx, cancel := context.WithCancelCause(t.Context())
 	// A missing config directory must not disable executable watching.
-	w, err := startRestartWatch(ctx, filepath.Join(dir, "missing", "config.toml"), filepath.Join(dir, "missing", envFileName), cancel)
+	w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "missing", "config.toml"), filepath.Join(dir, "missing", envFileName), cancel)
 	if err != nil {
 		cancel(nil)
 		t.Fatal(err)

@@ -19,6 +19,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -39,7 +41,7 @@ func testUpdater(t *testing.T, version string, rel release, data []byte) *Update
 		r.Header.Set("Authorization", "Bearer metadata-secret")
 		return response(encoded), nil
 	})}
-	u, err := New(Config{Repository: "owner/app", CurrentVersion: version, Binary: "app", ArchiveName: func(string) string { return "app_linux_amd64.tar.gz" }, Client: client})
+	u, err := New(Config{Repository: "owner/app", CurrentVersion: version, Binary: "app", ArchiveName: func(string) string { return "app_linux_amd64.tar.gz" }, Client: client, Log: testlog.New(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +79,7 @@ func TestUpdater(t *testing.T) {
 			if runtime.GOOS != "windows" {
 				t.Skip("Windows task launch context")
 			}
-			u, err := New(Config{Repository: "owner/app", CurrentVersion: Version(), Binary: "app.exe", ArchiveName: func(string) string { return "app.zip" }, TaskName: "\\GoModeMissingTask-" + strconv.Itoa(os.Getpid())})
+			u, err := New(Config{Repository: "owner/app", CurrentVersion: Version(), Binary: "app.exe", ArchiveName: func(string) string { return "app.zip" }, Log: testlog.New(t), TaskName: "\\GoModeMissingTask-" + strconv.Itoa(os.Getpid())})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/gomodedev/gomode/internal/pairing"
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/oauth"
 	v5 "github.com/gomodedev/gomode/oauth/oauthserver/data/v5"
 	"github.com/gomodedev/gomode/oauth/oauthverify"
@@ -67,7 +68,7 @@ func TestServer(t *testing.T) {
 		t.Run("legacy generation survives upgrade but never retirement or failed cleanup", func(t *testing.T) {
 			path := t.TempDir() + "/oauth.json"
 			host := &accountAuthorityHost{user: testUser()}
-			cfg := &ServerConfig{RefreshTokenStorePath: path, Session: host}
+			cfg := &ServerConfig{Log: testlog.New(t), RefreshTokenStorePath: path, Session: host}
 			s := newTestServer(t, cfg)
 			h := newTestServerHandler(s)
 			client := registerOAuthTestClient(t, h, "Client", []string{"https://claude.example.com/callback"})
@@ -114,7 +115,7 @@ func TestServer(t *testing.T) {
 		t.Run("revocation between consent read and publication cannot create a code", func(t *testing.T) {
 			host := &accountAuthorityHost{user: testUser()}
 			gate := &accountAuthorityGate{SessionManager: host, entered: make(chan struct{}), release: make(chan struct{})}
-			s := newTestServer(t, &ServerConfig{Session: gate})
+			s := newTestServer(t, &ServerConfig{Log: testlog.New(t), Session: gate})
 			t.Cleanup(s.Close)
 			h := newTestServerHandler(s)
 			client := registerOAuthTestClient(t, h, "Client", []string{"https://claude.example.com/callback"})
@@ -148,7 +149,7 @@ func TestServer(t *testing.T) {
 					host.user.Authority = "original"
 					gate := &accountAuthorityGate{SessionManager: host, entered: make(chan struct{}), release: make(chan struct{})}
 					path := t.TempDir() + "/oauth.json"
-					s := newTestServer(t, &ServerConfig{Session: gate, RefreshTokenStorePath: path})
+					s := newTestServer(t, &ServerConfig{Log: testlog.New(t), Session: gate, RefreshTokenStorePath: path})
 					t.Cleanup(s.Close)
 					h := newTestServerHandler(s)
 					client := registerOAuthTestClient(t, h, "Client", []string{"https://claude.example.com/callback"})
@@ -285,14 +286,14 @@ func TestServer(t *testing.T) {
 	t.Run("issuer configuration validates secure and local origins", func(t *testing.T) {
 		t.Parallel()
 		for _, issuer := range []string{"", "http://public.example", "https://user@example.com", "https://example.com/path", "https://example.com?", "https://example.com?query=1", "https://example.com#"} {
-			cfg := &ServerConfig{Issuer: issuer}
+			cfg := &ServerConfig{Log: testlog.New(t), Issuer: issuer}
 			applyTestServerDefaults(t, cfg)
 			cfg.Issuer = issuer
 			if _, err := NewServer(*cfg); err == nil {
 				t.Errorf("NewServer Issuer %q error = nil", issuer)
 			}
 		}
-		cfg := &ServerConfig{Issuer: "http://127.0.0.1:2242"}
+		cfg := &ServerConfig{Log: testlog.New(t), Issuer: "http://127.0.0.1:2242"}
 		applyTestServerDefaults(t, cfg)
 		s, err := NewServer(*cfg)
 		if err != nil {
@@ -306,7 +307,7 @@ func TestServer(t *testing.T) {
 		if canonical != "HTTPS://Example.COM:443" {
 			t.Fatalf("canonical issuer = %q", canonical)
 		}
-		invalidPrefix := &ServerConfig{ClientIDPrefix: "https://issued.example/"}
+		invalidPrefix := &ServerConfig{Log: testlog.New(t), ClientIDPrefix: "https://issued.example/"}
 		applyTestServerDefaults(t, invalidPrefix)
 		invalidPrefix.ClientIDPrefix = "https://issued.example/"
 		if _, err := NewServer(*invalidPrefix); err == nil {
@@ -354,7 +355,7 @@ func TestServer(t *testing.T) {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
 
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		s, err := NewServer(cfg)
 		if err != nil {
 			t.Fatalf("NewServer: %v", err)
@@ -431,7 +432,7 @@ func TestServer(t *testing.T) {
 			t.Fatalf("IssueAccessToken: %v", err)
 		}
 
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.Issuer = issuer
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -479,7 +480,7 @@ func TestServer(t *testing.T) {
 	t.Run("foreign-resource state introduced after startup fails closed", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		s := newTestServer(t, &ServerConfig{Session: &testSessionManager{users: map[string]oauth.User{user.ID: user}}})
+		s := newTestServer(t, &ServerConfig{Log: testlog.New(t), Session: &testSessionManager{users: map[string]oauth.User{user.ID: user}}})
 		const (
 			accessGrantID = "foreign-access-grant"
 			clientID      = "foreign-client"
@@ -527,7 +528,7 @@ func TestServer(t *testing.T) {
 	t.Run("introspection authenticates and scopes callers", func(t *testing.T) {
 		t.Parallel()
 		user := testUser()
-		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{user})
+		cfg := testFlowServerConfig(t, t.TempDir()+"/oauth.json", []oauth.User{user})
 		cfg.IntrospectionAuth = func(r *http.Request) (IntrospectionPrincipal, bool) {
 			clientID := r.Header.Get("X-Test-Introspection-Client")
 			return IntrospectionPrincipal{ClientID: clientID}, clientID != ""
@@ -636,7 +637,7 @@ func TestServer(t *testing.T) {
 	t.Run("login adapter redirects unauthenticated authorize request", func(t *testing.T) {
 		t.Parallel()
 
-		s := newTestServer(t, &ServerConfig{UI: &testAuthorizationUI{loginURL: "/auth/github/start?next=%2Foauth%2Fauthorize%3Fclient_id%3Dabc"}})
+		s := newTestServer(t, &ServerConfig{Log: testlog.New(t), UI: &testAuthorizationUI{loginURL: "/auth/github/start?next=%2Foauth%2Fauthorize%3Fclient_id%3Dabc"}})
 		h := newTestServerHandler(s)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/oauth/authorize?client_id=abc", http.NoBody)
@@ -1730,7 +1731,7 @@ func TestServer(t *testing.T) {
 			var handler http.Handler
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r) }))
 			t.Cleanup(ts.Close)
-			s := newTestServer(t, &ServerConfig{Issuer: ts.URL, Session: host})
+			s := newTestServer(t, &ServerConfig{Log: testlog.New(t), Issuer: ts.URL, Session: host})
 			handler = newTestServerHandler(s)
 			t.Cleanup(s.Close)
 			token, err := s.IssueNarrowToken(host.user, "voice-gateway", "voice.session", time.Minute)
@@ -1759,7 +1760,7 @@ func TestServer(t *testing.T) {
 		t.Run("retired account authority", func(t *testing.T) {
 			host := &accountAuthorityHost{user: testUser()}
 			stale := host.user
-			s := newTestServer(t, &ServerConfig{Session: host})
+			s := newTestServer(t, &ServerConfig{Log: testlog.New(t), Session: host})
 			t.Cleanup(s.Close)
 			host.retire()
 			token, err := s.IssueNarrowToken(stale, "voice-gateway", "voice.session", time.Minute)
@@ -1776,7 +1777,7 @@ func TestServer(t *testing.T) {
 			}))
 			t.Cleanup(ts.Close)
 			user := oauth.User{ID: "user-1", Username: "alice"}
-			s := newTestServer(t, &ServerConfig{Issuer: ts.URL, Session: &testSessionManager{users: map[string]oauth.User{user.ID: user}}})
+			s := newTestServer(t, &ServerConfig{Log: testlog.New(t), Issuer: ts.URL, Session: &testSessionManager{users: map[string]oauth.User{user.ID: user}}})
 			handler = newTestServerHandler(s)
 			token, err := s.IssueNarrowToken(user, "voice-gateway", "voice.session", 5*time.Minute)
 			if err != nil {
@@ -1823,7 +1824,7 @@ func TestTransactionalOAuthMutations(t *testing.T) {
 	t.Run("configured state path has one server owner", func(t *testing.T) {
 		t.Parallel()
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, path, []oauth.User{testUser()})
 		first, err := NewServer(cfg)
 		if err != nil {
 			t.Fatalf("first NewServer: %v", err)
@@ -2586,7 +2587,7 @@ func TestDeviceAuthorization(t *testing.T) {
 		t.Parallel()
 
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, path, []oauth.User{testUser()})
 		cfg.UI = &testAuthorizationUI{loginURL: "/auth/login"}
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -4050,7 +4051,7 @@ func testUser() oauth.User {
 }
 
 func newTestServer(t *testing.T, cfgs ...*ServerConfig) *Server {
-	cfg := &ServerConfig{}
+	cfg := &ServerConfig{Log: testlog.New(t)}
 	if len(cfgs) > 0 && cfgs[0] != nil {
 		cfg = cfgs[0]
 	}
@@ -4074,6 +4075,7 @@ func newTestFlowServerWithAudit(t *testing.T, path string, users []oauth.User, a
 	session := &testSessionManager{users: usersByID}
 	ui := &captureAuthorizationUI{}
 	cfg := &ServerConfig{
+		Log:                   testlog.New(t),
 		RefreshTokenStorePath: path,
 		Session:               session,
 		UI:                    ui,
@@ -4758,7 +4760,7 @@ func TestClientLifecyclePolicy(t *testing.T) {
 
 	t.Run("refresh eligibility is rechecked inside rotation", func(t *testing.T) {
 		t.Parallel()
-		server := newTestServer(t, &ServerConfig{Session: &testSessionManager{users: map[string]oauth.User{"user": {ID: "user"}}}})
+		server := newTestServer(t, &ServerConfig{Log: testlog.New(t), Session: &testSessionManager{users: map[string]oauth.User{"user": {ID: "user"}}}})
 		now := time.Now()
 		server.state.Clients["client"] = Client{ID: "client", RedirectURIs: []string{"https://example.com/callback"}, GrantTypes: []string{oauth.GrantAuthorizationCode}}
 		server.state.Grants["grant"] = v5.Grant{ID: "grant", UserID: "user", ClientID: "client", Resource: testResourceURL, ExpiresAt: now.Add(time.Hour)}
@@ -5080,7 +5082,7 @@ func TestEndSession(t *testing.T) {
 		t.Parallel()
 
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, path, []oauth.User{testUser()})
 		cfg.UI = &testAuthorizationUI{loginURL: "/auth/login"}
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5104,7 +5106,7 @@ func TestEndSession(t *testing.T) {
 
 		user := testUser()
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.Session = &testSessionManager{
 			users:       map[string]oauth.User{user.ID: user},
 			endRedirect: "https://custom.example.com/goodbye",
@@ -5177,6 +5179,7 @@ func TestEndSession(t *testing.T) {
 func newTestServerHandlerOnly(t *testing.T) http.Handler {
 	path := t.TempDir() + "/oauth.json"
 	cfg := &ServerConfig{
+		Log:                   testlog.New(t),
 		RefreshTokenStorePath: path,
 	}
 	applyTestServerDefaults(t, cfg)
@@ -5382,7 +5385,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5423,7 +5426,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5461,7 +5464,7 @@ func TestRateLimiting(t *testing.T) {
 	t.Run("unknown client IDs share a port-independent IP key", func(t *testing.T) {
 		t.Parallel()
 		lim := &inspectRateLimiter{}
-		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5490,7 +5493,7 @@ func TestRateLimiting(t *testing.T) {
 	t.Run("registered client keys ignore source ports", func(t *testing.T) {
 		t.Parallel()
 		limiter := &inspectRateLimiter{}
-		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		cfg.RateLimiter = limiter
 		server, err := NewServer(cfg)
 		if err != nil {
@@ -5521,7 +5524,7 @@ func TestRateLimiting(t *testing.T) {
 		t.Parallel()
 
 		lim := &inspectRateLimiter{}
-		cfg := testFlowServerConfig(t.TempDir()+"/oauth.json", []oauth.User{testUser()})
+		cfg := testFlowServerConfig(t, t.TempDir()+"/oauth.json", []oauth.User{testUser()})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5552,7 +5555,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5582,7 +5585,7 @@ func TestRateLimiting(t *testing.T) {
 		user := testUser()
 		lim := &inspectRateLimiter{}
 		path := t.TempDir() + "/oauth.json"
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5619,7 +5622,7 @@ func TestRateLimiting(t *testing.T) {
 		permissive.Close()
 
 		limiter := &tieredCountRateLimiter{ipMax: 3, clientMax: 1}
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = limiter
 		server, err := NewServer(cfg)
 		if err != nil {
@@ -5657,7 +5660,7 @@ func TestRateLimiting(t *testing.T) {
 		registered := registerOAuthTestClient(t, permissiveHandler, "Client", []string{"https://example.com/callback"})
 		permissive.Close()
 
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = &countRateLimiter{max: 1}
 		server, err := NewServer(cfg)
 		if err != nil {
@@ -5694,7 +5697,7 @@ func TestRateLimiting(t *testing.T) {
 		permissive.Close()
 
 		// Then create a new server from the same store but with a deny limiter.
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = &denyRateLimiter{}
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5741,7 +5744,7 @@ func TestRateLimiting(t *testing.T) {
 		// Create a limited server from the same store: allow only one token
 		// request per source IP and registered client.
 		lim := &countRateLimiter{max: 1}
-		cfg := testFlowServerConfig(path, []oauth.User{user})
+		cfg := testFlowServerConfig(t, path, []oauth.User{user})
 		cfg.RateLimiter = lim
 		s, err := NewServer(cfg)
 		if err != nil {
@@ -5848,12 +5851,13 @@ func (l *tieredCountRateLimiter) Allow(key string) bool {
 
 // testFlowServerConfig returns a ServerConfig pre-populated with test defaults,
 // user flow callbacks, and a consent renderer.
-func testFlowServerConfig(path string, users []oauth.User) ServerConfig {
+func testFlowServerConfig(tb testing.TB, path string, users []oauth.User) ServerConfig {
 	usersByID := make(map[string]oauth.User, len(users))
 	for _, user := range users {
 		usersByID[user.ID] = user
 	}
 	cfg := ServerConfig{
+		Log:                     testlog.New(tb),
 		RefreshTokenStorePath:   path,
 		KeyID:                   "test-key",
 		KeyPEM:                  testSigningKeyPEM,

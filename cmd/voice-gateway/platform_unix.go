@@ -7,12 +7,13 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 
 	"golang.org/x/sys/unix"
 )
 
-func startPlatformShutdown(context.CancelCauseFunc) (func() error, error) {
+func startPlatformShutdown(*slog.Logger, context.CancelCauseFunc) (func() error, error) {
 	return func() error { return nil }, nil
 }
 

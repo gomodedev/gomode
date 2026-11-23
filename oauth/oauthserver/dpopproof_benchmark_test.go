@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/oauth"
 	v5 "github.com/gomodedev/gomode/oauth/oauthserver/data/v5"
 )
@@ -16,6 +17,7 @@ func BenchmarkDPoPBearerAuth(b *testing.B) {
 	user := testUser()
 	session := &testSessionManager{users: map[string]oauth.User{user.ID: user}}
 	server, err := NewServer(ServerConfig{
+		Log:                     testlog.New(b),
 		KeyPEM:                  testSigningKeyPEM,
 		KeyID:                   "benchmark-key",
 		Issuer:                  testBaseURL,

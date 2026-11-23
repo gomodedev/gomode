@@ -7,10 +7,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 func BenchmarkOAuthRegistrationValidation(b *testing.B) {
 	server, err := NewServer(ServerConfig{
+		Log:             testlog.New(b),
 		KeyPEM:          testSigningKeyPEM,
 		KeyID:           "benchmark-key",
 		Issuer:          testBaseURL,

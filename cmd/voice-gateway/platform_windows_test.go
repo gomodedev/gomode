@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"golang.org/x/sys/windows"
 )
 
@@ -33,7 +34,7 @@ func TestShutdownWindowState(t *testing.T) {
 		cleaned := make(chan struct{})
 		close(cleaned)
 		var stopped atomic.Bool
-		s := shutdownWindowState{cancel: context.CancelCauseFunc(func(error) { stopped.Store(true) }), cleaned: cleaned}
+		s := shutdownWindowState{log: testlog.New(t), cancel: context.CancelCauseFunc(func(error) { stopped.Store(true) }), cleaned: cleaned}
 		if err := s.run(stop, wake, make(chan struct{})); err != nil {
 			t.Fatal(err)
 		}

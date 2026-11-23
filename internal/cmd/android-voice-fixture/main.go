@@ -146,7 +146,7 @@ binding.then(document => {
 		f.mu.Lock()
 		f.stats.FrontendPublished++
 		f.mu.Unlock()
-		writeJSON(w, map[string]bool{"ok": true})
+		f.writeJSON(w, map[string]bool{"ok": true})
 	})
 	return mux
 }
@@ -186,7 +186,7 @@ func (f *fixture) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.log.InfoContext(r.Context(), "settings", "path", r.URL.Path)
-	writeJSON(w, f.settingsDocument())
+	f.writeJSON(w, f.settingsDocument())
 }
 
 // mcpRequest is the subset of a JSON-RPC 2.0 request the fixture answers.
@@ -234,24 +234,24 @@ func (f *fixture) handleMCP(w http.ResponseWriter, r *http.Request) {
 			CacheScope: mcp.CacheScopePrivate,
 		}
 	default:
-		writeJSON(w, map[string]any{
+		f.writeJSON(w, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      req.ID,
 			"error":   map[string]any{"code": -32601, "message": "method not found: " + req.Method},
 		})
 		return
 	}
-	writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+	f.writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
 }
 
 func (f *fixture) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"status": "ok"})
+	f.writeJSON(w, map[string]any{"status": "ok"})
 }
 
 // handleChoices advertises one composable choice with every stage ownership.
 func (f *fixture) handleChoices(w http.ResponseWriter, _ *http.Request) {
 	client, gateway := voicev2.SpeechLocationClient, voicev2.SpeechLocationGateway
-	writeJSON(w, voicev2.VoiceChoicesResp{
+	f.writeJSON(w, voicev2.VoiceChoicesResp{
 		Choices: []voicev2.VoiceChoice{{
 			ID:         "fixture",
 			Label:      "Fixture text",
@@ -356,10 +356,10 @@ func writeMessage(ctx context.Context, log *slog.Logger, conn *websocket.Conn, m
 	return true
 }
 
-func writeJSON(w http.ResponseWriter, body any) {
+func (f *fixture) writeJSON(w http.ResponseWriter, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		slog.Error("write JSON response", "err", err)
+		f.log.Error("write JSON response", "err", err)
 	}
 }
 
@@ -410,7 +410,8 @@ func main() {
 	rtcIP := flag.String("rtc-ip", "", "host candidate address visible from the emulator (10.0.2.2)")
 	flag.Parse()
 	f := &fixture{rtcIP: *rtcIP}
-	// The recorder exposes the bridge's session cleanup causes to tests.
+	// The recorder exposes the bridge's session cleanup causes to tests. genai and
+	// genaipy log through the default logger.
 	log := slog.New(cleanupRecorder{Handler: slog.NewTextHandler(os.Stderr, nil), fixture: f})
 	slog.SetDefault(log)
 	f.log = log

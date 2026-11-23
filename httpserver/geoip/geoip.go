@@ -221,7 +221,7 @@ func loadOriginCache(ctx context.Context, log *slog.Logger, cacheDir string) *or
 	if cacheDir == "" {
 		return nil
 	}
-	cache, err := openOriginCache(filepath.Join(cacheDir, "ip-origins.json"))
+	cache, err := openOriginCache(ctx, log, filepath.Join(cacheDir, "ip-origins.json"))
 	if err != nil {
 		log.WarnContext(ctx, "failed to load IP origin cache", "err", err)
 		return nil

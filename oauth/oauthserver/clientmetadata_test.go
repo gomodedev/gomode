@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/oauth"
 )
 
@@ -354,6 +355,7 @@ func TestPrivateKeyJWTClientAuthentication(t *testing.T) {
 	user := testUser()
 	ui := &captureAuthorizationUI{}
 	cfg := &ServerConfig{
+		Log:                   testlog.New(t),
 		RefreshTokenStorePath: statePath,
 		Session:               &testSessionManager{users: map[string]oauth.User{user.ID: user}},
 		UI:                    ui,
@@ -462,6 +464,7 @@ func TestPrivateKeyJWTClientAuthentication(t *testing.T) {
 func TestClientMetadataRequiresDurableStore(t *testing.T) {
 	t.Parallel()
 	server, err := NewServer(ServerConfig{
+		Log:                     testlog.New(t),
 		KeyPEM:                  testSigningKeyPEM,
 		KeyID:                   "test-key",
 		Issuer:                  testBaseURL,

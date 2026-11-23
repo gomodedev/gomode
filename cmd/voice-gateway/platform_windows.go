@@ -34,6 +34,7 @@ const (
 )
 
 type shutdownWindowState struct {
+	log     *slog.Logger
 	cancel  context.CancelCauseFunc
 	cleaned <-chan struct{}
 }
@@ -43,7 +44,7 @@ func (s *shutdownWindowState) windowProc(hwnd uintptr, msg uint32, wp, lp uintpt
 		return 1 // Allow the session to end; WM_ENDSESSION confirms whether it will.
 	}
 	if msg == wmClose || (msg == wmEndSession && wp != 0) {
-		slog.Info("Windows requested shutdown", "message", msg)
+		s.log.Info("Windows requested shutdown", "message", msg)
 		s.cancel(nil)
 		if msg == wmEndSession {
 			// Windows can end the session once this callback returns. Give cleanup
@@ -78,7 +79,7 @@ type windowMessage struct {
 	Private        uint32
 }
 
-func startPlatformShutdown(cancel context.CancelCauseFunc) (func() error, error) {
+func startPlatformShutdown(log *slog.Logger, cancel context.CancelCauseFunc) (func() error, error) {
 	// The installer signals this event directly: no window discovery or native
 	// interop is needed in PowerShell. Local keeps it in the signed-in session,
 	// and the PID distinguishes gateway processes in that session.
@@ -96,7 +97,7 @@ func startPlatformShutdown(cancel context.CancelCauseFunc) (func() error, error)
 	if err != nil {
 		return nil, errors.Join(err, windows.CloseHandle(stop))
 	}
-	s := &shutdownWindowState{cancel: cancel, cleaned: cleaned}
+	s := &shutdownWindowState{log: log, cancel: cancel, cleaned: cleaned}
 	ready := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
@@ -164,7 +165,7 @@ func (s *shutdownWindowState) run(stop, wake windows.Handle, ready chan<- struct
 		r, _, e := msgWaitForMultipleObjects.Call(2, uintptr(unsafe.Pointer(&handles[0])), 0, windows.INFINITE, 0x04ff) // #nosec G103 -- QS_ALLINPUT; handles contains two live HANDLEs, matching the count argument.
 		switch r {
 		case windows.WAIT_OBJECT_0:
-			slog.Info("Windows shutdown event signaled")
+			s.log.Info("Windows shutdown event signaled")
 			s.cancel(nil)
 		case windows.WAIT_OBJECT_0 + 1, windows.WAIT_OBJECT_0 + 2:
 			var msg windowMessage

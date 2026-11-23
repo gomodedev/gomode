@@ -99,7 +99,7 @@ func (f *fixture) handleStats(w http.ResponseWriter, _ *http.Request) {
 	stats.RTCUserMessages = append([]string{}, f.stats.RTCUserMessages...)
 	stats.ProductionCleanups = append([]string{}, f.stats.ProductionCleanups...)
 	f.mu.Unlock()
-	writeJSON(w, stats)
+	f.writeJSON(w, stats)
 }
 
 func (f *fixture) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +117,7 @@ func (f *fixture) handleConfig(w http.ResponseWriter, r *http.Request) {
 		f.frontend.setLocked(*cfg.FrontendBlocked)
 	}
 	f.mu.Unlock()
-	writeJSON(w, map[string]bool{"ok": true})
+	f.writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (f *fixture) handleFrontend(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +126,7 @@ func (f *fixture) handleFrontend(w http.ResponseWriter, r *http.Request) {
 	released := f.waitLocked(r, &f.frontend)
 	f.mu.Unlock()
 	if released {
-		writeJSON(w, []any{})
+		f.writeJSON(w, []any{})
 	}
 }
 
@@ -142,7 +142,7 @@ func (f *fixture) handleOffer(w http.ResponseWriter, r *http.Request) {
 		voiceapi.WriteError(f.log, w, http.StatusBadRequest, voiceapi.CodeVoiceOfferFailed, "invalid fixture offer")
 		return
 	}
-	writeJSON(w, voicev2.VoiceRTCAnswerResp{SDP: answer, SessionID: id})
+	f.writeJSON(w, voicev2.VoiceRTCAnswerResp{SDP: answer, SessionID: id})
 }
 
 func (f *fixture) handleClose(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +152,7 @@ func (f *fixture) handleClose(w http.ResponseWriter, r *http.Request) {
 	if peer != nil {
 		peer.close()
 	}
-	writeJSON(w, map[string]string{"status": "ok"})
+	f.writeJSON(w, map[string]string{"status": "ok"})
 }
 
 func (f *fixture) answer(ctx context.Context, offer string) (string, string, error) {
@@ -534,7 +534,7 @@ func (f *fixture) handleTool(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, map[string]bool{"ok": true})
+	f.writeJSON(w, map[string]bool{"ok": true})
 }
 
 // rtcChannelLocked returns a connected WebRTC data channel, or nil. f.mu must be held.
@@ -566,7 +566,7 @@ func (f *fixture) handleInterrupt(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, map[string]bool{"ok": true})
+	f.writeJSON(w, map[string]bool{"ok": true})
 }
 
 // handleDrop closes every WebRTC peer without the client's close request, as a
@@ -582,5 +582,5 @@ func (f *fixture) handleDrop(w http.ResponseWriter, _ *http.Request) {
 	for _, peer := range peers {
 		peer.close()
 	}
-	writeJSON(w, map[string]bool{"ok": true})
+	f.writeJSON(w, map[string]bool{"ok": true})
 }

@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -19,7 +20,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "task" {
 		taskName = os.Args[2]
 	}
-	u, err := autoupdate.New(autoupdate.Config{Repository: "gomodedev/gomode", CurrentVersion: autoupdate.Version(), Binary: "fixture", TaskName: taskName, ArchiveName: func(string) string { return "fixture.tar.gz" }})
+	u, err := autoupdate.New(autoupdate.Config{Repository: "gomodedev/gomode", CurrentVersion: autoupdate.Version(), Binary: "fixture", TaskName: taskName, ArchiveName: func(string) string { return "fixture.tar.gz" }, Log: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 	if err != nil {
 		panic(err)
 	}

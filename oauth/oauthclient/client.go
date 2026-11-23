@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
@@ -170,9 +169,7 @@ func doTokenExchange(ctx context.Context, c oauth.ClientConfig, body url.Values)
 	jsonErr := json.Unmarshal(data, &tr)
 
 	if resp.StatusCode != http.StatusOK || (jsonErr == nil && tr.Error != "") {
-		errResp := buildRetrieveError(resp.StatusCode, data, jsonErr == nil, &tr)
-		slog.DebugContext(ctx, "oauth token exchange error", "status", resp.StatusCode, "body", string(data))
-		return nil, errResp
+		return nil, buildRetrieveError(resp.StatusCode, data, jsonErr == nil, &tr)
 	}
 
 	// JSON unmarshal succeeded and no error field: use parsed response.
@@ -184,7 +181,6 @@ func doTokenExchange(ctx context.Context, c oauth.ClientConfig, body url.Values)
 	}
 
 	// JSON unmarshal failed: fall back to form-urlencoded parsing.
-	slog.DebugContext(ctx, "oauth token json parse failed, trying form-encoded fallback", "err", jsonErr)
 	return parseFormEncodedToken(data)
 }
 

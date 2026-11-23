@@ -169,6 +169,8 @@ type ServerConfig struct {
 	IntrospectionAuth     IntrospectionAuthenticator
 	ClientMetadataNetwork ClientMetadataNetwork
 	ClientMetadataRootCAs *x509.CertPool
+	// Log receives request failures the client cannot see. It is required.
+	Log *slog.Logger
 }
 
 // Server stores OAuth state for remote clients.
@@ -179,6 +181,7 @@ type ServerConfig struct {
 // JWTs. Refresh tokens are resource-scoped opaque tokens, persisted as hashes,
 // and rotated on every refresh grant.
 type Server struct {
+	log         *slog.Logger
 	mu          sync.Mutex
 	state       *Store
 	parRequests map[string]v5.ConsentParams // short-lived pushed authorization requests (RFC 9126)
@@ -238,6 +241,9 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 	if c.Session == nil {
 		return nil, errors.New("oauth: Session is required")
 	}
+	if c.Log == nil {
+		return nil, errors.New("oauth: Log is required")
+	}
 	if c.UI == nil {
 		return nil, errors.New("oauth: UI is required")
 	}
@@ -267,6 +273,7 @@ func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerCon
 		clientMetadata = newClientMetadataResolver(c.ClientMetadataNetwork, c.ClientMetadataRootCAs)
 	}
 	return &Server{
+		log:                     c.Log,
 		state:                   state,
 		parRequests:             map[string]v5.ConsentParams{},
 		tokens:                  tokens,
@@ -589,12 +596,12 @@ func (s *Server) handleOAuthMetadata(w http.ResponseWriter, r *http.Request) {
 		metadata.TokenEndpointAuthMethodsSupported = append(metadata.TokenEndpointAuthMethodsSupported, oauth.TokenEndpointAuthPrivateKeyJWT)
 		metadata.RevocationEndpointAuthMethodsSupported = append(metadata.RevocationEndpointAuthMethodsSupported, oauth.TokenEndpointAuthPrivateKeyJWT)
 	}
-	writeJSONResponse(w, &metadata)
+	s.writeJSONResponse(w, &metadata)
 }
 
 func (s *Server) handleOAuthJWKS(w http.ResponseWriter, r *http.Request) {
 	resp := oauth.JWKSet{Keys: s.tokens.JWK()}
-	writeJSONResponse(w, &resp)
+	s.writeJSONResponse(w, &resp)
 }
 
 func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request) {
@@ -609,11 +616,11 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 			w.WriteHeader(http.StatusFound)
 			return
 		}
-		oauth.WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
 	}
 	if err := validateOAuthParameters(r.URL.Query(), nil); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if !s.rateLimitIP(w, r) {
@@ -628,7 +635,7 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		}
 		s.mu.Unlock()
 		if !ok || time.Now().After(par.ExpiresAt) {
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_request_uri", "invalid or expired request_uri")
+			oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request_uri", "invalid or expired request_uri")
 			return
 		}
 		values := url.Values{}
@@ -637,7 +644,7 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 		}
 		client, err := s.validateAuthorizeForm(r.Context(), values)
 		if err != nil {
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		s.renderConsent(w, r, user, values, &client)
@@ -645,7 +652,7 @@ func (s *Server) handleOAuthAuthorizeGET(w http.ResponseWriter, r *http.Request)
 	}
 	client, err := s.validateAuthorizeRequest(r)
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	s.renderConsent(w, r, user, cloneURLValues(r.URL.Query()), &client)
@@ -656,8 +663,8 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oaut
 	scope, _ := s.normalizeScope(values.Get("scope"))
 	consentToken, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "generate oauth consent token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not start consent")
+		s.log.WarnContext(r.Context(), "generate oauth consent token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not start consent")
 		return
 	}
 	params := make(map[string]string)
@@ -678,12 +685,12 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oaut
 		return true
 	})
 	if err != nil {
-		slog.WarnContext(r.Context(), "save oauth consent", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not start consent")
+		s.log.WarnContext(r.Context(), "save oauth consent", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not start consent")
 		return
 	}
 	if capacityExceeded {
-		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending authorization consents")
+		oauth.WriteError(s.log, w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending authorization consents")
 		return
 	}
 	data := ConsentPageData{
@@ -701,13 +708,13 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, user oaut
 		ScopeItems:             s.scopeItems(scope),
 	}
 	if err := s.ui.RenderOAuthConsent(w, &data); err != nil {
-		slog.WarnContext(r.Context(), "render oauth consent", "err", err)
+		s.log.WarnContext(r.Context(), "render oauth consent", "err", err)
 	}
 }
 
 // handleOAuthPAR handles RFC 9126 pushed authorization requests.
 func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
-	if !parseOAuthForm(w, r, nil) {
+	if !s.parseOAuthForm(w, r, nil) {
 		return
 	}
 	values := r.PostForm
@@ -716,20 +723,20 @@ func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := s.validateAuthorizeForm(r.Context(), values)
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if !s.rateLimitResolvedClient(w, r, &client) {
 		return
 	}
 	if err := s.authenticateResolvedOAuthClient(r, &client, s.issuer+"/oauth/par"); err != nil {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
 		return
 	}
 	requestURI, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "generate par request_uri", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not generate request_uri")
+		s.log.WarnContext(r.Context(), "generate par request_uri", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not generate request_uri")
 		return
 	}
 	requestURI = "urn:ietf:params:oauth:request_uri:" + requestURI
@@ -751,7 +758,7 @@ func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(s.parRequests) >= maxPendingPARRequests {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending pushed authorization requests")
+		oauth.WriteError(s.log, w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending pushed authorization requests")
 		return
 	}
 	s.parRequests[requestURI] = v5.ConsentParams{
@@ -766,17 +773,17 @@ func (s *Server) handleOAuthPAR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.WarnContext(r.Context(), "encode par response", "err", err)
+		s.log.WarnContext(r.Context(), "encode par response", "err", err)
 	}
 }
 
 func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.currentRequestUser(r.Context())
 	if !ok {
-		oauth.WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "login_required", "log in before authorizing protected resource access")
 		return
 	}
-	if !parseOAuthForm(w, r, []string{"scope"}) {
+	if !s.parseOAuthForm(w, r, []string{"scope"}) {
 		return
 	}
 	if !s.rateLimitIP(w, r) {
@@ -788,7 +795,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 	c, consentFound := s.state.Consents[consentHash]
 	s.mu.Unlock()
 	if !consentFound || c.UserID != user.ID || c.Authority != user.Authority || time.Now().After(c.ExpiresAt) {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid or expired consent")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "invalid or expired consent")
 		return
 	}
 	values := url.Values{}
@@ -796,7 +803,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 		values.Set(k, v)
 	}
 	if _, err := s.validateAuthorizeForm(r.Context(), values); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	switch r.PostForm.Get("decision") {
@@ -807,7 +814,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 			delete(next.Consents, consentHash)
 			return found
 		}); err != nil {
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "could not deny consent")
+			oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "could not deny consent")
 			return
 		}
 		s.recordAudit(r, "", "oauth/authorize", values.Get("client_id"), "deny", "denied", map[string]any{
@@ -818,18 +825,18 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 		s.redirectAuthorizeError(w, r, values, "access_denied", "authorization denied")
 		return
 	default:
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid consent decision")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "invalid consent decision")
 		return
 	}
 	code, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "generate oauth code", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not authorize client")
+		s.log.WarnContext(r.Context(), "generate oauth code", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not authorize client")
 		return
 	}
 	scope, err := s.approveScope(values.Get("scope"), r.PostForm)
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_scope", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_scope", err.Error())
 		return
 	}
 	entry := v5.Code{Authority: user.Authority, UserID: user.ID, ClientID: values.Get("client_id"), RedirectURI: values.Get("redirect_uri"), CodeChallenge: values.Get("code_challenge"), Resource: values.Get("resource"), Scope: scope, ExpiresAt: time.Now().Add(s.authCodeTTL)}
@@ -845,17 +852,17 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 		return true
 	})
 	if err != nil {
-		slog.WarnContext(r.Context(), "save oauth code", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not authorize client")
+		s.log.WarnContext(r.Context(), "save oauth code", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not authorize client")
 		return
 	}
 	if !published {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid or expired consent")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "invalid or expired consent")
 		return
 	}
 	redirectURL, err := url.Parse(entry.RedirectURI)
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect URI")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect URI")
 		return
 	}
 	q := redirectURL.Query()
@@ -874,7 +881,7 @@ func (s *Server) handleOAuthAuthorizePOST(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
-	if !parseOAuthForm(w, r, nil) {
+	if !s.parseOAuthForm(w, r, nil) {
 		return
 	}
 	if !s.rateLimitIP(w, r) {
@@ -882,7 +889,7 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := s.authenticateOAuthClient(r, s.issuer+"/oauth/token")
 	if err != nil {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
 		return
 	}
 	if !s.rateLimitResolvedClient(w, r, &client) {
@@ -924,8 +931,8 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.pruneExpiredRefreshTokens(time.Now()); err != nil {
-		slog.WarnContext(r.Context(), "prune oauth refresh tokens", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not prune refresh tokens")
+		s.log.WarnContext(r.Context(), "prune oauth refresh tokens", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not prune refresh tokens")
 		return
 	}
 
@@ -935,7 +942,7 @@ func (s *Server) handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	case oauth.GrantRefreshToken:
 		s.handleOAuthRefreshToken(w, r, binding, client)
 	default:
-		oauth.WriteError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
 	}
 }
 
@@ -947,7 +954,7 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 	entry, ok := s.state.Codes[codeHash]
 	s.mu.Unlock()
 	if !ok || time.Now().After(entry.ExpiresAt) {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired code")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "invalid or expired code")
 		return
 	}
 	if entry.Resource != s.resourceURL {
@@ -962,35 +969,35 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		})
 		s.mu.Unlock()
 		if err != nil {
-			slog.WarnContext(r.Context(), "discard oauth code for foreign resource", "err", err)
-			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not reject authorization code")
+			s.log.WarnContext(r.Context(), "discard oauth code for foreign resource", "err", err)
+			oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not reject authorization code")
 			return
 		}
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "authorization code resource is no longer valid")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "authorization code resource is no longer valid")
 		return
 	}
 	if r.PostForm.Get("client_id") != entry.ClientID || r.PostForm.Get("redirect_uri") != entry.RedirectURI {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "client or redirect URI mismatch")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "client or redirect URI mismatch")
 		return
 	}
 	if resource := r.PostForm.Get("resource"); resource != "" && resource != entry.Resource {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_target", "resource mismatch")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_target", "resource mismatch")
 		return
 	}
 	codeVerifier := r.PostForm.Get("code_verifier")
 	if !validPKCEValue(codeVerifier, 43, 128) || !oauth.VerifyPKCES256(entry.CodeChallenge, codeVerifier) {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
 		return
 	}
 	user, ok := s.findUserByID(entry.UserID)
 	if !ok || user.Authority != entry.Authority {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user authority no longer exists")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "user authority no longer exists")
 		return
 	}
 	grantID, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "generate oauth grant id", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+		s.log.WarnContext(r.Context(), "generate oauth grant id", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
 		return
 	}
 	now := time.Now()
@@ -1001,15 +1008,15 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		refreshEntry = v5.RefreshToken{GrantID: grantID, UserID: entry.UserID, ClientID: entry.ClientID, Resource: entry.Resource, Scope: entry.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
 		refreshToken, err = randomToken()
 		if err != nil {
-			slog.WarnContext(r.Context(), "generate oauth refresh token", "err", err)
-			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+			s.log.WarnContext(r.Context(), "generate oauth refresh token", "err", err)
+			oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
 			return
 		}
 	}
 	response, err := s.issueTokenResponse(user, entry.Resource, entry.Scope, grantID, refreshToken, dpopJKT, entry.ClientID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "sign oauth authorization-code token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
+		s.log.WarnContext(r.Context(), "sign oauth authorization-code token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue access token")
 		return
 	}
 	redeemed := false
@@ -1047,12 +1054,12 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		return true
 	})
 	if errors.Is(err, ErrUserAuthority) {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "account authority is no longer valid")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "account authority is no longer valid")
 		return
 	}
 	if err != nil {
-		slog.WarnContext(r.Context(), "exchange oauth authorization code", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not exchange authorization code")
+		s.log.WarnContext(r.Context(), "exchange oauth authorization code", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not exchange authorization code")
 		return
 	}
 	if proofRejected {
@@ -1060,7 +1067,7 @@ func (s *Server) handleOAuthAuthorizationCodeToken(w http.ResponseWriter, r *htt
 		return
 	}
 	if !redeemed {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired code")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "invalid or expired code")
 		return
 	}
 	s.recordAudit(r, entry.UserID, "oauth/token", entry.ClientID, "allow", "issued", map[string]any{
@@ -1089,7 +1096,7 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 	if candidate {
 		user, found := s.findUserByID(entry.UserID)
 		if !found {
-			oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
+			oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "user no longer exists")
 			return
 		}
 		var err error
@@ -1098,19 +1105,19 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 			response, err = s.issueTokenResponse(user, entry.Resource, entry.Scope, entry.GrantID, nextRefreshToken, entry.DPoPJKT, entry.ClientID)
 		}
 		if err != nil {
-			slog.WarnContext(r.Context(), "prepare oauth refresh response", "err", err)
-			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
+			s.log.WarnContext(r.Context(), "prepare oauth refresh response", "err", err)
+			oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue access token")
 			return
 		}
 	}
 	result, exchanged, err := s.exchangeRefreshToken(refreshToken, client, entry.UserID, nextRefreshToken, binding)
 	if errors.Is(err, ErrUserAuthority) {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "account authority is no longer valid")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "account authority is no longer valid")
 		return
 	}
 	if err != nil {
-		slog.WarnContext(r.Context(), "exchange oauth refresh token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not rotate refresh token")
+		s.log.WarnContext(r.Context(), "exchange oauth refresh token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not rotate refresh token")
 		return
 	}
 	if result == refreshExchangeReused {
@@ -1121,7 +1128,7 @@ func (s *Server) handleOAuthRefreshToken(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if result != refreshExchangeRotated {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
 	}
 	s.recordAudit(r, exchanged.UserID, "oauth/token", clientID, "allow", "refreshed", map[string]any{
@@ -1156,31 +1163,31 @@ func (s *Server) issueTokenResponse(user oauth.User, resource, scope, grantID, r
 func (s *Server) writeTokenResponse(w http.ResponseWriter, response *oauth.TokenResponse) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSONResponse(w, response)
+	s.writeJSONResponse(w, response)
 }
 
 func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	if s.introspectionAuth == nil {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "introspection authentication required")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_client", "introspection authentication required")
 		return
 	}
 	principal, ok := s.introspectionAuth(r)
 	if !ok {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "introspection authentication required")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_client", "introspection authentication required")
 		return
 	}
 	if !s.rateLimitClient(w, r, principal.ClientID) {
 		return
 	}
-	if !parseOAuthForm(w, r, nil) {
+	if !s.parseOAuthForm(w, r, nil) {
 		return
 	}
 	token := r.PostForm.Get("token")
 	hint := r.PostForm.Get("token_type_hint")
 	if token == "" {
-		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
+		s.writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
 		return
 	}
 
@@ -1196,10 +1203,10 @@ func (s *Server) handleOAuthIntrospect(w http.ResponseWriter, r *http.Request) {
 func (s *Server) introspectAccessToken(w http.ResponseWriter, token string, principal IntrospectionPrincipal) {
 	claims, err := s.tokens.VerifyAccessToken(token, s.issuer, s.resourceURL, time.Now(), s.touchGrant, s.session)
 	if err != nil || (principal.ClientID != "" && claims.ClientID != principal.ClientID) {
-		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
+		s.writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
 		return
 	}
-	writeJSONResponse(w, oauth.IntrospectionResponse{
+	s.writeJSONResponse(w, oauth.IntrospectionResponse{
 		Active:       true,
 		Scope:        strings.Join(claims.Scopes, " "),
 		ClientID:     claims.ClientID,
@@ -1223,16 +1230,16 @@ func (s *Server) introspectRefreshToken(w http.ResponseWriter, token string, pri
 	entry, ok := s.state.RefreshTokens[tokenHash]
 	if !ok || (principal.ClientID != "" && entry.ClientID != principal.ClientID) || !entry.RevokedAt.IsZero() || !entry.UsedAt.IsZero() || now.After(entry.ExpiresAt) {
 		s.mu.Unlock()
-		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
+		s.writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
 		return
 	}
 	grant, grantOK := s.state.Grants[entry.GrantID]
 	s.mu.Unlock()
 	if !grantOK || !grant.RevokedAt.IsZero() || now.After(grant.ExpiresAt) {
-		writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
+		s.writeJSONResponse(w, oauth.IntrospectionResponse{Active: false})
 		return
 	}
-	writeJSONResponse(w, oauth.IntrospectionResponse{
+	s.writeJSONResponse(w, oauth.IntrospectionResponse{
 		Active:    true,
 		Scope:     grant.Scope,
 		ClientID:  grant.ClientID,
@@ -1244,7 +1251,7 @@ func (s *Server) introspectRefreshToken(w http.ResponseWriter, token string, pri
 }
 
 func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
-	if !parseOAuthForm(w, r, nil) {
+	if !s.parseOAuthForm(w, r, nil) {
 		return
 	}
 	if !s.rateLimitIP(w, r) {
@@ -1252,7 +1259,7 @@ func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := s.authenticateOAuthClient(r, s.issuer+"/oauth/revoke")
 	if err != nil {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
 		return
 	}
 	if !s.rateLimitResolvedClient(w, r, &client) {
@@ -1275,8 +1282,8 @@ func (s *Server) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		slog.WarnContext(r.Context(), "revoke oauth token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not revoke token")
+		s.log.WarnContext(r.Context(), "revoke oauth token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not revoke token")
 		return
 	}
 	s.recordAudit(r, userID, "oauth/revoke", clientID, "allow", "revoked", nil)
@@ -1328,7 +1335,7 @@ func (s *Server) recordAudit(r *http.Request, userID, operation, name, decision,
 func (s *Server) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, values url.Values, code, description string) {
 	redirectURL, err := url.Parse(values.Get("redirect_uri"))
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect URI")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect URI")
 		return
 	}
 	q := redirectURL.Query()
@@ -1607,12 +1614,12 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	var req oauth.RegisterRequest
 	fields, err := decodeRegistrationJSON(r.Body, []string{"client_name", "redirect_uris", "token_endpoint_auth_method", "grant_types"}, &req)
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
 		return
 	}
 	_, clientNamePresent := fields["client_name"]
 	if clientNamePresent && req.ClientName == "" {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "client_name must not be null or empty")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "client_name must not be null or empty")
 		return
 	}
 	method := req.TokenEndpointAuthMethod
@@ -1620,11 +1627,11 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	if !authMethodPresent {
 		method = oauth.TokenEndpointAuthNone
 	} else if method == "" {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "token_endpoint_auth_method must not be null or empty")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "token_endpoint_auth_method must not be null or empty")
 		return
 	}
 	if method != oauth.TokenEndpointAuthNone {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
 		return
 	}
 	requestedGrantTypes := req.GrantTypes
@@ -1633,32 +1640,32 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	grantTypes, errorCode, err := validateClientMetadata(req.ClientName, req.RedirectURIs, method, requestedGrantTypes, false)
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, errorCode, err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, errorCode, err.Error())
 		return
 	}
 	clientID, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "generate oauth client id", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
+		s.log.WarnContext(r.Context(), "generate oauth client id", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
 	}
 	now := time.Now()
 	client := Client{ID: s.clientIDPrefix + clientID, Name: req.ClientName, RedirectURIs: slices.Clone(req.RedirectURIs), TokenEndpointAuthMethod: method, GrantTypes: grantTypes, CreatedAt: now, Provenance: ClientProvenanceDynamic}
 	capacityExceeded, err := s.registerClient(&client)
 	if err != nil {
-		slog.WarnContext(r.Context(), "save oauth client registration", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not register client")
+		s.log.WarnContext(r.Context(), "save oauth client registration", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not register client")
 		return
 	}
 	if capacityExceeded {
-		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many registered clients")
+		oauth.WriteError(s.log, w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many registered clients")
 		return
 	}
 	issuer := s.issuer
 	regToken, err := s.tokens.IssueRegistrationAccessToken(issuer, client.ID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "issue registration access token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue registration access token")
+		s.log.WarnContext(r.Context(), "issue registration access token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue registration access token")
 		return
 	}
 	resp := oauth.RegisterResponse{
@@ -1674,7 +1681,7 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(&resp); err != nil {
-		slog.WarnContext(r.Context(), "encode oauth registration response", "err", err)
+		s.log.WarnContext(r.Context(), "encode oauth registration response", "err", err)
 	}
 }
 
@@ -1701,11 +1708,11 @@ func (s *Server) handleOAuthRegisterRead(w http.ResponseWriter, r *http.Request)
 	clientID := r.PathValue("clientID")
 	client := s.oauthClient(clientID)
 	if client.ID == "" {
-		oauth.WriteError(w, http.StatusNotFound, "invalid_client", "client not found")
+		oauth.WriteError(s.log, w, http.StatusNotFound, "invalid_client", "client not found")
 		return
 	}
 	if err := s.verifyRegistrationAccessToken(r, clientID); err != nil {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_token", err.Error())
 		return
 	}
 	resp := oauth.RegisterResponse{
@@ -1716,48 +1723,48 @@ func (s *Server) handleOAuthRegisterRead(w http.ResponseWriter, r *http.Request)
 		TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
 		GrantTypes:              clientGrantTypes(&client),
 	}
-	writeJSONResponse(w, &resp)
+	s.writeJSONResponse(w, &resp)
 }
 
 // handleOAuthRegisterUpdate updates client registration metadata (RFC 7592 §2.2).
 func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Request) {
 	clientID := r.PathValue("clientID")
 	if err := s.verifyRegistrationAccessToken(r, clientID); err != nil {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_token", err.Error())
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodyBytes)
 	var req oauth.UpdateClientRequest
 	fields, err := decodeRegistrationJSON(r.Body, []string{"client_name", "redirect_uris", "token_endpoint_auth_method", "grant_types"}, &req)
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
 		return
 	}
 	s.mu.Lock()
 	client, ok := s.state.Clients[clientID]
 	if !ok {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusNotFound, "invalid_client", "client not found")
+		oauth.WriteError(s.log, w, http.StatusNotFound, "invalid_client", "client not found")
 		return
 	}
 	if _, present := fields["client_name"]; present && req.ClientName == nil {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "client_name must not be null")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "client_name must not be null")
 		return
 	}
 	if _, present := fields["redirect_uris"]; present && req.RedirectURIs == nil {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris must not be null")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris must not be null")
 		return
 	}
 	if _, present := fields["token_endpoint_auth_method"]; present && req.TokenEndpointAuthMethod == nil {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "token_endpoint_auth_method must not be null")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "token_endpoint_auth_method must not be null")
 		return
 	}
 	if _, present := fields["grant_types"]; present && req.GrantTypes == nil {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "grant_types must not be null")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "grant_types must not be null")
 		return
 	}
 	if req.ClientName != nil {
@@ -1767,7 +1774,7 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 		for _, uri := range *req.RedirectURIs {
 			if !validRedirectURI(uri) {
 				s.mu.Unlock()
-				oauth.WriteError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must be https or localhost http")
+				oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must be https or localhost http")
 				return
 			}
 		}
@@ -1783,13 +1790,13 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 	legacyGrantSentinel := !grantsUpdated && len(client.GrantTypes) == 0
 	if client.TokenEndpointAuthMethod != oauth.TokenEndpointAuthNone {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
 		return
 	}
 	grantTypes, errorCode, validationErr := validateClientMetadata(client.Name, client.RedirectURIs, client.TokenEndpointAuthMethod, client.GrantTypes, legacyGrantSentinel)
 	if validationErr != nil {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, errorCode, validationErr.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, errorCode, validationErr.Error())
 		return
 	}
 	client.GrantTypes = grantTypes
@@ -1799,8 +1806,8 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		s.mu.Unlock()
-		slog.WarnContext(r.Context(), "save oauth client update", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not update client")
+		s.log.WarnContext(r.Context(), "save oauth client update", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not update client")
 		return
 	}
 	s.mu.Unlock()
@@ -1808,8 +1815,8 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 	issuer := s.issuer
 	regToken, err := s.tokens.IssueRegistrationAccessToken(issuer, clientID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "issue registration access token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue registration access token")
+		s.log.WarnContext(r.Context(), "issue registration access token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue registration access token")
 		return
 	}
 	resp := oauth.RegisterResponse{
@@ -1822,7 +1829,7 @@ func (s *Server) handleOAuthRegisterUpdate(w http.ResponseWriter, r *http.Reques
 		RegistrationAccessToken: regToken,
 		RegistrationClientURI:   issuer + "/oauth/register/" + clientID,
 	}
-	writeJSONResponse(w, &resp)
+	s.writeJSONResponse(w, &resp)
 }
 
 // handleOAuthRegisterDelete deletes a client registration (RFC 7592 §2.3).
@@ -1831,11 +1838,11 @@ func (s *Server) handleOAuthRegisterDelete(w http.ResponseWriter, r *http.Reques
 	client := s.oauthClient(clientID)
 	if client.ID == "" {
 		// RFC 7592 §2.3: respond with errors as in §2.2.
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_client", "client not found")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_client", "client not found")
 		return
 	}
 	if err := s.verifyRegistrationAccessToken(r, clientID); err != nil {
-		oauth.WriteError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "invalid_token", err.Error())
 		return
 	}
 	s.mu.Lock()
@@ -1872,8 +1879,8 @@ func (s *Server) handleOAuthRegisterDelete(w http.ResponseWriter, r *http.Reques
 	})
 	s.mu.Unlock()
 	if err != nil {
-		slog.WarnContext(r.Context(), "save oauth client delete", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not delete client")
+		s.log.WarnContext(r.Context(), "save oauth client delete", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not delete client")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -2214,21 +2221,21 @@ func cloneURLValues(values url.Values) url.Values {
 	return clone
 }
 
-func writeJSONResponse(w http.ResponseWriter, output any) {
+func (s *Server) writeJSONResponse(w http.ResponseWriter, output any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(output); err != nil {
-		slog.Warn("failed to encode JSON response", "err", err)
+		s.log.Warn("failed to encode JSON response", "err", err)
 	}
 }
 
-func parseOAuthForm(w http.ResponseWriter, r *http.Request, repeatedParameters []string) bool {
+func (s *Server) parseOAuthForm(w http.ResponseWriter, r *http.Request, repeatedParameters []string) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBodyBytes)
 	if err := r.ParseForm(); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid form")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "invalid form")
 		return false
 	}
 	if err := validateOAuthParameters(r.PostForm, repeatedParameters); err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", err.Error())
 		return false
 	}
 	return true
@@ -2358,16 +2365,16 @@ func (s *Server) reserveDPoPBinding(binding dpopBinding) (bool, error) { //nolin
 
 func (s *Server) writeInvalidDPoPProof(w http.ResponseWriter, r *http.Request, description string) {
 	if nonce, err := s.issueDPoPNonce(); err != nil {
-		slog.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
+		s.log.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
 	} else {
 		w.Header().Set("DPoP-Nonce", nonce)
 	}
-	oauth.WriteError(w, http.StatusBadRequest, "invalid_dpop_proof", description)
+	oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_dpop_proof", description)
 }
 
 func (s *Server) writeUnauthorizedDPoP(w http.ResponseWriter, r *http.Request, description string) {
 	if nonce, err := s.issueDPoPNonce(); err != nil {
-		slog.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
+		s.log.ErrorContext(r.Context(), "issue dpop nonce", "err", err)
 	} else {
 		w.Header().Set("DPoP-Nonce", nonce)
 	}
@@ -2396,7 +2403,7 @@ func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.RevokeAllUserGrants(user.ID); err != nil {
-		slog.WarnContext(r.Context(), "revoke all user grants on logout", "err", err)
+		s.log.WarnContext(r.Context(), "revoke all user grants on logout", "err", err)
 	}
 
 	postLogoutRedirectURI := r.URL.Query().Get("post_logout_redirect_uri")
@@ -2434,7 +2441,7 @@ func (s *Server) handleOAuthEndSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.Request) {
-	if !parseOAuthForm(w, r, nil) {
+	if !s.parseOAuthForm(w, r, nil) {
 		return
 	}
 	clientID := r.PostForm.Get("client_id")
@@ -2442,24 +2449,24 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 		return
 	}
 	if clientID == "" {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "missing client_id")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "missing client_id")
 		return
 	}
 	client, err := s.authenticateOAuthClient(r, s.issuer+"/oauth/device_authorization")
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_client", "unknown client")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_client", "unknown client")
 		return
 	}
 	if !s.rateLimitResolvedClient(w, r, &client) {
 		return
 	}
 	if !clientSupportsGrant(&client, oauth.GrantDeviceCode) {
-		oauth.WriteError(w, http.StatusBadRequest, "unauthorized_client", "client is not registered for the device_code grant")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "unauthorized_client", "client is not registered for the device_code grant")
 		return
 	}
 	scope, err := s.normalizeScope(r.PostForm.Get("scope"))
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_scope", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_scope", err.Error())
 		return
 	}
 	deviceCode := pairing.Secret()
@@ -2487,13 +2494,13 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 	})
 	if err != nil {
 		s.mu.Unlock()
-		slog.WarnContext(r.Context(), "save device code", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not save device code")
+		s.log.WarnContext(r.Context(), "save device code", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not save device code")
 		return
 	}
 	s.mu.Unlock()
 	if capacityExceeded {
-		oauth.WriteError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending device authorizations")
+		oauth.WriteError(s.log, w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many pending device authorizations")
 		return
 	}
 
@@ -2506,7 +2513,7 @@ func (s *Server) handleOAuthDeviceAuthorization(w http.ResponseWriter, r *http.R
 		ExpiresIn:               int64(dc.flow.ExpiresAt.Sub(dc.flow.CreatedAt) / time.Second),
 		Interval:                5,
 	}
-	writeJSONResponse(w, &resp)
+	s.writeJSONResponse(w, &resp)
 }
 
 func (s *Server) handleOAuthDevicePage(w http.ResponseWriter, r *http.Request) {
@@ -2531,15 +2538,15 @@ func (s *Server) handleOAuthDeviceApprove(w http.ResponseWriter, r *http.Request
 			http.Redirect(w, r, loginURL, http.StatusFound) //nolint:gosec // loginURL produced by the caller's AuthorizationUI
 			return
 		}
-		oauth.WriteError(w, http.StatusUnauthorized, "login_required", "log in before authorizing device")
+		oauth.WriteError(s.log, w, http.StatusUnauthorized, "login_required", "log in before authorizing device")
 		return
 	}
-	if !parseOAuthForm(w, r, nil) {
+	if !s.parseOAuthForm(w, r, nil) {
 		return
 	}
 	userCode := r.PostForm.Get("user_code")
 	if userCode == "" {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "missing user_code")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "missing user_code")
 		return
 	}
 	var dc *DeviceCode
@@ -2557,12 +2564,12 @@ func (s *Server) handleOAuthDeviceApprove(w http.ResponseWriter, r *http.Request
 		return false
 	})
 	if dc == nil && err == nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid or expired user code")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "invalid or expired user code")
 		return
 	}
 	if err != nil {
-		slog.WarnContext(r.Context(), "save device approval", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not approve device")
+		s.log.WarnContext(r.Context(), "save device approval", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not approve device")
 		return
 	}
 
@@ -2575,7 +2582,7 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 	deviceCode := r.PostForm.Get("device_code")
 	clientID := r.PostForm.Get("client_id")
 	if deviceCode == "" || clientID == "" {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_request", "missing device_code or client_id")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_request", "missing device_code or client_id")
 		return
 	}
 	codeHash := oauth.RefreshTokenKey(deviceCode)
@@ -2583,7 +2590,7 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 	dc, ok := s.state.DeviceCodes[codeHash]
 	if !ok || dc.ClientID != clientID {
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid device_code")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "invalid device_code")
 		return
 	}
 	now := time.Now()
@@ -2594,11 +2601,11 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		})
 		s.mu.Unlock()
 		if err != nil {
-			slog.WarnContext(r.Context(), "delete expired device code", "err", err)
-			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not consume device code")
+			s.log.WarnContext(r.Context(), "delete expired device code", "err", err)
+			oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not consume device code")
 			return
 		}
-		oauth.WriteError(w, http.StatusBadRequest, "expired_token", "device_code expired")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "expired_token", "device_code expired")
 		return
 	}
 	if binding.jkt != "" {
@@ -2609,8 +2616,8 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		})
 		if err != nil {
 			s.mu.Unlock()
-			slog.WarnContext(r.Context(), "reserve device dpop proof", "err", err)
-			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not validate dpop proof")
+			s.log.WarnContext(r.Context(), "reserve device dpop proof", "err", err)
+			oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not validate dpop proof")
 			return
 		}
 		if !reserved {
@@ -2622,7 +2629,7 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 	switch dc.flow.Poll(now) {
 	case pairing.Pending:
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "authorization_pending", "user has not yet authorized the device")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "authorization_pending", "user has not yet authorized the device")
 		return
 	case pairing.Denied:
 		err := s.state.transact(func(next *storeState) bool {
@@ -2631,29 +2638,29 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		})
 		s.mu.Unlock()
 		if err != nil {
-			slog.WarnContext(r.Context(), "consume denied device code", "err", err)
-			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not consume device code")
+			s.log.WarnContext(r.Context(), "consume denied device code", "err", err)
+			oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not consume device code")
 			return
 		}
-		oauth.WriteError(w, http.StatusBadRequest, "access_denied", "user denied the authorization request")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "access_denied", "user denied the authorization request")
 		return
 	case pairing.Approved:
 		s.mu.Unlock()
 	default:
 		s.mu.Unlock()
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "unknown device code status")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "unknown device code status")
 		return
 	}
 
 	user, ok := s.findUserByID(dc.flow.Subject)
 	if !ok || user.Authority != dc.Authority {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "user authority no longer exists")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "user authority no longer exists")
 		return
 	}
 	grantID, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "generate device grant id", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue token")
+		s.log.WarnContext(r.Context(), "generate device grant id", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue token")
 		return
 	}
 	now = time.Now()
@@ -2664,15 +2671,15 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		refreshEntry = v5.RefreshToken{GrantID: grantID, UserID: dc.flow.Subject, ClientID: dc.ClientID, Resource: s.resourceURL, Scope: dc.Scope, DPoPJKT: dpopJKT, ExpiresAt: grant.ExpiresAt}
 		refreshToken, err = randomToken()
 		if err != nil {
-			slog.WarnContext(r.Context(), "generate device refresh token", "err", err)
-			oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
+			s.log.WarnContext(r.Context(), "generate device refresh token", "err", err)
+			oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue refresh token")
 			return
 		}
 	}
 	response, err := s.issueTokenResponse(user, grant.Resource, dc.Scope, grantID, refreshToken, dpopJKT, dc.ClientID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "sign device access token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
+		s.log.WarnContext(r.Context(), "sign device access token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue access token")
 		return
 	}
 	consumed := false
@@ -2699,16 +2706,16 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 		return true
 	})
 	if errors.Is(err, ErrUserAuthority) {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "account authority is no longer valid")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "account authority is no longer valid")
 		return
 	}
 	if err != nil {
-		slog.WarnContext(r.Context(), "exchange device code", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not exchange device code")
+		s.log.WarnContext(r.Context(), "exchange device code", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not exchange device code")
 		return
 	}
 	if !consumed {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_grant", "invalid device_code")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_grant", "invalid device_code")
 		return
 	}
 	s.writeTokenResponse(w, &response)
@@ -2723,26 +2730,26 @@ func (s *Server) handleOAuthDeviceCodeToken(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleOAuthClientCredentialsToken(w http.ResponseWriter, r *http.Request, binding dpopBinding, client Client) { //nolint:gocritic // Immutable proof values are passed together to preserve their binding.
 	dpopJKT := binding.jkt
 	if client.TokenEndpointAuthMethod != oauth.TokenEndpointAuthPrivateKeyJWT {
-		oauth.WriteError(w, http.StatusBadRequest, "unauthorized_client", "client_credentials requires a confidential client")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "unauthorized_client", "client_credentials requires a confidential client")
 		return
 	}
 	if !clientSupportsGrant(&client, oauth.GrantClientCredentials) {
-		oauth.WriteError(w, http.StatusBadRequest, "unauthorized_client", "client is not registered for the client_credentials grant")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "unauthorized_client", "client is not registered for the client_credentials grant")
 		return
 	}
 	if resource := r.PostForm.Get("resource"); resource != "" && resource != s.resourceURL {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_target", "resource mismatch")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_target", "resource mismatch")
 		return
 	}
 	scope, err := s.normalizeScope(r.PostForm.Get("scope"))
 	if err != nil {
-		oauth.WriteError(w, http.StatusBadRequest, "invalid_scope", err.Error())
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "invalid_scope", err.Error())
 		return
 	}
 	grantID, err := randomToken()
 	if err != nil {
-		slog.WarnContext(r.Context(), "generate client-credentials grant id", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue token")
+		s.log.WarnContext(r.Context(), "generate client-credentials grant id", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue token")
 		return
 	}
 	now := time.Now()
@@ -2751,8 +2758,8 @@ func (s *Server) handleOAuthClientCredentialsToken(w http.ResponseWriter, r *htt
 	grant := v5.Grant{ID: grantID, ClientID: client.ID, Resource: s.resourceURL, Scope: scope, CreatedAt: now, ExpiresAt: now.Add(s.refreshTokenTTL)}
 	accessToken, err := s.tokens.IssueClientCredentialsAccessToken(s.issuer, client.ID, s.resourceURL, scope, grantID, dpopJKT)
 	if err != nil {
-		slog.WarnContext(r.Context(), "sign client-credentials access token", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue access token")
+		s.log.WarnContext(r.Context(), "sign client-credentials access token", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue access token")
 		return
 	}
 	response := oauth.TokenResponse{AccessToken: accessToken, TokenType: oauth.TokenTypeBearer, ExpiresIn: int64(s.accessTokenTTL.Seconds()), Scope: scope}
@@ -2787,8 +2794,8 @@ func (s *Server) handleOAuthClientCredentialsToken(w http.ResponseWriter, r *htt
 	})
 	s.mu.Unlock()
 	if err != nil {
-		slog.WarnContext(r.Context(), "record client-credentials grant", "err", err)
-		oauth.WriteError(w, http.StatusInternalServerError, "server_error", "could not issue token")
+		s.log.WarnContext(r.Context(), "record client-credentials grant", "err", err)
+		oauth.WriteError(s.log, w, http.StatusInternalServerError, "server_error", "could not issue token")
 		return
 	}
 	if proofRejected {
@@ -2796,7 +2803,7 @@ func (s *Server) handleOAuthClientCredentialsToken(w http.ResponseWriter, r *htt
 		return
 	}
 	if !stored {
-		oauth.WriteError(w, http.StatusBadRequest, "unauthorized_client", "client is not registered for the client_credentials grant")
+		oauth.WriteError(s.log, w, http.StatusBadRequest, "unauthorized_client", "client is not registered for the client_credentials grant")
 		return
 	}
 	s.recordAudit(r, "", "oauth/token", client.ID, "allow", "issued", map[string]any{

@@ -96,7 +96,7 @@ func (g *productionGateway) close(ctx context.Context) error {
 func (f *fixture) fakeModelRoutes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]string{"status": "ok"})
+		f.writeJSON(w, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("POST /tokenize", func(w http.ResponseWriter, _ *http.Request) {
 		// A vocabulary without Qwen3-TTS language tokens accepts every language.

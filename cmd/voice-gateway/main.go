@@ -94,7 +94,7 @@ func mainImpl(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-	closeShutdown, err := startPlatformShutdown(func(cause error) {
+	closeShutdown, err := startPlatformShutdown(log, func(cause error) {
 		if cause == nil {
 			intentionalStop.Store(true)
 		}
@@ -155,7 +155,7 @@ func mainImpl(args []string) (err error) {
 	if err := resolved.Validate(); err != nil {
 		return fmt.Errorf("available voice choices: %w", err)
 	}
-	watcher, err := startRestartWatch(ctx, *configPath, envPath, cancel)
+	watcher, err := startRestartWatch(ctx, log, *configPath, envPath, cancel)
 	if err != nil {
 		return err
 	}
@@ -275,6 +275,8 @@ func initLogging(path string, level *slog.LevelVar) (*slog.Logger, error) {
 		NoColor:    !isatty.IsTerminal(os.Stderr.Fd()),
 		TimeFormat: time.RFC3339,
 	}))
+	// genai and genaipy log through the default logger; main reports failures
+	// that precede or outlive this logger through it too.
 	slog.SetDefault(l)
 	return l, nil
 }
@@ -334,7 +336,7 @@ func (w *restartWatcher) Close() error {
 	return err
 }
 
-func startRestartWatch(ctx context.Context, path, envPath string, cancel context.CancelCauseFunc) (*restartWatcher, error) {
+func startRestartWatch(ctx context.Context, log *slog.Logger, path, envPath string, cancel context.CancelCauseFunc) (*restartWatcher, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolve config path: %w", err)
@@ -421,7 +423,7 @@ func startRestartWatch(ctx context.Context, path, envPath string, cancel context
 				default:
 					continue
 				}
-				slog.InfoContext(ctx, "shutdown", "reason", reason, "ev", event)
+				log.InfoContext(ctx, "shutdown", "reason", reason, "ev", event)
 				// File changes request a restart after cleanup; watcher failures do not.
 				cancel(errRestartRequested)
 				return

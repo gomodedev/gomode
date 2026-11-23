@@ -296,11 +296,11 @@ func ECJWK(kid string, pub *ecdsa.PublicKey) JWK {
 	}
 }
 
-// WriteError writes an OAuth JSON error response.
-func WriteError(w http.ResponseWriter, status int, code, description string) {
+// WriteError writes an OAuth JSON error response. log receives write failures.
+func WriteError(log *slog.Logger, w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: code, ErrorDescription: description}); err != nil {
-		slog.Warn("failed to encode OAuth error", "err", err)
+		log.Warn("failed to encode OAuth error", "err", err)
 	}
 }

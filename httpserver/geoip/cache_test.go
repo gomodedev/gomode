@@ -14,6 +14,7 @@ import (
 	"time"
 
 	geoipdata "github.com/gomodedev/gomode/httpserver/geoip/data/v1"
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 type prefixFetchSpy struct {
@@ -85,7 +86,7 @@ func TestOriginCache(t *testing.T) {
 }
 
 func loadTestOrigin(t *testing.T, dir, name string, fetch *prefixFetchSpy) *urlOrigin {
-	cache, err := openOriginCache(filepath.Join(dir, "ip-origins.json"))
+	cache, err := openOriginCache(t.Context(), testlog.New(t), filepath.Join(dir, "ip-origins.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestOriginCacheHistorical(t *testing.T) {
 	if err := os.WriteFile(path, []byte(fixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := openOriginCache(path)
+	c, err := openOriginCache(t.Context(), testlog.New(t), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func TestOriginCacheHistorical(t *testing.T) {
 	if err := c.set("github", prefixes); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := openOriginCache(path)
+	reopened, err := openOriginCache(t.Context(), testlog.New(t), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestOriginCacheRecovery(t *testing.T) {
 			if fetch.calls != 1 {
 				t.Fatal("did not refetch discarded cache")
 			}
-			reopened, err := openOriginCache(path)
+			reopened, err := openOriginCache(t.Context(), testlog.New(t), path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -195,7 +196,7 @@ func TestOriginCacheRecovery(t *testing.T) {
 	}
 	t.Run("read error", func(t *testing.T) {
 		t.Parallel()
-		if _, err := openOriginCache(t.TempDir()); err == nil {
+		if _, err := openOriginCache(t.Context(), testlog.New(t), t.TempDir()); err == nil {
 			t.Fatal("directory read did not return error")
 		}
 	})

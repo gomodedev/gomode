@@ -3,6 +3,7 @@
 package geoip
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -24,7 +25,7 @@ type originCache struct {
 
 // openOriginCache discards malformed files atomically so a refetch can rebuild
 // them. Missing files are empty; other filesystem errors are returned.
-func openOriginCache(path string) (*originCache, error) {
+func openOriginCache(ctx context.Context, log *slog.Logger, path string) (*originCache, error) {
 	c := &originCache{path: path, data: make(map[string]geoipdata.Entry)}
 	f, err := os.Open(path) //nolint:gosec // Operator-owned cache path.
 	if err != nil {
@@ -43,7 +44,7 @@ func openOriginCache(path string) (*originCache, error) {
 		err = json.Unmarshal(raw, &disk)
 	}
 	if err != nil {
-		slog.Warn("discarding malformed IP origin cache", "path", path, "err", err)
+		log.WarnContext(ctx, "discarding malformed IP origin cache", "path", path, "err", err)
 		return c, nil
 	}
 	for k, e := range disk {

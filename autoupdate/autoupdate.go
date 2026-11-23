@@ -31,8 +31,8 @@ type Config struct {
 	Binary         string                      // Root archive member, including .exe on Windows.
 	ArchiveName    func(version string) string // Exact asset basename; version has no leading v.
 	Client         *http.Client                // GitHub API only; never used for public archive downloads.
-	Log            *slog.Logger
-	TaskName       string // Windows launch context: task must use MultipleInstances Queue; empty means foreground.
+	Log            *slog.Logger                // Required.
+	TaskName       string                      // Windows launch context: task must use MultipleInstances Queue; empty means foreground.
 }
 
 // Updater serializes manual and scheduled installation for one running application.
@@ -70,6 +70,9 @@ func New(cfg Config) (*Updater, error) {
 	if len(parts) != 2 || !safeName(parts[0]) || !safeName(parts[1]) || !safeName(cfg.Binary) || cfg.ArchiveName == nil {
 		return nil, errors.New("updater requires owner/repository, a binary member and an exact archive selector")
 	}
+	if cfg.Log == nil {
+		return nil, errors.New("updater requires a logger")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -77,9 +80,6 @@ func New(cfg Config) (*Updater, error) {
 	exe, err = filepath.EvalSymlinks(exe)
 	if err != nil {
 		return nil, err
-	}
-	if cfg.Log == nil {
-		cfg.Log = slog.Default()
 	}
 	api := http.Client{Timeout: 10 * time.Minute}
 	if cfg.Client != nil {
