@@ -148,6 +148,10 @@ sealed interface MessageKind {
         override val value = "session.close"
     }
     @Serializable
+    data object RTCAnswer : MessageKind {
+        override val value = "rtc.answer"
+    }
+    @Serializable
     data object SessionReady : MessageKind {
         override val value = "session.ready"
     }
@@ -158,6 +162,10 @@ sealed interface MessageKind {
     @Serializable
     data object SessionUsage : MessageKind {
         override val value = "session.usage"
+    }
+    @Serializable
+    data object RTCOffer : MessageKind {
+        override val value = "rtc.offer"
     }
     @Serializable
     data object TranscriptDelta : MessageKind {
@@ -215,9 +223,11 @@ object MessageKindSerializer : KSerializer<MessageKind> {
             "tool.result" -> MessageKind.ToolResult
             "turn.cancel" -> MessageKind.TurnCancel
             "session.close" -> MessageKind.SessionClose
+            "rtc.answer" -> MessageKind.RTCAnswer
             "session.ready" -> MessageKind.SessionReady
             "session.status" -> MessageKind.SessionStatus
             "session.usage" -> MessageKind.SessionUsage
+            "rtc.offer" -> MessageKind.RTCOffer
             "transcript.delta" -> MessageKind.TranscriptDelta
             "transcript.draft" -> MessageKind.TranscriptDraft
             "assistant.text.delta" -> MessageKind.AssistantTextDelta
@@ -1026,6 +1036,14 @@ data class SessionSetup(
      * It must be omitted for client-owned synthesis and indivisible choices.
      */
     @SerialName("synthesisModelID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val synthesisModelID: String? = null,
+    /**
+     * Renegotiation declares that the client answers rtc.offer. The gateway then
+     * sends one after session.ready when the session takes microphone audio
+     * below 48 kHz, capping the client's Opus encoder with RFC 7587
+     * maxplaybackrate so it stops spending uplink bits on audio the backend
+     * discards. It applies only to WebRTC sessions.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val renegotiation: Boolean? = null,
 )
 
 /**
@@ -1080,6 +1098,31 @@ data class SessionClose(
     val kind: MessageKind,
     /** Reason optionally explains why the client closed the session. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val reason: String? = null,
+)
+
+/**
+ * RTCOffer is a gateway message that renegotiates the WebRTC media session.
+ *
+ * The gateway sends at most one, after session.ready, and only to a client
+ * whose session.setup set renegotiation. The client applies it as the remote
+ * description and replies with rtc.answer; until then the session keeps its
+ * current media parameters.
+ */
+@Serializable
+data class RTCOffer(
+    /** Kind is "rtc.offer". */
+    val kind: MessageKind,
+    /** SDP is the gateway's SDP offer. */
+    val sdp: String,
+)
+
+/** RTCAnswer is a client message that answers rtc.offer. */
+@Serializable
+data class RTCAnswer(
+    /** Kind must be "rtc.answer". */
+    val kind: MessageKind,
+    /** SDP is the client's SDP answer. */
+    val sdp: String,
 )
 
 /**

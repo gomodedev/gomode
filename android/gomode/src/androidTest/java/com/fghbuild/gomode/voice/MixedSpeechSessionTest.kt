@@ -194,6 +194,19 @@ class MixedSpeechSessionTest {
             )
         }
 
+    // The production recognizer takes 16 kHz audio, so the gateway renegotiates the microphone's Opus
+    // encoder down to that rate, and Android's WebRTC stack answers.
+    @Test
+    fun productionGatewayRenegotiatesTheMicrophoneRate() =
+        withSession(
+            SpeechStageLocation.GATEWAY,
+            SpeechStageLocation.GATEWAY,
+            service = productionBaseUrl,
+        ) { session, _ ->
+            awaitFixture { it.getInt("productionRenegotiations") > 0 }
+            assertNull(session.state.value.error)
+        }
+
     @Test
     fun gatewayStagesNameTheirModelsAndLeaveDeviceSpeechUnused() =
         withSession(SpeechStageLocation.GATEWAY, SpeechStageLocation.GATEWAY) { session, speech ->

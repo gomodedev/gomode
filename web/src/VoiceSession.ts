@@ -18,6 +18,8 @@ import {
   type Error as GatewayError,
   type UserMessage,
   type MessageEnvelope,
+  type RTCAnswer,
+  type RTCOffer,
   type SessionSetup,
   type ToolResult,
   type ToolCall,
@@ -38,6 +40,8 @@ import {
   MessageKindUserMessage,
   MessageKindError,
   MessageKindInterrupted,
+  MessageKindRTCAnswer,
+  MessageKindRTCOffer,
   MessageKindSessionReady,
   MessageKindSessionStatus,
   MessageKindSessionUsage,
@@ -2732,6 +2736,7 @@ export class VoiceSession {
       this.state.showReasoning,
     );
     setup.speech = this.speech;
+    if (this._connection?.pc) setup.renegotiation = true;
     if (this._sessionComposable && this.state.speechInput === "gateway" && this._sessionSpeechModelIDs.input !== null)
       setup.recognitionModelID = this._sessionSpeechModelIDs.input;
     if (this._sessionComposable && this.state.speechOutput === "gateway" && this._sessionSpeechModelIDs.output !== null)
@@ -2751,12 +2756,35 @@ export class VoiceSession {
     return this._ownsConnection(attempt) && channel === attempt.channel;
   }
 
+  // _answerRTCOffer applies the gateway's renegotiation, which caps the Opus
+  // encoder at the session's microphone rate. A failure keeps the negotiated
+  // media, so it is logged instead of ending the session.
+  private async _answerRTCOffer(attempt: VoiceConnection, channel: VoiceChannel, offer: RTCOffer): Promise<void> {
+    const pc = attempt.pc;
+    if (pc === null) return;
+    try {
+      await pc.setRemoteDescription({ type: "offer", sdp: offer.sdp });
+      await pc.setLocalDescription();
+    } catch (error: unknown) {
+      console.warn("Could not apply the voice gateway's media renegotiation", error);
+      return;
+    }
+    const sdp = pc.localDescription?.sdp;
+    if (!sdp || !this._ownsChannel(attempt, channel)) return;
+    const answer: RTCAnswer = { kind: MessageKindRTCAnswer, sdp };
+    this._sendOn(channel, JSON.stringify(answer), VOICE_MESSAGE_DELIVERY_ERROR);
+  }
+
   private async _handleMessage(text: string, attempt: VoiceConnection, channel: VoiceChannel): Promise<void> {
     if (!this._ownsChannel(attempt, channel)) return;
     let env: MessageEnvelope;
     try {
       env = JSON.parse(text) as MessageEnvelope;
     } catch {
+      return;
+    }
+    if (env.kind === MessageKindRTCOffer) {
+      await this._answerRTCOffer(attempt, channel, JSON.parse(text) as RTCOffer);
       return;
     }
     if (env.kind === MessageKindSessionUsage) {

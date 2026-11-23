@@ -75,6 +75,25 @@ var opusReceiveCodec = webrtc.RTPCodecCapability{
 	SDPFmtpLine: "useinbandfec=1;usedtx=1",
 }
 
+// setOpusReceivePreferences makes the next offer or answer request
+// opusReceiveCodec. A positive maxPlaybackRate adds RFC 7587 maxplaybackrate:
+// libwebrtc then limits its encoder's audio bandwidth and lowers its default
+// bitrate from 32 to 20 kbit/s at 16 kHz or below.
+func setOpusReceivePreferences(pc *webrtc.PeerConnection, maxPlaybackRate int) error {
+	codec := opusReceiveCodec
+	if maxPlaybackRate > 0 {
+		codec.SDPFmtpLine += ";maxplaybackrate=" + strconv.Itoa(maxPlaybackRate)
+	}
+	for _, tr := range pc.GetTransceivers() {
+		if tr.Kind() == webrtc.RTPCodecTypeAudio {
+			if err := tr.SetCodecPreferences([]webrtc.RTPCodecParameters{{RTPCodecCapability: codec}}); err != nil {
+				return fmt.Errorf("set Opus receive preferences: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 // Bridge manages voice choices and sessions on one shared WebRTC transport.
 type Bridge struct {
 	log            *slog.Logger
@@ -472,7 +491,7 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 					sess.sendGatewayError(sessionCtx, "activity log: "+logErr.Error())
 					return
 				}
-				err = backendSession.acceptClientMessage(sessionCtx, data)
+				err = sess.acceptClientMessage(sessionCtx, backendSession, data)
 			}
 			if err != nil {
 				if errors.Is(err, errSessionClosed) {
@@ -531,12 +550,8 @@ func (b *Bridge) HandleChoiceOffer(ctx context.Context, sdpOffer, choiceID strin
 	// Pion copies the offer's fmtp into transceiver preferences during
 	// SetRemoteDescription. Restore our receive preferences before answering;
 	// registering them in the MediaEngine alone does not request uplink DTX.
-	for _, tr := range pc.GetTransceivers() {
-		if tr.Kind() == webrtc.RTPCodecTypeAudio {
-			if err := tr.SetCodecPreferences([]webrtc.RTPCodecParameters{{RTPCodecCapability: opusReceiveCodec}}); err != nil {
-				return "", "", fmt.Errorf("set Opus receive preferences: %w", err)
-			}
-		}
+	if err := setOpusReceivePreferences(pc, 0); err != nil {
+		return "", "", err
 	}
 
 	// Create answer.
@@ -916,6 +931,7 @@ type session struct {
 	audioTrackReceived   bool
 	backendConnected     bool
 	sessionReadySent     bool
+	renegotiation        bool // the client's session.setup accepts rtc.offer
 	lastError            string
 	workers              sync.WaitGroup
 	workerActive         int
@@ -1048,6 +1064,84 @@ func (s *session) backendReady(ctx context.Context) {
 		s.log.InfoContext(ctx, "voicertc: starting mic forwarding after backend setup", "session", s.id)
 		s.startWorker(func() { s.audioRxLoop(ctx, track) })
 	}
+	// A worker reads the rate: the backend may call backendReady while holding
+	// the lock inputSampleRate takes.
+	s.mu.Lock()
+	renegotiation := s.renegotiation
+	s.mu.Unlock()
+	if renegotiation {
+		s.startWorker(func() { s.offerMicrophoneRate(ctx) })
+	}
+}
+
+// acceptClientMessage handles the WebRTC messages the session owns and
+// forwards the rest to the backend.
+func (s *session) acceptClientMessage(ctx context.Context, backend backendSession, data []byte) error {
+	var env voicev2.MessageEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return err
+	}
+	switch env.Kind {
+	case voicev2.MessageKindRTCAnswer:
+		var answer voicev2.RTCAnswer
+		if err := json.Unmarshal(data, &answer); err != nil {
+			return err
+		}
+		if state := s.pc.SignalingState(); state != webrtc.SignalingStateHaveLocalOffer {
+			return fmt.Errorf("rtc.answer in signaling state %s", state)
+		}
+		if err := s.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: answer.SDP}); err != nil {
+			return fmt.Errorf("rtc.answer: %w", err)
+		}
+		s.log.InfoContext(ctx, "voicertc: microphone rate renegotiated", "session", s.id)
+		return nil
+	case voicev2.MessageKindSessionSetup:
+		var setup voicev2.SessionSetup
+		if err := json.Unmarshal(data, &setup); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.renegotiation = setup.Renegotiation
+		s.mu.Unlock()
+	}
+	return backend.acceptClientMessage(ctx, data)
+}
+
+// offerMicrophoneRate renegotiates to cap the client's Opus encoder at the
+// backend's microphone rate. A failure leaves the negotiated 48 kHz in place.
+func (s *session) offerMicrophoneRate(ctx context.Context) {
+	s.mu.Lock()
+	backend := s.backend
+	s.mu.Unlock()
+	rate := backend.inputSampleRate()
+	if rate == 0 || rate >= opusRTPClockRate {
+		return
+	}
+	offer, err := s.microphoneRateOffer(rate)
+	if err != nil {
+		s.log.WarnContext(ctx, "voicertc: microphone rate renegotiation failed", "session", s.id, "rate", rate, "err", err)
+		return
+	}
+	if err := s.sendGatewayMessage(ctx, mustGatewayServerMessage(&voicev2.RTCOffer{Kind: voicev2.MessageKindRTCOffer, SDP: offer})); err != nil {
+		s.log.WarnContext(ctx, "voicertc: rtc.offer send failed", "session", s.id, "err", err)
+	}
+}
+
+// microphoneRateOffer sets and returns a local offer whose Opus receive
+// preferences carry maxplaybackrate=rate. ICE gathering completed before the
+// first answer, so the offer already lists the gateway's candidates.
+func (s *session) microphoneRateOffer(rate int) (string, error) {
+	if err := setOpusReceivePreferences(s.pc, rate); err != nil {
+		return "", err
+	}
+	offer, err := s.pc.CreateOffer(nil)
+	if err != nil {
+		return "", fmt.Errorf("create offer: %w", err)
+	}
+	if err := s.pc.SetLocalDescription(offer); err != nil {
+		return "", fmt.Errorf("set local description: %w", err)
+	}
+	return s.pc.LocalDescription().SDP, nil
 }
 
 func (s *session) sendGatewayMessage(ctx context.Context, data []byte) error {

@@ -438,7 +438,7 @@ func TestProductionGateway(t *testing.T) {
 	srv := httptest.NewServer(production.routes(f.routes()))
 	t.Cleanup(srv.Close)
 
-	t.Run("advertises the production choice with gateway synthesis", func(t *testing.T) {
+	t.Run("advertises the production choice with gateway stages", func(t *testing.T) {
 		resp, err := httpGet(t, srv.URL+"/api/voicegateway/v2/voice/choices")
 		if err != nil {
 			t.Fatal(err)
@@ -451,6 +451,9 @@ func TestProductionGateway(t *testing.T) {
 		if len(catalog.Choices) != 1 || catalog.Choices[0].ID != "production" ||
 			catalog.DefaultChoiceID(voicev2.VoiceTransportWebRTC) != "production" {
 			t.Fatalf("production catalog = %+v", catalog)
+		}
+		if len(catalog.RecognitionModels) != 1 || catalog.RecognitionModels[0].ID != "production-asr" {
+			t.Fatalf("production recognition models = %+v", catalog.RecognitionModels)
 		}
 		if len(catalog.SynthesisModels) != 1 || catalog.SynthesisModels[0].ID != "production-tts" {
 			t.Fatalf("production synthesis models = %+v", catalog.SynthesisModels)
@@ -468,13 +471,17 @@ func TestProductionGateway(t *testing.T) {
 	})
 }
 
-func TestCleanupRecorder(t *testing.T) {
+func TestProductionRecorder(t *testing.T) {
 	t.Parallel()
 	f := &fixture{}
-	log := slog.New(cleanupRecorder{Handler: testlog.New(t).Handler(), fixture: f}).With("component", "test")
+	log := slog.New(productionRecorder{Handler: testlog.New(t).Handler(), fixture: f}).With("component", "test")
 	log.Info("voicertc: session cleaned up", "session", "s1", "cause", errors.New("client closed the WebRTC connection"))
 	log.Info("voicertc: data channel closed", "session", "s1")
+	log.Info("voicertc: microphone rate renegotiated", "session", "s1")
 	if got := f.stats.ProductionCleanups; len(got) != 1 || got[0] != "client closed the WebRTC connection" {
 		t.Fatalf("cleanups = %q", got)
+	}
+	if got := f.stats.ProductionRenegotiations; got != 1 {
+		t.Fatalf("renegotiations = %d", got)
 	}
 }

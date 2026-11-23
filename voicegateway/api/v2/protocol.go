@@ -20,12 +20,16 @@ const (
 	MessageKindTurnCancel MessageKind = "turn.cancel"
 	// MessageKindSessionClose asks the gateway to close the session.
 	MessageKindSessionClose MessageKind = "session.close"
+	// MessageKindRTCAnswer answers the gateway's rtc.offer.
+	MessageKindRTCAnswer MessageKind = "rtc.answer"
 	// MessageKindSessionReady reports that the gateway session is ready.
 	MessageKindSessionReady MessageKind = "session.ready"
 	// MessageKindSessionStatus reports startup progress before session.ready.
 	MessageKindSessionStatus MessageKind = "session.status"
 	// MessageKindSessionUsage reports cumulative provider usage for this connection.
 	MessageKindSessionUsage MessageKind = "session.usage"
+	// MessageKindRTCOffer renegotiates the WebRTC media session.
+	MessageKindRTCOffer MessageKind = "rtc.offer"
 	// MessageKindTranscriptDelta streams transcript text.
 	MessageKindTranscriptDelta MessageKind = "transcript.delta"
 	// MessageKindTranscriptDraft replaces provisional user text, without committing it.
@@ -145,6 +149,12 @@ type SessionSetup struct {
 	// Omitted uses the first available entry when output is gateway-owned.
 	// It must be omitted for client-owned synthesis and indivisible choices.
 	SynthesisModelID string `json:"synthesisModelID,omitempty"`
+	// Renegotiation declares that the client answers rtc.offer. The gateway then
+	// sends one after session.ready when the session takes microphone audio
+	// below 48 kHz, capping the client's Opus encoder with RFC 7587
+	// maxplaybackrate so it stops spending uplink bits on audio the backend
+	// discards. It applies only to WebRTC sessions.
+	Renegotiation bool `json:"renegotiation,omitempty"`
 }
 
 // SessionClose is a client message that closes the voice session.
@@ -153,6 +163,27 @@ type SessionClose struct {
 	Kind MessageKind `json:"kind"`
 	// Reason optionally explains why the client closed the session.
 	Reason string `json:"reason,omitempty"`
+}
+
+// RTCOffer is a gateway message that renegotiates the WebRTC media session.
+//
+// The gateway sends at most one, after session.ready, and only to a client
+// whose session.setup set renegotiation. The client applies it as the remote
+// description and replies with rtc.answer; until then the session keeps its
+// current media parameters.
+type RTCOffer struct {
+	// Kind is "rtc.offer".
+	Kind MessageKind `json:"kind"`
+	// SDP is the gateway's SDP offer.
+	SDP string `json:"sdp"`
+}
+
+// RTCAnswer is a client message that answers rtc.offer.
+type RTCAnswer struct {
+	// Kind must be "rtc.answer".
+	Kind MessageKind `json:"kind"`
+	// SDP is the client's SDP answer.
+	SDP string `json:"sdp"`
 }
 
 // SessionReady is a gateway message that reports the session is ready.

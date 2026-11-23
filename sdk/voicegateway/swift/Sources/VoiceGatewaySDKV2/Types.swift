@@ -113,9 +113,11 @@ public struct MessageKind: Codable, Equatable, Hashable {
     public static let ToolResult = MessageKind("tool.result")
     public static let TurnCancel = MessageKind("turn.cancel")
     public static let SessionClose = MessageKind("session.close")
+    public static let RTCAnswer = MessageKind("rtc.answer")
     public static let SessionReady = MessageKind("session.ready")
     public static let SessionStatus = MessageKind("session.status")
     public static let SessionUsage = MessageKind("session.usage")
+    public static let RTCOffer = MessageKind("rtc.offer")
     public static let TranscriptDelta = MessageKind("transcript.delta")
     public static let TranscriptDraft = MessageKind("transcript.draft")
     public static let AssistantTextDelta = MessageKind("assistant.text.delta")
@@ -907,6 +909,12 @@ public struct SessionSetup: Codable {
     /// Omitted uses the first available entry when output is gateway-owned.
     /// It must be omitted for client-owned synthesis and indivisible choices.
     public let synthesisModelID: String?
+    /// Renegotiation declares that the client answers rtc.offer. The gateway then
+    /// sends one after session.ready when the session takes microphone audio
+    /// below 48 kHz, capping the client's Opus encoder with RFC 7587
+    /// maxplaybackrate so it stops spending uplink bits on audio the backend
+    /// discards. It applies only to WebRTC sessions.
+    public let renegotiation: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -917,9 +925,10 @@ public struct SessionSetup: Codable {
         case speech
         case recognitionModelID
         case synthesisModelID
+        case renegotiation
     }
 
-    public init(kind: MessageKind, voice: VoiceConfig, tools: [ToolDeclaration]?, context: Context, includeReasoning: Bool? = nil, speech: SpeechConfig? = nil, recognitionModelID: String? = nil, synthesisModelID: String? = nil) {
+    public init(kind: MessageKind, voice: VoiceConfig, tools: [ToolDeclaration]?, context: Context, includeReasoning: Bool? = nil, speech: SpeechConfig? = nil, recognitionModelID: String? = nil, synthesisModelID: String? = nil, renegotiation: Bool? = nil) {
         self.kind = kind
         self.voice = voice
         self.tools = tools
@@ -928,6 +937,7 @@ public struct SessionSetup: Codable {
         self.speech = speech
         self.recognitionModelID = recognitionModelID
         self.synthesisModelID = synthesisModelID
+        self.renegotiation = renegotiation
     }
 
     public init(from decoder: Decoder) throws {
@@ -940,6 +950,7 @@ public struct SessionSetup: Codable {
         self.speech = try c.decodeIfPresent(SpeechConfig.self, forKey: .speech)
         self.recognitionModelID = try c.decodeIfPresent(String.self, forKey: .recognitionModelID)
         self.synthesisModelID = try c.decodeIfPresent(String.self, forKey: .synthesisModelID)
+        self.renegotiation = try c.decodeIfPresent(Bool.self, forKey: .renegotiation)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -952,6 +963,7 @@ public struct SessionSetup: Codable {
         try c.encodeIfPresent(self.speech, forKey: .speech)
         try c.encodeIfPresent(self.recognitionModelID, forKey: .recognitionModelID)
         try c.encodeIfPresent(self.synthesisModelID, forKey: .synthesisModelID)
+        try c.encodeIfPresent(self.renegotiation, forKey: .renegotiation)
     }
 }
 
@@ -1050,6 +1062,37 @@ public struct SessionClose: Codable {
     public init(kind: MessageKind, reason: String? = nil) {
         self.kind = kind
         self.reason = reason
+    }
+}
+
+/// RTCOffer is a gateway message that renegotiates the WebRTC media session.
+///
+/// The gateway sends at most one, after session.ready, and only to a client
+/// whose session.setup set renegotiation. The client applies it as the remote
+/// description and replies with rtc.answer; until then the session keeps its
+/// current media parameters.
+public struct RTCOffer: Codable {
+    /// Kind is "rtc.offer".
+    public let kind: MessageKind
+    /// SDP is the gateway's SDP offer.
+    public let sdp: String
+
+    public init(kind: MessageKind, sdp: String) {
+        self.kind = kind
+        self.sdp = sdp
+    }
+}
+
+/// RTCAnswer is a client message that answers rtc.offer.
+public struct RTCAnswer: Codable {
+    /// Kind must be "rtc.answer".
+    public let kind: MessageKind
+    /// SDP is the client's SDP answer.
+    public let sdp: String
+
+    public init(kind: MessageKind, sdp: String) {
+        self.kind = kind
+        self.sdp = sdp
     }
 }
 

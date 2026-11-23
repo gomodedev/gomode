@@ -5,7 +5,9 @@
 // SpeechRecognizer and offers no microphone track, because the gateway rejects microphone audio
 // for client recognition. Gateway speech plays the remote RTP track; device speech mutes it and
 // speaks assistant.text.delta through DeviceSpeechOutput, with thinking music while the gateway
-// thinks. With either device stage, a client turn is idle once the gateway reports idle and device
+// thinks. Gateway recognition below 48 kHz receives one rtc.offer after session.ready; applying
+// it caps the Opus encoder at that rate, and a failure keeps the negotiated media. With either
+// device stage, a client turn is idle once the gateway reports idle and device
 // playback drained; device recognition listens only while the assistant speaks or the turn is idle.
 // A recognized hypothesis during assistant output sends turn.cancel; output of the cancelled turn
 // is dropped until the gateway acknowledges with interrupted and the next user turn starts
@@ -39,6 +41,8 @@ import com.fghbuild.voicegateway.sdk.v2.ContextUpdate
 import com.fghbuild.voicegateway.sdk.v2.Error
 import com.fghbuild.voicegateway.sdk.v2.MessageEnvelope
 import com.fghbuild.voicegateway.sdk.v2.MessageKind
+import com.fghbuild.voicegateway.sdk.v2.RTCAnswer
+import com.fghbuild.voicegateway.sdk.v2.RTCOffer
 import com.fghbuild.voicegateway.sdk.v2.ReasoningDelta
 import com.fghbuild.voicegateway.sdk.v2.SessionSetup
 import com.fghbuild.voicegateway.sdk.v2.SessionStatus
@@ -112,6 +116,7 @@ private const val TAG = "GoModeVoiceSession"
 private const val MIC_LEVEL_POLL_MS = 100L
 private const val SETUP_TIMEOUT_MS = 15_000L
 private const val ICE_GATHERING_TIMEOUT_MS = 10_000L
+private const val RENEGOTIATION_FAILED = "Could not apply the voice gateway's media renegotiation"
 private const val ICE_DISCONNECTED_GRACE_MS = 5_000L
 
 // A Wi-Fi to cellular handover can take tens of seconds. DNS, sockets, ICE gathering, and gateway
@@ -1105,27 +1110,71 @@ internal class VoiceSession(
         pc: PeerConnection,
         desc: SessionDescription,
     ) {
-        val result = CompletableDeferred<String?>()
-        pc.setLocalDescription(
+        awaitSdp("Set local description") { pc.setLocalDescription(it, desc) }
+    }
+
+    // awaitSdp runs one libwebrtc SDP operation and returns the description it created, or null
+    // for a set operation.
+    private suspend fun awaitSdp(
+        operation: String,
+        start: (SdpObserver) -> Unit,
+    ): SessionDescription? {
+        val result = CompletableDeferred<Result<SessionDescription?>>()
+        start(
             object : SdpObserver {
-                override fun onCreateSuccess(p0: SessionDescription) = Unit
+                override fun onCreateSuccess(p0: SessionDescription) {
+                    result.complete(Result.success(p0))
+                }
 
                 override fun onSetSuccess() {
-                    result.complete(null)
+                    result.complete(Result.success(null))
                 }
 
-                override fun onCreateFailure(p0: String) = Unit
+                override fun onCreateFailure(p0: String) {
+                    result.complete(Result.failure(IllegalStateException("$operation failed: $p0")))
+                }
 
                 override fun onSetFailure(p0: String) {
-                    result.complete(p0)
+                    result.complete(Result.failure(IllegalStateException("$operation failed: $p0")))
                 }
             },
-            desc,
         )
-        val error = withTimeout(ICE_GATHERING_TIMEOUT_MS) { result.await() }
-        if (error != null) {
-            error("Set local description failed: $error")
-        }
+        return withTimeout(ICE_GATHERING_TIMEOUT_MS) { result.await() }.getOrThrow()
+    }
+
+    // answerRTCOffer applies the gateway's renegotiation, which caps the Opus encoder at the
+    // session's microphone rate. A failure keeps the negotiated media, so it is logged instead of
+    // ending the session.
+    private suspend fun answerRTCOffer(
+        offer: RTCOffer,
+        attempt: Long,
+        originChannel: DataChannel,
+    ) {
+        val pc = peerConnection ?: return
+        val sdp =
+            try {
+                awaitSdp("Set remote offer") {
+                    pc.setRemoteDescription(it, SessionDescription(SessionDescription.Type.OFFER, offer.sdp))
+                }
+                val answer =
+                    checkNotNull(awaitSdp("Create answer") { pc.createAnswer(it, MediaConstraints()) })
+                setLocalDescription(pc, answer)
+                checkNotNull(pc.localDescription?.description) { "WebRTC local answer SDP unavailable" }
+            } catch (e: TimeoutCancellationException) {
+                Log.w(TAG, RENEGOTIATION_FAILED, e)
+                return
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, RENEGOTIATION_FAILED, e)
+                return
+            }
+        if (!ownsAttempt(attempt) || dataChannel !== originChannel || peerConnection !== pc) return
+        sendOnChannel(
+            originChannel,
+            json.encodeToString(RTCAnswer.serializer(), RTCAnswer(kind = MessageKind.RTCAnswer, sdp = sdp)),
+            VOICE_MESSAGE_DELIVERY_ERROR,
+        )
     }
 
     // waitForUsableICECandidate does not wait for every configured STUN server.
@@ -1425,6 +1474,10 @@ internal class VoiceSession(
                     clientTurnIdle = true
                     flushPendingNotifications()
                     if (clientStages && ownsAttempt(attempt) && dataChannel === originChannel) drainClientTurn()
+                }
+
+                MessageKind.RTCOffer -> {
+                    answerRTCOffer(json.decodeFromString(RTCOffer.serializer(), text), attempt, originChannel)
                 }
 
                 MessageKind.SessionUsage -> {
@@ -2194,7 +2247,10 @@ internal fun buildNetworkRecoveryContext(transcript: List<TranscriptEntry>): Str
     return lines.joinToString("\n")
 }
 
-/** Builds session.setup; a WebRTC session names its pinned [voice] setup, a text session sends none. */
+/**
+ * Builds session.setup; a WebRTC session names its pinned [voice] setup and answers rtc.offer, a text
+ * session sends none.
+ */
 internal fun gatewaySessionSetup(
     tools: List<ToolDeclaration>,
     systemInstruction: String,
@@ -2205,6 +2261,7 @@ internal fun gatewaySessionSetup(
 ) = SessionSetup(
     kind = MessageKind.SessionSetup,
     includeReasoning = includeReasoning.takeIf { it },
+    renegotiation = true.takeIf { voice != null },
     voice =
         VoiceConfig(
             name = voice?.voiceName?.takeIf { it.isNotEmpty() },

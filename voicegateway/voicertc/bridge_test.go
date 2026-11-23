@@ -537,6 +537,124 @@ func TestBrowserOpusDTX(t *testing.T) {
 	}
 }
 
+// TestBrowserOpusMaxPlaybackRate measures Chromium's real libwebrtc encoder
+// after the gateway renegotiates its 16 kHz microphone rate.
+func TestBrowserOpusMaxPlaybackRate(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	t.Cleanup(cancel)
+	b := newTestBridge(ctx, t, &fakeBackendConnector{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "text/html")
+			if _, err := w.Write([]byte("<!doctype html><title>Opus maxplaybackrate test</title>")); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		var req struct{ SDP string }
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			t.Error(err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		sdp, _, err := b.HandleOffer(r.Context(), req.SDP)
+		if err != nil {
+			t.Error(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(map[string]string{"sdp": sdp}); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newDTXBrowser(ctx, t)
+	c.navigate(srv.URL)
+	var res struct {
+		Result           struct{ Value []uint64 }
+		ExceptionDetails json.RawMessage
+	}
+	c.call("Runtime.evaluate", map[string]any{
+		"expression": browserMaxPlaybackRateMeasurement, "awaitPromise": true, "returnByValue": true,
+	}, c.session, &res)
+	if len(res.ExceptionDetails) != 0 || len(res.Result.Value) != 2 {
+		t.Fatalf("browser measurement failed: %+v", res)
+	}
+	full, capped := res.Result.Value[0], res.Result.Value[1]
+	t.Logf("uplink over 1.5s: 48 kHz %d bytes; maxplaybackrate=16000 %d bytes", full, capped)
+	// libwebrtc's default Opus bitrate drops from 32 to 20 kbit/s.
+	if full == 0 || capped*4 >= full*3 {
+		t.Fatal("maxplaybackrate did not cut uplink bytes by a quarter")
+	}
+}
+
+// browserMaxPlaybackRateMeasurement sends white noise, which needs every bit the
+// encoder allows, and returns the Opus payload bytes sent over 1.5 seconds
+// without and with renegotiation.
+const browserMaxPlaybackRateMeasurement = `(async () => {
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  async function run(renegotiation) {
+    const ac = new AudioContext({sampleRate: 48000});
+    const noise = ac.createBuffer(1, 48000, 48000);
+    const samples = noise.getChannelData(0);
+    for (let i = 0; i < samples.length; i++) samples[i] = (Math.random() * 2 - 1) * 0.3;
+    const source = ac.createBufferSource();
+    source.buffer = noise;
+    source.loop = true;
+    const dest = ac.createMediaStreamDestination();
+    dest.channelCount = 1;
+    source.connect(dest);
+    const pc = new RTCPeerConnection();
+    try {
+      pc.addTrack(dest.stream.getAudioTracks()[0]);
+      const dc = pc.createDataChannel('voice-gateway');
+      const ready = new Promise((resolve, reject) => {
+        let sessionReady = false;
+        dc.onopen = () => dc.send(JSON.stringify({kind: 'session.setup', voice: {name: 'local', language: 'en'}, renegotiation}));
+        dc.onmessage = async ev => {
+          const msg = JSON.parse(ev.data);
+          if (msg.kind === 'error') reject(new Error(msg.message));
+          if (msg.kind === 'session.ready') {
+            sessionReady = true;
+            if (!renegotiation) resolve();
+          }
+          if (msg.kind === 'rtc.offer' && sessionReady) {
+            await pc.setRemoteDescription({type: 'offer', sdp: msg.sdp});
+            await pc.setLocalDescription(await pc.createAnswer());
+            dc.send(JSON.stringify({kind: 'rtc.answer', sdp: pc.localDescription.sdp}));
+            resolve();
+          }
+        };
+      });
+      source.start();
+      await ac.resume();
+      await pc.setLocalDescription(await pc.createOffer());
+      if (pc.iceGatheringState !== 'complete') await new Promise(resolve => {
+        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+      });
+      const res = await fetch('/offer', {method: 'POST', body: JSON.stringify({sdp: pc.localDescription.sdp})});
+      if (!res.ok) throw new Error(await res.text());
+      await pc.setRemoteDescription({type: 'answer', sdp: (await res.json()).sdp});
+      await ready;
+      async function bytes() {
+        const reports = await pc.getStats();
+        const r = [...reports.values()].find(r => r.type === 'outbound-rtp' && r.kind === 'audio');
+        if (!r) throw new Error('No outbound audio stats');
+        return r.bytesSent;
+      }
+      await sleep(500);
+      const start = await bytes();
+      await sleep(1500);
+      return (await bytes()) - start;
+    } finally {
+      pc.close(); source.stop(); await ac.close();
+    }
+  }
+  return [await run(false), await run(true)];
+})()`
+
 type fakeBackendConnector struct {
 	closed   bool
 	closeErr error
@@ -597,6 +715,35 @@ type sessionContextConnector struct {
 func (b *sessionContextConnector) connect(ctx context.Context, id string, sink backendSink) (backendSession, error) {
 	b.ctx <- ctx
 	return b.fakeBackendConnector.connect(ctx, id, sink)
+}
+
+// kindRecordingConnector reports the kind of each client message its sessions
+// receive.
+type kindRecordingConnector struct {
+	fakeBackendConnector
+	kinds chan voicev2.MessageKind
+}
+
+func (b *kindRecordingConnector) connect(ctx context.Context, id string, sink backendSink) (backendSession, error) {
+	s, err := b.fakeBackendConnector.connect(ctx, id, sink)
+	if err != nil {
+		return nil, err
+	}
+	return &kindRecordingSession{fakeBackendSession: s.(*fakeBackendSession), kinds: b.kinds}, nil
+}
+
+type kindRecordingSession struct {
+	*fakeBackendSession
+	kinds chan voicev2.MessageKind
+}
+
+func (s *kindRecordingSession) acceptClientMessage(ctx context.Context, data []byte) error {
+	var env voicev2.MessageEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return err
+	}
+	s.kinds <- env.Kind
+	return s.fakeBackendSession.acceptClientMessage(ctx, data)
 }
 
 type fakeBackendSession struct {
@@ -1495,6 +1642,89 @@ func TestBridge(t *testing.T) {
 				}
 				if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: answer}); err != nil {
 					t.Fatalf("client rejected answer for payload %d: %v", pt, err)
+				}
+			}
+		})
+	})
+
+	t.Run("Renegotiation", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			t.Cleanup(cancel)
+			backend := &kindRecordingConnector{kinds: make(chan voicev2.MessageKind, 8)}
+			b := newTestBridge(ctx, t, backend)
+			client := connectVoiceRTCClient(ctx, t, b.HandleOffer, &voicev2.SessionSetup{
+				Kind: voicev2.MessageKindSessionSetup, Voice: voicev2.VoiceConfig{Name: "local", Language: "en"}, Renegotiation: true,
+			})
+			var offer voicev2.RTCOffer
+			if err := json.Unmarshal(client.waitMessage(ctx, t, voicev2.MessageKindRTCOffer), &offer); err != nil {
+				t.Fatal(err)
+			}
+			// The fake backend takes 16 kHz microphone audio.
+			if got, ok := opusFmtp(offer.SDP); !ok || got != "useinbandfec=1;usedtx=1;maxplaybackrate=16000" {
+				t.Fatalf("rtc.offer opus fmtp = %q", got)
+			}
+			if err := client.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer.SDP}); err != nil {
+				t.Fatal(err)
+			}
+			answer, err := client.pc.CreateAnswer(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.pc.SetLocalDescription(answer); err != nil {
+				t.Fatal(err)
+			}
+			client.send(ctx, t, &voicev2.RTCAnswer{Kind: voicev2.MessageKindRTCAnswer, SDP: client.pc.LocalDescription().SDP})
+			// The data channel delivers in order, so the gateway has applied the
+			// answer once the backend sees the next message.
+			client.send(ctx, t, &voicev2.ContextUpdate{Kind: voicev2.MessageKindContextUpdate})
+			for _, want := range []voicev2.MessageKind{voicev2.MessageKindSessionSetup, voicev2.MessageKindContextUpdate} {
+				select {
+				case got := <-backend.kinds:
+					if got != want {
+						t.Fatalf("backend received %s, want %s", got, want)
+					}
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			if got := b.DiagnoseVoiceRTC(ctx, client.sessionID, nil).Server.SignalingState; got != voicev2.VoiceRTCSignalingState(webrtc.SignalingStateStable.String()) {
+				t.Fatalf("gateway signaling state %q after rtc.answer", got)
+			}
+			// The fake backend echoes microphone PCM, so audio survives renegotiation.
+			client.writeMicAudio(ctx, t, 25)
+			select {
+			case <-client.remoteAudioEnergy:
+			case err := <-client.mediaErrs:
+				t.Fatal(err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			t.Cleanup(cancel)
+			client := newVoiceRTCTestSession(ctx, t, &fakeBackendConnector{})
+			client.send(ctx, t, &voicev2.RTCAnswer{Kind: voicev2.MessageKindRTCAnswer, SDP: "v=0"})
+			for {
+				select {
+				case msg := <-client.messages:
+					if msg.kind != voicev2.MessageKindError {
+						continue
+					}
+					var e voicev2.Error
+					if err := json.Unmarshal(msg.data, &e); err != nil {
+						t.Fatal(err)
+					}
+					if e.Message != "session: rtc.answer in signaling state stable" {
+						t.Fatalf("error = %q", e.Message)
+					}
+					return
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
 				}
 			}
 		})

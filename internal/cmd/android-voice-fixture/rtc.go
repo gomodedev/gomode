@@ -62,6 +62,9 @@ type fixtureStats struct {
 	// ProductionCleanups lists the cause of each production gateway session
 	// cleanup, in order.
 	ProductionCleanups []string `json:"productionCleanups"`
+	// ProductionRenegotiations counts the production gateway's applied
+	// rtc.answer messages.
+	ProductionRenegotiations int `json:"productionRenegotiations"`
 }
 
 type mediaPeer struct {

@@ -34,6 +34,8 @@ const mcpMocks = {
 };
 import {
   MessageKindError,
+  MessageKindRTCAnswer,
+  MessageKindRTCOffer,
   MessageKindSessionReady,
   MessageKindToolCall,
   MessageKindTurnStatus,
@@ -62,6 +64,7 @@ class FakePeerConnection extends EventTarget {
   iceConnectionState: RTCIceConnectionState = "new";
   iceGatheringState: RTCIceGatheringState = "new";
   localDescription: RTCSessionDescription | null = null;
+  readonly remoteDescriptions: RTCSessionDescriptionInit[] = [];
   oniceconnectionstatechange: ((this: RTCPeerConnection, ev: Event) => unknown) | null = null;
   ontrack: ((this: RTCPeerConnection, ev: RTCTrackEvent) => unknown) | null = null;
 
@@ -88,6 +91,10 @@ class FakePeerConnection extends EventTarget {
   }
 
   setLocalDescription(): Promise<void> {
+    if (this.remoteDescriptions.at(-1)?.type === "offer") {
+      this.localDescription = { type: "answer", sdp: "renegotiated-answer" } as RTCSessionDescription;
+      return Promise.resolve();
+    }
     this.iceGatheringState = "gathering";
     this.localDescription = { type: "offer", sdp: "initial-offer" } as RTCSessionDescription;
     queueMicrotask(() => {
@@ -123,7 +130,8 @@ class FakePeerConnection extends EventTarget {
     return Promise.resolve();
   }
 
-  setRemoteDescription(): Promise<void> {
+  setRemoteDescription(desc: RTCSessionDescriptionInit): Promise<void> {
+    this.remoteDescriptions.push(desc);
     return Promise.resolve();
   }
 
@@ -3501,6 +3509,32 @@ describe("VoiceSession", () => {
     } finally {
       session.disconnect();
       warn.mockRestore();
+    }
+  });
+
+  it("answers the gateway's media renegotiation", async () => {
+    const session = new VoiceSession();
+    try {
+      await session.connect();
+      const channel = FakePeerConnection.dataChannels[0];
+      channel?.onopen?.();
+      expect(JSON.parse(channel?.send.mock.calls[0]?.[0] as string)).toMatchObject({
+        kind: "session.setup",
+        renegotiation: true,
+      });
+      channel?.onmessage?.(
+        new MessageEvent("message", { data: JSON.stringify({ kind: MessageKindRTCOffer, sdp: "gateway-offer" }) }),
+      );
+      await vi.waitFor(() =>
+        expect(channel?.send.mock.calls.map(([text]) => JSON.parse(text as string)).at(-1)).toEqual({
+          kind: MessageKindRTCAnswer,
+          sdp: "renegotiated-answer",
+        }),
+      );
+      expect(FakePeerConnection.last?.remoteDescriptions.at(-1)).toEqual({ type: "offer", sdp: "gateway-offer" });
+      expect(session.state.error).toBeNull();
+    } finally {
+      session.disconnect();
     }
   });
 

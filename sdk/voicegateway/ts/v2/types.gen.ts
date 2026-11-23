@@ -32,9 +32,11 @@ export type MessageKind =
   | "tool.result"
   | "turn.cancel"
   | "session.close"
+  | "rtc.answer"
   | "session.ready"
   | "session.status"
   | "session.usage"
+  | "rtc.offer"
   | "transcript.delta"
   | "transcript.draft"
   | "assistant.text.delta"
@@ -54,9 +56,11 @@ export const MessageKindUserMessage = "user.message";
 export const MessageKindToolResult = "tool.result";
 export const MessageKindTurnCancel = "turn.cancel";
 export const MessageKindSessionClose = "session.close";
+export const MessageKindRTCAnswer = "rtc.answer";
 export const MessageKindSessionReady = "session.ready";
 export const MessageKindSessionStatus = "session.status";
 export const MessageKindSessionUsage = "session.usage";
+export const MessageKindRTCOffer = "rtc.offer";
 export const MessageKindTranscriptDelta = "transcript.delta";
 export const MessageKindTranscriptDraft = "transcript.draft";
 export const MessageKindAssistantTextDelta = "assistant.text.delta";
@@ -554,6 +558,14 @@ export interface SessionSetup {
    * It must be omitted for client-owned synthesis and indivisible choices.
    */
   synthesisModelID?: string;
+  /**
+   * Renegotiation declares that the client answers rtc.offer. The gateway then
+   * sends one after session.ready when the session takes microphone audio
+   * below 48 kHz, capping the client's Opus encoder with RFC 7587
+   * maxplaybackrate so it stops spending uplink bits on audio the backend
+   * discards. It applies only to WebRTC sessions.
+   */
+  renegotiation?: boolean;
 }
 
 /**
@@ -603,6 +615,29 @@ export interface SessionClose {
   kind: MessageKind;
   /** Reason optionally explains why the client closed the session. */
   reason?: string;
+}
+
+/**
+ * RTCOffer is a gateway message that renegotiates the WebRTC media session.
+ *
+ * The gateway sends at most one, after session.ready, and only to a client
+ * whose session.setup set renegotiation. The client applies it as the remote
+ * description and replies with rtc.answer; until then the session keeps its
+ * current media parameters.
+ */
+export interface RTCOffer {
+  /** Kind is "rtc.offer". */
+  kind: MessageKind;
+  /** SDP is the gateway's SDP offer. */
+  sdp: string;
+}
+
+/** RTCAnswer is a client message that answers rtc.offer. */
+export interface RTCAnswer {
+  /** Kind must be "rtc.answer". */
+  kind: MessageKind;
+  /** SDP is the client's SDP answer. */
+  sdp: string;
 }
 
 /**

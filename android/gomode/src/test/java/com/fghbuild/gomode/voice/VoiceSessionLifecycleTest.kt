@@ -59,6 +59,7 @@ import org.robolectric.shadows.ShadowLog
 import org.robolectric.shadows.ShadowNetwork
 import org.robolectric.shadows.ShadowSystemClock
 import org.webrtc.DataChannel
+import org.webrtc.MediaConstraints
 import org.webrtc.NativePeerConnectionFactory
 import org.webrtc.PeerConnection
 import org.webrtc.SdpObserver
@@ -377,6 +378,34 @@ class VoiceSessionLifecycleTest {
                             ).map { it.msg }
                     assertFalse(records.any { it.contains("event=finished") })
                     assertEquals(1, records.count { it.contains("event=stage_timeout stage=TRANSPORT") })
+                } finally {
+                    session.close()
+                }
+            }
+        }
+
+    // The gateway's rtc.offer caps the Opus encoder; a renegotiation failure keeps the session.
+    @Test
+    fun rtcOfferIsAnsweredAndItsFailureKeepsTheSession() =
+        runTest {
+            for (remoteFailure in listOf(null, "bad offer")) {
+                val settings = SettingsRepository(MemoryPreferences())
+                val service = settings.addService("Service", "https://service.example")
+                settings.settings.first { it.activeServiceId == service }
+                val session = createCloudSession(settings)
+                val channel = RecordingDataChannel()
+                val peer = RecordingPeerConnection().also { it.remoteFailure = remoteFailure }
+                attachAuthorizedChannel(session, channel)
+                VoiceSession::class.java.getDeclaredField("peerConnection").apply {
+                    isAccessible = true
+                    set(session, peer)
+                }
+                try {
+                    invokeHandleServerMessage(session, """{"kind":"rtc.offer","sdp":"gateway-offer"}""", channel)
+                    assertEquals(listOf("OFFER:gateway-offer"), peer.remoteDescriptions)
+                    val sent = if (remoteFailure == null) listOf(RENEGOTIATED_ANSWER) else emptyList()
+                    assertEquals(sent, channel.sent)
+                    assertNull(session.state.value.error)
                 } finally {
                     session.close()
                 }
@@ -1085,15 +1114,36 @@ class VoiceSessionLifecycleTest {
     ) : PeerConnection(NativePeerConnectionFactory { 1L }) {
         var closed = false
         var disposed = false
+        var remoteFailure: String? = null
+        val remoteDescriptions = mutableListOf<String>()
         private var descriptionObserver: SdpObserver? = null
+        private var local: SessionDescription? = null
 
         override fun setLocalDescription(
             observer: SdpObserver,
             description: SessionDescription,
         ) {
             descriptionObserver = observer
+            local = description
             if (completeDescription) observer.onSetSuccess()
         }
+
+        override fun setRemoteDescription(
+            observer: SdpObserver,
+            description: SessionDescription,
+        ) {
+            remoteDescriptions += "${description.type}:${description.description}"
+            remoteFailure?.let(observer::onSetFailure) ?: observer.onSetSuccess()
+        }
+
+        override fun createAnswer(
+            observer: SdpObserver,
+            constraints: MediaConstraints,
+        ) {
+            observer.onCreateSuccess(SessionDescription(SessionDescription.Type.ANSWER, "renegotiated-answer"))
+        }
+
+        override fun getLocalDescription(): SessionDescription? = local
 
         fun completeDescriptionLate() {
             descriptionObserver?.onSetSuccess()
@@ -1300,6 +1350,7 @@ class VoiceSessionLifecycleTest {
         }
 
     private companion object {
+        const val RENEGOTIATED_ANSWER = """{"kind":"rtc.answer","sdp":"renegotiated-answer"}"""
         const val SETTINGS_JSON = """
             {
               "service": "test-service",

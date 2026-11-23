@@ -28,6 +28,8 @@ var SDKAPI = apispec.Config[voiceapi.ErrorCode]{
 		reflect.TypeFor[ToolResult](),
 		reflect.TypeFor[TurnCancel](),
 		reflect.TypeFor[SessionClose](),
+		reflect.TypeFor[RTCOffer](),
+		reflect.TypeFor[RTCAnswer](),
 		reflect.TypeFor[SessionReady](),
 		reflect.TypeFor[SessionStatus](),
 		reflect.TypeFor[SessionUsage](),

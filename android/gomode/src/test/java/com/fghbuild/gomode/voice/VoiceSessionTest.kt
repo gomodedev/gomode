@@ -190,6 +190,14 @@ class VoiceSessionTest {
         assertFalse(listOf("speech", "recognitionModelID", "synthesisModelID").any(textPayload::containsKey))
     }
 
+    // Only a WebRTC session carries media the gateway can renegotiate.
+    @Test
+    fun onlyWebRtcSessionSetupAnswersRenegotiation() {
+        assertEquals(true, gatewaySessionSetup(emptyList(), "", "", "en-US", voice = selection()).renegotiation)
+        val text = Json.encodeToString(SessionSetup.serializer(), gatewaySessionSetup(emptyList(), "", "", "en-US"))
+        assertFalse(Json.parseToJsonElement(text).jsonObject.containsKey("renegotiation"))
+    }
+
     private fun selection(
         recognition: SpeechStageLocation = GATEWAY,
         speech: SpeechStageLocation = GATEWAY,

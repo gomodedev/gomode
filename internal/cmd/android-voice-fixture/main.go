@@ -412,7 +412,7 @@ func main() {
 	f := &fixture{rtcIP: *rtcIP}
 	// The recorder exposes the bridge's session cleanup causes to tests. genai and
 	// genaipy log through the default logger.
-	log := slog.New(cleanupRecorder{Handler: slog.NewTextHandler(os.Stderr, nil), fixture: f})
+	log := slog.New(productionRecorder{Handler: slog.NewTextHandler(os.Stderr, nil), fixture: f})
 	slog.SetDefault(log)
 	f.log = log
 	if err := run(context.Background(), f, *addr, *productionAddr); err != nil {

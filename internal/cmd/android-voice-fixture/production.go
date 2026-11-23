@@ -30,8 +30,11 @@ const productionReply = "Production gateway reply."
 // productionGateway runs voicertc's bridge and local stack against a fake
 // llama.cpp and OpenAI-compatible model server, so an emulator session crosses
 // the production WebRTC bridge, session protocol and synthesis path without
-// model weights. The synthetic gateway on the main listener stays in control
-// of scripted media and failures; this one proves production behavior.
+// model weights. Its recognizer resolves against the same server, which serves
+// no transcription session: gateway recognition connects and renegotiates the
+// microphone rate, but recognizing speech fails. The synthetic gateway on the
+// main listener stays in control of scripted media and failures; this one
+// proves production behavior.
 type productionGateway struct {
 	log    *slog.Logger
 	bridge *voicertc.Bridge
@@ -49,6 +52,7 @@ func newProductionGateway(ctx context.Context, f *fixture) (*productionGateway, 
 	go func() { _ = model.Serve(listener) }()
 	origin := "http://" + listener.Addr().String()
 	cfg := voicegateway.Config{
+		ASR: []voicegateway.ASRConfig{{ID: "production-asr", Label: "Fixture recognition", Provider: "llamacpp", Remote: origin, Model: "fixture/asr"}},
 		LLM: []voicegateway.LLMConfig{{ID: "production", Label: "Production gateway", ModelConfig: voicegateway.ModelConfig{
 			Provider: "openaicompatible", Remote: origin + "/v1/chat/completions", Model: "fixture-llm",
 		}}},
@@ -137,19 +141,24 @@ func productionTone() []int16 {
 	return out
 }
 
-// cleanupRecorder forwards records to its handler and keeps the cause of each
-// voicertc session cleanup, which tests read from /fixture/stats. Recording
-// does not depend on the handler's level.
-type cleanupRecorder struct {
+// productionRecorder forwards records to its handler and keeps the cause of
+// each voicertc session cleanup and the count of renegotiations, which tests
+// read from /fixture/stats. Recording does not depend on the handler's level.
+type productionRecorder struct {
 	slog.Handler
 	fixture *fixture
 }
 
-func (h cleanupRecorder) Enabled(ctx context.Context, level slog.Level) bool {
+func (h productionRecorder) Enabled(ctx context.Context, level slog.Level) bool {
 	return level >= slog.LevelInfo || h.Handler.Enabled(ctx, level)
 }
 
-func (h cleanupRecorder) Handle(ctx context.Context, r slog.Record) error {
+func (h productionRecorder) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message == "voicertc: microphone rate renegotiated" {
+		h.fixture.mu.Lock()
+		h.fixture.stats.ProductionRenegotiations++
+		h.fixture.mu.Unlock()
+	}
 	if r.Message == "voicertc: session cleaned up" {
 		r.Attrs(func(a slog.Attr) bool {
 			if a.Key == "cause" {
@@ -166,10 +175,10 @@ func (h cleanupRecorder) Handle(ctx context.Context, r slog.Record) error {
 	return h.Handler.Handle(ctx, r)
 }
 
-func (h cleanupRecorder) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return cleanupRecorder{Handler: h.Handler.WithAttrs(attrs), fixture: h.fixture}
+func (h productionRecorder) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return productionRecorder{Handler: h.Handler.WithAttrs(attrs), fixture: h.fixture}
 }
 
-func (h cleanupRecorder) WithGroup(name string) slog.Handler {
-	return cleanupRecorder{Handler: h.Handler.WithGroup(name), fixture: h.fixture}
+func (h productionRecorder) WithGroup(name string) slog.Handler {
+	return productionRecorder{Handler: h.Handler.WithGroup(name), fixture: h.fixture}
 }

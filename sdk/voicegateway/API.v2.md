@@ -68,9 +68,11 @@ MessageKind identifies a voice gateway WebRTC data-channel message.
 | `tool.result` | MessageKindToolResult returns the result of a tool call. |
 | `turn.cancel` | MessageKindTurnCancel asks the gateway to cancel the current turn. |
 | `session.close` | MessageKindSessionClose asks the gateway to close the session. |
+| `rtc.answer` | MessageKindRTCAnswer answers the gateway's rtc.offer. |
 | `session.ready` | MessageKindSessionReady reports that the gateway session is ready. |
 | `session.status` | MessageKindSessionStatus reports startup progress before session.ready. |
 | `session.usage` | MessageKindSessionUsage reports cumulative provider usage for this connection. |
+| `rtc.offer` | MessageKindRTCOffer renegotiates the WebRTC media session. |
 | `transcript.delta` | MessageKindTranscriptDelta streams transcript text. |
 | `transcript.draft` | MessageKindTranscriptDraft replaces provisional user text, without committing it. |
 | `assistant.text.delta` | MessageKindAssistantTextDelta streams assistant text. |
@@ -472,6 +474,7 @@ SessionSetup is the client message that initializes a voice session.
 | `speech` | `SpeechConfig` | Speech selects the owner of recognition and synthesis for this session. |  |
 | `recognitionModelID` | `string` | RecognitionModelID selects a recognitionModels entry for a composable LLM. Omitted uses the first available entry when input is gateway-owned. It must be omitted for client-owned recognition and indivisible choices. |  |
 | `synthesisModelID` | `string` | SynthesisModelID selects a synthesisModels entry for a composable LLM. Omitted uses the first available entry when output is gateway-owned. It must be omitted for client-owned synthesis and indivisible choices. |  |
+| `renegotiation` | `boolean` | Renegotiation declares that the client answers rtc.offer. The gateway then sends one after session.ready when the session takes microphone audio below 48 kHz, capping the client's Opus encoder with RFC 7587 maxplaybackrate so it stops spending uplink bits on audio the backend discards. It applies only to WebRTC sessions. |  |
 
 ### ContextUpdate
 
@@ -521,6 +524,29 @@ SessionClose is a client message that closes the voice session.
 |-------|------|-------------|----------|
 | `kind` | `MessageKind` | Kind must be "session.close". | yes |
 | `reason` | `string` | Reason optionally explains why the client closed the session. |  |
+
+### RTCOffer
+
+RTCOffer is a gateway message that renegotiates the WebRTC media session.
+
+The gateway sends at most one, after session.ready, and only to a client
+whose session.setup set renegotiation. The client applies it as the remote
+description and replies with rtc.answer; until then the session keeps its
+current media parameters.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `MessageKind` | Kind is "rtc.offer". | yes |
+| `sdp` | `string` | SDP is the gateway's SDP offer. | yes |
+
+### RTCAnswer
+
+RTCAnswer is a client message that answers rtc.offer.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `MessageKind` | Kind must be "rtc.answer". | yes |
+| `sdp` | `string` | SDP is the client's SDP answer. | yes |
 
 ### SessionReady
 
