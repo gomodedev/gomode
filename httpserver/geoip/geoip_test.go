@@ -6,18 +6,15 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"log/slog"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-)
 
-func testLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
-}
+	"github.com/gomodedev/gomode/internal/testlog"
+)
 
 func originOf(c *Checker, ip string) string {
 	origin, _ := c.CheckOrigin(ip)
@@ -30,7 +27,7 @@ func TestChecker(t *testing.T) {
 		t.Parallel()
 		t.Run("special addresses", func(t *testing.T) {
 			t.Parallel()
-			c, err := NewChecker(t.Context(), testLogger(), "local,tailscale", "", "")
+			c, err := NewChecker(t.Context(), testlog.New(t), "local,tailscale", "", "")
 			if err != nil {
 				t.Fatalf("NewChecker: %v", err)
 			}
@@ -71,14 +68,14 @@ func TestChecker(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			writeOriginCache(t, dir, "github", time.Now(), []string{"192.30.252.0/22", "185.199.108.0/22"})
-			cache := loadOriginCache(t.Context(), testLogger(), dir)
+			cache := loadOriginCache(t.Context(), testlog.New(t), dir)
 			if cache == nil {
 				t.Fatal("cache unavailable")
 			}
 			if err := cache.set("openai", []netip.Prefix{netip.MustParsePrefix("20.0.53.96/28")}); err != nil {
 				t.Fatal(err)
 			}
-			c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,anthropic,github,openai", "", dir)
+			c, err := NewChecker(t.Context(), testlog.New(t), "local,tailscale,anthropic,github,openai", "", dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +105,7 @@ func TestChecker(t *testing.T) {
 		})
 		t.Run("returns allowed origin", func(t *testing.T) {
 			t.Parallel()
-			c, err := NewChecker(t.Context(), testLogger(), "local", "", "")
+			c, err := NewChecker(t.Context(), testlog.New(t), "local", "", "")
 			if err != nil {
 				t.Fatalf("NewChecker: %v", err)
 			}
@@ -119,7 +116,7 @@ func TestChecker(t *testing.T) {
 		})
 		t.Run("returns blocked origin", func(t *testing.T) {
 			t.Parallel()
-			c, err := NewChecker(t.Context(), testLogger(), "tailscale", "", "")
+			c, err := NewChecker(t.Context(), testlog.New(t), "tailscale", "", "")
 			if err != nil {
 				t.Fatalf("NewChecker: %v", err)
 			}
@@ -132,7 +129,7 @@ func TestChecker(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			writeOriginCache(t, dir, "github", time.Now(), []string{"81.2.69.160/32"})
-			c, err := NewChecker(t.Context(), testLogger(), "github", testCountryDB(t), dir)
+			c, err := NewChecker(t.Context(), testlog.New(t), "github", testCountryDB(t), dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -288,7 +285,7 @@ func TestNewChecker(t *testing.T) {
 
 	t.Run("anthropic in allowlist uses static CIDR", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,anthropic", "", "")
+		c, err := NewChecker(t.Context(), testlog.New(t), "local,tailscale,anthropic", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -300,7 +297,7 @@ func TestNewChecker(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeOriginCache(t, dir, "github", time.Now(), []string{"192.30.252.0/22", "185.199.108.0/22"})
-		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,github", "", dir)
+		c, err := NewChecker(t.Context(), testlog.New(t), "local,tailscale,github", "", dir)
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -313,7 +310,7 @@ func TestNewChecker(t *testing.T) {
 	})
 	t.Run("github not in allowlist skips fetch", func(t *testing.T) {
 		t.Parallel()
-		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale", "", "")
+		c, err := NewChecker(t.Context(), testlog.New(t), "local,tailscale", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -326,7 +323,7 @@ func TestNewChecker(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		c, err := NewChecker(ctx, testLogger(), "github", "", "")
+		c, err := NewChecker(ctx, testlog.New(t), "github", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -336,7 +333,7 @@ func TestNewChecker(t *testing.T) {
 	})
 	t.Run("country code without DB returns error", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewChecker(t.Context(), testLogger(), "CA", "", ""); err == nil {
+		if _, err := NewChecker(t.Context(), testlog.New(t), "CA", "", ""); err == nil {
 			t.Error("expected error when country code given without DB path")
 		}
 	})
@@ -345,7 +342,7 @@ func TestNewChecker(t *testing.T) {
 		dir := t.TempDir()
 		writeOriginCache(t, dir, "openai", time.Now(), []string{"20.0.53.96/28", "104.211.73.128/28"})
 
-		c, err := NewChecker(t.Context(), testLogger(), "local,tailscale,openai", "", dir)
+		c, err := NewChecker(t.Context(), testlog.New(t), "local,tailscale,openai", "", dir)
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -384,7 +381,7 @@ func TestOpen(t *testing.T) {
 		}
 	})
 	t.Run("country allowlist", func(t *testing.T) {
-		c, err := NewChecker(t.Context(), testLogger(), "GB", path, "")
+		c, err := NewChecker(t.Context(), testlog.New(t), "GB", path, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -405,7 +402,7 @@ func TestOpen(t *testing.T) {
 			{"GB,ZZ,CA,ZZ", "country codes absent from database: CA, ZZ"},
 			{"local,CA", "country codes absent from database: CA"},
 		} {
-			c, err := NewChecker(t.Context(), testLogger(), tc.allow, path, "")
+			c, err := NewChecker(t.Context(), testlog.New(t), tc.allow, path, "")
 			if err == nil {
 				if closeErr := c.Close(); closeErr != nil {
 					t.Error(closeErr)
@@ -420,7 +417,7 @@ func TestOpen(t *testing.T) {
 	t.Run("country scan cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		c, err := NewChecker(ctx, testLogger(), "GB", path, "")
+		c, err := NewChecker(ctx, testlog.New(t), "GB", path, "")
 		if err == nil {
 			if closeErr := c.Close(); closeErr != nil {
 				t.Error(closeErr)
@@ -436,7 +433,7 @@ func TestOpen(t *testing.T) {
 		if _, err := Open("missing.mmdb"); err == nil {
 			t.Error("missing database accepted")
 		}
-		if _, err := NewChecker(t.Context(), testLogger(), "GB", "missing.mmdb", ""); err == nil {
+		if _, err := NewChecker(t.Context(), testlog.New(t), "GB", "missing.mmdb", ""); err == nil {
 			t.Error("missing filter database accepted")
 		}
 		if _, err := NewChecker(t.Context(), nil, "local", "", ""); err == nil {

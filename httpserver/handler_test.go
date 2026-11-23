@@ -15,6 +15,7 @@ import (
 
 	"github.com/gomodedev/gomode/httpserver"
 	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 func TestNewHandler(t *testing.T) {
@@ -78,7 +79,7 @@ func TestNewHandler(t *testing.T) {
 				var checker httpserver.OriginChecker
 				if tc.allow != "" {
 					var err error
-					checker, err = geoip.NewChecker(t.Context(), slog.New(slog.DiscardHandler), tc.allow, "", "")
+					checker, err = geoip.NewChecker(t.Context(), testlog.New(t), tc.allow, "", "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -128,7 +129,7 @@ func TestNewHandler(t *testing.T) {
 		}
 		t.Run("host policy", func(t *testing.T) {
 			state := newHostPolicy(t, "https://voice.example", true)
-			h, err := httpserver.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), httpserver.Options{Hosts: state, Logger: slog.New(slog.DiscardHandler)})
+			h, err := httpserver.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), httpserver.Options{Hosts: state, Logger: testlog.New(t)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +153,7 @@ func TestNewHandler(t *testing.T) {
 
 	t.Run("execution trace", func(t *testing.T) {
 		var buf bytes.Buffer
-		h, err := httpserver.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), httpserver.Options{Logger: slog.New(slog.DiscardHandler)})
+		h, err := httpserver.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), httpserver.Options{Logger: testlog.New(t)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +177,7 @@ func newGatewayHandler(t *testing.T, next http.Handler, origin string, proxies [
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := httpserver.Options{Logger: slog.New(slog.DiscardHandler), TrustedProxies: prefixes}
+	opts := httpserver.Options{Logger: testlog.New(t), TrustedProxies: prefixes}
 	if origin != "" {
 		if opts.Hosts, err = httpserver.NewHostPolicy(httpserver.HostPolicyOptions{ExternalURL: origin}); err != nil {
 			t.Fatal(err)

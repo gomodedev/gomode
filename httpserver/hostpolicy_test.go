@@ -5,7 +5,6 @@ package httpserver_test
 import (
 	"crypto/tls"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/gomodedev/gomode/httpserver"
 	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 func newHostPolicy(t *testing.T, origin string, local bool) *httpserver.HostPolicy {
@@ -26,7 +26,7 @@ func newHostPolicy(t *testing.T, origin string, local bool) *httpserver.HostPoli
 }
 
 func policyHandler(t *testing.T, p *httpserver.HostPolicy, proxies []netip.Prefix) http.Handler {
-	h, err := httpserver.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), httpserver.Options{Logger: slog.New(slog.DiscardHandler), Hosts: p, TrustedProxies: proxies})
+	h, err := httpserver.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), httpserver.Options{Logger: testlog.New(t), Hosts: p, TrustedProxies: proxies})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestHostPolicy(t *testing.T) {
 					gotIP = httpserver.ClientIP(r.Context())
 					gotRequestOrigin = httpserver.RequestOrigin(r.Context())
 					w.WriteHeader(204)
-				}), httpserver.Options{Logger: slog.New(slog.DiscardHandler), Hosts: p, TrustedProxies: proxies})
+				}), httpserver.Options{Logger: testlog.New(t), Hosts: p, TrustedProxies: proxies})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -150,7 +150,7 @@ func TestHostPolicy(t *testing.T) {
 				t.Errorf("client IP=%q", got)
 			}
 			w.WriteHeader(204)
-		}), httpserver.Options{Logger: slog.New(slog.DiscardHandler), TrustedProxies: trusted})
+		}), httpserver.Options{Logger: testlog.New(t), TrustedProxies: trusted})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -265,11 +265,11 @@ func TestHostPolicy(t *testing.T) {
 	})
 	t.Run("blocked origin cannot establish public URL", func(t *testing.T) {
 		p := newHostPolicy(t, "", true)
-		checker, err := geoip.NewChecker(t.Context(), slog.New(slog.DiscardHandler), "tailscale", "", "")
+		checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "tailscale", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		h, err := httpserver.NewHandler(http.NotFoundHandler(), httpserver.Options{Logger: slog.New(slog.DiscardHandler), Hosts: p, GeoIP: checker})
+		h, err := httpserver.NewHandler(http.NotFoundHandler(), httpserver.Options{Logger: testlog.New(t), Hosts: p, GeoIP: checker})
 		if err != nil {
 			t.Fatal(err)
 		}

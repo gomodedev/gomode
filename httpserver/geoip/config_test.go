@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 func TestConfig(t *testing.T) {
@@ -85,7 +87,7 @@ func TestConfig(t *testing.T) {
 		})
 		t.Run("filter", func(t *testing.T) {
 			cfg := Config{DB: testCountryDB(t), AllowOrigins: []string{"GB", "192.0.2.0/24"}}
-			checker, err := cfg.Open(t.Context(), testLogger(), "")
+			checker, err := cfg.Open(t.Context(), testlog.New(t), "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +110,7 @@ func TestConfig(t *testing.T) {
 			t.Run("valid", func(t *testing.T) {
 				for _, code := range []string{"GB", "gb", " gb "} {
 					cfg := Config{DB: path, AllowOrigins: []string{code}}
-					checker, err := cfg.Open(t.Context(), testLogger(), "")
+					checker, err := cfg.Open(t.Context(), testlog.New(t), "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -129,7 +131,7 @@ func TestConfig(t *testing.T) {
 					if err := cfg.Validate(); err != nil {
 						t.Fatalf("syntax rejected %s: %v", code, err)
 					}
-					checker, err := cfg.Open(t.Context(), testLogger(), "")
+					checker, err := cfg.Open(t.Context(), testlog.New(t), "")
 					if err == nil {
 						if closeErr := checker.Close(); closeErr != nil {
 							t.Error(closeErr)
@@ -145,7 +147,7 @@ func TestConfig(t *testing.T) {
 		t.Run("static origins leave cache untouched", func(t *testing.T) {
 			cfg := Config{AllowOrigins: []string{"local", "tailscale", "ANTHROPIC"}}
 			path := filepath.Join(t.TempDir(), "not-created")
-			checker, err := cfg.Open(t.Context(), testLogger(), path)
+			checker, err := cfg.Open(t.Context(), testlog.New(t), path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -168,7 +170,7 @@ func TestConfig(t *testing.T) {
 					path := filepath.Join(t.TempDir(), "cache", "nested")
 					ctx, cancel := context.WithCancel(t.Context())
 					cancel()
-					checker, err := cfg.Open(ctx, testLogger(), path)
+					checker, err := cfg.Open(ctx, testlog.New(t), path)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -188,7 +190,7 @@ func TestConfig(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			for _, cfg := range []Config{{DB: "missing.mmdb"}, {DB: "missing.mmdb", AllowOrigins: []string{"GB"}}, {AllowOrigins: []string{"bad-token"}}} {
-				if _, err := cfg.Open(t.Context(), testLogger(), ""); err == nil {
+				if _, err := cfg.Open(t.Context(), testlog.New(t), ""); err == nil {
 					t.Errorf("Open(%+v) succeeded", cfg)
 				}
 			}
@@ -201,7 +203,7 @@ func TestConfig(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg = Config{AllowOrigins: []string{"github"}}
-			if _, err := cfg.Open(t.Context(), testLogger(), filepath.Join(path, "nested")); err == nil {
+			if _, err := cfg.Open(t.Context(), testlog.New(t), filepath.Join(path, "nested")); err == nil {
 				t.Error("invalid cache parent accepted")
 			}
 		})

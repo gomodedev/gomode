@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -323,7 +322,7 @@ func TestProxyFrontend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := httpserver.NewHandler(mux, httpserver.Options{Logger: slog.New(slog.DiscardHandler), Hosts: hosts, TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}})
+	h, err := httpserver.NewHandler(mux, httpserver.Options{Logger: testlog.New(t), Hosts: hosts, TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}})
 	if err != nil {
 		t.Fatal(err)
 	}

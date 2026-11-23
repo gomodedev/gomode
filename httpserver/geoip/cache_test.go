@@ -34,7 +34,7 @@ func TestOriginCache(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeOriginCache(t, dir, "github", time.Now(), []string{"203.0.113.0/24"})
-		c, err := NewChecker(t.Context(), testLogger(), "github", "", dir)
+		c, err := NewChecker(t.Context(), testlog.New(t), "github", "", dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func TestOriginCache(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeOriginCache(t, dir, "anthropic", time.Now(), []string{"198.51.100.0/24"})
-		c, err := NewChecker(t.Context(), testLogger(), "anthropic", "", dir)
+		c, err := NewChecker(t.Context(), testlog.New(t), "anthropic", "", dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -91,7 +91,7 @@ func loadTestOrigin(t *testing.T, dir, name string, fetch *prefixFetchSpy) *urlO
 		t.Fatal(err)
 	}
 	o := &urlOrigin{prefixOrigin: prefixOrigin{name: name}, urls: []string{"https://example.invalid"}, fetch: fetch.fetch}
-	o.load(t.Context(), testLogger(), cache)
+	o.load(t.Context(), testlog.New(t), cache)
 	if len(o.prefixes) == 0 {
 		t.Fatal("startup loading returned no prefixes")
 	}
@@ -170,7 +170,7 @@ func TestOriginCacheRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Use the production loader: malformed caches must remain writable.
-			c := loadOriginCache(t.Context(), testLogger(), dir)
+			c := loadOriginCache(t.Context(), testlog.New(t), dir)
 			if c == nil {
 				t.Fatal("malformed file disabled cache")
 			}
@@ -179,7 +179,7 @@ func TestOriginCacheRecovery(t *testing.T) {
 			}
 			fetch := &prefixFetchSpy{prefixes: []netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")}}
 			source := &urlOrigin{prefixOrigin: prefixOrigin{name: "github"}, urls: []string{"https://example.invalid"}, fetch: fetch.fetch}
-			source.load(t.Context(), testLogger(), c)
+			source.load(t.Context(), testlog.New(t), c)
 			prefixes := source.prefixes
 			if fetch.calls != 1 {
 				t.Fatal("did not refetch discarded cache")

@@ -22,6 +22,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/internal/testlog"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -103,7 +104,7 @@ func TestFixtureFrontendPreparation(t *testing.T) {
 
 func newFixture(t *testing.T) *httptest.Server {
 	t.Helper()
-	f := &fixture{log: slog.New(slog.DiscardHandler)}
+	f := &fixture{log: testlog.New(t)}
 	srv := httptest.NewServer(f.routes())
 	t.Cleanup(srv.Close)
 	return srv
@@ -424,7 +425,7 @@ func TestFixtureSettingsGate(t *testing.T) {
 
 func TestProductionGateway(t *testing.T) {
 	t.Parallel()
-	f := &fixture{log: slog.New(slog.DiscardHandler)}
+	f := &fixture{log: testlog.New(t)}
 	production, err := newProductionGateway(t.Context(), f)
 	if err != nil {
 		t.Fatal(err)
@@ -470,7 +471,7 @@ func TestProductionGateway(t *testing.T) {
 func TestCleanupRecorder(t *testing.T) {
 	t.Parallel()
 	f := &fixture{}
-	log := slog.New(cleanupRecorder{Handler: slog.DiscardHandler, fixture: f}).With("component", "test")
+	log := slog.New(cleanupRecorder{Handler: testlog.New(t).Handler(), fixture: f}).With("component", "test")
 	log.Info("voicertc: session cleaned up", "session", "s1", "cause", errors.New("client closed the WebRTC connection"))
 	log.Info("voicertc: data channel closed", "session", "s1")
 	if got := f.stats.ProductionCleanups; len(got) != 1 || got[0] != "client closed the WebRTC connection" {

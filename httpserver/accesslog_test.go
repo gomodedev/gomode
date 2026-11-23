@@ -14,6 +14,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/gomodedev/gomode/internal/testlog"
 )
 
 func TestAccessLog(t *testing.T) {
@@ -151,7 +153,7 @@ func TestAccessLog(t *testing.T) {
 		t.Run("flush error", func(t *testing.T) {
 			t.Parallel()
 			failure := errors.New("flush failed")
-			h := AccessLog{Logger: slog.New(slog.DiscardHandler), Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			h := AccessLog{Logger: testlog.New(t), Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				if err := http.NewResponseController(w).Flush(); !errors.Is(err, failure) {
 					t.Errorf("flush error=%v", err)
 				}
