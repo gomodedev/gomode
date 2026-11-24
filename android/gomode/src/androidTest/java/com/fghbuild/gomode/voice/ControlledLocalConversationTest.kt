@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.completeFixtureFrontend
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.MemoryPreferences
@@ -62,6 +63,12 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class ControlledLocalConversationTest {
+    // GoModeApp observes the application's glasses, as MainActivity passes them.
+    private val glassesOwner
+        get() =
+            (InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as GoModeApplication)
+                .glassesOwner
+
     @get:Rule(order = 0)
     val permissions = GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
 
@@ -147,7 +154,17 @@ class ControlledLocalConversationTest {
                 val shellOwner = ServiceShellOwner(context, repository)
                 val mounted = mutableStateOf(true)
                 try {
-                    composeRule.setContent { if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner) } }
+                    composeRule.setContent {
+                        if (mounted.value) {
+                            GoModeTheme {
+                                GoModeApp(
+                                    shellOwner,
+                                    owner,
+                                    glassesOwner,
+                                )
+                            }
+                        }
+                    }
                     assertTrue(started.await(30, TimeUnit.SECONDS))
                     for (id in listOf(ids.second, ids.first)) {
                         composeRule.onNodeWithTag("gomode-next-app").performClick()

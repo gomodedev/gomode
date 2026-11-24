@@ -11,6 +11,7 @@ import android.telecom.TelecomManager
 import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.ui.web.HostedWebViewCompat
@@ -20,6 +21,7 @@ import com.fghbuild.gomode.ui.web.ServiceShellKey
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.gomode.ui.web.WebShellLoadState
 import com.fghbuild.gomode.ui.web.completeFrontendPreparation
+import com.fghbuild.halo.ble.HaloConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -62,6 +64,7 @@ class CarDialVoiceOwnerTest {
     private lateinit var model: LocalModelOwner
     private lateinit var pages: ServiceShellOwner
     private lateinit var owner: CarDialVoiceOwner
+    private lateinit var glasses: GlassesOwner
     private lateinit var repository: SettingsRepository
     private val server = ServiceInstance("saved-server", "Saved server", url = "https://example.test")
 
@@ -78,12 +81,14 @@ class CarDialVoiceOwnerTest {
         model = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
         repository = SettingsRepository(MemoryPreferences())
         pages = ServiceShellOwner(context, repository)
-        owner = CarDialVoiceOwner(context, repository, model, pages)
+        glasses = GlassesOwner(context, repository, HaloConnection(context))
+        owner = CarDialVoiceOwner(context, repository, model, pages, glasses)
     }
 
     @After
     fun tearDown() {
         owner.close()
+        glasses.close()
         pages.close()
         model.close()
         Dispatchers.resetMain()

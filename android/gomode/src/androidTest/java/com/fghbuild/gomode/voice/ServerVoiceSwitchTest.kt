@@ -28,6 +28,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
+import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.LocalEmulatorOnly
 import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.MemoryPreferences
@@ -65,6 +66,12 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class ServerVoiceSwitchTest {
+    // GoModeApp observes the application's glasses, as MainActivity passes them.
+    private val glassesOwner
+        get() =
+            (InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as GoModeApplication)
+                .glassesOwner
+
     @get:Rule(order = 0)
     val speech: TestRule = ModelFreeSpeechRule()
 
@@ -113,7 +120,7 @@ class ServerVoiceSwitchTest {
                 val mounted = mutableStateOf(true)
                 try {
                     composeRule.setContent {
-                        if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner) }
+                        if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner, glassesOwner) }
                     }
                     composeRule.waitUntil(30_000) {
                         composeRule
@@ -187,7 +194,7 @@ class ServerVoiceSwitchTest {
                     val mounted = mutableStateOf(true)
                     try {
                         composeRule.setContent {
-                            if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner) }
+                            if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner, glassesOwner) }
                         }
                         composeRule.waitUntil(30_000) {
                             composeRule
@@ -689,7 +696,17 @@ class ServerVoiceSwitchTest {
                 val shellOwner = ServiceShellOwner(context, repository)
                 val mounted = mutableStateOf(true)
                 try {
-                    composeRule.setContent { if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner) } }
+                    composeRule.setContent {
+                        if (mounted.value) {
+                            GoModeTheme {
+                                GoModeApp(
+                                    shellOwner,
+                                    owner,
+                                    glassesOwner,
+                                )
+                            }
+                        }
+                    }
                     composeRule.waitUntil(30_000) {
                         composeRule
                             .onAllNodes(hasTestTag("gomode-voice-connect") and isEnabled())
@@ -751,7 +768,7 @@ class ServerVoiceSwitchTest {
                     val mounted = mutableStateOf(true)
                     try {
                         composeRule.setContent {
-                            if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner) }
+                            if (mounted.value) GoModeTheme { GoModeApp(shellOwner, owner, glassesOwner) }
                         }
                         composeRule.waitUntil(30_000) { first.monitoringRequests.isNotEmpty() }
                         repository.switchService(secondID)

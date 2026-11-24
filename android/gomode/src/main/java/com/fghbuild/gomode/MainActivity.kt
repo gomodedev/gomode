@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             localModelOwner = (application as GoModeApplication).localModelOwner,
+                            glassesOwner = (application as GoModeApplication).glassesOwner,
                             modelDownloadRequested = modelDownloadRequested,
                             onModelDownloadHandled = { modelDownloadRequested = false },
                         )

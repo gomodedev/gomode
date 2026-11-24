@@ -54,6 +54,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.MemoryPreferences
+import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -66,6 +67,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -254,6 +256,36 @@ class VoiceSettingsTest {
         composeRule.runOnIdle { active.value = true }
         // Display-only: it stays available while a call runs.
         toggle.performScrollTo().assertIsEnabled()
+    }
+
+    @Test
+    fun glassesTranscriptToggleStartsOnPersistsAndStaysAvailableDuringCalls() {
+        val active = mutableStateOf(false)
+        val store = MemoryPreferences()
+        val repository = SettingsRepository(store)
+        composeRule.setContent {
+            val settings by repository.settings.collectAsState()
+            GoModeTheme {
+                SettingsScreen(
+                    settings = settings,
+                    settingsRepository = repository,
+                    edits = rememberSettingsEdits(repository, settings),
+                    voiceSessionActive = active.value,
+                    onDone = {},
+                    onOpenHalo = {},
+                )
+            }
+        }
+        val toggle = composeRule.onNodeWithTag("gomode-show-transcript-on-glasses")
+        toggle.performScrollTo().assertIsOn()
+        // Turning it off mid-call clears the glasses; the choice stays available while a call runs.
+        composeRule.runOnIdle { active.value = true }
+        toggle.performScrollTo().assertIsEnabled().performClick()
+        composeRule.waitUntil { !repository.settings.value.showTranscriptOnGlasses }
+        toggle.performScrollTo().assertIsOff()
+        val reopened = SettingsRepository(store)
+        composeRule.waitUntil { reopened.settings.value.loadState == SettingsLoadState.Ready }
+        assertFalse(reopened.settings.value.showTranscriptOnGlasses)
     }
 
     @Test

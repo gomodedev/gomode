@@ -25,7 +25,7 @@ internal const val HALO_APP_MAIN = "halo/main.lua"
 internal val HALO_APP_LIBS = listOf("data.min.lua", "sprite.min.lua", "text_page.lua")
 
 // About eight lines fit the circle; large enough to read at a glance.
-private const val HALO_FONT_SIZE_PX = 24
+internal const val HALO_FONT_SIZE_PX = 24
 
 /**
  * The typed messages that make Go Mode's Halo app show [text]: the first page laid out in the

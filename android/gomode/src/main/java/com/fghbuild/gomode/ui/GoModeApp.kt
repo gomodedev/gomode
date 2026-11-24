@@ -68,6 +68,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.service.CatalogNotification
 import com.fghbuild.gomode.service.CatalogService
 import com.fghbuild.gomode.service.ServiceCatalog
@@ -121,6 +122,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -207,6 +209,7 @@ internal sealed interface ServiceBootstrapState {
 internal fun GoModeApp(
     shellOwner: ServiceShellOwner,
     localModelOwner: LocalModelOwner,
+    glassesOwner: GlassesOwner,
     notificationDestination: ServiceNotificationDestination? = null,
     onNotificationHandled: (ServiceNotificationDestination) -> Unit = {},
     showWhenLocked: Boolean = false,
@@ -223,7 +226,6 @@ internal fun GoModeApp(
     val carVoiceState by carVoiceOwner.state.collectAsStateWithLifecycle()
     val carVoiceSession by carVoiceOwner.session.collectAsStateWithLifecycle()
     val carVoiceBusy = carVoiceState.status != CarDialStatus.IDLE && carVoiceState.status != CarDialStatus.FAILED
-    val glassesOwner = (context.applicationContext as GoModeApplication).glassesOwner
     LaunchedEffect(glassesOwner) { glassesOwner.start() }
 
     val settings = shellSnapshot.settings
@@ -373,6 +375,14 @@ internal fun GoModeApp(
                 )
             }
         }
+    // CarDialVoiceOwner feeds the glasses from its own session, including while this shell shows it.
+    LaunchedEffect(manualVoiceSession, glassesOwner) {
+        showVoiceTranscript(
+            manualVoiceSession.state,
+            settingsRepository.settings.map { it.showTranscriptOnGlasses },
+            glassesOwner::show,
+        )
+    }
     DisposableEffect(manualVoiceSession) {
         carVoiceOwner.registerManualSession(manualVoiceSession)
         onDispose {

@@ -170,6 +170,12 @@ internal class SettingsEdits(
             true
         }
 
+    suspend fun setShowTranscriptOnGlasses(enabled: Boolean): Boolean =
+        persist {
+            repository.updateShowTranscriptOnGlasses(enabled)
+            true
+        }
+
     suspend fun setShowServiceOnLockScreen(enabled: Boolean): Boolean =
         persist {
             repository.updateShowServiceOnLockScreen(enabled)

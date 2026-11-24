@@ -42,6 +42,8 @@ import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
+import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.ui.web.ServiceCallStage
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
@@ -56,8 +58,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -118,6 +122,7 @@ internal class CarDialVoiceOwner(
     private val settingsRepository: SettingsRepository,
     private val localModelOwner: LocalModelOwner,
     private val pages: ServiceShellOwner,
+    private val glasses: GlassesOwner,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(CarDialVoiceState())
@@ -151,6 +156,18 @@ internal class CarDialVoiceOwner(
             IntentFilter(VoiceService.ACTION_HANG_UP),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
+        // Like the native call surface, the glasses show the call's transcript while the phone is locked.
+        scope.launch {
+            session.collectLatest { voice ->
+                if (voice != null) {
+                    showVoiceTranscript(
+                        voice.state,
+                        settingsRepository.settings.map { it.showTranscriptOnGlasses },
+                        glasses::show,
+                    )
+                }
+            }
+        }
     }
 
     val isBusy: Boolean get() = request != null

@@ -349,6 +349,7 @@ data class SettingsState(
     val voiceLanguageTag: String = DEFAULT_VOICE_LANGUAGE_TAG,
     val showReasoning: Boolean = false,
     val showUsageStats: Boolean = false,
+    val showTranscriptOnGlasses: Boolean = true,
     val localLlmModel: LocalLlmModel = LocalLlmModel.GEMMA_4_E2B,
     val voiceAudioDeviceType: Int? = null,
     /** Saved selections per normalized gateway URL. */
@@ -383,6 +384,7 @@ class SettingsRepository(
         val VOICE_LANGUAGE_TAG = stringPreferencesKey("VOICE_LANGUAGE_TAG")
         val SHOW_REASONING = booleanPreferencesKey("SHOW_REASONING")
         val SHOW_USAGE_STATS = booleanPreferencesKey("SHOW_USAGE_STATS")
+        val SHOW_TRANSCRIPT_ON_GLASSES = booleanPreferencesKey("SHOW_TRANSCRIPT_ON_GLASSES")
         val LEGACY_ON_DEVICE_VOICE_ENGINE = stringPreferencesKey("ON_DEVICE_VOICE_ENGINE")
         val LOCAL_LLM_MODEL = stringPreferencesKey("LOCAL_LLM_MODEL")
         val VOICE_AUDIO_DEVICE_TYPE = intPreferencesKey("VOICE_AUDIO_DEVICE_TYPE")
@@ -413,6 +415,7 @@ class SettingsRepository(
                     voiceLanguageTag = prefs[Keys.VOICE_LANGUAGE_TAG] ?: DEFAULT_VOICE_LANGUAGE_TAG,
                     showReasoning = prefs[Keys.SHOW_REASONING] ?: false,
                     showUsageStats = prefs[Keys.SHOW_USAGE_STATS] ?: false,
+                    showTranscriptOnGlasses = prefs[Keys.SHOW_TRANSCRIPT_ON_GLASSES] ?: true,
                     localLlmModel = decodeLocalLlmModel(prefs),
                 )
             }.catch {
@@ -564,6 +567,10 @@ class SettingsRepository(
 
     suspend fun updateShowUsageStats(enabled: Boolean) {
         dataStore.edit { it[Keys.SHOW_USAGE_STATS] = enabled }
+    }
+
+    suspend fun updateShowTranscriptOnGlasses(enabled: Boolean) {
+        dataStore.edit { it[Keys.SHOW_TRANSCRIPT_ON_GLASSES] = enabled }
     }
 
     suspend fun updateVoiceAudioDeviceType(type: Int) {

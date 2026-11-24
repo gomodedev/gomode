@@ -181,6 +181,12 @@ internal fun SettingsScreen(
                     enabled = settings.loadState == SettingsLoadState.Ready,
                     tag = "gomode-show-usage-stats",
                 ) { value -> scope.launch { edits.setShowUsageStats(value) } }
+                SwitchRow(
+                    "Show transcript on glasses",
+                    checked = settings.showTranscriptOnGlasses,
+                    enabled = settings.loadState == SettingsLoadState.Ready,
+                    tag = "gomode-show-transcript-on-glasses",
+                ) { value -> scope.launch { edits.setShowTranscriptOnGlasses(value) } }
             }
             HorizontalDivider()
             CarDialSetting(settings, enabled = !voiceSessionActive)

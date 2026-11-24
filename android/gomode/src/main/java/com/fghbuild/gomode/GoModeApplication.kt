@@ -56,7 +56,7 @@ class GoModeApplication :
     internal val serviceShellOwner by serviceShellOwnerDelegate
     private val carDialVoiceOwnerDelegate =
         lazy {
-            CarDialVoiceOwner(this, settingsRepository, localModelOwner, serviceShellOwner)
+            CarDialVoiceOwner(this, settingsRepository, localModelOwner, serviceShellOwner, glassesOwner)
         }
     internal val carDialVoiceOwner by carDialVoiceOwnerDelegate
     private val glassesOwnerDelegate = lazy { GlassesOwner(this, settingsRepository, HaloConnection(this)) }
