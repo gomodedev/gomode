@@ -38,7 +38,7 @@ class ServiceShellOwnerTest {
         runTest {
             Dispatchers.setMain(StandardTestDispatcher(testScheduler))
             val context = RuntimeEnvironment.getApplication()
-            val owner = ServiceShellOwner(context, SettingsRepository(MemoryPreferences()))
+            val owner = ServiceShellOwner(context, SettingsRepository(MemoryPreferences()), glassesDisplay = { null })
             val connectivity = shadowOf(context.getSystemService(ConnectivityManager::class.java))
             try {
                 owner.start()
@@ -84,7 +84,7 @@ class ServiceShellOwnerTest {
             server.start()
             val context = RuntimeEnvironment.getApplication()
             val settings = SettingsRepository(MemoryPreferences())
-            val owner = ServiceShellOwner(context, settings)
+            val owner = ServiceShellOwner(context, settings, glassesDisplay = { null })
             try {
                 settings.addService("Service", server.url("/").toString())
                 owner.start()
@@ -130,7 +130,7 @@ class ServiceShellOwnerTest {
             server.start()
             val context = RuntimeEnvironment.getApplication()
             val settings = SettingsRepository(MemoryPreferences())
-            val owner = ServiceShellOwner(context, settings)
+            val owner = ServiceShellOwner(context, settings, glassesDisplay = { null })
             try {
                 settings.addService("Service", server.url("/").toString())
                 owner.start()
@@ -167,7 +167,7 @@ class ServiceShellOwnerTest {
             server.start()
             val context = RuntimeEnvironment.getApplication()
             val settings = SettingsRepository(MemoryPreferences())
-            val owner = ServiceShellOwner(context, settings)
+            val owner = ServiceShellOwner(context, settings, glassesDisplay = { null })
             try {
                 settings.addService("Service", server.url("/").toString())
                 owner.start()
@@ -206,7 +206,7 @@ class ServiceShellOwnerTest {
             val manager = context.getSystemService(ConnectivityManager::class.java)
             val connectivity = shadowOf(manager)
             val settings = SettingsRepository(MemoryPreferences())
-            val owner = ServiceShellOwner(context, settings)
+            val owner = ServiceShellOwner(context, settings, glassesDisplay = { null })
             try {
                 settings.addService("Service", server.url("/").toString())
                 owner.start()

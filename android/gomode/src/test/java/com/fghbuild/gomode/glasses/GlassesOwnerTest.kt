@@ -79,7 +79,7 @@ class GlassesOwnerTest {
             assertEquals(ScannedGlasses(ADDRESS, "Halo AB", -50), scanned)
 
             owner.connect(scanned.address)
-            owner.state.first { it.link == GlassesLink.Connected }
+            owner.state.first { it.link is GlassesLink.Connected }
             runCurrent()
             assertEquals(false, owner.state.value.scanning)
             assertEquals(ADDRESS, repository.settings.first { it.haloAddress != null }.haloAddress)
@@ -107,7 +107,7 @@ class GlassesOwnerTest {
             owner.show("after\nreplacement")
             runCurrent()
 
-            assertEquals(GlassesLink.Connected, owner.state.value.link)
+            assertEquals(GlassesLink.Connected(HALO_DISPLAY), owner.state.value.link)
             assertEquals(0, transport.disconnects)
             assertEquals(
                 listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Page(lines = 2)),
@@ -120,6 +120,7 @@ class GlassesOwnerTest {
     fun aDroppedLinkReconnectsWithBackoffAndShowsTheTextAgain() =
         runTest {
             connectSavedGlasses()
+            assertEquals(HALO_DISPLAY, owner.connectedDisplay)
             owner.show("hello")
             runCurrent()
 
@@ -127,6 +128,7 @@ class GlassesOwnerTest {
             transport.halos.single().drop()
             runCurrent()
             assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNREACHABLE), owner.state.value.link)
+            assertEquals(null, owner.connectedDisplay)
             assertEquals(1, transport.connects)
 
             advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
@@ -140,9 +142,10 @@ class GlassesOwnerTest {
             runCurrent()
             assertEquals(3, transport.connects)
 
-            owner.state.first { it.link == GlassesLink.Connected }
+            owner.state.first { it.link is GlassesLink.Connected }
             runCurrent()
             assertEquals(listOf(Shown.Page(lines = 1)), transport.halos.last().shown())
+            assertEquals(HALO_DISPLAY, owner.connectedDisplay)
         }
 
     @Test
@@ -166,6 +169,7 @@ class GlassesOwnerTest {
             owner.forget()
             runCurrent()
             assertEquals(GlassesLink.Disconnected, owner.state.value.link)
+            assertEquals(null, owner.connectedDisplay)
             assertEquals(listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Clear), transport.halos.single().shown())
             assertEquals(1, transport.disconnects)
             repository.settings.first { it.haloAddress == null }
@@ -184,7 +188,7 @@ class GlassesOwnerTest {
             repository.settings.first { it.haloAutoConnect && it.haloAddress == ADDRESS }
 
             owner.start()
-            owner.state.first { it.link == GlassesLink.Connected }
+            owner.state.first { it.link is GlassesLink.Connected }
             assertEquals(1, transport.connects)
         }
 
@@ -216,7 +220,7 @@ class GlassesOwnerTest {
 
             transport.hangConnects = false
             owner.connect(OTHER_ADDRESS)
-            owner.state.first { it.link == GlassesLink.Connected }
+            owner.state.first { it.link is GlassesLink.Connected }
             runCurrent()
             assertTrue("$links", links.none { it is GlassesLink.Reconnecting })
             assertEquals(listOf(ADDRESS, OTHER_ADDRESS), transport.attempts)
@@ -252,7 +256,7 @@ class GlassesOwnerTest {
     private suspend fun TestScope.connectSavedGlasses() {
         owner.start()
         owner.connect(ADDRESS)
-        owner.state.first { it.link == GlassesLink.Connected }
+        owner.state.first { it.link is GlassesLink.Connected }
         runCurrent()
     }
 }

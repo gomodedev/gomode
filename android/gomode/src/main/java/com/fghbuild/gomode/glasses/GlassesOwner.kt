@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.util.Log
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.halo.ble.HaloConnection
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloScannedDevice
@@ -47,7 +48,10 @@ internal sealed interface GlassesLink {
 
     data object Connecting : GlassesLink
 
-    data object Connected : GlassesLink
+    /** The glasses are up and show [display]. */
+    data class Connected(
+        val display: Display,
+    ) : GlassesLink
 
     /** The connection ended or failed with [problem]; the owner tries again on its own. */
     data class Reconnecting(
@@ -106,6 +110,10 @@ internal class GlassesOwner(
 
     private val mutableState = MutableStateFlow(GlassesState())
     val state: StateFlow<GlassesState> = mutableState.asStateFlow()
+
+    /** The connected glasses' display, or null without a connection; any thread may read it. */
+    val connectedDisplay: Display?
+        get() = (state.value.link as? GlassesLink.Connected)?.display
 
     fun start() {
         if (started) return
@@ -238,7 +246,7 @@ internal class GlassesOwner(
                 try {
                     val glasses = connect()
                     retryDelayMs = RECONNECT_INITIAL_DELAY_MS
-                    mutableState.update { it.copy(link = GlassesLink.Connected) }
+                    mutableState.update { it.copy(link = GlassesLink.Connected(glasses.description)) }
                     showUntilClosed(glasses)
                 } catch (e: GlassesException) {
                     Log.w(TAG, "Glasses connection failed: ${e.message}")

@@ -54,6 +54,62 @@ object InstantSerializer : KSerializer<Instant> {
     override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
 }
 
+@Serializable(with = DisplayColorSpaceSerializer::class)
+sealed interface DisplayColorSpace {
+    val value: String
+    @Serializable
+    data object Luminance : DisplayColorSpace {
+        override val value = "luminance"
+    }
+    @Serializable
+    data object RGB : DisplayColorSpace {
+        override val value = "rgb"
+    }
+    @Serializable
+    data class Other(override val value: String) : DisplayColorSpace
+}
+
+object DisplayColorSpaceSerializer : KSerializer<DisplayColorSpace> {
+    override val descriptor = PrimitiveSerialDescriptor("DisplayColorSpace", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: DisplayColorSpace) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): DisplayColorSpace {
+        val v = decoder.decodeString()
+        return when (v) {
+            "luminance" -> DisplayColorSpace.Luminance
+            "rgb" -> DisplayColorSpace.RGB
+            else -> DisplayColorSpace.Other(v)
+        }
+    }
+}
+
+@Serializable(with = DisplayShapeSerializer::class)
+sealed interface DisplayShape {
+    val value: String
+    @Serializable
+    data object Circle : DisplayShape {
+        override val value = "circle"
+    }
+    @Serializable
+    data object Rectangle : DisplayShape {
+        override val value = "rectangle"
+    }
+    @Serializable
+    data class Other(override val value: String) : DisplayShape
+}
+
+object DisplayShapeSerializer : KSerializer<DisplayShape> {
+    override val descriptor = PrimitiveSerialDescriptor("DisplayShape", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: DisplayShape) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): DisplayShape {
+        val v = decoder.decodeString()
+        return when (v) {
+            "circle" -> DisplayShape.Circle
+            "rectangle" -> DisplayShape.Rectangle
+            else -> DisplayShape.Other(v)
+        }
+    }
+}
+
 object ErrorCodes {
 }
 
@@ -121,6 +177,40 @@ data class Settings(
      */
     val apiVersion: Int,
     val webShell: WebShellSettings,
+)
+
+/**
+ * Display describes one connected display so a server can fit its content to
+ * it. It is the settings object of the com.fghbuild.gomode/display client
+ * capability extension, whose contract the Go constant DisplayExtension
+ * documents. Servers must ignore fields they do not know.
+ */
+@Serializable
+data class Display(
+    /** Width is the number of pixel columns. It is positive. */
+    val width: Int,
+    /** Height is the number of pixel rows. It is positive. */
+    val height: Int,
+    /** Shape is the visible area within the Width by Height pixels. */
+    val shape: DisplayShape,
+    /** ColorSpace is what a pixel value represents. */
+    val colorSpace: DisplayColorSpace,
+    /**
+     * BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of
+     * 2^BitsPerPixel luminance levels or colours, as ColorSpace defines.
+     */
+    val bitsPerPixel: Int,
+)
+
+/**
+ * ClientExtensions holds the settings objects of the Go Mode client capability
+ * extensions, keyed as in ClientCapabilities.extensions. Clients encode it to
+ * build that map, so generated SDKs carry each extension identifier.
+ */
+@Serializable
+data class ClientExtensions(
+    /** Display is present while glasses are connected. */
+    @SerialName("com.fghbuild.gomode/display") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val display: Display? = null,
 )
 
 /**

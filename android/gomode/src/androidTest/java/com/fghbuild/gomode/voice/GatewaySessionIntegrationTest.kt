@@ -74,7 +74,7 @@ class GatewaySessionIntegrationTest {
                 }
                 repository.settings.first { it.activeServiceURL == baseUrl && !it.voiceSetup.deviceSpeech }
                 val activity = ActivityScenario.launch(MainActivity::class.java)
-                val pages = ServiceShellOwner(context, repository)
+                val pages = ServiceShellOwner(context, repository, glassesDisplay = { null })
                 val conversation =
                     VoiceConversation(repository, ServiceSettingsClient(), pages.catalog) { pages.entries }
                 val calls = TelecomCallController(context, onTelecomEnded = {})
@@ -148,12 +148,18 @@ class GatewaySessionIntegrationTest {
                     DeviceVoiceSession(
                         appContext = context,
                         settingsRepository = repository,
+                        glassesDisplay = { null },
                         languageTag = "en-US",
                         callController = calls,
                         speech = speech,
                         setupProvider = {
                             finishSetup.await()
-                            prepareVoiceSetup(repository, ServiceSettingsClient(), { null })
+                            prepareVoiceSetup(
+                                repository,
+                                ServiceSettingsClient(),
+                                { null },
+                                VoiceSetupMcp.Service { null },
+                            )
                         },
                     )
                 try {

@@ -13,6 +13,7 @@
 // monitoring, so a switch has current context and their alerts still reach shared voice.
 package com.fghbuild.gomode.service
 
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.ui.ServiceBootstrapState
 import com.fghbuild.gomode.ui.web.FrontendVoiceTools
 import com.fghbuild.gomode.ui.web.ServiceShellKey
@@ -82,8 +83,10 @@ internal data class CatalogNotification(
 
 // Activity/Main-thread owner. Each participant has a cancellable discovery worker and resource monitor.
 // Selection is absent: shared gateway conversations use this catalog independently of visible-page focus.
+// glassesDisplay supplies the display that each participant's MCP requests declare.
 internal class ServiceCatalog(
     parentScope: CoroutineScope,
+    val glassesDisplay: () -> Display?,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val members = linkedMapOf<ServiceShellKey, Participant>()
@@ -488,7 +491,12 @@ internal class ServiceCatalog(
                         ) {
                             null
                         } else {
-                            prepareServiceMcp(entry.key.url, ready.settings, entry.bearerStore::tokenFor)
+                            prepareServiceMcp(
+                                entry.key.url,
+                                ready.settings,
+                                entry.bearerStore::tokenFor,
+                                glassesDisplay,
+                            )
                         }
                     prepared = PreparedService(identity, mcp, ToolCallValidator(mcp?.tools.orEmpty()))
                     error = null

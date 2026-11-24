@@ -8,6 +8,7 @@ import androidx.work.Configuration
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.gomode.voice.CarDialVoiceOwner
 import com.fghbuild.gomode.voice.LocalModelDownloads
@@ -52,7 +53,8 @@ class GoModeApplication :
         localModelOwner.removeModel(model) { modelDownloads.removeFiles(model) }
     }
 
-    private val serviceShellOwnerDelegate = lazy { ServiceShellOwner(this, settingsRepository) }
+    private val serviceShellOwnerDelegate =
+        lazy { ServiceShellOwner(this, settingsRepository, ::connectedGlassesDisplay) }
     internal val serviceShellOwner by serviceShellOwnerDelegate
     private val carDialVoiceOwnerDelegate =
         lazy {
@@ -61,6 +63,10 @@ class GoModeApplication :
     internal val carDialVoiceOwner by carDialVoiceOwnerDelegate
     private val glassesOwnerDelegate = lazy { GlassesOwner(this, settingsRepository, HaloConnection(this)) }
     internal val glassesOwner by glassesOwnerDelegate
+
+    // An owner that does not exist yet has no glasses connected; reading the display must not create one.
+    private fun connectedGlassesDisplay(): Display? =
+        if (glassesOwnerDelegate.isInitialized()) glassesOwner.connectedDisplay else null
 
     override fun onTerminate() {
         if (glassesOwnerDelegate.isInitialized()) glassesOwner.close()

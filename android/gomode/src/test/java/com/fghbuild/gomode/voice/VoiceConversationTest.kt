@@ -72,7 +72,7 @@ class VoiceConversationTest {
                     val key = ServiceShellKey(service.id, service.url)
                     key to ServiceShellSession(key) {}.also { authenticate(it, "identity") }
                 }
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { entries }
             try {
                 owner.begin(false)
@@ -115,7 +115,7 @@ class VoiceConversationTest {
                 ServiceShellSession(
                     ServiceShellKey(id, "https://example.test"),
                 ) {}.also { authenticate(it, "identity") }
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { mapOf(entry.key to entry) }
             try {
                 entry.invalidateIdentity()
@@ -145,7 +145,7 @@ class VoiceConversationTest {
             repository.settings.first { it.activeServiceId == id }
             val entry = ServiceShellSession(ServiceShellKey(id, "https://example.test")) {}
             authenticate(entry, "initial")
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { mapOf(entry.key to entry) }
             val messages = mutableListOf<JSONObject>()
 
@@ -221,7 +221,7 @@ class VoiceConversationTest {
                     .put("ready", true)
                     .put("voiceSessionVersion", 1),
             ) {}
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { mapOf(entry.key to entry) }
             try {
                 val pending = async { runCatching { owner.prepareLocal() } }
@@ -267,7 +267,7 @@ class VoiceConversationTest {
             ) {}
             val entries = mutableMapOf(first.key to first, second.key to second)
             var authorized = true
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog, { authorized }) { entries }
             try {
                 val pending = async { runCatching { owner.prepareLocal() } }
@@ -295,7 +295,7 @@ class VoiceConversationTest {
             repository.settings.first { it.activeServiceId == id }
             val key = ServiceShellKey(id, "https://example.test")
             val entry = ServiceShellSession(key) {}.also { authenticate(it, "initial") }
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             var authorized = true
             val conversation =
                 VoiceConversation(repository, ServiceSettingsClient(), catalog, { authorized }) {
@@ -358,7 +358,7 @@ class VoiceConversationTest {
                     repository.settings.first { it.speakingVoices[gateway]?.get("live") == voice }
                     val key = ServiceShellKey(id, gateway)
                     val page = ServiceShellSession(key) {}.also { authenticate(it, "initial") }
-                    val catalog = ServiceCatalog(backgroundScope)
+                    val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                     val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { mapOf(key to page) }
                     try {
                         owner.begin(false)
@@ -414,7 +414,7 @@ class VoiceConversationTest {
                 repository.settings.first { it.activeServiceId == id }
                 val key = ServiceShellKey(id, gateway)
                 val page = ServiceShellSession(key) {}.also { authenticate(it, "initial") }
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { mapOf(key to page) }
                 try {
                     owner.begin(false)
@@ -478,7 +478,7 @@ class VoiceConversationTest {
                         val key = ServiceShellKey(service.id, service.url)
                         key to ServiceShellSession(key) {}.also { authenticate(it, "initial") }
                     }
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { entries }
                 try {
                     owner.begin(false)
@@ -530,7 +530,7 @@ class VoiceConversationTest {
             val participant = entries.values.single { it !== sponsor }
             // Native participant identity must be pinned before frontend initial data completes.
             participant.invalidateIdentity()
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { entries }
             try {
                 owner.begin(false)
@@ -579,7 +579,7 @@ class VoiceConversationTest {
             val sponsor = entries.values.single { it.key.serviceID == sponsorID }
             val participant = entries.values.single { it !== sponsor }
             authenticate(sponsor, "sponsor")
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { entries }
             val cookies = CookieManager.getInstance()
 
@@ -640,7 +640,7 @@ class VoiceConversationTest {
             val key = ServiceShellKey(id, repository.settings.value.activeServiceURL)
             val entry = ServiceShellSession(key) {}
             authenticate(entry, "original-account")
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { mapOf(key to entry) }
             try {
                 owner.begin(false)
@@ -673,7 +673,7 @@ class VoiceConversationTest {
                     val key = ServiceShellKey(service.id, service.url)
                     key to ServiceShellSession(key) {}.also { authenticate(it, "initial") }
                 }
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { entries }
             try {
                 val preparation = owner.prepareLocal()
@@ -718,7 +718,7 @@ class VoiceConversationTest {
                 it.copy(preference = it.preference.copy(languageModel = VoiceLanguageModel.LOCAL_LLM))
             }
             repository.settings.first { it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM }
-            val catalog = ServiceCatalog(backgroundScope)
+            val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
             val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { emptyMap() }
             try {
                 val prepared = owner.prepareLocal()

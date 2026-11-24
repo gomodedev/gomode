@@ -116,7 +116,7 @@ class ServerVoiceSwitchTest {
                 }
                 val context = InstrumentationRegistry.getInstrumentation().targetContext
                 val owner = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
-                val shellOwner = ServiceShellOwner(context, repository)
+                val shellOwner = ServiceShellOwner(context, repository, glassesDisplay = { null })
                 val mounted = mutableStateOf(true)
                 try {
                     composeRule.setContent {
@@ -190,7 +190,7 @@ class ServerVoiceSwitchTest {
                     }
                     val context = InstrumentationRegistry.getInstrumentation().targetContext
                     val owner = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
-                    val shellOwner = ServiceShellOwner(context, repository)
+                    val shellOwner = ServiceShellOwner(context, repository, glassesDisplay = { null })
                     val mounted = mutableStateOf(true)
                     try {
                         composeRule.setContent {
@@ -693,7 +693,7 @@ class ServerVoiceSwitchTest {
                 repository.settings.first { it.activeServiceId == sourceID && !it.voiceSetup.deviceSpeech }
                 val context = InstrumentationRegistry.getInstrumentation().targetContext
                 val owner = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
-                val shellOwner = ServiceShellOwner(context, repository)
+                val shellOwner = ServiceShellOwner(context, repository, glassesDisplay = { null })
                 val mounted = mutableStateOf(true)
                 try {
                     composeRule.setContent {
@@ -764,7 +764,7 @@ class ServerVoiceSwitchTest {
                     repository.addService("First", firstServer.url("/").toString())
                     val context = InstrumentationRegistry.getInstrumentation().targetContext
                     val owner = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
-                    val shellOwner = ServiceShellOwner(context, repository)
+                    val shellOwner = ServiceShellOwner(context, repository, glassesDisplay = { null })
                     val mounted = mutableStateOf(true)
                     try {
                         composeRule.setContent {

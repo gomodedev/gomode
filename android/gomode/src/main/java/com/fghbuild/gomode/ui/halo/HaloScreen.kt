@@ -228,7 +228,7 @@ private fun HaloDeviceRow(
 @Composable
 private fun GlassesLink.tint() =
     when (this) {
-        GlassesLink.Connected -> MaterialTheme.colorScheme.primary
+        is GlassesLink.Connected -> MaterialTheme.colorScheme.primary
         is GlassesLink.Reconnecting -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -243,7 +243,7 @@ private fun GlassesLink.label(): String =
             "Waiting for pairing or connection"
         }
 
-        GlassesLink.Connected -> {
+        is GlassesLink.Connected -> {
             "Connected"
         }
 

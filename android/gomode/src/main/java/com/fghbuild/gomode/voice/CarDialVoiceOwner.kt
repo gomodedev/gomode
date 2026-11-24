@@ -431,6 +431,7 @@ internal class CarDialVoiceOwner(
                     settingsRepository,
                     settingsClient,
                     bearerTokenFor = bearer,
+                    glassesDisplay = pages.catalog.glassesDisplay,
                     languageTag = settings.voiceLanguageTag,
                     localModelOwner = localModelOwner,
                     callController = call,

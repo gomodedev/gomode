@@ -80,7 +80,7 @@ class CarDialVoiceOwnerTest {
         shadowOf(context.getSystemService(RoleManager::class.java)).addHeldRole(RoleManager.ROLE_CALL_REDIRECTION)
         model = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
         repository = SettingsRepository(MemoryPreferences())
-        pages = ServiceShellOwner(context, repository)
+        pages = ServiceShellOwner(context, repository, glassesDisplay = { null })
         glasses = GlassesOwner(context, repository, HaloConnection(context))
         owner = CarDialVoiceOwner(context, repository, model, pages, glasses)
     }
@@ -263,6 +263,7 @@ class CarDialVoiceOwnerTest {
                             ServiceSettingsClient(),
                             ServiceCatalog(
                                 CoroutineScope(SupervisorJob() + Dispatchers.Main),
+                                glassesDisplay = { null },
                             ),
                         ) { emptyMap() },
                     languageTag = "en-US",

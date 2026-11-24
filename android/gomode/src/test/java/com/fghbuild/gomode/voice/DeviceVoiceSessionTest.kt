@@ -1000,7 +1000,7 @@ class DeviceVoiceSessionTest {
                                 completeFrontendPreparation(entry)
                             }
                     }
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { entries }
                 val speech = FakeSpeech(completeSpeechImmediately = false)
                 val call = FakeVoiceCallController()
@@ -1014,6 +1014,7 @@ class DeviceVoiceSessionTest {
                     DeviceVoiceSession(
                         RuntimeEnvironment.getApplication(),
                         repository,
+                        glassesDisplay = { null },
                         languageTag = "en-US",
                         speech = speech,
                         callController = call,
@@ -1501,7 +1502,9 @@ class DeviceVoiceSessionTest {
         }
 
     private fun toolSetup(server: MockWebServer): VoiceSetup =
-        testSetup().copy(mcpClient = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }))
+        testSetup().copy(
+            mcpClient = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null }),
+        )
 
     private fun toolFailureResponse(): MockResponse =
         MockResponse().setBody(
@@ -3065,7 +3068,7 @@ class DeviceVoiceSessionTest {
             com.fghbuild.gomode.service
                 .ServiceSettingsClient(),
             com.fghbuild.gomode.service
-                .ServiceCatalog(kotlinx.coroutines.CoroutineScope(Dispatchers.Main)),
+                .ServiceCatalog(kotlinx.coroutines.CoroutineScope(Dispatchers.Main), glassesDisplay = { null }),
         ) { emptyMap() }
 
     /** Waits for the asynchronous record to publish the failure. */
@@ -3101,7 +3104,10 @@ class DeviceVoiceSessionTest {
                         com.fghbuild.gomode.service
                             .ServiceSettingsClient(),
                         com.fghbuild.gomode.service
-                            .ServiceCatalog(kotlinx.coroutines.CoroutineScope(Dispatchers.Main)),
+                            .ServiceCatalog(
+                                kotlinx.coroutines.CoroutineScope(Dispatchers.Main),
+                                glassesDisplay = { null },
+                            ),
                     ) {
                         emptyMap()
                     }.also { it.begin(false) }
@@ -3111,6 +3117,7 @@ class DeviceVoiceSessionTest {
         return DeviceVoiceSession(
             appContext = RuntimeEnvironment.getApplication(),
             settingsRepository = settingsRepo,
+            glassesDisplay = { null },
             voiceConversation = localConversation,
             speech = speech,
             frontendTools = frontendTools,
@@ -3345,7 +3352,7 @@ class DeviceVoiceSessionTest {
             service = null,
             tokenEndpointURL = null,
             gatewayHeaders = emptyMap(),
-            mcpClient = McpClient("https://gateway.example.com/mcp", "2024-11-05", { null }),
+            mcpClient = McpClient("https://gateway.example.com/mcp", "2024-11-05", { null }, display = { null }),
             tools = emptyList(),
             systemInstruction = "be terse",
             serviceContextText = "",

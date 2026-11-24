@@ -14,6 +14,7 @@ import android.util.Log
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.service.DefaultNetworkMonitor
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.isTransientHTTPStatus
@@ -115,6 +116,7 @@ internal class DeviceVoiceSession(
     private val settingsRepository: SettingsRepository,
     private val settingsClient: ServiceSettingsClient = ServiceSettingsClient(),
     private val bearerTokenFor: (String) -> String? = { null },
+    private val glassesDisplay: () -> Display?,
     private val frontendTools: FrontendVoiceTools = FrontendVoiceTools(),
     private val isAuthorityCurrent: () -> Boolean = { true },
     voiceConversation: VoiceConversation? = null,
@@ -130,7 +132,13 @@ internal class DeviceVoiceSession(
     private val switchServer: suspend (String) -> Unit = { id -> settingsRepository.switchService(id) },
     private val startupTiming: () -> VoiceStartupTiming? = { null },
     private val setupProvider: suspend (String) -> VoiceSetup = { sessionID ->
-        prepareVoiceSetup(settingsRepository, settingsClient, bearerTokenFor, sessionID = sessionID)
+        prepareVoiceSetup(
+            settingsRepository,
+            settingsClient,
+            bearerTokenFor,
+            VoiceSetupMcp.Service(glassesDisplay),
+            sessionID = sessionID,
+        )
     },
     private val webSocketFactory: (Request, WebSocketListener) -> WebSocket = { request, listener ->
         deviceWebSocketClient.newWebSocket(request, listener)

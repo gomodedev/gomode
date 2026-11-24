@@ -1,6 +1,7 @@
 // Host-neutral contract for showing text on one connected pair of glasses, whatever their model.
 package com.fghbuild.gomode.glasses
 
+import com.fghbuild.gomode.sdk.v1.Display
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -9,6 +10,9 @@ import kotlinx.coroutines.flow.StateFlow
  * holds at most one and replaces it after the connection ends.
  */
 internal interface GlassesDisplay {
+    /** The display as MCP requests declare it while these glasses are connected. */
+    val description: Display
+
     /** Why the connection ended, or null while it is up. Once set, it stays set. */
     val closeCause: StateFlow<Exception?>
 
@@ -22,6 +26,9 @@ internal interface GlassesDisplay {
     /** Disconnects; [closeCause] then reports the disconnection. */
     suspend fun close()
 }
+
+/** The bits a pixel needs to take one of [values] levels or colours. */
+internal fun bitsPerPixel(values: Int): Int = Int.SIZE_BITS - (values - 1).countLeadingZeroBits()
 
 /**
  * Connecting to glasses or showing text on them failed. A [permanent] failure, such as a device of

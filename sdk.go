@@ -29,6 +29,7 @@ var SDKAPI = apispec.Config[string]{
 		reflect.TypeFor[ErrorResponse]().PkgPath(): {},
 	},
 	ExtraSeeds: []reflect.Type{
+		reflect.TypeFor[ClientExtensions](),
 		reflect.TypeFor[ConversationContext](),
 		reflect.TypeFor[ConversationResultMeta](),
 		reflect.TypeFor[ErrorResponse](),

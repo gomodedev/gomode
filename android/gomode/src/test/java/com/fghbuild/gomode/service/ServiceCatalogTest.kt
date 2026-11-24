@@ -82,7 +82,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("Network").use { fixture ->
                 val entry = fixture.entry("network")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -114,7 +114,7 @@ class ServiceCatalogTest {
                     fixture.supportsSubscriptions = true
                     fixture.holdSubscriptions = true
                     val entry = fixture.entry("advisory")
-                    val catalog = ServiceCatalog(backgroundScope)
+                    val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                     try {
                         catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                         catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -169,7 +169,7 @@ class ServiceCatalogTest {
                 fixture.includeAlerts = true
                 fixture.blockContextAlerts = true
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -200,7 +200,7 @@ class ServiceCatalogTest {
                 Fixture("B").use { second ->
                     val a = first.entry("a")
                     val b = second.entry("b")
-                    val catalog = ServiceCatalog(backgroundScope)
+                    val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                     try {
                         catalog.reconcile(mapOf(a.key to a), emptyMap())
                         catalog.state.first { it[a.key]?.readiness == ServiceReadiness.READY }
@@ -232,7 +232,7 @@ class ServiceCatalogTest {
                 fixture.blockContextSubscription = true
                 fixture.withdrawItemsForSession = "schemas"
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -273,7 +273,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("Authority").use { fixture ->
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -316,7 +316,7 @@ class ServiceCatalogTest {
                     }
                     val a = first.entry(aID)
                     val b = second.entry(bID)
-                    val catalog = ServiceCatalog(backgroundScope)
+                    val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                     val owner =
                         VoiceConversation(settings, ServiceSettingsClient(), catalog) { mapOf(a.key to a, b.key to b) }
                     try {
@@ -366,7 +366,7 @@ class ServiceCatalogTest {
                         it.voiceSetup.languageModel == VoiceLanguageModel.LOCAL_LLM
                 }
                 val entry = fixture.entry(id)
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 val owner = VoiceConversation(settings, ServiceSettingsClient(), catalog) { mapOf(entry.key to entry) }
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
@@ -413,7 +413,7 @@ class ServiceCatalogTest {
                     }
                     val a = first.entry(aID)
                     val b = second.entry(bID)
-                    val catalog = ServiceCatalog(backgroundScope)
+                    val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                     val owner =
                         VoiceConversation(settings, ServiceSettingsClient(), catalog) { mapOf(a.key to a, b.key to b) }
                     try {
@@ -453,7 +453,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("Cancellation").use { fixture ->
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 val lifetime = SupervisorJob()
                 val dispatcher = credentialedHTTPClient.dispatcher
                 try {
@@ -495,7 +495,7 @@ class ServiceCatalogTest {
                 fixture.scopedItems = true
                 fixture.supportsSubscriptions = true
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 val lifetime = SupervisorJob()
                 val voiceScope = CoroutineScope(backgroundScope.coroutineContext + lifetime)
                 try {
@@ -550,7 +550,7 @@ class ServiceCatalogTest {
                 fixture.supportsSubscriptions = true
                 fixture.withdrawItemsForSession = "conversation-one"
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 val lifetime = SupervisorJob()
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
@@ -630,7 +630,7 @@ class ServiceCatalogTest {
             Fixture("ready").use { fixture ->
                 val entry = fixture.entry("a")
                 entry.invalidateIdentity()
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -694,7 +694,7 @@ class ServiceCatalogTest {
                     val a = first.entry("a")
                     val b = second.entry("b", authenticated = false)
                     val entries = mapOf(a.key to a, b.key to b)
-                    val catalog = ServiceCatalog(backgroundScope)
+                    val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                     try {
                         catalog.reconcile(entries, mapOf("a" to "Alpha", "b" to "Beta"))
                         catalog.state.first { it[a.key]?.monitoring?.resources != null }
@@ -814,7 +814,7 @@ class ServiceCatalogTest {
                 fixture.supportsResources = false
                 val entry = fixture.entry("a")
                 entry.updateLoad(WebShellLoadState.Loading)
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     // A hidden service has not started loading; it must not claim to be loading.
@@ -851,7 +851,7 @@ class ServiceCatalogTest {
                     second.failDiscovery = true
                     val a = first.entry("a")
                     val b = second.entry("b")
-                    val catalog = ServiceCatalog(backgroundScope)
+                    val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                     try {
                         catalog.reconcile(mapOf(a.key to a, b.key to b), emptyMap())
                         catalog.state.first { it[a.key]?.monitoring?.resources != null && it[b.key]?.error != null }
@@ -894,7 +894,7 @@ class ServiceCatalogTest {
                     """.trimIndent(),
                     org.json.JSONObject("""{"document":"document","token":"identity","scope":"scope"}"""),
                 )
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -941,7 +941,7 @@ class ServiceCatalogTest {
                     declaration,
                     org.json.JSONObject("""{"document":"document","token":"identity","scope":"scope"}"""),
                 )
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -982,7 +982,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("A").use { fixture ->
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -1009,7 +1009,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("A").use { fixture ->
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -1043,7 +1043,7 @@ class ServiceCatalogTest {
                     "uri":"fixture://context","epoch":"private-epoch","version":"private-authority-sentinel","dependencies":[]}}""",
                     )
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -1100,7 +1100,7 @@ class ServiceCatalogTest {
         runTest {
             Fixture("Private metadata").use { fixture ->
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -1191,7 +1191,7 @@ class ServiceCatalogTest {
             Fixture("Tools only").use { fixture ->
                 fixture.supportsResources = false
                 val entry = fixture.entry("a")
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }
@@ -1242,7 +1242,7 @@ class ServiceCatalogTest {
                     """[{"name":"duplicate","description":"Frontend","parameters":{"type":"object"}}]""",
                     org.json.JSONObject("""{"document":"document","token":"identity","scope":"scope"}"""),
                 )
-                val catalog = ServiceCatalog(backgroundScope)
+                val catalog = ServiceCatalog(backgroundScope, glassesDisplay = { null })
                 try {
                     catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                     catalog.state.first { it[entry.key]?.readiness == ServiceReadiness.READY }

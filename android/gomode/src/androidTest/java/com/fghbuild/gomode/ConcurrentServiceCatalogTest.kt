@@ -91,7 +91,7 @@ class ConcurrentServiceCatalogTest {
                 val voiceAlerts = CopyOnWriteArrayList<CatalogNotification>()
                 composeRule.setContent {
                     val scope = rememberCoroutineScope()
-                    catalog = remember { ServiceCatalog(scope) }
+                    catalog = remember { ServiceCatalog(scope, glassesDisplay = { null }) }
                     catalog.reconcile(entries.associateBy { it.key }, mapOf("a" to " Alpha ", "b" to " Beta "))
                     ServiceNotifications(
                         catalog,
@@ -235,7 +235,7 @@ class ConcurrentServiceCatalogTest {
                 lateinit var scope: CoroutineScope
                 composeRule.setContent {
                     scope = rememberCoroutineScope()
-                    catalog = remember { ServiceCatalog(scope) }
+                    catalog = remember { ServiceCatalog(scope, glassesDisplay = { null }) }
                     catalog.reconcile(entries.associateBy { it.key }, mapOf("a" to "Alpha", "b" to "Beta"))
                     DisposableEffect(catalog) {
                         val job = scope.launch { catalog.notifications.collect { notifications += it } }
@@ -401,7 +401,7 @@ class ConcurrentServiceCatalogTest {
             val notifications = CopyOnWriteArrayList<CatalogNotification>()
             composeRule.setContent {
                 val scope = rememberCoroutineScope()
-                catalog = remember { ServiceCatalog(scope) }
+                catalog = remember { ServiceCatalog(scope, glassesDisplay = { null }) }
                 catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                 DisposableEffect(catalog) {
                     val job = scope.launch { catalog.notifications.collect { notifications += it } }
@@ -445,7 +445,7 @@ class ConcurrentServiceCatalogTest {
             lateinit var catalog: ServiceCatalog
             composeRule.setContent {
                 val scope = rememberCoroutineScope()
-                catalog = remember { ServiceCatalog(scope) }
+                catalog = remember { ServiceCatalog(scope, glassesDisplay = { null }) }
                 catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                 DisposableEffect(catalog) {
                     onDispose {
@@ -512,7 +512,7 @@ class ConcurrentServiceCatalogTest {
             lateinit var catalog: ServiceCatalog
             composeRule.setContent {
                 val scope = rememberCoroutineScope()
-                catalog = remember { ServiceCatalog(scope) }
+                catalog = remember { ServiceCatalog(scope, glassesDisplay = { null }) }
                 catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                 DisposableEffect(catalog) {
                     onDispose {

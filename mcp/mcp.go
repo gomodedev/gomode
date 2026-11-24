@@ -44,6 +44,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
+	"github.com/gomodedev/gomode"
 	"github.com/gomodedev/gomode/sse"
 )
 
@@ -1114,6 +1115,29 @@ type ElicitationCapability struct {
 // The draft schema constrains values to JSON objects. RawMessage keeps the DTO
 // forward-compatible; validate extension values before depending on object shape.
 type Extensions map[string]json.RawMessage
+
+// ClientDisplay decodes the display a Go Mode client declares in m through the
+// [gomode.DisplayExtension] client capability. ok is false when m declares no
+// display. err reports a declared value that is not a valid [gomode.Display];
+// the server then treats the display as unusable. Clients declare capabilities
+// per request, so decode it from each request's metadata.
+//
+// It lives here rather than in package gomode to keep that package free of
+// this package's dependencies.
+func ClientDisplay(m *RequestMeta) (d gomode.Display, ok bool, err error) {
+	raw, ok := m.ClientCapabilities.Extensions[gomode.DisplayExtension]
+	if !ok {
+		return gomode.Display{}, false, nil
+	}
+	// Unknown fields are optional additions from later clients.
+	if err = json.Unmarshal(raw, &d); err == nil {
+		err = d.Validate()
+	}
+	if err != nil {
+		return gomode.Display{}, true, fmt.Errorf("%s: %w", gomode.DisplayExtension, err)
+	}
+	return d, true, nil
+}
 
 // RequestParams contains common MCP request metadata.
 type RequestParams struct {

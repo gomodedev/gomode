@@ -4,6 +4,7 @@ package com.fghbuild.gomode.ui.web
 import android.content.Context
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.service.DefaultNetworkMonitor
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceReadiness
@@ -40,10 +41,11 @@ internal data class ServiceShellSnapshot(
 internal class ServiceShellOwner(
     private val context: Context,
     val settingsRepository: SettingsRepository,
+    glassesDisplay: () -> Display?,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val registry = ServiceShellRegistry()
-    val catalog = ServiceCatalog(scope)
+    val catalog = ServiceCatalog(scope, glassesDisplay)
     private val workers = mutableMapOf<ServiceShellSession, Job>()
     private val mutableState = MutableStateFlow(ServiceShellSnapshot(settingsRepository.settings.value))
     val state = mutableState.asStateFlow()

@@ -51,6 +51,7 @@ class VoiceForegroundLeaseTest {
                         ServiceSettingsClient(),
                         ServiceCatalog(
                             CoroutineScope(SupervisorJob() + Dispatchers.Main),
+                            glassesDisplay = { null },
                         ),
                     ) { emptyMap() },
                 languageTag = "en-US",

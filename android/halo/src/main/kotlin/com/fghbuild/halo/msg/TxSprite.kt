@@ -122,7 +122,7 @@ data class TxSprite(
                 }
             }
 
-            val numColors = colorMap.size.coerceAtMost(16)
+            val numColors = colorMap.size.coerceAtMost(HaloDisplay.COLORS)
             val paletteBytes = ByteArray(numColors * 3)
             val entries = colorMap.entries.take(numColors)
             entries.forEachIndexed { i, (rgb, _) ->

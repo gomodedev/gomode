@@ -50,6 +50,7 @@ class SpeechTextFilterSessionTest {
                 DeviceVoiceSession(
                     appContext = context,
                     settingsRepository = repository,
+                    glassesDisplay = { null },
                     languageTag = "en-US",
                     speech = speech,
                     voiceChimePlayer = SilentChime(),

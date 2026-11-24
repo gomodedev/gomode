@@ -28,6 +28,24 @@ All errors return:
 
 ## Types
 
+### DisplayColorSpace
+
+DisplayColorSpace is what a display's pixel values represent.
+
+| Value | Description |
+|-------|-------------|
+| `luminance` | DisplayColorSpaceLuminance pixels are brightness levels that the device shows in its single tint, such as green on Even Realities G2. |
+| `rgb` | DisplayColorSpaceRGB pixels are colours. Below 24 bits per pixel, the client picks the 2^BitsPerPixel colours of each image from 24-bit RGB. |
+
+### DisplayShape
+
+DisplayShape is the visible area of a display.
+
+| Value | Description |
+|-------|-------------|
+| `circle` | DisplayShapeCircle shows the circle inscribed in the Width by Height pixels; pixels outside it are not visible. |
+| `rectangle` | DisplayShapeRectangle shows every pixel. |
+
 ### ToolGroup
 
 ToolGroup describes a bootstrap MCP tool group advertised by the manifest.
@@ -77,6 +95,31 @@ Settings is the service compatibility document consumed by Go Mode clients.
 | `serviceVersion` | `string` | ServiceVersion is the host product version. It is informational and does not participate in Go Mode compatibility checks. |  |
 | `apiVersion` | `int` | APIVersion is the Go Mode discovery schema version. A client must reject manifests with an API version it does not explicitly support. | yes |
 | `webShell` | `WebShellSettings` |  | yes |
+
+### Display
+
+Display describes one connected display so a server can fit its content to
+it. It is the settings object of the com.fghbuild.gomode/display client
+capability extension, whose contract the Go constant DisplayExtension
+documents. Servers must ignore fields they do not know.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `width` | `int` | Width is the number of pixel columns. It is positive. | yes |
+| `height` | `int` | Height is the number of pixel rows. It is positive. | yes |
+| `shape` | `DisplayShape` | Shape is the visible area within the Width by Height pixels. | yes |
+| `colorSpace` | `DisplayColorSpace` | ColorSpace is what a pixel value represents. | yes |
+| `bitsPerPixel` | `int` | BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of 2^BitsPerPixel luminance levels or colours, as ColorSpace defines. | yes |
+
+### ClientExtensions
+
+ClientExtensions holds the settings objects of the Go Mode client capability
+extensions, keyed as in ClientCapabilities.extensions. Clients encode it to
+build that map, so generated SDKs carry each extension identifier.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `com.fghbuild.gomode/display` | `Display` | Display is present while glasses are connected. |  |
 
 ### ResourceDependency
 

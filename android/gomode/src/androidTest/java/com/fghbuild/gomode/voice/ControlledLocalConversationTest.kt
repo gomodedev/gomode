@@ -151,7 +151,7 @@ class ControlledLocalConversationTest {
                             ControlledRunner(configurations)
                         })
                     }
-                val shellOwner = ServiceShellOwner(context, repository)
+                val shellOwner = ServiceShellOwner(context, repository, glassesDisplay = { null })
                 val mounted = mutableStateOf(true)
                 try {
                     composeRule.setContent {
@@ -212,7 +212,7 @@ class ControlledLocalConversationTest {
                 lateinit var session: DeviceVoiceSession
                 composeRule.setContent {
                     val scope = rememberCoroutineScope()
-                    catalog = androidx.compose.runtime.remember { ServiceCatalog(scope) }
+                    catalog = androidx.compose.runtime.remember { ServiceCatalog(scope, glassesDisplay = { null }) }
                     catalog.reconcile(entries.associateBy { it.key }, emptyMap())
                     conversation =
                         androidx.compose.runtime.remember {
@@ -227,6 +227,7 @@ class ControlledLocalConversationTest {
                             DeviceVoiceSession(
                                 context,
                                 repository,
+                                glassesDisplay = { null },
                                 languageTag = "en-US",
                                 speech = speech,
                                 voiceConversation = conversation,
@@ -353,7 +354,13 @@ class ControlledLocalConversationTest {
                 try {
                     composeRule.setContent {
                         val scope = rememberCoroutineScope()
-                        val catalog = androidx.compose.runtime.remember { ServiceCatalog(scope) }
+                        val catalog =
+                            androidx.compose.runtime.remember {
+                                ServiceCatalog(
+                                    scope,
+                                    glassesDisplay = { null },
+                                )
+                            }
                         catalog.reconcile(mapOf(entry.key to entry), emptyMap())
                         conversation =
                             androidx.compose.runtime.remember {
@@ -366,6 +373,7 @@ class ControlledLocalConversationTest {
                                 DeviceVoiceSession(
                                     context,
                                     repository,
+                                    glassesDisplay = { null },
                                     languageTag = "en-US",
                                     speech = speech,
                                     voiceConversation = conversation,

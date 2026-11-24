@@ -231,9 +231,9 @@ internal class VoiceConversation(
                     settingsRepository,
                     settingsClient,
                     ::tokenFor,
+                    VoiceSetupMcp.Catalog,
                     pinnedVoice = pinnedVoice,
                     capturedSettings = current.settings,
-                    sharedCatalog = catalog,
                     sessionID = current.lifetime.sessionID,
                     ensureCurrent = ::requireCurrent,
                 ).also {

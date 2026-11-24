@@ -2,6 +2,24 @@
 /** ISO 8601 timestamp string (e.g. "2026-04-13T12:00:00Z"). */
 export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 
+export type DisplayColorSpace =
+  | "luminance"
+  | "rgb";
+/**
+ * Supported values.
+ */
+export const DisplayColorSpaceLuminance = "luminance";
+export const DisplayColorSpaceRGB = "rgb";
+
+export type DisplayShape =
+  | "circle"
+  | "rectangle";
+/**
+ * Supported values.
+ */
+export const DisplayShapeCircle = "circle";
+export const DisplayShapeRectangle = "rectangle";
+
 /**
  * ToolGroup describes a bootstrap MCP tool group advertised by the manifest.
  *
@@ -62,6 +80,38 @@ export interface Settings {
    */
   apiVersion: number /* int */;
   webShell: WebShellSettings;
+}
+
+/**
+ * Display describes one connected display so a server can fit its content to
+ * it. It is the settings object of the com.fghbuild.gomode/display client
+ * capability extension, whose contract the Go constant DisplayExtension
+ * documents. Servers must ignore fields they do not know.
+ */
+export interface Display {
+  /** Width is the number of pixel columns. It is positive. */
+  width: number /* int */;
+  /** Height is the number of pixel rows. It is positive. */
+  height: number /* int */;
+  /** Shape is the visible area within the Width by Height pixels. */
+  shape: DisplayShape;
+  /** ColorSpace is what a pixel value represents. */
+  colorSpace: DisplayColorSpace;
+  /**
+   * BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of
+   * 2^BitsPerPixel luminance levels or colours, as ColorSpace defines.
+   */
+  bitsPerPixel: number /* int */;
+}
+
+/**
+ * ClientExtensions holds the settings objects of the Go Mode client capability
+ * extensions, keyed as in ClientCapabilities.extensions. Clients encode it to
+ * build that map, so generated SDKs carry each extension identifier.
+ */
+export interface ClientExtensions {
+  /** Display is present while glasses are connected. */
+  "com.fghbuild.gomode/display"?: Display;
 }
 
 /**

@@ -139,7 +139,7 @@ class GatewayAuthorizationTest {
                 val cookies = CookieManager.getInstance()
                 cookies.setCookie(participant.key.url, "endpoint_account=original; Path=/api")
                 assertFalse(cookies.getCookie(participant.key.url).orEmpty().contains("endpoint_account="))
-                val catalog = ServiceCatalog(this)
+                val catalog = ServiceCatalog(this, glassesDisplay = { null })
                 val owner = VoiceConversation(repository, ServiceSettingsClient(), catalog) { entries }
 
                 fun settle() {

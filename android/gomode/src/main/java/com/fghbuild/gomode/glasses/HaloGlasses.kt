@@ -3,6 +3,9 @@ package com.fghbuild.gomode.glasses
 
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import com.fghbuild.gomode.sdk.v1.Display
+import com.fghbuild.gomode.sdk.v1.DisplayColorSpace
+import com.fghbuild.gomode.sdk.v1.DisplayShape
 import com.fghbuild.halo.ble.HaloConnection
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloException
@@ -27,6 +30,16 @@ internal val HALO_APP_LIBS = listOf("data.min.lua", "sprite.min.lua", "text_page
 // About eight lines fit the circle; large enough to read at a glance.
 internal const val HALO_FONT_SIZE_PX = 24
 
+/** Halo's display as MCP requests declare it: a circle whose sprites choose 16 colours from 24-bit RGB. */
+internal val HALO_DISPLAY =
+    Display(
+        width = HaloDisplay.SIZE_PX,
+        height = HaloDisplay.SIZE_PX,
+        shape = DisplayShape.Circle,
+        colorSpace = DisplayColorSpace.RGB,
+        bitsPerPixel = bitsPerPixel(HaloDisplay.COLORS),
+    )
+
 /**
  * The typed messages that make Go Mode's Halo app show [text]: the first page laid out in the
  * display's circle, or a clear when [text] is blank.
@@ -42,6 +55,8 @@ internal class HaloGlasses private constructor(
     private val app: HalosideApp,
     override val closeCause: StateFlow<Exception?>,
 ) : GlassesDisplay {
+    override val description = HALO_DISPLAY
+
     override suspend fun showText(text: String) {
         try {
             haloTextMessages(text).forEach { (code, message) -> app.send(code, message) }

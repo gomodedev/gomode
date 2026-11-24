@@ -58,6 +58,48 @@ public enum JSONValue: Codable, Equatable {
     }
 }
 
+public struct DisplayColorSpace: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Luminance = DisplayColorSpace("luminance")
+    public static let RGB = DisplayColorSpace("rgb")
+
+    public static func other(_ value: String) -> DisplayColorSpace { DisplayColorSpace(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct DisplayShape: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Circle = DisplayShape("circle")
+    public static let Rectangle = DisplayShape("rectangle")
+
+    public static func other(_ value: String) -> DisplayShape { DisplayShape(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public enum ErrorCodes {
 }
 
@@ -157,6 +199,48 @@ public struct Settings: Codable {
         self.serviceVersion = serviceVersion
         self.apiVersion = apiVersion
         self.webShell = webShell
+    }
+}
+
+/// Display describes one connected display so a server can fit its content to
+/// it. It is the settings object of the com.fghbuild.gomode/display client
+/// capability extension, whose contract the Go constant DisplayExtension
+/// documents. Servers must ignore fields they do not know.
+public struct Display: Codable {
+    /// Width is the number of pixel columns. It is positive.
+    public let width: Int
+    /// Height is the number of pixel rows. It is positive.
+    public let height: Int
+    /// Shape is the visible area within the Width by Height pixels.
+    public let shape: DisplayShape
+    /// ColorSpace is what a pixel value represents.
+    public let colorSpace: DisplayColorSpace
+    /// BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of
+    /// 2^BitsPerPixel luminance levels or colours, as ColorSpace defines.
+    public let bitsPerPixel: Int
+
+    public init(width: Int, height: Int, shape: DisplayShape, colorSpace: DisplayColorSpace, bitsPerPixel: Int) {
+        self.width = width
+        self.height = height
+        self.shape = shape
+        self.colorSpace = colorSpace
+        self.bitsPerPixel = bitsPerPixel
+    }
+}
+
+/// ClientExtensions holds the settings objects of the Go Mode client capability
+/// extensions, keyed as in ClientCapabilities.extensions. Clients encode it to
+/// build that map, so generated SDKs carry each extension identifier.
+public struct ClientExtensions: Codable {
+    /// Display is present while glasses are connected.
+    public let display: Display?
+
+    private enum CodingKeys: String, CodingKey {
+        case display = "com.fghbuild.gomode/display"
+    }
+
+    public init(display: Display? = nil) {
+        self.display = display
     }
 }
 

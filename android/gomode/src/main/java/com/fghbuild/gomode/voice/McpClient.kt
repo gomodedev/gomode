@@ -5,10 +5,15 @@
 // unsupported ones are skipped. Subscription events are invalidations:
 // notifications/resources/updated re-reads the resource, and notifications/resources/list_changed
 // re-reads the list.
+//
+// Every request reads the display provider and declares a present display through the Go Mode
+// display client capability extension, so glasses connected mid-session reach the next request.
 package com.fghbuild.gomode.voice
 
 import android.util.Base64
 import android.util.Log
+import com.fghbuild.gomode.sdk.v1.ClientExtensions
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.service.ServiceResourceClient
 import com.fghbuild.gomode.service.ServiceResourceRead
 import com.fghbuild.gomode.service.credentialedHTTPClient
@@ -71,10 +76,12 @@ data class McpToolResult(
     val isError: Boolean = false,
 )
 
+/** [display] returns the display to declare on the next request, or null to declare none. */
 class McpClient(
     endpointURL: String,
     private val protocolVersion: String,
     private val cookieProvider: () -> String?,
+    private val display: () -> Display?,
     private val bearerTokenProvider: () -> String? = { null },
 ) : ServiceResourceClient {
     private val endpointURL = endpointURL.trimEnd('/')
@@ -91,12 +98,17 @@ class McpClient(
         RequestMeta(
             protocolVersion = protocolVersion,
             clientInfo = clientInfo,
-            clientCapabilities = ClientCapabilities(),
+            clientCapabilities = clientCapabilities(),
             locale = locale,
             session = sessionID,
             userAgent = "${clientInfo.name}/${clientInfo.version}",
             userLocation = OpenAIUserLocation(timezone = ZoneId.systemDefault().id),
         )
+
+    private fun clientCapabilities(): ClientCapabilities {
+        val display = display() ?: return ClientCapabilities()
+        return ClientCapabilities(extensions = json.encodeToJsonElement(ClientExtensions(display = display)).jsonObject)
+    }
 
     private fun cookieHeaders(): Map<String, String> =
         cookieProvider()?.takeIf { it.isNotBlank() }?.let { mapOf("Cookie" to it) } ?: emptyMap()

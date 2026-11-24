@@ -18,6 +18,7 @@ import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.glasses.FakeHaloTransport
 import com.fghbuild.gomode.glasses.GlassesLink
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.HALO_DISPLAY
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
@@ -64,10 +65,10 @@ class GlassesVoiceTranscriptTest {
                 val transport = FakeHaloTransport(context)
                 val glasses = GlassesOwner(context, repository, transport)
                 val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
-                val shellOwner = ServiceShellOwner(context, repository)
+                val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
                 try {
                     composeRule.runOnUiThread { glasses.connect(HALO_ADDRESS) }
-                    withTimeout(TIMEOUT_MS) { glasses.state.first { it.link == GlassesLink.Connected } }
+                    withTimeout(TIMEOUT_MS) { glasses.state.first { it.link is GlassesLink.Connected } }
                     val halo = transport.halos.single()
                     composeRule.setContent { GoModeTheme { GoModeApp(shellOwner, models, glasses) } }
                     composeRule.waitUntil(TIMEOUT_MS) {
@@ -99,7 +100,7 @@ class GlassesVoiceTranscriptTest {
 
                     composeRule.onNodeWithContentDescription("End voice").performClick()
                     composeRule.waitUntil(TIMEOUT_MS) { halo.lastShows("") }
-                    assertEquals(GlassesLink.Connected, glasses.state.value.link)
+                    assertEquals(GlassesLink.Connected(HALO_DISPLAY), glasses.state.value.link)
                 } finally {
                     composeRule.runOnUiThread {
                         glasses.close()

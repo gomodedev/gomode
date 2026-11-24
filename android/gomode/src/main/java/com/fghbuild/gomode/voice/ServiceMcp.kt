@@ -4,6 +4,7 @@
 // read skill files or activation hints; docs/PLAN_GOMODE.md owns progressive skill activation.
 package com.fghbuild.gomode.voice
 
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.sdk.v1.Settings
 import com.fghbuild.gomode.service.resolveServiceURL
 import com.fghbuild.mcp.sdk.v1.Capabilities
@@ -29,6 +30,7 @@ internal suspend fun prepareServiceMcp(
     serviceURL: String,
     settings: Settings,
     bearerTokenFor: (String) -> String?,
+    glassesDisplay: () -> Display?,
     sessionID: String? = null,
 ): ServiceMcp {
     // First-group activation is shared with voice setup; progressive skill activation is separate work.
@@ -49,7 +51,13 @@ internal suspend fun prepareServiceMcp(
             { bearerTokenFor(endpoint) },
         )
     val client =
-        McpClient(endpoint, group.protocolVersion, credentials::cookieForRequest, credentials::bearerForRequest)
+        McpClient(
+            endpoint,
+            group.protocolVersion,
+            credentials::cookieForRequest,
+            display = glassesDisplay,
+            bearerTokenProvider = credentials::bearerForRequest,
+        )
     val discovery = client.serverDiscover(sessionID)
     val tools = client.listTools(sessionID)
     require(tools.none { it.name in nativeVoiceToolNames }) {

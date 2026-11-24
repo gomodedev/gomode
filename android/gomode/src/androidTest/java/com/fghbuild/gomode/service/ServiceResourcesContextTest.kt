@@ -106,7 +106,7 @@ class ServiceResourcesContextTest {
                         "native-conversation",
                         ServiceMonitorPurpose.CONVERSATION_CONTEXT,
                     ) { endpoint, protocol ->
-                        McpClient(endpoint, protocol, { null })
+                        McpClient(endpoint, protocol, { null }, display = { null })
                     }
                 val settings =
                     com.fghbuild.gomode.sdk.v1.Settings(
@@ -273,7 +273,7 @@ class ServiceResourcesContextTest {
                         }
                     }
                 server.start()
-                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null })
+                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null })
                 for (content in listOf("""{"選択":null,"_meta":"public body"}""", "Aucune sélection.", "[42, false]")) {
                     source.set(content)
                     val setup =

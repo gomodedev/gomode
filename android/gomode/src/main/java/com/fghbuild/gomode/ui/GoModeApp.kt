@@ -355,6 +355,7 @@ internal fun GoModeApp(
                     settingsRepository,
                     settingsClient,
                     bearerTokenFor = if (sharedConversation) voiceConversation::tokenFor else bearerStore::tokenFor,
+                    glassesDisplay = serviceCatalog.glassesDisplay,
                     frontendTools = if (sharedConversation) FrontendVoiceTools() else serviceSession.frontendTools,
                     voiceConversation = voiceConversation.takeIf { sharedConversation },
                     languageTag = settings.voiceLanguageTag,

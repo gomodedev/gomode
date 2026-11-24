@@ -559,6 +559,7 @@ class VoiceSessionLifecycleTest {
                                     repository,
                                     ServiceSettingsClient(),
                                     { null },
+                                    VoiceSetupMcp.Service { null },
                                     pinnedVoice =
                                         if (change == "recovery catalog") {
                                             GatewayVoiceSelection(
@@ -676,7 +677,8 @@ class VoiceSessionLifecycleTest {
                         null,
                     ) { it.copy(preference = it.preference.copy(languageModel = engine)) }
                     repository.settings.first { it.voiceSetup.deviceSpeech && it.voiceSetup.languageModel == engine }
-                    val setup = prepareVoiceSetup(repository, ServiceSettingsClient(), { null })
+                    val setup =
+                        prepareVoiceSetup(repository, ServiceSettingsClient(), { null }, VoiceSetupMcp.Service { null })
                     assertEquals(repository.settings.value.activeServiceId, setup.serverID)
                     val names = setup.tools.map { it.name }
                     assertTrue("host tools remain available", "host_tool" in names)
@@ -687,7 +689,12 @@ class VoiceSessionLifecycleTest {
                     hostTool = name
                     val error =
                         runCatching {
-                            prepareVoiceSetup(repository, ServiceSettingsClient(), { null })
+                            prepareVoiceSetup(
+                                repository,
+                                ServiceSettingsClient(),
+                                { null },
+                                VoiceSetupMcp.Service { null },
+                            )
                         }.exceptionOrNull()
                     assertTrue(error is IllegalArgumentException)
                     assertTrue(error?.message.orEmpty().contains("reserved native voice tool"))
@@ -1250,7 +1257,7 @@ class VoiceSessionLifecycleTest {
     ): VoiceSession {
         val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
         val registry = ServiceShellRegistry()
-        val catalog = ServiceCatalog(scope)
+        val catalog = ServiceCatalog(scope, glassesDisplay = { null })
         cleanup += { scope.cancel() }
         cleanup += registry::close
         cleanup += catalog::close

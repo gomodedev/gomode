@@ -19,7 +19,7 @@ import android.webkit.CookieManager
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeechStage
-import com.fghbuild.gomode.service.ServiceCatalog
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.VoiceTokenClient
 import com.fghbuild.gomode.service.readInitialServiceContext
@@ -67,14 +67,26 @@ internal fun standaloneVoiceSetup(): VoiceSetup =
         service = null,
         tokenEndpointURL = null,
         gatewayHeaders = emptyMap(),
-        mcpClient = McpClient("", "2024-11-05", { null }),
+        // Without an endpoint, no request reaches a server that could read a display.
+        mcpClient = McpClient("", "2024-11-05", { null }, display = { null }),
         tools = emptyList(),
         systemInstruction = "",
         serviceContextText = "",
     )
 
+/** Who owns the MCP client of a voice session's service. */
+internal sealed interface VoiceSetupMcp {
+    /** A shared ServiceCatalog owns every participant's MCP client, tools, and context streams. */
+    data object Catalog : VoiceSetupMcp
+
+    /** Setup prepares the active service's MCP client, whose requests declare [glassesDisplay]. */
+    data class Service(
+        val glassesDisplay: () -> Display?,
+    ) : VoiceSetupMcp
+}
+
 /**
- * Resolves the active service for a voice session.
+ * Resolves the active service for a voice session, with its MCP client owned as [mcp] says.
  *
  * Throws [VoiceSetupException] when the service cannot support voice, and lets
  * [VoiceMcpAuthChangedException] propagate when credentials change mid-setup.
@@ -83,10 +95,10 @@ internal suspend fun prepareVoiceSetup(
     settingsRepository: SettingsRepository,
     settingsClient: ServiceSettingsClient,
     bearerTokenFor: (String) -> String?,
+    mcp: VoiceSetupMcp,
     voiceTokenClient: VoiceTokenClient = VoiceTokenClient(),
     pinnedVoice: GatewayVoiceSelection? = null,
     capturedSettings: SettingsState? = null,
-    sharedCatalog: ServiceCatalog? = null,
     sessionID: String? = null,
     ensureCurrent: () -> Unit = {},
 ): VoiceSetup {
@@ -113,7 +125,11 @@ internal suspend fun prepareVoiceSetup(
         serviceSettings.webShell.toolGroups
             .orEmpty()
             .firstOrNull()
-    if (group == null && sharedCatalog == null) throw VoiceSetupException("Voice is not available for this service")
+    if (group == null &&
+        mcp is VoiceSetupMcp.Service
+    ) {
+        throw VoiceSetupException("Voice is not available for this service")
+    }
     val mcpEndpointURL = group?.let { resolveServiceURL(settings.activeServiceURL, it.endpoint) }
     val gatewayEndpointURL = resolveServiceURL(settings.activeServiceURL, voiceGatewayURL)
     val externalGateway = serviceOrigin(gatewayEndpointURL) != serviceOrigin(settings.activeServiceURL)
@@ -132,7 +148,7 @@ internal suspend fun prepareVoiceSetup(
     ) {
         throw VoiceSetupException("Voice token endpoint must be hosted by the service")
     }
-    if (sharedCatalog == null &&
+    if (mcp is VoiceSetupMcp.Service &&
         group?.authRequired == true &&
         mcpEndpointURL != null &&
         cookieFor(mcpEndpointURL).isNullOrBlank() &&
@@ -159,23 +175,31 @@ internal suspend fun prepareVoiceSetup(
     requireCurrent()
 
     val participant =
-        if (sharedCatalog ==
-            null
-        ) {
-            prepareServiceMcp(settings.activeServiceURL, serviceSettings, bearerTokenFor, sessionID)
-        } else {
-            null
+        when (mcp) {
+            VoiceSetupMcp.Catalog -> {
+                null
+            }
+
+            is VoiceSetupMcp.Service -> {
+                prepareServiceMcp(
+                    settings.activeServiceURL,
+                    serviceSettings,
+                    bearerTokenFor,
+                    mcp.glassesDisplay,
+                    sessionID,
+                )
+            }
         }
     val client = participant?.client
     val systemInstruction =
         participant?.instructions.orEmpty()
     val tools = (participant?.tools ?: serviceCatalogTools) + nativeVoiceTools(settings)
     val serviceContextText =
-        if (sharedCatalog != null) {
+        if (participant == null) {
             // The conversation's item streams own setup and subsequent context.
             ""
         } else {
-            readInitialServiceContext(requireNotNull(client), sessionID)
+            readInitialServiceContext(participant.client, sessionID)
         }
     val service = tokenEndpointURL?.let { voiceTokenClient.fetch(it, cookieFor(it), bearerTokenFor(it)) }
     requireCurrent()

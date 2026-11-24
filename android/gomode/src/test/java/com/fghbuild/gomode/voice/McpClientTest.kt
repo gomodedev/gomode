@@ -1,6 +1,8 @@
 // Tests native MCP requests, tool result normalization, and SSE configuration.
 package com.fghbuild.gomode.voice
 
+import com.fghbuild.gomode.glasses.HALO_DISPLAY
+import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.mcp.sdk.v1.NotificationMethod
 import com.fghbuild.mcp.sdk.v1.RequestMeta
 import com.fghbuild.mcp.sdk.v1.ResourcesReadParams
@@ -14,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -43,7 +46,7 @@ class McpClientTest {
             try {
                 MockWebServer().use { server ->
                     server.start()
-                    val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null })
+                    val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null })
                     TimeZone.setDefault(TimeZone.getTimeZone("America/Toronto"))
                     server.enqueue(
                         MockResponse().setBody(
@@ -90,7 +93,7 @@ class McpClientTest {
         runTest {
             MockWebServer().use { server ->
                 server.start()
-                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null })
+                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null })
                 val malformed =
                     listOf(
                         """{"uri":"fixture://context","epoch":"owner","version":"private-version-sentinel","dependencies":[]}""",
@@ -237,11 +240,51 @@ class McpClientTest {
     }
 
     @Test
+    fun `each request declares the glasses display connected at that moment`() =
+        runTest {
+            MockWebServer().use { server ->
+                server.start()
+                var display: Display? = null
+                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { display })
+
+                suspend fun capabilities(request: suspend () -> Unit): JsonObject {
+                    server.enqueue(
+                        MockResponse().setBody(
+                            """{"jsonrpc":"2.0","id":1,"result":{"resultType":"complete","contents":[],
+                            "content":[],"ttlMs":0,"cacheScope":"private"}}""",
+                        ),
+                    )
+                    request()
+                    val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+                    val params = requireNotNull(body["params"]).jsonObject
+                    val meta = requireNotNull(params["_meta"]).jsonObject
+                    return requireNotNull(meta["io.modelcontextprotocol/clientCapabilities"]).jsonObject
+                }
+
+                suspend fun callTool() {
+                    client.callTool("read_item", JsonObject(emptyMap()), sessionID = null, locale = null)
+                }
+                val halo =
+                    Json.parseToJsonElement(
+                        """{"com.fghbuild.gomode/display":
+                        {"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4}}""",
+                    )
+
+                assertEquals(JsonObject(emptyMap()), capabilities(::callTool))
+                display = HALO_DISPLAY
+                assertEquals(halo, capabilities(::callTool)["extensions"])
+                assertEquals(halo, capabilities { client.readResource("host://usage", null) }["extensions"])
+                display = null
+                assertEquals(JsonObject(emptyMap()), capabilities(::callTool))
+            }
+        }
+
+    @Test
     fun `malformed MCP envelopes never expose private transport diagnostics`() =
         runTest {
             MockWebServer().use { server ->
                 server.start()
-                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null })
+                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null })
                 for (status in listOf(200, 401)) {
                     server.enqueue(
                         MockResponse().setResponseCode(status).setBody(
@@ -273,7 +316,7 @@ class McpClientTest {
         runTest {
             MockWebServer().use { server ->
                 server.start()
-                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null })
+                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null })
                 val meta =
                     Json
                         .parseToJsonElement(
@@ -338,7 +381,7 @@ class McpClientTest {
                         )}}}""",
                     ),
                 )
-                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null })
+                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null })
                 val validArgs = Json.parseToJsonElement("""{"item":6}""").jsonObject
                 assertEquals(
                     "waiting",
@@ -404,6 +447,7 @@ class McpClientTest {
                         endpointURL = service.url("/mcp").toString(),
                         protocolVersion = "2026-07-28",
                         cookieProvider = { "session=secret" },
+                        display = { null },
                         bearerTokenProvider = { "scoped-token" },
                     )
 
@@ -438,6 +482,7 @@ class McpClientTest {
                         endpointURL = server.url("/mcp").toString(),
                         protocolVersion = "2026-07-28",
                         cookieProvider = { null },
+                        display = { null },
                     )
 
                 assertEquals("Use the tools.", client.serverInstructions("conversation-one"))
@@ -486,6 +531,7 @@ class McpClientTest {
                         endpointURL = server.url("/mcp").toString(),
                         protocolVersion = "2026-07-28",
                         cookieProvider = { "session=abc" },
+                        display = { null },
                     )
 
                 val resources = client.listResources()
@@ -526,6 +572,7 @@ class McpClientTest {
                         endpointURL = server.url("/mcp").toString(),
                         protocolVersion = "2026-07-28",
                         cookieProvider = { null },
+                        display = { null },
                     )
 
                 val templates = client.listResourceTemplates(sessionID = null)
@@ -552,6 +599,7 @@ class McpClientTest {
                         endpointURL = server.url("/mcp").toString(),
                         protocolVersion = "2026-07-28",
                         cookieProvider = { null },
+                        display = { null },
                     )
 
                 val result = client.readResource("service://items")
@@ -592,6 +640,7 @@ class McpClientTest {
                         endpointURL = server.url("/mcp").toString(),
                         protocolVersion = "2026-07-28",
                         cookieProvider = { null },
+                        display = { null },
                     )
 
                 val events =

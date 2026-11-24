@@ -644,7 +644,7 @@ class LocalModelOwnerTest {
                 service = null,
                 tokenEndpointURL = null,
                 gatewayHeaders = emptyMap(),
-                mcpClient = McpClient("https://service.example/mcp", "2024-11-05", { null }),
+                mcpClient = McpClient("https://service.example/mcp", "2024-11-05", { null }, display = { null }),
                 tools =
                     listOf(
                         ToolDescriptor(

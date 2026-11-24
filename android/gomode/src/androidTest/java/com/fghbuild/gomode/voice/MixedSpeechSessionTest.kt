@@ -250,7 +250,7 @@ class MixedSpeechSessionTest {
                     it.voiceSetup.effectiveSpeech == speech
             }
             val activity = ActivityScenario.launch(MainActivity::class.java)
-            val pages = ServiceShellOwner(context, repository)
+            val pages = ServiceShellOwner(context, repository, glassesDisplay = { null })
             val conversation =
                 VoiceConversation(repository, ServiceSettingsClient(), pages.catalog) { pages.entries }
             val deviceSpeech = ScriptedSpeech(holdPlayback)

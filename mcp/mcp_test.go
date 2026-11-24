@@ -20,6 +20,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gomodedev/gomode"
 	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/invopop/jsonschema"
 	schemavalidator "github.com/santhosh-tekuri/jsonschema/v6"
@@ -1209,6 +1210,94 @@ func TestRequestMeta(t *testing.T) {
 			if extra != nil && (string(fields["example/trace"]) != `"keep"` || extra["openai/locale"] != "wrong") {
 				t.Fatalf("extension metadata changed: %s, extra=%#v", data, extra)
 			}
+		}
+	})
+}
+
+func TestClientDisplay(t *testing.T) {
+	t.Parallel()
+	// callTool sends a tools/call whose client capabilities are capabilities
+	// through Handler and returns the metadata the registry received.
+	callTool := func(t *testing.T, capabilities string) *RequestMeta {
+		r := &metadataRegistry{Registry: &subscriptionTestRegistry{}}
+		h := &Handler{Log: testlog.New(t), Registry: r}
+		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{},"_meta":{` +
+			`"io.modelcontextprotocol/protocolVersion":"` + ProtocolVersion + `",` +
+			`"io.modelcontextprotocol/clientInfo":{"name":"gomode-android","version":"1.0.0"},` +
+			`"io.modelcontextprotocol/clientCapabilities":` + capabilities + `}}}`
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
+		req.Header.Set("Mcp-Method", string(MethodToolsCall))
+		req.Header.Set("Mcp-Name", "echo")
+		w := httptest.NewRecorder()
+		h.HandleMCP(w, req)
+		var response JSONRPCResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.Error != nil || r.params.Name != "echo" {
+			t.Fatalf("tools/call did not reach the registry: %s", w.Body)
+		}
+		return &r.params.Meta
+	}
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, display string
+			want          gomode.Display
+		}{
+			{
+				"halo",
+				`{"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4}`,
+				gomode.Display{Width: 256, Height: 256, Shape: gomode.DisplayShapeCircle, ColorSpace: gomode.DisplayColorSpaceRGB, BitsPerPixel: 4},
+			},
+			{
+				"unknown field",
+				`{"width":576,"height":288,"shape":"rectangle","colorSpace":"luminance","bitsPerPixel":4,"refreshHz":20}`,
+				gomode.Display{Width: 576, Height: 288, Shape: gomode.DisplayShapeRectangle, ColorSpace: gomode.DisplayColorSpaceLuminance, BitsPerPixel: 4},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				meta := callTool(t, `{"extensions":{"com.fghbuild.gomode/display":`+tc.display+`}}`)
+				got, ok, err := ClientDisplay(meta)
+				if err != nil || !ok || got != tc.want {
+					t.Fatalf("ClientDisplay = %+v, %t, %v; want %+v", got, ok, err, tc.want)
+				}
+			})
+		}
+		for _, tc := range []struct{ name, capabilities string }{
+			{"absent without extensions", `{}`},
+			{"absent among other extensions", `{"extensions":{"com.example/other":{}}}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				got, ok, err := ClientDisplay(callTool(t, tc.capabilities))
+				if err != nil || ok {
+					t.Fatalf("ClientDisplay = %+v, %t, %v; want absent", got, ok, err)
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct{ name, display, want string }{
+			{"null", `null`, "width 0 must be positive"},
+			{"not an object", `"circle"`, "cannot unmarshal string"},
+			{"wrong type", `{"width":"256","height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4}`, "cannot unmarshal string"},
+			{"missing height", `{"width":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4}`, "height 0 must be positive"},
+			{"unknown shape", `{"width":256,"height":256,"shape":"hexagon","colorSpace":"rgb","bitsPerPixel":4}`, `unknown shape "hexagon"`},
+			{"unknown colour space", `{"width":256,"height":256,"shape":"circle","colorSpace":"cmyk","bitsPerPixel":4}`, `unknown colorSpace "cmyk"`},
+			{"deep pixels", `{"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":32}`, "bitsPerPixel 32 must be from 1 to 24"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				meta := callTool(t, `{"extensions":{"com.fghbuild.gomode/display":`+tc.display+`}}`)
+				got, ok, err := ClientDisplay(meta)
+				if err == nil || !ok || got != (gomode.Display{}) || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("ClientDisplay = %+v, %t, %v; want error containing %q", got, ok, err, tc.want)
+				}
+			})
 		}
 	})
 }
