@@ -56,9 +56,11 @@ android {
     sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/speech-text"))
     sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/voice-choices"))
     sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("../e2e/voice-preview/scene"))
-    // Fakes compiled into both unit and instrumented tests.
+    // Fakes compiled into both unit and instrumented tests, including the Even G2 SDK's fake glasses.
     sourceSets.getByName("test").java.srcDir("src/sharedTest/java")
     sourceSets.getByName("androidTest").java.srcDir("src/sharedTest/java")
+    sourceSets.getByName("test").java.srcDir("../evenG2/src/sharedTest/kotlin")
+    sourceSets.getByName("androidTest").java.srcDir("../evenG2/src/sharedTest/kotlin")
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
@@ -118,6 +120,7 @@ tasks.withType<Test>().configureEach {
 
 dependencies {
     implementation(project(":halo-sdk"))
+    implementation(project(":even-g2-sdk"))
     implementation(project(":gomode-sdk"))
     implementation(project(":mcp-sdk"))
     implementation(project(":voicegateway-sdk"))

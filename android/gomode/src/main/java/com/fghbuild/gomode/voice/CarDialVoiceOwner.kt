@@ -163,6 +163,7 @@ internal class CarDialVoiceOwner(
                     showVoiceTranscript(
                         voice.state,
                         settingsRepository.settings.map { it.showTranscriptOnGlasses },
+                        glasses.textCapacity,
                         glasses::show,
                     )
                 }

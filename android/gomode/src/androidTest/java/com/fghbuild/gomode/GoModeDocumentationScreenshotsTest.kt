@@ -1,8 +1,9 @@
-// Captures real native service, voice settings and pickers, Halo, and a host-neutral demonstration frontend.
+// Captures native service, voice settings and pickers, glasses over fake transports, and a demo frontend.
 package com.fghbuild.gomode
 
 import android.Manifest
 import android.os.Environment
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
@@ -19,6 +20,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
+import com.fghbuild.eveng2.FakeG2Firmware
+import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.fakeG2Scanner
+import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.ScanningFakeHalo
+import com.fghbuild.gomode.ui.GoModeApp
+import com.fghbuild.gomode.ui.theme.GoModeTheme
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -27,11 +37,20 @@ import java.io.File
 
 private const val SETTLE_CHECK_INTERVAL_MS = 100L
 
+// Documentation-range addresses for the glasses the fake transports report.
+private const val CAPTURE_HALO_ADDRESS = "00:00:5E:00:53:05"
+private val CAPTURE_G2_PAIR =
+    G2Pair(
+        "7",
+        G2Arm(G2Side.LEFT, "00:00:5E:00:53:06", "Even G2_7_L_005306"),
+        G2Arm(G2Side.RIGHT, "00:00:5E:00:53:07", "Even G2_7_R_005307"),
+    )
+
 @RunWith(AndroidJUnit4::class)
 @DocumentationCapture
 class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
     // Both capture passes must start with the same permission state before Activity launch. Grants
-    // persist across installs, so granting Bluetooth too keeps the Halo scene independent of earlier
+    // persist across installs, so granting Bluetooth too keeps the glasses scene independent of earlier
     // tests on the emulator.
     @get:Rule(order = 1)
     val permissionRule: GrantPermissionRule =
@@ -145,9 +164,42 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         composeRule.onNode(hasText("Voice") and isHeading()).performScrollTo()
         capture(device, directory, "voice-settings-all-in-one")
 
-        composeRule.onNodeWithTag("gomode-manage-halo").performScrollTo().performClick()
-        waitForTag("gomode-halo-screen")
-        capture(device, directory, "halo")
+        captureGlasses(device, directory)
+    }
+
+    // The emulator has no glasses, so the shell runs over the fake Even G2 and Halo transports that
+    // GlassesPairingTest drives: a first scan finds one pair of each model.
+    private fun captureGlasses(
+        device: UiDevice,
+        directory: File,
+    ) {
+        val app = composeRule.activity.application as GoModeApplication
+        val glasses =
+            GlassesOwner(
+                app,
+                app.settingsRepository,
+                ScanningFakeHalo(app, CAPTURE_HALO_ADDRESS),
+                fakeG2Scanner(CAPTURE_G2_PAIR),
+                FakeG2Firmware().connector,
+            )
+        try {
+            composeRule.runOnUiThread {
+                composeRule.activity.setContent {
+                    GoModeTheme { GoModeApp(app.serviceShellOwner, app.localModelOwner, glasses) }
+                }
+            }
+            waitForSettingsButton()
+            composeRule.onNodeWithTag("gomode-web-open-settings").performClick()
+            composeRule.onNodeWithTag("gomode-manage-glasses").performScrollTo().performClick()
+            waitForTag("gomode-glasses-screen")
+            composeRule.onNodeWithTag("gomode-glasses-scan").performClick()
+            composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
+                composeRule.onAllNodesWithTag("gomode-glasses-found").fetchSemanticsNodes().size == 2
+            }
+            capture(device, directory, "glasses")
+        } finally {
+            composeRule.runOnUiThread { glasses.close() }
+        }
     }
 
     private fun waitForSettledHostedPage() {

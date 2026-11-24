@@ -1,5 +1,5 @@
-// Compose Halo screen: scans, connects, forgets, and sets auto-connect through the app-scoped GlassesOwner.
-package com.fghbuild.gomode.ui.halo
+// Compose glasses screen: scans for Halo and Even G2, connects, forgets, and sets auto-connect through GlassesOwner.
+package com.fghbuild.gomode.ui.glasses
 
 import android.Manifest
 import android.app.KeyguardManager
@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.glasses.GlassesLink
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.GlassesProblem
@@ -53,7 +54,7 @@ private val BluetoothPermissions =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun HaloScreen(
+internal fun GlassesScreen(
     owner: GlassesOwner,
     onNavigateBack: () -> Unit,
 ) {
@@ -84,7 +85,7 @@ internal fun HaloScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Halo") },
+                title = { Text("Glasses") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -100,55 +101,57 @@ internal fun HaloScreen(
                     .padding(padding)
                     .padding(horizontal = 16.dp)
                     .verticalScroll(rememberScrollState())
-                    .testTag("gomode-halo-screen"),
+                    .testTag("gomode-glasses-screen"),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val savedAddress = state.savedAddress
+            val saved = state.saved
+            // The status takes the row's width, and its action sits below it, so a long retry reason
+            // wraps without squeezing the action.
             ListItem(
                 headlineContent = { Text("Connection") },
                 supportingContent = {
-                    Text(state.link.label(), modifier = Modifier.testTag("gomode-halo-link"))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(state.link.label(saved), modifier = Modifier.testTag("gomode-glasses-link"))
+                        if (state.link != GlassesLink.Disconnected) {
+                            OutlinedButton(
+                                onClick = owner::disconnect,
+                                modifier = Modifier.testTag("gomode-glasses-disconnect"),
+                            ) {
+                                Text("Disconnect")
+                            }
+                        } else if (saved != null) {
+                            Button(
+                                onClick = { withBluetooth { owner.connect(saved) } },
+                                modifier = Modifier.testTag("gomode-glasses-connect"),
+                            ) {
+                                Text("Connect")
+                            }
+                        }
+                    }
                 },
                 leadingContent = {
                     Icon(Icons.Filled.Bluetooth, contentDescription = null, tint = state.link.tint())
-                },
-                trailingContent = {
-                    if (state.link != GlassesLink.Disconnected) {
-                        OutlinedButton(
-                            onClick = owner::disconnect,
-                            modifier = Modifier.testTag("gomode-halo-disconnect"),
-                        ) {
-                            Text("Disconnect")
-                        }
-                    } else if (savedAddress != null) {
-                        Button(
-                            onClick = { withBluetooth { owner.connect(savedAddress) } },
-                            modifier = Modifier.testTag("gomode-halo-connect"),
-                        ) {
-                            Text("Connect")
-                        }
-                    }
                 },
             )
 
             ListItem(
                 headlineContent = { Text("Auto-connect") },
-                supportingContent = { Text("Connect to the saved Halo when Go Mode opens.") },
+                supportingContent = { Text("Connect to the saved glasses when Go Mode opens.") },
                 trailingContent = {
                     Switch(
                         checked = state.autoConnect,
                         onCheckedChange = owner::updateAutoConnect,
-                        modifier = Modifier.testTag("gomode-halo-auto-connect"),
+                        modifier = Modifier.testTag("gomode-glasses-auto-connect"),
                     )
                 },
             )
 
-            if (savedAddress != null) {
+            if (saved != null) {
                 ListItem(
-                    headlineContent = { Text("Saved device") },
-                    supportingContent = { Text(savedAddress) },
+                    headlineContent = { Text("Saved glasses") },
+                    supportingContent = { Text(saved.label(), modifier = Modifier.testTag("gomode-glasses-saved")) },
                     trailingContent = {
-                        TextButton(onClick = owner::forget, modifier = Modifier.testTag("gomode-halo-forget")) {
+                        TextButton(onClick = owner::forget, modifier = Modifier.testTag("gomode-glasses-forget")) {
                             Text("Forget")
                         }
                     },
@@ -160,20 +163,20 @@ internal fun HaloScreen(
                     text = error,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.testTag("gomode-halo-error"),
+                    modifier = Modifier.testTag("gomode-glasses-error"),
                 )
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             if (state.scanning) {
-                OutlinedButton(onClick = owner::stopScan, modifier = Modifier.testTag("gomode-halo-stop-scan")) {
+                OutlinedButton(onClick = owner::stopScan, modifier = Modifier.testTag("gomode-glasses-stop-scan")) {
                     Text("Stop scan")
                 }
             } else {
                 Button(
                     onClick = { withBluetooth(owner::startScan) },
-                    modifier = Modifier.testTag("gomode-halo-scan"),
+                    modifier = Modifier.testTag("gomode-glasses-scan"),
                 ) {
                     Text("Scan")
                 }
@@ -190,33 +193,49 @@ internal fun HaloScreen(
             Text("Devices", style = MaterialTheme.typography.titleMedium)
             if (state.devices.isEmpty()) {
                 Text(
-                    text = "No Halo devices found.",
+                    text = "No Halo or Even G2 found.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
-                state.devices.forEach { device ->
-                    HaloDeviceRow(
-                        device = device,
-                        // The saved glasses already have the connection, or are getting it.
-                        linked = device.address == savedAddress && state.link != GlassesLink.Disconnected,
-                        onConnect = { withBluetooth { owner.connect(device.address) } },
-                    )
-                }
+            }
+            state.devices.forEach { scanned ->
+                GlassesRow(
+                    scanned = scanned,
+                    // The saved glasses already have the connection, or are getting it.
+                    linked = scanned.device == saved && state.link != GlassesLink.Disconnected,
+                    onConnect = { withBluetooth { owner.connect(scanned.device) } },
+                )
+            }
+            if (state.devices.none { it.device is GlassesDevice.EvenG2 }) {
+                // G2Scanner: an arm stops advertising while any host is connected to it.
+                Text(
+                    text = "Even G2 appears only while no other app is connected to it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("gomode-glasses-g2-hint"),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun HaloDeviceRow(
-    device: ScannedGlasses,
+private fun GlassesRow(
+    scanned: ScannedGlasses,
     linked: Boolean,
     onConnect: () -> Unit,
 ) {
+    val detail =
+        when (val device = scanned.device) {
+            is GlassesDevice.Halo -> "${device.address} · ${scanned.rssi} dBm"
+
+            // One arm per line: two addresses do not fit beside the button on one line.
+            is GlassesDevice.EvenG2 -> "Left ${device.pair.left.address}\nRight ${device.pair.right.address}"
+        }
     ListItem(
-        headlineContent = { Text(device.name, fontWeight = FontWeight.Medium) },
-        supportingContent = { Text("${device.address} - ${device.rssi} dBm") },
+        modifier = Modifier.testTag("gomode-glasses-found"),
+        headlineContent = { Text(scanned.name, fontWeight = FontWeight.Medium) },
+        supportingContent = { Text(detail) },
         trailingContent = {
             Button(onClick = onConnect, enabled = !linked) {
                 Text("Connect")
@@ -224,6 +243,20 @@ private fun HaloDeviceRow(
         },
     )
 }
+
+/** The model and identity of [this], as the glasses screen and settings name saved glasses. */
+internal fun GlassesDevice.label(): String =
+    when (this) {
+        is GlassesDevice.Halo -> "Halo · $address"
+        is GlassesDevice.EvenG2 -> "Even G2 ${pair.id}"
+    }
+
+private fun GlassesDevice?.model(): String =
+    when (this) {
+        is GlassesDevice.Halo -> "Halo"
+        is GlassesDevice.EvenG2 -> "Even G2"
+        null -> "Glasses"
+    }
 
 @Composable
 private fun GlassesLink.tint() =
@@ -233,7 +266,8 @@ private fun GlassesLink.tint() =
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-private fun GlassesLink.label(): String =
+// [saved] names the glasses the link is for: the owner saves the glasses it connects to.
+private fun GlassesLink.label(saved: GlassesDevice?): String =
     when (this) {
         GlassesLink.Disconnected -> {
             "Disconnected"
@@ -249,8 +283,8 @@ private fun GlassesLink.label(): String =
 
         is GlassesLink.Reconnecting -> {
             when (problem) {
-                GlassesProblem.UNREACHABLE -> "Halo not reachable. Turn it on and keep it close. Retrying."
-                GlassesProblem.UNRESPONSIVE -> "Halo stopped responding. Retrying."
+                GlassesProblem.UNREACHABLE -> "${saved.model()} not reachable. Turn it on and keep it close. Retrying."
+                GlassesProblem.UNRESPONSIVE -> "${saved.model()} stopped responding. Retrying."
             }
         }
     }

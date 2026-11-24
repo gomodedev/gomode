@@ -29,6 +29,11 @@
 //
 // The former engine also becomes the separate-stages language model for cloud voice, so choosing
 // device speech later restores it.
+//
+// Saved glasses: GLASSES_KIND names the kind, HALO or EVEN_G2; without it, as before Even G2,
+// HALO_ADDRESS is a Halo's. EVEN_G2_PAIR holds a pair's ID and both arms as JSON (version 1).
+// One write replaces the kind and its keys and removes the other kind's. HALO_AUTO_CONNECT
+// keeps its name and applies to either kind.
 package com.fghbuild.gomode.data
 
 import androidx.datastore.core.DataStore
@@ -38,6 +43,9 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2Side
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -341,8 +349,8 @@ sealed interface SpeakingVoiceOwner {
 
 data class SettingsState(
     val activeServiceURL: String = "",
-    val haloAddress: String? = null,
-    val haloAutoConnect: Boolean = false,
+    val glasses: GlassesDevice? = null,
+    val glassesAutoConnect: Boolean = false,
     val services: List<ServiceInstance> = emptyList(),
     val activeServiceId: String = "",
     val voiceSetup: VoiceSetupPreference = VoiceSetupPreference(),
@@ -373,7 +381,9 @@ class SettingsRepository(
         val CAR_CALLER_SLOTS = stringPreferencesKey("CAR_CALLER_SLOTS")
         val SHOW_SERVICE_ON_LOCK_SCREEN = booleanPreferencesKey("SHOW_SERVICE_ON_LOCK_SCREEN")
         val ACTIVE_SERVICE_ID = stringPreferencesKey("ACTIVE_SERVICE_ID")
+        val GLASSES_KIND = stringPreferencesKey("GLASSES_KIND")
         val HALO_ADDRESS = stringPreferencesKey("HALO_ADDRESS")
+        val EVEN_G2_PAIR = stringPreferencesKey("EVEN_G2_PAIR")
         val HALO_AUTO_CONNECT = booleanPreferencesKey("HALO_AUTO_CONNECT")
         val SPEAKING_VOICES = stringPreferencesKey("SPEAKING_VOICES")
         val SYNTHESIS_VOICES = stringPreferencesKey("SYNTHESIS_VOICES")
@@ -407,8 +417,8 @@ class SettingsRepository(
                     synthesisVoices = decodeVoices(prefs, Keys.SYNTHESIS_VOICES),
                     carCallerSlots = decodeCarCallerSlots(prefs),
                     showServiceOnLockScreen = prefs[Keys.SHOW_SERVICE_ON_LOCK_SCREEN] ?: false,
-                    haloAddress = prefs[Keys.HALO_ADDRESS],
-                    haloAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
+                    glasses = decodeGlasses(prefs),
+                    glassesAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
                     services = services,
                     activeServiceId = active?.id ?: "",
                     voiceAudioDeviceType = prefs[Keys.VOICE_AUDIO_DEVICE_TYPE],
@@ -501,17 +511,35 @@ class SettingsRepository(
         }
     }
 
-    suspend fun updateHaloAddress(address: String?) {
+    /** Saves [glasses] in place of the saved glasses of either kind; null forgets them. */
+    suspend fun updateGlasses(glasses: GlassesDevice?) {
         dataStore.edit { prefs ->
-            if (address.isNullOrBlank()) {
-                prefs.remove(Keys.HALO_ADDRESS)
-            } else {
-                prefs[Keys.HALO_ADDRESS] = address
+            prefs.remove(Keys.GLASSES_KIND)
+            prefs.remove(Keys.HALO_ADDRESS)
+            prefs.remove(Keys.EVEN_G2_PAIR)
+            when (glasses) {
+                null -> {
+                    Unit
+                }
+
+                is GlassesDevice.Halo -> {
+                    prefs[Keys.GLASSES_KIND] = GLASSES_KIND_HALO
+                    prefs[Keys.HALO_ADDRESS] = glasses.address
+                }
+
+                is GlassesDevice.EvenG2 -> {
+                    val pair = glasses.pair
+                    prefs[Keys.GLASSES_KIND] = GLASSES_KIND_EVEN_G2
+                    prefs[Keys.EVEN_G2_PAIR] =
+                        json.encodeToString(
+                            SavedG2Pair(pair.id, SavedG2Arm(pair.left), SavedG2Arm(pair.right)),
+                        )
+                }
             }
         }
     }
 
-    suspend fun updateHaloAutoConnect(enabled: Boolean) {
+    suspend fun updateGlassesAutoConnect(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.HALO_AUTO_CONNECT] = enabled
         }
@@ -709,6 +737,29 @@ class SettingsRepository(
             else -> LocalLlmModel.entries.firstOrNull { it.name == saved }
         } ?: LocalLlmModel.GEMMA_4_E2B
 
+    // Saved glasses that no longer decode, or of a kind a newer version saved, read as none.
+    private fun decodeGlasses(prefs: Preferences): GlassesDevice? =
+        when (prefs[Keys.GLASSES_KIND] ?: GLASSES_KIND_HALO) {
+            GLASSES_KIND_HALO -> {
+                prefs[Keys.HALO_ADDRESS]?.takeIf(String::isNotBlank)?.let(GlassesDevice::Halo)
+            }
+
+            GLASSES_KIND_EVEN_G2 -> {
+                prefs[Keys.EVEN_G2_PAIR]?.let { encoded ->
+                    runCatching {
+                        val saved = json.decodeFromString<SavedG2Pair>(encoded)
+                        GlassesDevice.EvenG2(
+                            G2Pair(saved.id, saved.left.arm(G2Side.LEFT), saved.right.arm(G2Side.RIGHT)),
+                        )
+                    }.getOrNull()
+                }
+            }
+
+            else -> {
+                null
+            }
+        }
+
     private fun decodeServices(prefs: Preferences): List<ServiceInstance> =
         prefs[Keys.SERVICES]?.let { encoded ->
             runCatching { json.decodeFromString<List<ServiceInstance>>(encoded) }.getOrNull()
@@ -716,6 +767,8 @@ class SettingsRepository(
 
     companion object {
         private const val DEFAULT_SERVICE_LABEL = "Service"
+        private const val GLASSES_KIND_HALO = "HALO"
+        private const val GLASSES_KIND_EVEN_G2 = "EVEN_G2"
 
         /** Maps the former voice mode and on-device engine values onto the voice setup. */
         internal fun legacyVoiceSetup(
@@ -772,4 +825,22 @@ class SettingsRepository(
             return locale.toLanguageTag()
         }
     }
+}
+
+// EVEN_G2_PAIR, version 1: the pair's ID and each arm's address and advertised name.
+@Serializable
+private data class SavedG2Pair(
+    val id: String,
+    val left: SavedG2Arm,
+    val right: SavedG2Arm,
+)
+
+@Serializable
+private data class SavedG2Arm(
+    val address: String,
+    val name: String,
+) {
+    constructor(arm: G2Arm) : this(arm.address, arm.name)
+
+    fun arm(side: G2Side): G2Arm = G2Arm(side, address, name)
 }

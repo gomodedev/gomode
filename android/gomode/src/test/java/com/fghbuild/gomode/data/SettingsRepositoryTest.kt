@@ -1,8 +1,12 @@
 // Unit tests for Go Mode service-instance settings.
 package com.fghbuild.gomode.data
 
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2Side
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -493,8 +497,8 @@ class SettingsRepositoryTest {
             assertTrue(state.services.isEmpty())
             assertEquals("", state.activeServiceURL)
             assertEquals("", state.activeServiceId)
-            assertNull(state.haloAddress)
-            assertFalse(state.haloAutoConnect)
+            assertNull(state.glasses)
+            assertFalse(state.glassesAutoConnect)
         }
 
     @Test
@@ -615,28 +619,76 @@ class SettingsRepositoryTest {
         }
 
     @Test
-    fun `updateHaloAddress stores and clears address`() =
+    fun `a Halo address saved before Even G2 support reads as saved Halo glasses`() =
         runBlocking {
-            val repo = createRepo()
-            repo.updateHaloAddress("AA:BB:CC:DD:EE:FF")
-            val stored = repo.awaitSettings("haloAddress != null") { it.haloAddress != null }
+            val store = MemoryPreferences()
+            store.edit {
+                it[stringPreferencesKey("HALO_ADDRESS")] = "AA:BB:CC:DD:EE:FF"
+                it[booleanPreferencesKey("HALO_AUTO_CONNECT")] = true
+            }
+            val state = SettingsRepository(store).awaitSettings("saved Halo") { it.glasses != null }
 
-            assertEquals("AA:BB:CC:DD:EE:FF", stored.haloAddress)
-
-            repo.updateHaloAddress(null)
-            val cleared = repo.awaitSettings("haloAddress == null") { it.haloAddress == null }
-
-            assertNull(cleared.haloAddress)
+            assertEquals(GlassesDevice.Halo("AA:BB:CC:DD:EE:FF"), state.glasses)
+            assertTrue(state.glassesAutoConnect)
         }
 
     @Test
-    fun `updateHaloAutoConnect toggles flag`() =
+    fun `saved glasses of one kind replace the other and survive a restart`() =
+        runBlocking {
+            val store = MemoryPreferences()
+            val repo = SettingsRepository(store)
+            val pair =
+                G2Pair(
+                    "S110L",
+                    G2Arm(G2Side.LEFT, "00:11:22:33:55:01", "Even G2_7_L_335501"),
+                    G2Arm(G2Side.RIGHT, "00:11:22:33:55:02", "Even G2_7_R_335502"),
+                )
+            repo.updateGlasses(GlassesDevice.Halo("AA:BB:CC:DD:EE:FF"))
+            repo.updateGlasses(GlassesDevice.EvenG2(pair))
+            repo.awaitSettings("Even G2 saved") { it.glasses is GlassesDevice.EvenG2 }
+
+            assertEquals(
+                GlassesDevice.EvenG2(pair),
+                SettingsRepository(store).awaitSettings("restored Even G2") { it.glasses != null }.glasses,
+            )
+            // An older version, which reads only the Halo address, finds no glasses.
+            assertNull(store.data.first()[stringPreferencesKey("HALO_ADDRESS")])
+
+            repo.updateGlasses(GlassesDevice.Halo("AA:BB:CC:DD:EE:00"))
+            assertEquals(
+                GlassesDevice.Halo("AA:BB:CC:DD:EE:00"),
+                SettingsRepository(store).awaitSettings("restored Halo") { it.glasses is GlassesDevice.Halo }.glasses,
+            )
+            assertNull(store.data.first()[stringPreferencesKey("EVEN_G2_PAIR")])
+
+            repo.updateGlasses(null)
+            assertNull(
+                SettingsRepository(
+                    store,
+                ).awaitSettings("forgotten") { it.loadState == SettingsLoadState.Ready }.glasses,
+            )
+        }
+
+    @Test
+    fun `glasses of a kind this version does not know read as none`() =
+        runBlocking {
+            val store = MemoryPreferences()
+            store.edit {
+                it[stringPreferencesKey("GLASSES_KIND")] = "FUTURE"
+                it[stringPreferencesKey("HALO_ADDRESS")] = "AA:BB:CC:DD:EE:FF"
+            }
+            val state = SettingsRepository(store).awaitSettings("loaded") { it.loadState == SettingsLoadState.Ready }
+            assertNull(state.glasses)
+        }
+
+    @Test
+    fun `updateGlassesAutoConnect toggles flag`() =
         runBlocking {
             val repo = createRepo()
-            repo.updateHaloAutoConnect(true)
-            val state = repo.awaitSettings("haloAutoConnect == true") { it.haloAutoConnect }
+            repo.updateGlassesAutoConnect(true)
+            val state = repo.awaitSettings("glassesAutoConnect == true") { it.glassesAutoConnect }
 
-            assertTrue(state.haloAutoConnect)
+            assertTrue(state.glassesAutoConnect)
         }
 
     @Test

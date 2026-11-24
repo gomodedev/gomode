@@ -5,6 +5,8 @@ import android.app.Application
 import android.content.Context
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.work.Configuration
+import com.fghbuild.eveng2.G2GattConnector
+import com.fghbuild.eveng2.G2Scanner
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.glasses.GlassesOwner
@@ -61,7 +63,8 @@ class GoModeApplication :
             CarDialVoiceOwner(this, settingsRepository, localModelOwner, serviceShellOwner, glassesOwner)
         }
     internal val carDialVoiceOwner by carDialVoiceOwnerDelegate
-    private val glassesOwnerDelegate = lazy { GlassesOwner(this, settingsRepository, HaloConnection(this)) }
+    private val glassesOwnerDelegate =
+        lazy { GlassesOwner(this, settingsRepository, HaloConnection(this), G2Scanner(this), G2GattConnector(this)) }
     internal val glassesOwner by glassesOwnerDelegate
 
     // An owner that does not exist yet has no glasses connected; reading the display must not create one.

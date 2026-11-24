@@ -28,8 +28,8 @@ User and integration guides are at [docs.gomode.dev](https://docs.gomode.dev):
 - `sdk/`: generated TypeScript, Kotlin, and Swift protocol clients.
 - `web/src/`: `@gomodedev/gomode` SolidJS browser integration.
 - `internal/gatewayfrontend/`: optional test app embedded by `cmd/voice-gateway`.
-- `android/gomode/`: native WebView, voice, notifications, settings, and Halo
-  shell.
+- `android/gomode/`: native WebView, voice, notifications, settings, and glasses shell; it
+  pairs a Brilliant Halo or an Even Realities G2.
 - `android/evenG2/`: Even Realities G2 smart-glasses Android SDK.
 - `android/halo/`: Halo smart-glasses Android SDK.
 

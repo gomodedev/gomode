@@ -17,14 +17,20 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
-class G2Scanner(
-    private val context: Context,
-) {
+/** Finds Even G2 pairs nearby. */
+fun interface G2PairScanner {
     /**
      * Each pair once both arms are heard, and again when an arm's address changes. Scanning
      * runs while the flow is collected. An arm stops advertising while any host is connected.
      */
-    fun pairs(): Flow<G2Pair> =
+    fun pairs(): Flow<G2Pair>
+}
+
+/** Scans with the platform's BLE scanner; the caller holds BLUETOOTH_SCAN and BLUETOOTH_CONNECT. */
+class G2Scanner(
+    private val context: Context,
+) : G2PairScanner {
+    override fun pairs(): Flow<G2Pair> =
         callbackFlow {
             val scanner =
                 context.getSystemService(BluetoothManager::class.java)?.adapter?.bluetoothLeScanner

@@ -32,7 +32,7 @@ FAILURES = ROOT / "android-screenshots-failures"
 DEVICE_DIRECTORY = "/sdcard/Pictures/gomode-screenshots"
 SCENARIOS = (
     "connections",
-    "halo",
+    "glasses",
     "hosted-service",
     "service-editor",
     "voice-settings",

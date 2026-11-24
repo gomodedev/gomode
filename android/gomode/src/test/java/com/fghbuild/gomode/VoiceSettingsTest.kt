@@ -118,7 +118,7 @@ class VoiceSettingsTest {
                             settingsRepository = repository,
                             voiceSessionActive = false,
                             onDone = {},
-                            onOpenHalo = {},
+                            onOpenGlasses = {},
                             edits = rememberSettingsEdits(repository, settings),
                             serviceStatus =
                                 mapOf(
@@ -177,7 +177,7 @@ class VoiceSettingsTest {
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
                     onDone = {},
-                    onOpenHalo = {},
+                    onOpenGlasses = {},
                 )
             }
         }
@@ -211,7 +211,7 @@ class VoiceSettingsTest {
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
                     onDone = {},
-                    onOpenHalo = {},
+                    onOpenGlasses = {},
                 )
             }
         }
@@ -242,7 +242,7 @@ class VoiceSettingsTest {
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
                     onDone = {},
-                    onOpenHalo = {},
+                    onOpenGlasses = {},
                 )
             }
         }
@@ -272,7 +272,7 @@ class VoiceSettingsTest {
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
                     onDone = {},
-                    onOpenHalo = {},
+                    onOpenGlasses = {},
                 )
             }
         }
@@ -522,7 +522,7 @@ class VoiceSettingsTest {
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
                     onDone = {},
-                    onOpenHalo = {},
+                    onOpenGlasses = {},
                 )
             }
         }
@@ -668,7 +668,7 @@ class VoiceSettingsTest {
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active(),
                     onDone = {},
-                    onOpenHalo = {},
+                    onOpenGlasses = {},
                 )
             }
         }

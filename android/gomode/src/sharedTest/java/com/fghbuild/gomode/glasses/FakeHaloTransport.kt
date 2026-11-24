@@ -51,10 +51,14 @@ internal open class FakeHaloTransport(
     val connects get() = attempts.size
     var disconnects = 0
 
+    // Runs at the start of every connection attempt.
+    var connecting: () -> Unit = {}
+
     override suspend fun connect(
         device: BluetoothDevice,
         timeoutMs: Long,
     ): HaloDevice {
+        connecting()
         attempts += device.address
         if (hangConnects) {
             try {

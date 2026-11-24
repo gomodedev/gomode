@@ -12,7 +12,8 @@ offline resolver; update that version alongside Robolectric or compileSdk.
 
 Read `gomode/AGENTS.md` before editing the app. Keep product task, document,
 and database UI in the hosted frontend. Native code owns WebView bootstrap,
-permissions, notifications, voice, settings, and Halo device integration.
+permissions, notifications, voice, settings, and glasses integration: Brilliant Halo and Even
+Realities G2, one pair connected at a time.
 
 Run `make android-lint android-test` at the repository root after Android changes.
 Also run applicable instrumented tests on an emulator: `make android-e2e` runs all

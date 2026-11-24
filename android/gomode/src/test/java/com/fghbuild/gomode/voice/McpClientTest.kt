@@ -1,6 +1,7 @@
 // Tests native MCP requests, tool result normalization, and SSE configuration.
 package com.fghbuild.gomode.voice
 
+import com.fghbuild.gomode.glasses.G2_DISPLAY
 import com.fghbuild.gomode.glasses.HALO_DISPLAY
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.mcp.sdk.v1.NotificationMethod
@@ -270,10 +271,18 @@ class McpClientTest {
                         {"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4}}""",
                     )
 
+                val g2 =
+                    Json.parseToJsonElement(
+                        """{"com.fghbuild.gomode/display":
+                        {"width":576,"height":288,"shape":"rectangle","colorSpace":"luminance","bitsPerPixel":4}}""",
+                    )
+
                 assertEquals(JsonObject(emptyMap()), capabilities(::callTool))
                 display = HALO_DISPLAY
                 assertEquals(halo, capabilities(::callTool)["extensions"])
                 assertEquals(halo, capabilities { client.readResource("host://usage", null) }["extensions"])
+                display = G2_DISPLAY
+                assertEquals(g2, capabilities(::callTool)["extensions"])
                 display = null
                 assertEquals(JsonObject(emptyMap()), capabilities(::callTool))
             }

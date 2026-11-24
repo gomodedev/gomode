@@ -6,7 +6,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -42,7 +41,7 @@ class G2GlassesTest {
     @Test
     fun opensThePageThroughBothArmsAndUpdatesItInPlace() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.show("Hello")
             glasses.connect(pair)
@@ -66,7 +65,7 @@ class G2GlassesTest {
     @Test
     fun textBeyondTheCreationLimitArrivesByUpdate() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             val long = "é".repeat(600) // 1,200 UTF-8 bytes.
             glasses.show(long)
@@ -78,7 +77,7 @@ class G2GlassesTest {
     @Test
     fun authFailureClosesBothLinksAndRetries() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             firmware.authenticates = { it == G2Side.LEFT }
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
@@ -97,7 +96,7 @@ class G2GlassesTest {
     @Test
     fun rightArmDropReconnectsWithTheLatestText() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.show("First")
             glasses.connect(pair)
@@ -123,7 +122,7 @@ class G2GlassesTest {
     @Test
     fun leftArmDropShutsThePageDownThroughTheRightArm() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
             glasses.await { it is G2State.Ready }
@@ -141,7 +140,7 @@ class G2GlassesTest {
     @Test
     fun disconnectShutsThePageDownAndStops() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
             glasses.await { it is G2State.Ready }
@@ -158,7 +157,7 @@ class G2GlassesTest {
     @Test
     fun wearerExitEndsTheConnection() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
             glasses.await { it is G2State.Ready }
@@ -182,7 +181,7 @@ class G2GlassesTest {
     @Test
     fun unansweredUpdateTimesOut() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             firmware.answersUpdates = false
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
@@ -197,7 +196,7 @@ class G2GlassesTest {
     @Test
     fun connectFailuresBackOff() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             firmware.reachable = { it == G2Side.LEFT }
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             val states = record(glasses)
@@ -212,7 +211,7 @@ class G2GlassesTest {
     @Test
     fun cancellationAsAnArmConnectsClosesItsLink() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val scope = CoroutineScope(backgroundScope.coroutineContext + Job(backgroundScope.coroutineContext[Job]))
             // The owner's scope is cancelled while connect() returns an open link.
             firmware.connected = { scope.cancel() }
@@ -226,7 +225,7 @@ class G2GlassesTest {
     @Test
     fun unansweredCreateShutsThePageDown() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             firmware.answersCreate = false
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
@@ -240,7 +239,7 @@ class G2GlassesTest {
     @Test
     fun unexpectedConnectorExceptionClosesTheConnection() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val failure = SecurityException("BLUETOOTH_CONNECT")
             firmware.failure = { side -> failure.takeIf { side == G2Side.RIGHT } }
             val glasses = G2Glasses(firmware.connector, backgroundScope)
@@ -258,7 +257,7 @@ class G2GlassesTest {
     @Test
     fun connectDuringDisconnectWaitsForTheStoppingSession() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             firmware.answersShutdown = false
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
@@ -277,7 +276,7 @@ class G2GlassesTest {
     @Test
     fun replacedConnectionPublishesNothing() =
         runTest {
-            val firmware = FakeFirmware()
+            val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             val states = record(glasses)
             val other = pair("2")
@@ -296,209 +295,4 @@ class G2GlassesTest {
                 firmware.requests.first { it.address == "1-R" && it.kind == "shutdown" }.toString(),
             )
         }
-}
-
-/** Glasses that answer AUTH, the prelude, and Even Hub commands the way the vectors show. */
-private class FakeFirmware {
-    var authenticates: (G2Side) -> Boolean = { true }
-    var reachable: (G2Side) -> Boolean = { true }
-    var answersUpdates = true
-    var answersCreate = true
-    var answersShutdown = true
-
-    /** Thrown by the connector instead of connecting; any exception type, as a host connector may. */
-    var failure: (G2Side) -> Exception? = { null }
-
-    /** Runs after an arm's link is created, before connect() returns it. */
-    var connected: (G2Side) -> Unit = {}
-
-    /** The most links open at the same time. */
-    var maxOpen = 0
-    var pageSession = 0L
-    val links = mutableListOf<FakeLink>()
-    val requests = mutableListOf<Request>()
-
-    class Request(
-        val side: G2Side,
-        val address: String,
-        val kind: String,
-        val text: String? = null,
-    ) {
-        override fun toString(): String = listOfNotNull("$side $kind", text).joinToString(" ")
-    }
-
-    val connector =
-        G2ArmConnector { arm ->
-            if (!reachable(arm.side)) throw G2Exception("unreachable")
-            failure(arm.side)?.let { throw it }
-            FakeLink(arm, this).also {
-                links += it
-                maxOpen = maxOf(maxOpen, links.count { link -> !link.closed })
-                connected(arm.side)
-            }
-        }
-
-    fun link(side: G2Side): FakeLink = links.last { it.side == side }
-
-    fun exitPage(
-        type: Long,
-        session: Long,
-    ) {
-        val system =
-            protobuf {
-                scalar(1, type)
-                scalar(5, G2TextPage().widgetId)
-                scalar(6, session)
-            }
-        val payload =
-            protobuf {
-                scalar(1, 2)
-                bytes(13, protobuf { bytes(3, system) })
-            }
-        link(G2Side.RIGHT).notify(G2Protocol.SID_EVEN_HUB, 1, G2Protocol.FLAG_NOTIFY, payload)
-    }
-
-    fun handle(
-        link: FakeLink,
-        sid: Int,
-        sync: Int,
-        payload: ByteArray,
-    ) {
-        val root = checkNotNull(G2ProtoReader.fields(payload))
-        val magic = root.scalar(2) ?: 0L
-
-        fun record(
-            kind: String,
-            text: String? = null,
-        ) {
-            requests += Request(link.side, link.arm.address, kind, text)
-        }
-        when (sid) {
-            G2Protocol.SID_DEVICE_CONFIG -> {
-                record("auth")
-                val auth = if (authenticates(link.side)) byteArrayOf() else protobuf { scalar(3, 1) }
-                link.notify(
-                    sid,
-                    sync,
-                    0,
-                    protobuf {
-                        scalar(1, 4)
-                        scalar(2, magic)
-                        bytes(3, auth)
-                    },
-                )
-            }
-
-            G2Protocol.SID_PRELUDE -> {
-                record("prelude")
-                link.notify(
-                    sid,
-                    sync,
-                    0,
-                    protobuf {
-                        scalar(1, 2)
-                        scalar(2, magic)
-                    },
-                )
-            }
-
-            G2Protocol.SID_EVEN_HUB -> {
-                evenHub(link, sync, root, magic, ::record)
-            }
-        }
-    }
-
-    private fun evenHub(
-        link: FakeLink,
-        sync: Int,
-        root: Map<Int, G2ProtoField>,
-        magic: Long,
-        record: (String, String?) -> Unit,
-    ) {
-        fun ack(
-            command: Long,
-            branch: Int,
-            body: ByteArray,
-        ) = link.notify(
-            G2Protocol.SID_EVEN_HUB,
-            sync,
-            0,
-            protobuf {
-                scalar(1, command)
-                scalar(2, magic)
-                bytes(branch, body)
-            },
-        )
-        when (root.scalar(1) ?: 0L) {
-            0L -> {
-                val body = checkNotNull(root.bytes(3)?.let(G2ProtoReader::fields))
-                val container = checkNotNull(body.bytes(3)?.let(G2ProtoReader::fields))
-                pageSession = checkNotNull(body.scalar(7))
-                record("create", String(checkNotNull(container.bytes(12))))
-                if (answersCreate) ack(1, 4, byteArrayOf())
-            }
-
-            5L -> {
-                val body = checkNotNull(root.bytes(9)?.let(G2ProtoReader::fields))
-                record("update", String(checkNotNull(body.bytes(5))))
-                if (answersUpdates) ack(6, 10, protobuf { scalar(1, 8) })
-            }
-
-            9L -> {
-                record("shutdown", null)
-                if (answersShutdown) ack(10, 12, protobuf { scalar(1, 10) })
-            }
-
-            12L -> {
-                record("heartbeat", null)
-                ack(13, 15, protobuf { scalar(2, 12) })
-            }
-        }
-    }
-}
-
-private class FakeLink(
-    val arm: G2Arm,
-    private val firmware: FakeFirmware,
-) : G2ArmLink {
-    private val channel = Channel<ByteArray>(Channel.UNLIMITED)
-    private val partial = mutableMapOf<Int, ByteArray>()
-    private var lost: G2LinkLostException? = null
-    var closed = false
-
-    override val side: G2Side get() = arm.side
-    override val notifications = channel
-
-    override suspend fun write(packet: ByteArray) {
-        lost?.let { throw it }
-        if (closed) throw G2Exception("closed")
-        val sync = packet[2].toInt() and 0xFF
-        val length = packet[3].toInt() and 0xFF
-        val last = packet[4] == packet[5]
-        val body = packet.copyOfRange(8, 8 + length - if (last) 2 else 0)
-        val payload = (partial.remove(sync) ?: byteArrayOf()) + body
-        if (last) firmware.handle(this, packet[6].toInt() and 0xFF, sync, payload) else partial[sync] = payload
-    }
-
-    override fun close() {
-        closed = true
-        channel.close()
-    }
-
-    fun notify(
-        sid: Int,
-        sync: Int,
-        flag: Int,
-        payload: ByteArray,
-    ) {
-        G2Frame.packets(payload, sid, flag, sync).forEach {
-            it[1] = 0x12
-            channel.trySend(it)
-        }
-    }
-
-    fun drop(status: Int) {
-        lost = G2LinkLostException(status)
-        channel.close(lost)
-    }
 }

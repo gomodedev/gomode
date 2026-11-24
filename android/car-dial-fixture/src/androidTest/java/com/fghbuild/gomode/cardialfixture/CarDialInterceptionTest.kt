@@ -459,13 +459,13 @@ class CarDialInterceptionTest {
             assertUnlockedShell()
             val policy = shell("dumpsys window policy")
             assertTrue(policy, policy.contains("showing=true") && policy.contains("secure=true"))
-            // Settings/Halo must not become a route to Android permission dialogs above keyguard.
+            // Settings/Glasses must not become a route to Android permission dialogs above keyguard.
             val settings = device.wait(Until.findObject(By.desc("Settings")), 5_000)
             assertNotNull(settings)
             settings.click()
             device.waitForIdle()
             assertFalse(device.hasObject(By.res("gomode-settings")))
-            assertFalse(device.hasObject(By.text("Manage Halo")))
+            assertFalse(device.hasObject(By.desc("Manage glasses")))
             assertUnlockedShell()
             val shown = browserTool("locked-normal-ui", "fixture_echo")
             assertTrue(shown.getBoolean("visible"))

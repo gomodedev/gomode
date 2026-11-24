@@ -8,6 +8,10 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
+import com.fghbuild.eveng2.G2ArmConnector
+import com.fghbuild.eveng2.G2Glasses
+import com.fghbuild.eveng2.G2PairScanner
+import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.sdk.v1.Display
@@ -24,13 +28,17 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,9 +56,10 @@ internal sealed interface GlassesLink {
 
     data object Connecting : GlassesLink
 
-    /** The glasses are up and show [display]. */
+    /** The glasses are up and show [display], which fits [textCapacity] characters of prose. */
     data class Connected(
         val display: Display,
+        val textCapacity: Int,
     ) : GlassesLink
 
     /** The connection ended or failed with [problem]; the owner tries again on its own. */
@@ -68,40 +77,50 @@ internal enum class GlassesProblem {
     UNRESPONSIVE,
 }
 
+/** Glasses a scan found; [rssi] is null for an Even G2 pair, whose arms each have their own. */
 internal data class ScannedGlasses(
-    val address: String,
+    val device: GlassesDevice,
     val name: String,
-    val rssi: Int,
+    val rssi: Int?,
 )
 
 internal data class GlassesState(
     val link: GlassesLink = GlassesLink.Disconnected,
     val scanning: Boolean = false,
     val devices: List<ScannedGlasses> = emptyList(),
-    val savedAddress: String? = null,
+    val saved: GlassesDevice? = null,
     val autoConnect: Boolean = false,
     // A failure that stopped scanning or prevented a connection attempt.
     val error: String? = null,
 )
 
 /**
- * The application owns one so the glasses stay connected across Activity replacement. A connection
- * to the saved glasses lasts until [disconnect], [forget], or [close], reconnecting in between with
- * a delay that doubles from [RECONNECT_INITIAL_DELAY_MS] to [RECONNECT_MAX_DELAY_MS] and resets after
- * each successful connection. Auto-connect starts that connection when [start] first sees the saved
+ * The application owns one so the glasses stay connected across Activity replacement. One pair, a
+ * Halo or an Even G2, is saved and connected at a time; connecting to another replaces it. A
+ * connection to the saved glasses lasts until [disconnect], [forget], or [close], or until a
+ * permanent failure, reconnecting in between with a delay that doubles from
+ * [RECONNECT_INITIAL_DELAY_MS] to [RECONNECT_MAX_DELAY_MS] and resets after each successful
+ * connection. This is the only reconnection policy for either model; see EvenG2Glasses.kt for how
+ * it replaces G2Glasses' own. Auto-connect starts that connection when [start] first sees the saved
  * settings. Every connection shows the latest [show] text. Callers hold BLUETOOTH_SCAN before
  * [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
  * connecting on its own.
  *
- * Only Halo connects today, through [connection]; the link logic depends on [GlassesDisplay] alone.
+ * Halo scans and connects through [halo], Even G2 through [g2Scanner] and [g2Connector]; the link
+ * logic depends on [GlassesDisplay] alone. A scan looks for both models at once.
  */
 internal class GlassesOwner(
     context: Context,
     private val settingsRepository: SettingsRepository,
-    private val connection: HaloConnection,
+    private val halo: HaloConnection,
+    private val g2Scanner: G2PairScanner,
+    g2Connector: G2ArmConnector,
 ) : AutoCloseable {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val g2 = G2Glasses(g2Connector, scope)
+
+    // Halo devices a scan found by address; connecting prefers them to a device made from the address.
     private val scanned = mutableMapOf<String, BluetoothDevice>()
     private val text = MutableStateFlow("")
     private var scanJob: Job? = null
@@ -115,23 +134,22 @@ internal class GlassesOwner(
     val connectedDisplay: Display?
         get() = (state.value.link as? GlassesLink.Connected)?.display
 
+    /** The connected glasses' [GlassesDisplay.textCapacity], or null without a connection. */
+    val textCapacity: Flow<Int?> =
+        state.map { (it.link as? GlassesLink.Connected)?.textCapacity }.distinctUntilChanged()
+
     fun start() {
         if (started) return
         started = true
         scope.launch {
             settingsRepository.settings.collect { settings ->
-                mutableState.update {
-                    it.copy(
-                        savedAddress = settings.haloAddress,
-                        autoConnect = settings.haloAutoConnect,
-                    )
-                }
+                mutableState.update { it.copy(saved = settings.glasses, autoConnect = settings.glassesAutoConnect) }
             }
         }
         scope.launch {
             val settings = settingsRepository.settings.first { it.loadState == SettingsLoadState.Ready }
-            val saved = settings.haloAddress
-            if (settings.haloAutoConnect && saved != null && hasConnectPermission() && linkJob == null) {
+            val saved = settings.glasses
+            if (settings.glassesAutoConnect && saved != null && hasConnectPermission() && linkJob == null) {
                 connect(saved)
             }
         }
@@ -146,21 +164,27 @@ internal class GlassesOwner(
         if (scanJob?.isActive == true) return
         scanned.clear()
         mutableState.update { it.copy(scanning = true, devices = emptyList(), error = null) }
+        val halos =
+            halo
+                .scan()
+                .filter { it.type == HaloDeviceType.HALO }
+                .map { result -> result.toItem().also { scanned[result.device.address] = result.device } }
+        val g2Pairs =
+            g2Scanner
+                .pairs()
+                .map { ScannedGlasses(GlassesDevice.EvenG2(it), "Even G2 ${it.id}", null) }
         scanJob =
             scope.launch {
-                connection
-                    .scan()
+                merge(halos, g2Pairs)
                     .catch { error ->
                         mutableState.update { it.copy(scanning = false, error = error.message ?: "Scan failed") }
-                    }.filter { it.type == HaloDeviceType.HALO }
-                    .collect { result ->
-                        val item = result.toItem()
-                        scanned[item.address] = result.device
+                    }.collect { item ->
+                        val key = item.device.key()
                         mutableState.update { current ->
                             current.copy(
                                 devices =
-                                    (current.devices.filterNot { it.address == item.address } + item)
-                                        .sortedWith(compareBy({ it.name }, { it.address })),
+                                    (current.devices.filterNot { it.device.key() == key } + item)
+                                        .sortedWith(compareBy({ it.name }, { it.device.key() })),
                             )
                         }
                     }
@@ -173,26 +197,39 @@ internal class GlassesOwner(
         mutableState.update { it.copy(scanning = false) }
     }
 
-    /** Saves the glasses at [address], a scan result or the saved device, and keeps them connected. */
-    fun connect(address: String) {
+    /**
+     * Saves [device], a scan result or the saved glasses, in place of the saved glasses and keeps it
+     * connected, disconnecting the glasses connected before.
+     */
+    fun connect(device: GlassesDevice) {
         if (!hasConnectPermission()) {
-            mutableState.update { it.copy(error = "Allow Nearby devices to connect to Halo") }
+            mutableState.update { it.copy(error = "Allow Nearby devices to connect to glasses") }
             return
         }
-        val device =
-            scanned[address]
-                ?: appContext
-                    .getSystemService(BluetoothManager::class.java)
-                    .adapter
-                    ?.getRemoteDevice(address)
-        if (device == null) {
-            mutableState.update { it.copy(error = "Bluetooth is not available") }
-            return
-        }
+        val open: suspend () -> GlassesDisplay =
+            when (device) {
+                is GlassesDevice.Halo -> {
+                    val bluetooth =
+                        scanned[device.address]
+                            ?: appContext
+                                .getSystemService(BluetoothManager::class.java)
+                                .adapter
+                                ?.getRemoteDevice(device.address)
+                    if (bluetooth == null) {
+                        mutableState.update { it.copy(error = "Bluetooth is not available") }
+                        return
+                    }
+                    suspend { HaloGlasses.connect(appContext, halo, bluetooth) }
+                }
+
+                is GlassesDevice.EvenG2 -> {
+                    suspend { EvenG2Glasses.connect(g2, device.pair, scope) }
+                }
+            }
         stopScan()
         mutableState.update { it.copy(link = GlassesLink.Connecting, error = null) }
-        replaceLink { HaloGlasses.connect(appContext, connection, device) }
-        scope.launch { settingsRepository.updateHaloAddress(address) }
+        replaceLink(open)
+        scope.launch { settingsRepository.updateGlasses(device) }
     }
 
     /** Stops the connection and its reconnection, clearing the display when the glasses are reachable. */
@@ -203,11 +240,11 @@ internal class GlassesOwner(
 
     fun forget() {
         disconnect()
-        scope.launch { settingsRepository.updateHaloAddress(null) }
+        scope.launch { settingsRepository.updateGlasses(null) }
     }
 
     fun updateAutoConnect(enabled: Boolean) {
-        scope.launch { settingsRepository.updateHaloAutoConnect(enabled) }
+        scope.launch { settingsRepository.updateGlassesAutoConnect(enabled) }
     }
 
     override fun close() {
@@ -242,46 +279,50 @@ internal class GlassesOwner(
                     )
                 }
             }
-            val problem =
+            val ending =
                 try {
                     val glasses = connect()
                     retryDelayMs = RECONNECT_INITIAL_DELAY_MS
-                    mutableState.update { it.copy(link = GlassesLink.Connected(glasses.description)) }
+                    mutableState.update {
+                        it.copy(link = GlassesLink.Connected(glasses.description, glasses.textCapacity))
+                    }
                     showUntilClosed(glasses)
                 } catch (e: GlassesException) {
                     Log.w(TAG, "Glasses connection failed: ${e.message}")
-                    if (e.permanent) {
-                        currentCoroutineContext().ensureActive()
-                        mutableState.update { it.copy(link = GlassesLink.Disconnected, error = e.message) }
-                        return
-                    }
-                    GlassesProblem.UNREACHABLE
+                    e
                 }
+            if (ending.permanent) {
+                currentCoroutineContext().ensureActive()
+                mutableState.update { it.copy(link = GlassesLink.Disconnected, error = ending.message) }
+                return
+            }
             // A disconnect or a switch to other glasses cancels this link; it must not report a retry.
             currentCoroutineContext().ensureActive()
-            mutableState.update { it.copy(link = GlassesLink.Reconnecting(problem)) }
+            mutableState.update { it.copy(link = GlassesLink.Reconnecting(ending.problem)) }
             // TODO: While the glasses stay off, each attempt is a direct connectGatt bounded by the SDK's
-            // 15 s step timeout, repeated every 60 s for the process lifetime. Add a background connect
-            // mode (connectGatt autoConnect = true) to HaloConnection and use it for retries.
+            // timeout (HaloConnection's 15 s step, G2Protocol.CONNECT_TIMEOUT_MS), repeated every 60 s for
+            // the process lifetime. Add a background connect mode (connectGatt autoConnect = true) to
+            // HaloConnection and G2GattConnector and use it for retries.
             delay(retryDelayMs)
             retryDelayMs = (retryDelayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
         }
     }
 
-    // Shows each text until the connection ends, and returns why it ended. Cancellation clears the
-    // display, best effort, and every exit closes the glasses.
-    private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesProblem =
+    // Shows each text until the connection ends, and returns why it ended: the glasses' close cause
+    // once they report one. Cancellation clears the display, best effort, and every exit closes the
+    // glasses.
+    private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
         try {
             coroutineScope {
                 val drawing = launch { text.collect(glasses::showText) }
                 val cause = glasses.closeCause.filterNotNull().first()
                 drawing.cancel()
                 Log.w(TAG, "Glasses connection ended: ${cause.message}")
-                GlassesProblem.UNREACHABLE
+                cause.asGlassesException()
             }
         } catch (e: GlassesException) {
             Log.w(TAG, "Glasses stopped responding: ${e.message}")
-            if (glasses.closeCause.value == null) GlassesProblem.UNRESPONSIVE else GlassesProblem.UNREACHABLE
+            glasses.closeCause.value?.asGlassesException() ?: e
         } finally {
             withContext(NonCancellable) {
                 if (glasses.closeCause.value == null) {
@@ -303,7 +344,18 @@ internal class GlassesOwner(
 
 private const val TAG = "GoModeGlasses"
 
+// A transport's own close cause, such as a dropped Halo link, is a retryable loss of reach.
+private fun Exception.asGlassesException(): GlassesException =
+    this as? GlassesException ?: GlassesException(message ?: "Disconnected", this)
+
+// Identifies scan results of the same glasses across reports.
+private fun GlassesDevice.key(): String =
+    when (this) {
+        is GlassesDevice.Halo -> "halo/$address"
+        is GlassesDevice.EvenG2 -> "even-g2/${pair.id}"
+    }
+
 // HaloConnection.scan reports only devices whose name it read, so the name is available here.
 @SuppressLint("MissingPermission") // Scanning requires BLUETOOTH_CONNECT for names, which the scan already read.
 private fun HaloScannedDevice.toItem(): ScannedGlasses =
-    ScannedGlasses(address = device.address, name = device.name ?: "Halo", rssi = rssi)
+    ScannedGlasses(GlassesDevice.Halo(device.address), name = device.name ?: "Halo", rssi = rssi)

@@ -917,6 +917,9 @@ class ServerVoiceSwitchTest {
         val toolResults = CopyOnWriteArrayList<JSONObject>()
         val callMetadata = CopyOnWriteArrayList<JSONObject>()
         val resourceMetadata = CopyOnWriteArrayList<JSONObject>()
+
+        // The _meta of every MCP request, in arrival order.
+        val requestMetadata = CopyOnWriteArrayList<JSONObject>()
         val secondPageRequested = CountDownLatch(1)
 
         @Volatile
@@ -949,6 +952,7 @@ class ServerVoiceSwitchTest {
 
                 mcpPath -> {
                     val rpc = JSONObject(request.body.readUtf8())
+                    rpc.optJSONObject("params")?.optJSONObject("_meta")?.let { requestMetadata += it }
                     if (rpc.getString("method") in listOf("resources/list", "resources/read")) {
                         resourceMetadata += rpc.optJSONObject("params")?.optJSONObject("_meta") ?: JSONObject()
                     }

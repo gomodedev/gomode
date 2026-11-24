@@ -81,7 +81,7 @@ import com.fghbuild.gomode.service.ServiceSettingsException
 import com.fghbuild.gomode.service.alertLine
 import com.fghbuild.gomode.service.compatibilityError
 import com.fghbuild.gomode.service.serverSection
-import com.fghbuild.gomode.ui.halo.HaloScreen
+import com.fghbuild.gomode.ui.glasses.GlassesScreen
 import com.fghbuild.gomode.ui.settings.ServiceStatus
 import com.fghbuild.gomode.ui.settings.SettingsEdits
 import com.fghbuild.gomode.ui.settings.SettingsScreen
@@ -132,7 +132,7 @@ import com.fghbuild.gomode.sdk.v1.Settings as ServiceSettings
 
 private enum class NativeScreen {
     Settings,
-    Halo,
+    Glasses,
 }
 
 internal class PendingMicrophoneVoiceStart(
@@ -381,6 +381,7 @@ internal fun GoModeApp(
         showVoiceTranscript(
             manualVoiceSession.state,
             settingsRepository.settings.map { it.showTranscriptOnGlasses },
+            glassesOwner.textCapacity,
             glassesOwner::show,
         )
     }
@@ -933,8 +934,8 @@ private fun GoModeContent(
         }
     val bearerStore = serviceSession.bearerStore
     when {
-        activeNativeScreen == NativeScreen.Halo -> {
-            HaloScreen(
+        activeNativeScreen == NativeScreen.Glasses -> {
+            GlassesScreen(
                 owner = glassesOwner,
                 onNavigateBack = { onSetNativeScreen(NativeScreen.Settings) },
             )
@@ -959,7 +960,7 @@ private fun GoModeContent(
                     }
                 },
                 onDone = { onSetNativeScreen(null) },
-                onOpenHalo = { onSetNativeScreen(NativeScreen.Halo) },
+                onOpenGlasses = { onSetNativeScreen(NativeScreen.Glasses) },
                 bearerTokenFor = bearerStore::tokenFor,
                 bearerToken = key(bearerStore) { bearerStore.token.collectAsStateWithLifecycle().value },
                 authEpoch = key(bearerStore) { bearerStore.authEpoch.collectAsStateWithLifecycle().value },

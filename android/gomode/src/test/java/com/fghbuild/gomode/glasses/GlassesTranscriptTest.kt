@@ -1,4 +1,4 @@
-// Tests the transcript lines glasses show, their fit on Halo, frame coalescing, and clearing at session end.
+// Tests the transcript lines glasses show, their fit on the connected display, frame coalescing, and clearing.
 package com.fghbuild.gomode.glasses
 
 import com.fghbuild.gomode.voice.TranscriptEntry
@@ -48,7 +48,10 @@ class GlassesTranscriptTest {
                     TranscriptEntry(TranscriptSpeaker.ASSISTANT, "Recall the note.", kind = TranscriptKind.REASONING) +
                     TranscriptEntry(TranscriptSpeaker.ASSISTANT, "The code word\nis cedar."),
             )
-        assertEquals("You: What is the code word?\nThe code word is cedar.", glassesTranscriptText(state))
+        assertEquals(
+            "You: What is the code word?\nThe code word is cedar.",
+            glassesTranscriptText(state, HALO_TEXT_CAPACITY),
+        )
     }
 
     @Test
@@ -57,28 +60,28 @@ class GlassesTranscriptTest {
             active(
                 EARLIER,
             ).copy(transcriptDraft = TranscriptDraft(MessageKind.TranscriptDraft, "d1", "and the"))
-        assertEquals("You: and the", glassesTranscriptText(state))
+        assertEquals("You: and the", glassesTranscriptText(state, HALO_TEXT_CAPACITY))
     }
 
     @Test
     fun aDeviceRecognitionDraftShowsAsTheUsersLine() {
         val state = active(EARLIER + TranscriptEntry(TranscriptSpeaker.USER, "and the", final = false))
-        assertEquals("You: and the", glassesTranscriptText(state))
+        assertEquals("You: and the", glassesTranscriptText(state, HALO_TEXT_CAPACITY))
     }
 
     @Test
     fun aLongReplyKeepsItsNewestWordsAndDropsTheQuestion() {
-        val text = glassesTranscriptText(active(exchange(QUESTION, REPLY)))
+        val text = glassesTranscriptText(active(exchange(QUESTION, REPLY)), HALO_TEXT_CAPACITY)
         assertTrue(text, text.startsWith("…") && text.endsWith("Monday morning."))
         assertFalse(text, text.contains("You:") || text.contains('\n'))
-        assertTrue(text, text.length <= GLASSES_TRANSCRIPT_MAX_CHARS)
+        assertTrue(text, text.length <= HALO_TEXT_CAPACITY)
         // The cut starts at a word.
         assertTrue(text, REPLY.contains(" " + text.removePrefix("…")))
     }
 
     @Test
     fun aLongQuestionKeepsItsLabelAndNewestWordsAboveAShortReply() {
-        val text = glassesTranscriptText(active(exchange(QUESTION, "Yes.")))
+        val text = glassesTranscriptText(active(exchange(QUESTION, "Yes.")), HALO_TEXT_CAPACITY)
         val lines = text.lines()
         assertEquals(2, lines.size)
         assertTrue(text, lines[0].startsWith("You: …") && lines[0].endsWith("starting with the plumbing?"))
@@ -92,12 +95,39 @@ class GlassesTranscriptTest {
             active(exchange(QUESTION, REPLY)),
             active(exchange(QUESTION, "Yes, the plumbing first.")),
         )) {
-            val text = glassesTranscriptText(state)
+            val text = glassesTranscriptText(state, HALO_TEXT_CAPACITY)
             val page = TxTextPage(layout, text)
             page.measureNextPage()
             assertFalse("Halo cuts \"${page.remainingText()}\" from \"$text\"", page.hasMoreText)
         }
     }
+
+    @Test
+    fun aLargerDisplayKeepsTheWholeReplyAndTheNewestWordsOfTheQuestion() {
+        val text = glassesTranscriptText(active(exchange(QUESTION, REPLY)), G2_TEXT_CAPACITY)
+        val lines = text.lines()
+        assertEquals(2, lines.size)
+        assertTrue(text, lines[0].startsWith("You: …") && lines[0].endsWith("starting with the plumbing?"))
+        assertEquals(REPLY, lines[1])
+        assertTrue(text, text.length <= G2_TEXT_CAPACITY)
+    }
+
+    @Test
+    fun framesFollowTheConnectedDisplaysCapacityAndClearWithoutGlasses() =
+        runTest {
+            val capacity = MutableStateFlow<Int?>(HALO_TEXT_CAPACITY)
+            val frames = follow(MutableStateFlow(active(exchange(QUESTION, REPLY))), capacity = capacity)
+            capacity.value = G2_TEXT_CAPACITY
+            advanceTimeBy(GLASSES_FRAME_INTERVAL_MS)
+            runCurrent()
+            capacity.value = null
+            advanceTimeBy(GLASSES_FRAME_INTERVAL_MS)
+            runCurrent()
+            assertEquals(3, frames.size)
+            assertFalse(frames[0], frames[0].contains("You:"))
+            assertTrue(frames[1], frames[1].startsWith("You: …") && frames[1].endsWith(REPLY))
+            assertEquals("", frames[2])
+        }
 
     @Test
     fun framesFollowDraftRevisionsAtMostTwiceASecondAndEndOnTheNewest() =
@@ -159,7 +189,12 @@ class GlassesTranscriptTest {
     fun anIdleSessionLeavesTheGlassesToTheOtherOwner() =
         runTest {
             val voice = MutableStateFlow(VoiceState(transcript = EARLIER))
-            val job = launch { showVoiceTranscript(voice, MutableStateFlow(true)) { error("Idle sent \"$it\"") } }
+            val job =
+                launch {
+                    showVoiceTranscript(voice, MutableStateFlow(true), MutableStateFlow(HALO_TEXT_CAPACITY)) {
+                        error("Idle sent \"$it\"")
+                    }
+                }
             runCurrent()
             job.cancel()
             runCurrent()
@@ -170,7 +205,14 @@ class GlassesTranscriptTest {
         runTest {
             val frames = mutableListOf<String>()
             val job =
-                launch { showVoiceTranscript(MutableStateFlow(active(EARLIER)), MutableStateFlow(true), frames::add) }
+                launch {
+                    showVoiceTranscript(
+                        MutableStateFlow(active(EARLIER)),
+                        MutableStateFlow(true),
+                        MutableStateFlow(HALO_TEXT_CAPACITY),
+                        frames::add,
+                    )
+                }
             runCurrent()
             job.cancel()
             runCurrent()
@@ -181,9 +223,10 @@ class GlassesTranscriptTest {
     private fun TestScope.follow(
         voice: MutableStateFlow<VoiceState>,
         enabled: MutableStateFlow<Boolean> = MutableStateFlow(true),
+        capacity: MutableStateFlow<Int?> = MutableStateFlow(HALO_TEXT_CAPACITY),
     ): List<String> {
         val frames = mutableListOf<String>()
-        backgroundScope.launch { showVoiceTranscript(voice, enabled, frames::add) }
+        backgroundScope.launch { showVoiceTranscript(voice, enabled, capacity, frames::add) }
         runCurrent()
         return frames
     }

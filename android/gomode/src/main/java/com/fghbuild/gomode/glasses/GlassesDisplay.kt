@@ -6,14 +6,20 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * A connected pair of glasses that shows text. Each glasses model implements it: [HaloGlasses]
- * rasterizes text on the phone; glasses whose firmware lays out text take it as is. [GlassesOwner]
+ * rasterizes text on the phone; [EvenG2Glasses] hands it to firmware that lays it out. [GlassesOwner]
  * holds at most one and replaces it after the connection ends.
  */
 internal interface GlassesDisplay {
     /** The display as MCP requests declare it while these glasses are connected. */
     val description: Display
 
-    /** Why the connection ended, or null while it is up. Once set, it stays set. */
+    /** How many characters of ordinary prose one screen shows before cutting the rest. */
+    val textCapacity: Int
+
+    /**
+     * Why the connection ended, or null while it is up. Once set, it stays set. A permanent
+     * [GlassesException] ends the connection for good, such as the wearer closing Go Mode's page.
+     */
     val closeCause: StateFlow<Exception?>
 
     /**
@@ -32,10 +38,12 @@ internal fun bitsPerPixel(values: Int): Int = Int.SIZE_BITS - (values - 1).count
 
 /**
  * Connecting to glasses or showing text on them failed. A [permanent] failure, such as a device of
- * an unsupported model, fails again on retry, so the owner stops instead of reconnecting.
+ * an unsupported model, fails again on retry, so the owner stops instead of reconnecting. [problem]
+ * tells the user what failed.
  */
 internal class GlassesException(
     message: String,
     cause: Throwable? = null,
     val permanent: Boolean = false,
+    val problem: GlassesProblem = GlassesProblem.UNREACHABLE,
 ) : Exception(message, cause)

@@ -30,6 +30,11 @@ internal val HALO_APP_LIBS = listOf("data.min.lua", "sprite.min.lua", "text_page
 // About eight lines fit the circle; large enough to read at a glance.
 internal const val HALO_FONT_SIZE_PX = 24
 
+// Eight lines of 8 to 18 characters fit the circle. GlassesTranscriptTest lays the longest transcripts
+// out with HALO_FONT_SIZE_PX and checks that one page holds them; a run of wide capitals can still
+// overflow it.
+internal const val HALO_TEXT_CAPACITY = 96
+
 /** Halo's display as MCP requests declare it: a circle whose sprites choose 16 colours from 24-bit RGB. */
 internal val HALO_DISPLAY =
     Display(
@@ -56,12 +61,13 @@ internal class HaloGlasses private constructor(
     override val closeCause: StateFlow<Exception?>,
 ) : GlassesDisplay {
     override val description = HALO_DISPLAY
+    override val textCapacity = HALO_TEXT_CAPACITY
 
     override suspend fun showText(text: String) {
         try {
             haloTextMessages(text).forEach { (code, message) -> app.send(code, message) }
         } catch (e: HaloException) {
-            throw GlassesException("Halo did not take the text: ${e.message}", e)
+            throw GlassesException("Halo did not take the text: ${e.message}", e, problem = GlassesProblem.UNRESPONSIVE)
         }
     }
 

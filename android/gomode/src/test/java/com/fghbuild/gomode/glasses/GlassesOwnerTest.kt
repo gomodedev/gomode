@@ -1,16 +1,23 @@
-// Tests the app-scoped glasses owner against a fake Halo transport: connect, Activity replacement, reconnect, forget.
+// Tests the app-scoped glasses owner against fake Halo and Even G2 transports: connect, reconnect, failures, switching.
 package com.fghbuild.gomode.glasses
 
 import android.Manifest
 import android.app.Application
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanResult
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.fghbuild.eveng2.FakeG2Firmware
+import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2Scanner
+import com.fghbuild.eveng2.G2Side
+import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
-import com.fghbuild.gomode.ui.halo.HaloScreen
+import com.fghbuild.gomode.ui.glasses.GlassesScreen
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloScannedDevice
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +49,18 @@ import org.robolectric.annotation.GraphicsMode
 private const val ADDRESS = "00:11:22:33:44:55"
 private const val OTHER_ADDRESS = "00:11:22:33:44:66"
 private const val FRAME_ADDRESS = "00:11:22:33:44:77"
+private const val G2_LEFT_ADDRESS = "00:11:22:33:55:01"
+private const val G2_RIGHT_ADDRESS = "00:11:22:33:55:02"
+
+// Arm names as an Even G2 pair advertises them: the pair field, the side, and the address's last three bytes.
+private val G2_PAIR =
+    G2Pair(
+        "7",
+        G2Arm(G2Side.LEFT, G2_LEFT_ADDRESS, "Even G2_7_L_335501"),
+        G2Arm(G2Side.RIGHT, G2_RIGHT_ADDRESS, "Even G2_7_R_335502"),
+    )
+private val HALO = GlassesDevice.Halo(ADDRESS)
+private val G2 = GlassesDevice.EvenG2(G2_PAIR)
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -49,6 +68,7 @@ class GlassesOwnerTest {
     private val context: Application = RuntimeEnvironment.getApplication()
     private lateinit var repository: SettingsRepository
     private lateinit var transport: ScanningHaloTransport
+    private lateinit var firmware: FakeG2Firmware
     private lateinit var owner: GlassesOwner
 
     @Before
@@ -57,7 +77,8 @@ class GlassesOwnerTest {
         shadowOf(context).grantPermissions(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         repository = SettingsRepository(MemoryPreferences())
         transport = ScanningHaloTransport(context)
-        owner = GlassesOwner(context, repository, transport)
+        firmware = FakeG2Firmware()
+        owner = GlassesOwner(context, repository, transport, G2Scanner(context), firmware.connector)
     }
 
     @After
@@ -67,22 +88,27 @@ class GlassesOwnerTest {
     }
 
     @Test
-    fun scanningListsHaloOnlyAndConnectingSavesItStartsTheAppAndShowsTheLatestText() =
-        runTest {
+    fun scanningListsHaloAndEvenG2AndConnectingAHaloSavesItStartsTheAppAndShowsTheLatestText() =
+        runOwnerTest {
+            advertise(G2_PAIR.left, G2_PAIR.right)
             owner.start()
             owner.startScan()
             runCurrent()
             // The scan also found a Brilliant Frame, which Go Mode does not drive.
-            val scanned =
-                owner.state.value.devices
-                    .single()
-            assertEquals(ScannedGlasses(ADDRESS, "Halo AB", -50), scanned)
+            assertEquals(
+                listOf(ScannedGlasses(G2, "Even G2 7", null), ScannedGlasses(HALO, "Halo AB", -50)),
+                owner.state.value.devices,
+            )
 
-            owner.connect(scanned.address)
+            owner.connect(
+                owner.state.value.devices
+                    .single { it.device is GlassesDevice.Halo }
+                    .device,
+            )
             owner.state.first { it.link is GlassesLink.Connected }
             runCurrent()
             assertEquals(false, owner.state.value.scanning)
-            assertEquals(ADDRESS, repository.settings.first { it.haloAddress != null }.haloAddress)
+            assertEquals(HALO, repository.settings.first { it.glasses != null }.glasses)
             val halo = transport.halos.single()
             assertTrue(halo.files.toString(), halo.files.containsAll(listOf("text_page.lua", "main.lua")))
             assertEquals(listOf(Shown.Clear), halo.shown())
@@ -94,20 +120,20 @@ class GlassesOwnerTest {
 
     @Test
     fun theConnectionOutlivesTheActivityThatShowedTheHaloScreen() =
-        runTest {
+        runOwnerTest {
             connectSavedGlasses()
             val first = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-            first.get().setContent { HaloScreen(owner, onNavigateBack = {}) }
+            first.get().setContent { GlassesScreen(owner, onNavigateBack = {}) }
             owner.show("before")
             runCurrent()
 
             first.pause().stop().destroy()
             val second = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-            second.get().setContent { HaloScreen(owner, onNavigateBack = {}) }
+            second.get().setContent { GlassesScreen(owner, onNavigateBack = {}) }
             owner.show("after\nreplacement")
             runCurrent()
 
-            assertEquals(GlassesLink.Connected(HALO_DISPLAY), owner.state.value.link)
+            assertEquals(GlassesLink.Connected(HALO_DISPLAY, HALO_TEXT_CAPACITY), owner.state.value.link)
             assertEquals(0, transport.disconnects)
             assertEquals(
                 listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Page(lines = 2)),
@@ -118,7 +144,7 @@ class GlassesOwnerTest {
 
     @Test
     fun aDroppedLinkReconnectsWithBackoffAndShowsTheTextAgain() =
-        runTest {
+        runOwnerTest {
             connectSavedGlasses()
             assertEquals(HALO_DISPLAY, owner.connectedDisplay)
             owner.show("hello")
@@ -150,7 +176,7 @@ class GlassesOwnerTest {
 
     @Test
     fun glassesThatRejectTextReconnectAsUnresponsive() =
-        runTest {
+        runOwnerTest {
             connectSavedGlasses()
             transport.halos.single().rejectMessages = true
             owner.show("hello")
@@ -161,7 +187,7 @@ class GlassesOwnerTest {
 
     @Test
     fun forgettingClearsTheDisplayDisconnectsAndStopsReconnecting() =
-        runTest {
+        runOwnerTest {
             connectSavedGlasses()
             owner.show("hello")
             runCurrent()
@@ -172,8 +198,8 @@ class GlassesOwnerTest {
             assertEquals(null, owner.connectedDisplay)
             assertEquals(listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Clear), transport.halos.single().shown())
             assertEquals(1, transport.disconnects)
-            repository.settings.first { it.haloAddress == null }
-            owner.state.first { it.savedAddress == null }
+            repository.settings.first { it.glasses == null }
+            owner.state.first { it.saved == null }
 
             advanceTimeBy(RECONNECT_MAX_DELAY_MS)
             runCurrent()
@@ -182,10 +208,10 @@ class GlassesOwnerTest {
 
     @Test
     fun autoConnectConnectsToTheSavedGlassesWhenTheOwnerStarts() =
-        runTest {
-            repository.updateHaloAddress(ADDRESS)
-            repository.updateHaloAutoConnect(true)
-            repository.settings.first { it.haloAutoConnect && it.haloAddress == ADDRESS }
+        runOwnerTest {
+            repository.updateGlasses(HALO)
+            repository.updateGlassesAutoConnect(true)
+            repository.settings.first { it.glassesAutoConnect && it.glasses == HALO }
 
             owner.start()
             owner.state.first { it.link is GlassesLink.Connected }
@@ -194,10 +220,10 @@ class GlassesOwnerTest {
 
     @Test
     fun disconnectingWhileConnectingNeverReportsARetry() =
-        runTest {
+        runOwnerTest {
             val links = recordLinks()
             transport.hangConnects = true
-            owner.connect(ADDRESS)
+            owner.connect(HALO)
             runCurrent()
             assertEquals(GlassesLink.Connecting, owner.state.value.link)
 
@@ -212,14 +238,14 @@ class GlassesOwnerTest {
 
     @Test
     fun switchingGlassesWhileConnectingNeverReportsARetry() =
-        runTest {
+        runOwnerTest {
             val links = recordLinks()
             transport.hangConnects = true
-            owner.connect(ADDRESS)
+            owner.connect(HALO)
             runCurrent()
 
             transport.hangConnects = false
-            owner.connect(OTHER_ADDRESS)
+            owner.connect(GlassesDevice.Halo(OTHER_ADDRESS))
             owner.state.first { it.link is GlassesLink.Connected }
             runCurrent()
             assertTrue("$links", links.none { it is GlassesLink.Reconnecting })
@@ -234,9 +260,9 @@ class GlassesOwnerTest {
 
     @Test
     fun aFrameStopsTheLinkWithAnAccurateErrorAndNoRetry() =
-        runTest {
+        runOwnerTest {
             transport.connectedType = HaloDeviceType.FRAME
-            owner.connect(FRAME_ADDRESS)
+            owner.connect(GlassesDevice.Halo(FRAME_ADDRESS))
             runCurrent()
             advanceTimeBy(RECONNECT_MAX_DELAY_MS)
             runCurrent()
@@ -246,6 +272,181 @@ class GlassesOwnerTest {
             assertEquals(1, transport.disconnects)
         }
 
+    @Test
+    fun anEvenG2OpensOneTextContainerAndUpdatesItInPlace() =
+        runOwnerTest {
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            assertEquals(GlassesLink.Connected(G2_DISPLAY, G2_TEXT_CAPACITY), owner.state.value.link)
+            // MCP requests declare a 576×288 rectangle of 16 grey levels.
+            assertEquals(G2_DISPLAY, owner.connectedDisplay)
+            assertEquals(G2, repository.settings.first { it.glasses != null }.glasses)
+
+            owner.show("one\ntwo")
+            runCurrent()
+            owner.show("three")
+            runCurrent()
+            assertEquals(
+                listOf(
+                    "RIGHT auth",
+                    "LEFT auth",
+                    "RIGHT prelude",
+                    "RIGHT create ",
+                    "RIGHT update one\ntwo",
+                    "RIGHT update three",
+                ),
+                firmware.requests.filter { it.kind != "heartbeat" }.map { it.toString() },
+            )
+        }
+
+    @Test
+    fun aDroppedEvenG2ReconnectsOnTheOwnersBackoffAloneAndShowsTheTextAgain() =
+        runOwnerTest {
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            owner.show("hello")
+            runCurrent()
+
+            firmware.reachable = { it == G2Side.LEFT }
+            firmware.link(G2Side.RIGHT).drop(status = 8)
+            runCurrent()
+            assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNREACHABLE), owner.state.value.link)
+            assertEquals(null, owner.connectedDisplay)
+            val rightAttempts = { firmware.attempts.count { it == G2Side.RIGHT } }
+            assertEquals(1, rightAttempts())
+
+            // G2Glasses would retry 2 s and then 5 s after each failure; only the owner's doubling delay runs.
+            advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
+            runCurrent()
+            assertEquals(2, rightAttempts())
+            advanceTimeBy(2 * RECONNECT_INITIAL_DELAY_MS - 1)
+            runCurrent()
+            assertEquals(2, rightAttempts())
+            firmware.reachable = { true }
+            advanceTimeBy(1)
+            owner.state.first { it.link is GlassesLink.Connected }
+            runCurrent()
+            assertEquals(3, rightAttempts())
+            assertEquals("RIGHT create hello", firmware.requests.last { it.kind == "create" }.toString())
+            assertEquals(G2_DISPLAY, owner.connectedDisplay)
+        }
+
+    @Test
+    fun anEvenG2ThatStopsAnsweringReconnectsAsUnresponsive() =
+        runOwnerTest {
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            firmware.answersUpdates = false
+            owner.show("hello")
+            owner.state.first { it.link is GlassesLink.Reconnecting }
+            assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNRESPONSIVE), owner.state.value.link)
+            assertTrue(firmware.links.all { it.closed })
+        }
+
+    @Test
+    fun closingGoModeOnTheEvenG2StopsTheLinkWithoutRetrying() =
+        runOwnerTest {
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            firmware.exitPage(type = 7, session = firmware.pageSession)
+            owner.state.first { it.link == GlassesLink.Disconnected }
+            assertEquals("Go Mode was closed on the glasses", owner.state.value.error)
+
+            advanceTimeBy(RECONNECT_MAX_DELAY_MS)
+            runCurrent()
+            assertEquals(2, firmware.attempts.size)
+            assertTrue(firmware.links.all { it.closed })
+            // The pair stays saved, so Connect opens Go Mode again.
+            assertEquals(G2, owner.state.value.saved)
+        }
+
+    @Test
+    fun anUnexpectedEvenG2TransportFailureIsPermanent() =
+        runOwnerTest {
+            firmware.failure = { SecurityException("BLUETOOTH_CONNECT") }
+            owner.connect(G2)
+            owner.state.first { it.error != null }
+            assertEquals(GlassesLink.Disconnected, owner.state.value.link)
+            assertEquals("Could not use Even G2: BLUETOOTH_CONNECT", owner.state.value.error)
+            val attempts = firmware.attempts.size
+
+            advanceTimeBy(RECONNECT_MAX_DELAY_MS)
+            runCurrent()
+            assertEquals(attempts, firmware.attempts.size)
+        }
+
+    @Test
+    fun switchingBetweenHaloAndEvenG2KeepsOnePairConnectedAndSavesTheNewOne() =
+        runOwnerTest {
+            val links = recordLinks()
+            // What each connection found of the other model's link.
+            val haloDisconnectsAtG2Arms = mutableListOf<Int>()
+            val g2ClosedAtHaloAttempts = mutableListOf<Boolean>()
+            firmware.connected = { haloDisconnectsAtG2Arms += transport.disconnects }
+            transport.connecting = { g2ClosedAtHaloAttempts += firmware.links.all { it.closed } }
+            connectSavedGlasses()
+            owner.show("hello")
+            runCurrent()
+
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
+            runCurrent()
+            // The Halo was cleared and disconnected before either G2 arm connected; the G2 shows the same text.
+            assertEquals(listOf(1, 1), haloDisconnectsAtG2Arms)
+            assertEquals(
+                Shown.Clear,
+                transport.halos
+                    .single()
+                    .shown()
+                    .last(),
+            )
+            assertEquals("hello", firmware.shownText())
+            assertEquals(G2_DISPLAY, owner.connectedDisplay)
+            assertEquals(G2, repository.settings.first { it.glasses == G2 }.glasses)
+
+            owner.connect(HALO)
+            owner.state.first { it.link is GlassesLink.Connected && it.saved == HALO }
+            runCurrent()
+            assertEquals(listOf("RIGHT update ", "RIGHT shutdown"), firmware.requests.takeLast(2).map { it.toString() })
+            // The G2 page was cleared and closed, and both arms disconnected, before the Halo connection began.
+            assertEquals(listOf(true, true), g2ClosedAtHaloAttempts)
+            assertEquals(2, transport.halos.size)
+            assertTrue(transport.halos.last().lastShows("hello"))
+            assertEquals(HALO_DISPLAY, owner.connectedDisplay)
+            assertEquals(HALO, repository.settings.first { it.glasses == HALO }.glasses)
+            assertTrue("$links", links.none { it is GlassesLink.Reconnecting })
+        }
+
+    @Test
+    fun theTextCapacityFollowsTheConnectedDisplay() =
+        runOwnerTest {
+            val capacities = mutableListOf<Int?>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                owner.textCapacity.collect {
+                    capacities +=
+                        it
+                }
+            }
+            connectSavedGlasses()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
+            owner.disconnect()
+            runCurrent()
+            assertEquals(listOf(null, HALO_TEXT_CAPACITY, null, G2_TEXT_CAPACITY, null), capacities)
+        }
+
+    // Closes the owner before runTest waits for idle: a connected Even G2's heartbeat never idles.
+    private fun runOwnerTest(body: suspend TestScope.() -> Unit) =
+        runTest {
+            try {
+                body()
+            } finally {
+                owner.close()
+            }
+        }
+
     // Records every link state the owner publishes from now on.
     private fun TestScope.recordLinks(): List<GlassesLink> {
         val links = mutableListOf<GlassesLink>()
@@ -253,9 +454,19 @@ class GlassesOwnerTest {
         return links
     }
 
+    // Each arm advertises its name; Robolectric reports these results when a scan starts.
+    private fun advertise(vararg arms: G2Arm) {
+        val adapter = context.getSystemService(BluetoothManager::class.java).adapter
+        for (arm in arms) {
+            val device = adapter.getRemoteDevice(arm.address).also { shadowOf(it).setName(arm.name) }
+            @Suppress("DEPRECATION") // The public constructor without advertising-extension fields is enough here.
+            shadowOf(adapter.bluetoothLeScanner).addScanResult(ScanResult(device, null, -60, 0))
+        }
+    }
+
     private suspend fun TestScope.connectSavedGlasses() {
         owner.start()
-        owner.connect(ADDRESS)
+        owner.connect(HALO)
         owner.state.first { it.link is GlassesLink.Connected }
         runCurrent()
     }

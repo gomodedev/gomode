@@ -8,6 +8,8 @@ import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.telecom.TelecomManager
+import com.fghbuild.eveng2.G2GattConnector
+import com.fghbuild.eveng2.G2Scanner
 import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
@@ -81,7 +83,8 @@ class CarDialVoiceOwnerTest {
         model = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
         repository = SettingsRepository(MemoryPreferences())
         pages = ServiceShellOwner(context, repository, glassesDisplay = { null })
-        glasses = GlassesOwner(context, repository, HaloConnection(context))
+        glasses =
+            GlassesOwner(context, repository, HaloConnection(context), G2Scanner(context), G2GattConnector(context))
         owner = CarDialVoiceOwner(context, repository, model, pages, glasses)
     }
 

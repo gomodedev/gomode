@@ -67,6 +67,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.ui.glasses.label
 import com.fghbuild.gomode.voice.AndroidThinkingEarcon
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
@@ -79,7 +80,7 @@ internal fun SettingsScreen(
     settingsRepository: SettingsRepository,
     voiceSessionActive: Boolean,
     onDone: () -> Unit,
-    onOpenHalo: () -> Unit,
+    onOpenGlasses: () -> Unit,
     edits: SettingsEdits,
     bearerTokenFor: (String) -> String? = { null },
     bearerToken: String? = null,
@@ -212,17 +213,17 @@ internal fun SettingsScreen(
             )
             CarCallerIDSetting(settings, enabled = !voiceSessionActive)
             HorizontalDivider()
-            Text("Halo", style = MaterialTheme.typography.titleMedium)
+            Text("Glasses", style = MaterialTheme.typography.titleMedium)
             ListItem(
                 headlineContent = { Text("Device") },
-                supportingContent = { Text(settings.haloAddress ?: "No device selected") },
+                supportingContent = { Text(settings.glasses?.label() ?: "No device selected") },
                 leadingContent = { Icon(Icons.Filled.Bluetooth, contentDescription = null) },
                 trailingContent = {
                     IconButton(
-                        onClick = { finish { onOpenHalo() } },
-                        modifier = Modifier.testTag("gomode-manage-halo"),
+                        onClick = { finish { onOpenGlasses() } },
+                        modifier = Modifier.testTag("gomode-manage-glasses"),
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = "Manage Halo")
+                        Icon(Icons.Default.Settings, contentDescription = "Manage glasses")
                     }
                 },
             )
