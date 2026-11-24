@@ -2,7 +2,10 @@
 
 package com.fghbuild.eveng2
 
-/** Why a session ended. [retryable] causes lead to a reconnect; the others end the connection. */
+/**
+ * Why a session ended. A [retryable] cause, such as a dropped link, may clear on a later session; the
+ * others fail the same way again or follow a deliberate stop, so a host does not retry them.
+ */
 sealed interface G2CloseCause {
     val retryable: Boolean
 
@@ -58,8 +61,8 @@ sealed interface G2CloseCause {
     }
 
     /**
-     * The glasses closed the page. An exit (event 7) follows the wearer's action and ends the
-     * connection; an abnormal exit (event 6) reconnects.
+     * The glasses closed the page. An exit (event 7) follows the wearer's action and is not
+     * retryable; an abnormal exit (event 6) is.
      */
     data class PageExited(
         val abnormal: Boolean,
@@ -83,10 +86,9 @@ sealed interface G2CloseCause {
 sealed interface G2State {
     data object Idle : G2State
 
-    /** Connecting, authenticating, and opening the page; [attempt] counts from 1 since the last ready session. */
+    /** Connecting, authenticating, and opening the page. */
     data class Connecting(
         val pair: G2Pair,
-        val attempt: Int,
     ) : G2State
 
     /** The page is open and shows [text], acknowledged by the glasses. */
@@ -95,13 +97,7 @@ sealed interface G2State {
         val text: String,
     ) : G2State
 
-    /** The last session ended with [cause]; the next attempt starts after [delayMs]. */
-    data class Reconnecting(
-        val pair: G2Pair,
-        val cause: G2CloseCause,
-        val delayMs: Long,
-    ) : G2State
-
+    /** The session ended with [cause]; only [G2Glasses.connect] starts another. */
     data class Closed(
         val cause: G2CloseCause,
     ) : G2State

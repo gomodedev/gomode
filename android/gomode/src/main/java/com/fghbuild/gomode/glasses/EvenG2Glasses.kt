@@ -1,16 +1,13 @@
 // Even G2's GlassesDisplay: one firmware text container, created on connect and updated in place.
 //
-// Reconnection has one owner, GlassesOwner, for every glasses model: one backoff, one problem
-// report, one stop on a permanent failure. G2Glasses can reconnect on its own, so each GlassesOwner
-// attempt runs it for a single session. connect() returns at the first G2State.Ready and fails at
-// the first Reconnecting or Closed state; once connected, the first such state sets closeCause.
-// Either way GlassesOwner closes these glasses, and close() stops G2Glasses while it waits out its
-// first backoff delay, before it reconnects. A retryable G2CloseCause is a retryable
-// GlassesException; the others, such as the wearer closing the page, are permanent.
+// Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
+// another. connect() returns at the session's first G2State.Ready and fails if it reaches
+// G2State.Closed first; once connected, Closed sets closeCause. A retryable G2CloseCause is a
+// retryable GlassesException; the others, such as the wearer closing the page, are permanent.
 //
 // GlassesOwner keeps one G2Glasses across attempts, so request and page session IDs never repeat
-// on the glasses. Every attempt ends in disconnect(), so each starts from Idle or
-// Closed(Stopped), and the first other state belongs to it.
+// on the glasses. G2Glasses.connect() publishes Connecting before it returns, so every state
+// connect() and the watcher read belongs to this attempt.
 package com.fghbuild.gomode.glasses
 
 import com.fghbuild.eveng2.G2CloseCause
@@ -28,6 +25,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -63,8 +61,8 @@ internal class EvenG2Glasses private constructor(
     override suspend fun showText(text: String) {
         val shown = g2Text(text)
         glasses.show(shown)
-        val state = glasses.state.first { (it is G2State.Ready && it.text == shown) || it.endCause() != null }
-        state.endCause()?.let { throw end(it) }
+        val state = glasses.state.first { (it is G2State.Ready && it.text == shown) || it is G2State.Closed }
+        if (state is G2State.Closed) throw end(state.cause)
     }
 
     override suspend fun close() {
@@ -82,23 +80,26 @@ internal class EvenG2Glasses private constructor(
     companion object {
         /**
          * Opens a session of [glasses] with [pair], which shows the text [G2Glasses.show] last set.
-         * [scope] watches the connection until [close]. The caller holds BLUETOOTH_CONNECT. A failure
-         * or cancellation disconnects.
+         * A [background] session waits for the arms to advertise; see [G2Glasses.connect]. [scope]
+         * watches the connection until [close]. The caller holds BLUETOOTH_CONNECT. A failure or
+         * cancellation disconnects.
          */
         suspend fun connect(
             glasses: G2Glasses,
             pair: G2Pair,
+            background: Boolean,
             scope: CoroutineScope,
         ): EvenG2Glasses {
             var connected: EvenG2Glasses? = null
             try {
-                glasses.connect(pair)
-                val first = glasses.state.first { it is G2State.Ready || it.endCause() != null }
-                first.endCause()?.let { throw it.toGlassesException() }
+                glasses.connect(pair, background)
+                val first = glasses.state.first { it is G2State.Ready || it is G2State.Closed }
+                if (first is G2State.Closed) throw first.cause.toGlassesException()
                 return EvenG2Glasses(glasses).also { display ->
                     display.watcher =
                         scope.launch {
-                            display.end(checkNotNull(glasses.state.first { it.endCause() != null }.endCause()))
+                            val closed = glasses.state.filterIsInstance<G2State.Closed>().first()
+                            display.end(closed.cause)
                         }
                     connected = display
                 }
@@ -122,15 +123,6 @@ internal fun g2Text(text: String): String {
     while (bytes[end].toInt() and 0xC0 == 0x80) end--
     return bytes.decodeToString(0, end)
 }
-
-// Why this attempt's session ended, or null while it runs. Closed(Stopped) is the previous
-// attempt's disconnect.
-private fun G2State.endCause(): G2CloseCause? =
-    when (this) {
-        is G2State.Reconnecting -> cause
-        is G2State.Closed -> cause.takeIf { it != G2CloseCause.Stopped }
-        else -> null
-    }
 
 private fun G2CloseCause.toGlassesException(): GlassesException {
     val problem =

@@ -11,10 +11,16 @@
 // G2CloseCause. From the moment the create request is written, the page may be open: unless
 // the right link is gone or the glasses closed the page, every exit shuts it down before both
 // links close, so a quick reconnect over a link Android keeps alive does not meet an open page.
+//
+// A direct session gives each arm G2Protocol.CONNECT_TIMEOUT_MS to connect. A background session
+// waits for the arms without a deadline, as Android's background connection does, until the first
+// arm's link is set up; the other arm then has CONNECT_TIMEOUT_MS, so one arm alone never holds a
+// link that no session uses.
 
 package com.fghbuild.eveng2
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
@@ -22,6 +28,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -31,7 +38,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 
-/** Request identifiers that stay unique across the reconnects of one [G2Glasses]. */
+/** Request identifiers that stay unique across the sessions of one [G2Glasses]. */
 internal class G2Ids {
     private var magic = 0
     private var sync = 0
@@ -77,6 +84,7 @@ private sealed interface Inbound {
 internal class G2Session(
     private val pair: G2Pair,
     private val connector: G2ArmConnector,
+    private val background: Boolean,
     private val page: G2TextPage,
     private val ids: G2Ids,
     private val desired: StateFlow<String>,
@@ -119,18 +127,34 @@ internal class G2Session(
 
     private suspend fun connectBoth() =
         coroutineScope {
-            for (arm in listOf(pair.left, pair.right)) {
-                launch {
-                    try {
-                        // Register before anything can resume: a cancellation that lands as
-                        // connect() returns would otherwise lose an open link.
-                        withTimeout(G2Protocol.CONNECT_TIMEOUT_MS) {
-                            connector.connect(arm).also { links[arm.side] = it }
+            val firstUp = CompletableDeferred<Unit>()
+            val arms =
+                listOf(pair.left, pair.right).map { arm ->
+                    launch {
+                        try {
+                            // Register before anything can resume: a cancellation that lands as
+                            // connect() returns would otherwise lose an open link.
+                            if (background) {
+                                connector.connect(arm, background = true).also { links[arm.side] = it }
+                            } else {
+                                withTimeout(G2Protocol.CONNECT_TIMEOUT_MS) {
+                                    connector.connect(arm, background = false).also { links[arm.side] = it }
+                                }
+                            }
+                        } catch (e: TimeoutCancellationException) {
+                            throw G2Closed(G2CloseCause.ConnectFailed(arm.side, "timed out"), e)
+                        } catch (e: G2Exception) {
+                            throw G2Closed(G2CloseCause.ConnectFailed(arm.side, e.message.orEmpty()), e)
                         }
-                    } catch (e: TimeoutCancellationException) {
-                        throw G2Closed(G2CloseCause.ConnectFailed(arm.side, "timed out"), e)
-                    } catch (e: G2Exception) {
-                        throw G2Closed(G2CloseCause.ConnectFailed(arm.side, e.message.orEmpty()), e)
+                        firstUp.complete(Unit)
+                    }
+                }
+            if (background) {
+                firstUp.await()
+                if (withTimeoutOrNull(G2Protocol.CONNECT_TIMEOUT_MS) { arms.joinAll() } == null) {
+                    // An arm whose link registered at the deadline finishes on its own.
+                    G2Side.entries.firstOrNull { !links.containsKey(it) }?.let {
+                        throw G2Closed(G2CloseCause.ConnectFailed(it, "timed out"))
                     }
                 }
             }

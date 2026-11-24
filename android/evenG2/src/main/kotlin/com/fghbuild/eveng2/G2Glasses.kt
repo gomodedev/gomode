@@ -1,12 +1,14 @@
-// G2Glasses: keeps one Even G2 pair connected with a text page, reconnecting after retryable close causes.
+// G2Glasses: runs one Even G2 session per connect() with a text page, ending with a typed close cause.
 //
-// Entry point of the SDK. connect() starts a supervisor in the owner's scope: it runs one
-// G2Session at a time and, when a session ends with a retryable G2CloseCause, waits the next
-// G2Protocol.RECONNECT_BACKOFF_MS delay and runs another. Each new session recreates the page
-// with the latest text from show(). A session that reaches G2State.Ready resets the backoff.
-// A superseded supervisor never publishes state. A replaced or stopped supervisor stays in `job`
-// until it has finished, so a later connect() joins it and never runs two sessions at once.
-// An exception that escapes a session ends the connection with G2CloseCause.Failed.
+// Entry point of the SDK. connect() publishes G2State.Connecting before it returns and runs one
+// G2Session in the owner's scope: the state becomes G2State.Ready each time the glasses
+// acknowledge a text, and G2State.Closed with the session's G2CloseCause when it ends. The SDK
+// never reconnects; the host decides whether and when to call connect() again, for example
+// after a retryable cause. Request and page session IDs stay unique across the sessions of one
+// G2Glasses, and each page starts with the latest text from show(). A superseded session never
+// publishes state. A replaced or stopped session stays in `job` until it has finished, so a
+// later connect() joins it and never runs two sessions at once. An exception that escapes a
+// session ends it with G2CloseCause.Failed.
 
 package com.fghbuild.eveng2
 
@@ -14,7 +16,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,15 +35,25 @@ class G2Glasses(
 
     val state: StateFlow<G2State> = mutableState.asStateFlow()
 
-    /** Connect to [pair] and keep it connected, replacing any previous connection. */
-    fun connect(pair: G2Pair) {
+    /**
+     * Run one session with [pair], replacing any previous one. The state is [G2State.Connecting]
+     * when this returns, so every later state belongs to this session until the next [connect] or
+     * [disconnect]. A [background] session waits without a deadline for the arms to advertise,
+     * through Android's background connection; use it to reconnect a pair that went away. The first
+     * connection to a scanned pair is direct; see [G2GattConnector].
+     */
+    fun connect(
+        pair: G2Pair,
+        background: Boolean = false,
+    ) {
         synchronized(lock) {
             val previous = job
             val current = ++generation
+            mutableState.value = G2State.Connecting(pair)
             job =
                 scope.launch {
                     previous?.cancelAndJoin()
-                    supervise(current, pair)
+                    runSession(current, pair, background)
                 }
         }
     }
@@ -70,39 +81,23 @@ class G2Glasses(
         publish(current, G2State.Closed(G2CloseCause.Stopped))
     }
 
-    @Suppress("TooGenericExceptionCaught") // An escaping session exception would stop reconnecting.
-    private suspend fun supervise(
+    @Suppress("TooGenericExceptionCaught") // A host connector may throw anything; the session still ends with a cause.
+    private suspend fun runSession(
         current: Long,
         pair: G2Pair,
+        background: Boolean,
     ) {
-        var failures = 0
-        while (true) {
-            publish(current, G2State.Connecting(pair, failures + 1))
-            var ready = false
-            val session =
-                G2Session(pair, connector, page, ids, desired) { text ->
-                    ready = true
-                    publish(current, G2State.Ready(pair, text))
-                }
-            val cause =
-                try {
-                    session.run()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    G2CloseCause.Failed(e)
-                }
-            if (ready) failures = 0
-            if (!cause.retryable) {
-                publish(current, G2State.Closed(cause))
-                return
+        val session =
+            G2Session(pair, connector, background, page, ids, desired) { publish(current, G2State.Ready(pair, it)) }
+        val cause =
+            try {
+                session.run()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                G2CloseCause.Failed(e)
             }
-            val backoff = G2Protocol.RECONNECT_BACKOFF_MS
-            val delayMs = backoff[minOf(failures, backoff.lastIndex)]
-            failures++
-            publish(current, G2State.Reconnecting(pair, cause, delayMs))
-            delay(delayMs)
-        }
+        publish(current, G2State.Closed(cause))
     }
 
     private fun publish(

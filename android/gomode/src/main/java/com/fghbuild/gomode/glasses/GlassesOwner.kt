@@ -3,11 +3,16 @@ package com.fghbuild.gomode.glasses
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.fghbuild.eveng2.G2ArmConnector
 import com.fghbuild.eveng2.G2Glasses
 import com.fghbuild.eveng2.G2PairScanner
@@ -23,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -31,6 +37,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -97,13 +104,22 @@ internal data class GlassesState(
  * The application owns one so the glasses stay connected across Activity replacement. One pair, a
  * Halo or an Even G2, is saved and connected at a time; connecting to another replaces it. A
  * connection to the saved glasses lasts until [disconnect], [forget], the end of [parentScope], or
- * a permanent failure, reconnecting in between with a delay that doubles from
- * [RECONNECT_INITIAL_DELAY_MS] to [RECONNECT_MAX_DELAY_MS] and resets after each successful
- * connection. This is the only reconnection policy for either model; see EvenG2Glasses.kt for how
- * it replaces G2Glasses' own. Auto-connect starts that connection when [start] first sees the saved
+ * a permanent failure. This is the only reconnection policy for either model: each attempt is one
+ * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
  * settings. Every connection shows the latest [show] text. Callers hold BLUETOOTH_SCAN before
  * [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
  * connecting on its own.
+ *
+ * The first attempt of a [connect] is direct, so a pair just scanned or chosen connects at once or
+ * fails within the SDK's deadline. Every later attempt is a background connection: one pending GATT
+ * client per radio link that Android's controller connects when the glasses next advertise, with no
+ * deadline and no repeated attempts while they stay off or away. Each attempt follows a delay that
+ * doubles from [RECONNECT_INITIAL_DELAY_MS] to [RECONNECT_MAX_DELAY_MS] and resets after each
+ * successful connection: glasses that connect and then fail, such as an Even G2 that does not accept
+ * AUTH, are not reconnected in a tight loop. A background attempt waits for Bluetooth to be on and
+ * ends when Bluetooth turns off, since the stack's restart may forget pending connections; the next
+ * attempt arms again once Bluetooth is back. Cancelling an attempt, by [disconnect], [forget],
+ * [connect] to other glasses, or the end of [parentScope], releases its pending GATT clients.
  *
  * Halo scans and connects through [halo], Even G2 through [g2Scanner] and [g2Connector]; the link
  * logic depends on [GlassesDisplay] alone. A scan looks for both models at once.
@@ -132,6 +148,29 @@ internal class GlassesOwner(
     private var scanJob: Job? = null
     private var linkJob: Job? = null
     private var started = false
+
+    // Whether the Bluetooth adapter is on, from now on while collected.
+    private val bluetoothOn: Flow<Boolean> =
+        callbackFlow {
+            val receiver =
+                object : BroadcastReceiver() {
+                    override fun onReceive(
+                        context: Context,
+                        intent: Intent,
+                    ) {
+                        val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                        trySend(state == BluetoothAdapter.STATE_ON)
+                    }
+                }
+            ContextCompat.registerReceiver(
+                appContext,
+                receiver,
+                IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            trySend(appContext.getSystemService(BluetoothManager::class.java).adapter?.isEnabled == true)
+            awaitClose { appContext.unregisterReceiver(receiver) }
+        }.distinctUntilChanged()
 
     private val mutableState = MutableStateFlow(GlassesState())
     val state: StateFlow<GlassesState> = mutableState.asStateFlow()
@@ -212,7 +251,7 @@ internal class GlassesOwner(
             mutableState.update { it.copy(error = "Allow Nearby devices to connect to glasses") }
             return
         }
-        val open: suspend () -> GlassesDisplay =
+        val open: suspend (background: Boolean) -> GlassesDisplay =
             when (device) {
                 is GlassesDevice.Halo -> {
                     val bluetooth =
@@ -225,11 +264,11 @@ internal class GlassesOwner(
                         mutableState.update { it.copy(error = "Bluetooth is not available") }
                         return
                     }
-                    suspend { HaloGlasses.connect(appContext, halo, bluetooth) }
+                    { background -> HaloGlasses.connect(appContext, halo, bluetooth, background) }
                 }
 
                 is GlassesDevice.EvenG2 -> {
-                    suspend { EvenG2Glasses.connect(g2, device.pair, scope) }
+                    { background -> EvenG2Glasses.connect(g2, device.pair, background, scope) }
                 }
             }
         stopScan()
@@ -254,7 +293,7 @@ internal class GlassesOwner(
     }
 
     // The previous link finishes clearing and closing its glasses before the next one connects.
-    private fun replaceLink(connect: (suspend () -> GlassesDisplay)?) {
+    private fun replaceLink(connect: (suspend (background: Boolean) -> GlassesDisplay)?) {
         val previous = linkJob
         previous?.cancel()
         linkJob =
@@ -267,8 +306,9 @@ internal class GlassesOwner(
     }
 
     // Runs until cancelled, or until a permanent failure leaves the glasses disconnected.
-    private suspend fun keepConnected(connect: suspend () -> GlassesDisplay) {
+    private suspend fun keepConnected(connect: suspend (background: Boolean) -> GlassesDisplay) {
         var retryDelayMs = RECONNECT_INITIAL_DELAY_MS
+        var background = false
         while (true) {
             // A retry keeps showing why the previous attempt ended until this one connects.
             mutableState.update {
@@ -282,7 +322,7 @@ internal class GlassesOwner(
             }
             val ending =
                 try {
-                    val glasses = connect()
+                    val glasses = if (background) connectInBackground(connect) else connect(false)
                     retryDelayMs = RECONNECT_INITIAL_DELAY_MS
                     mutableState.update {
                         it.copy(link = GlassesLink.Connected(glasses.description, glasses.textCapacity))
@@ -300,12 +340,31 @@ internal class GlassesOwner(
             // A disconnect or a switch to other glasses cancels this link; it must not report a retry.
             currentCoroutineContext().ensureActive()
             mutableState.update { it.copy(link = GlassesLink.Reconnecting(ending.problem)) }
-            // TODO: While the glasses stay off, each attempt is a direct connectGatt bounded by the SDK's
-            // timeout (HaloConnection's 15 s step, G2Protocol.CONNECT_TIMEOUT_MS), repeated every 60 s for
-            // the process lifetime. Add a background connect mode (connectGatt autoConnect = true) to
-            // HaloConnection and G2GattConnector and use it for retries.
             delay(retryDelayMs)
             retryDelayMs = (retryDelayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
+            background = true
+        }
+    }
+
+    // A background attempt, armed while Bluetooth is on and abandoned when it turns off.
+    // TODO(hardware): Hypothesis, unverified on a phone: turning Bluetooth off drops a pending
+    // background connection without a callback, since AOSP's BluetoothGatt has no adapter-state
+    // handling and the stack forgets its clients when it stops. Hence the re-arm here. On a phone,
+    // arm a background connection, toggle Bluetooth, and check whether it still connects when the
+    // glasses return; if it does, this watch only costs a re-arm.
+    private suspend fun connectInBackground(connect: suspend (background: Boolean) -> GlassesDisplay): GlassesDisplay {
+        bluetoothOn.first { it }
+        return coroutineScope {
+            val off =
+                launch {
+                    bluetoothOn.first { !it }
+                    throw GlassesException("Bluetooth turned off")
+                }
+            try {
+                connect(true)
+            } finally {
+                off.cancel()
+            }
         }
     }
 

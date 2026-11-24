@@ -3,14 +3,18 @@ package com.fghbuild.gomode.glasses
 
 import android.Manifest
 import android.app.Application
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanResult
 import android.content.Context
+import android.content.Intent
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2Protocol
 import com.fghbuild.eveng2.G2Scanner
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.testing.FakeG2Firmware
@@ -77,6 +81,8 @@ class GlassesOwnerTest {
     fun setUp() {
         Dispatchers.setMain(StandardTestDispatcher())
         shadowOf(context).grantPermissions(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        // Robolectric's adapter starts off; background connections wait for it to be on.
+        shadowOf(context.getSystemService(BluetoothManager::class.java).adapter).setEnabled(true)
     }
 
     @After
@@ -140,19 +146,50 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun aDroppedLinkReconnectsWithBackoffAndShowsTheTextAgain() =
+    fun aDroppedHaloWaitsInOneBackgroundConnectionUntilItReturnsAndShowsTheTextAgain() =
         runOwnerTest {
             connectSavedGlasses()
             assertEquals(HALO_DISPLAY, owner.connectedDisplay)
             owner.show("hello")
             runCurrent()
+            // Connecting to saved glasses is direct.
+            assertEquals(0, transport.backgroundConnects)
 
-            transport.unreachableAttempts = 1
+            transport.present = false
             transport.halos.single().drop()
             runCurrent()
             assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNREACHABLE), owner.state.value.link)
             assertEquals(null, owner.connectedDisplay)
             assertEquals(1, transport.connects)
+
+            advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
+            runCurrent()
+            assertEquals(1, transport.waiting.value)
+            // The glasses stay off for an hour: the one background connection keeps waiting, and
+            // nothing else connects.
+            advanceTimeBy(60 * RECONNECT_MAX_DELAY_MS)
+            runCurrent()
+            assertEquals(2, transport.connects)
+            assertEquals(1, transport.backgroundConnects)
+            assertEquals(1, transport.waiting.value)
+            assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNREACHABLE), owner.state.value.link)
+
+            transport.present = true
+            owner.state.first { it.link is GlassesLink.Connected }
+            runCurrent()
+            assertEquals(0, transport.waiting.value)
+            assertEquals(listOf(Shown.Page(lines = 1)), transport.halos.last().shown())
+            assertEquals(HALO_DISPLAY, owner.connectedDisplay)
+        }
+
+    @Test
+    fun aHaloThatDropsAgainAtOnceReconnectsWithBackoff() =
+        runOwnerTest {
+            connectSavedGlasses()
+            // Each background connection comes up and fails before the glasses take the app.
+            transport.unreachableAttempts = 2
+            transport.halos.single().drop()
+            runCurrent()
 
             advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
             runCurrent()
@@ -164,11 +201,58 @@ class GlassesOwnerTest {
             advanceTimeBy(1)
             runCurrent()
             assertEquals(3, transport.connects)
-
+            advanceTimeBy(4 * RECONNECT_INITIAL_DELAY_MS)
             owner.state.first { it.link is GlassesLink.Connected }
+            assertEquals(4, transport.connects)
+            assertEquals(3, transport.backgroundConnects)
+        }
+
+    @Test
+    fun forgettingGlassesThatAreAwayReleasesTheirBackgroundConnection() =
+        runOwnerTest {
+            connectSavedGlasses()
+            transport.present = false
+            transport.halos.single().drop()
+            advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
             runCurrent()
-            assertEquals(listOf(Shown.Page(lines = 1)), transport.halos.last().shown())
-            assertEquals(HALO_DISPLAY, owner.connectedDisplay)
+            assertEquals(1, transport.waiting.value)
+
+            owner.forget()
+            runCurrent()
+            assertEquals(0, transport.waiting.value)
+            assertEquals(GlassesLink.Disconnected, owner.state.value.link)
+            transport.present = true
+            advanceTimeBy(RECONNECT_MAX_DELAY_MS)
+            runCurrent()
+            assertEquals(2, transport.connects)
+            assertEquals(1, transport.halos.size)
+        }
+
+    @Test
+    fun bluetoothTurningOffReleasesTheBackgroundConnectionUntilItIsBackOn() =
+        runOwnerTest {
+            connectSavedGlasses()
+            transport.present = false
+            transport.halos.single().drop()
+            advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
+            runCurrent()
+            assertEquals(1, transport.waiting.value)
+
+            setBluetooth(on = false)
+            runCurrent()
+            assertEquals(0, transport.waiting.value)
+            assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNREACHABLE), owner.state.value.link)
+            // Nothing is armed while Bluetooth is off.
+            advanceTimeBy(RECONNECT_MAX_DELAY_MS)
+            runCurrent()
+            assertEquals(2, transport.connects)
+
+            setBluetooth(on = true)
+            runCurrent()
+            assertEquals(3, transport.connects)
+            assertEquals(1, transport.waiting.value)
+            transport.present = true
+            owner.state.first { it.link is GlassesLink.Connected }
         }
 
     @Test
@@ -298,35 +382,60 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun aDroppedEvenG2ReconnectsOnTheOwnersBackoffAloneAndShowsTheTextAgain() =
+    fun aDroppedEvenG2WaitsInOneBackgroundConnectionPerArmUntilItReturns() =
         runOwnerTest {
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected }
             owner.show("hello")
             runCurrent()
+            assertEquals(emptyList<G2Side>(), firmware.backgroundAttempts)
 
-            firmware.reachable = { it == G2Side.LEFT }
+            firmware.reachable = { false }
             firmware.link(G2Side.RIGHT).drop(status = 8)
             runCurrent()
             assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNREACHABLE), owner.state.value.link)
             assertEquals(null, owner.connectedDisplay)
-            val rightAttempts = { firmware.attempts.count { it == G2Side.RIGHT } }
-            assertEquals(1, rightAttempts())
 
-            // G2Glasses would retry 2 s and then 5 s after each failure; only the owner's doubling delay runs.
             advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
             runCurrent()
-            assertEquals(2, rightAttempts())
-            advanceTimeBy(2 * RECONNECT_INITIAL_DELAY_MS - 1)
+            assertEquals(2, firmware.waiting.value)
+            advanceTimeBy(60 * RECONNECT_MAX_DELAY_MS)
             runCurrent()
-            assertEquals(2, rightAttempts())
+            assertEquals(listOf(G2Side.LEFT, G2Side.RIGHT), firmware.backgroundAttempts.sorted())
+            assertEquals(2, firmware.waiting.value)
+            assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNREACHABLE), owner.state.value.link)
+
             firmware.reachable = { true }
-            advanceTimeBy(1)
             owner.state.first { it.link is GlassesLink.Connected }
             runCurrent()
-            assertEquals(3, rightAttempts())
+            assertEquals(0, firmware.waiting.value)
             assertEquals("RIGHT create hello", firmware.requests.last { it.kind == "create" }.toString())
             assertEquals(G2_DISPLAY, owner.connectedDisplay)
+        }
+
+    @Test
+    fun anEvenG2ThatRejectsGoModeBacksOffBetweenBackgroundAttempts() =
+        runOwnerTest {
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            firmware.authenticates = { false }
+            firmware.link(G2Side.LEFT).drop(status = 8)
+            runCurrent()
+
+            // Each attempt connects both arms and waits out AUTH; the delays between them double.
+            val authAttempts = { firmware.backgroundAttempts.count { it == G2Side.RIGHT } }
+            advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
+            runCurrent()
+            assertEquals(1, authAttempts())
+            advanceTimeBy(G2Protocol.AUTH_TIMEOUT_MS)
+            runCurrent()
+            assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNRESPONSIVE), owner.state.value.link)
+            advanceTimeBy(2 * RECONNECT_INITIAL_DELAY_MS - 1)
+            assertEquals(1, authAttempts())
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(2, authAttempts())
+            assertTrue(firmware.links.dropLast(2).all { it.closed })
         }
 
     @Test
@@ -457,6 +566,17 @@ class GlassesOwnerTest {
             @Suppress("DEPRECATION") // The public constructor without advertising-extension fields is enough here.
             shadowOf(adapter.bluetoothLeScanner).addScanResult(ScanResult(device, null, -60, 0))
         }
+    }
+
+    // Turns the Bluetooth adapter off or on, as the system reports it to receivers.
+    private fun setBluetooth(on: Boolean) {
+        val adapter = context.getSystemService(BluetoothManager::class.java).adapter
+        shadowOf(adapter).setEnabled(on)
+        val state = if (on) BluetoothAdapter.STATE_ON else BluetoothAdapter.STATE_OFF
+        context.sendBroadcast(
+            Intent(BluetoothAdapter.ACTION_STATE_CHANGED).putExtra(BluetoothAdapter.EXTRA_STATE, state),
+        )
+        shadowOf(Looper.getMainLooper()).idle()
     }
 
     private suspend fun TestScope.connectSavedGlasses() {

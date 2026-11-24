@@ -35,7 +35,15 @@ interface G2ArmLink {
     fun close()
 }
 
-/** Opens a [G2ArmLink] to one arm; throws [G2Exception] on failure and closes partial links on cancellation. */
+/**
+ * Opens a [G2ArmLink] to one arm; throws [G2Exception] on failure and closes partial links on
+ * cancellation. A direct connection fails when the arm does not answer within the platform's
+ * deadline; [G2Session] also bounds it. A [background] connection waits without a deadline until
+ * the arm advertises, then sets the link up within [G2Protocol.CONNECT_TIMEOUT_MS].
+ */
 fun interface G2ArmConnector {
-    suspend fun connect(arm: G2Arm): G2ArmLink
+    suspend fun connect(
+        arm: G2Arm,
+        background: Boolean,
+    ): G2ArmLink
 }

@@ -4,16 +4,19 @@ package com.fghbuild.eveng2
 
 import android.Manifest
 import android.app.Application
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
+import android.content.Context
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
@@ -30,13 +33,14 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.annotation.RealObject
+import org.robolectric.shadows.ShadowBluetoothDevice
 import org.robolectric.shadows.ShadowBluetoothGatt
 
 private val ARM = G2Arm(G2Side.RIGHT, "00:11:22:33:44:55", "Even G2_1_R_334455")
 
 @OptIn(ExperimentalCoroutinesApi::class) // runCurrent drives the connector between callbacks.
 @RunWith(RobolectricTestRunner::class)
-@Config(shadows = [ManualGatt::class])
+@Config(shadows = [ManualGatt::class, AutoConnectRecorder::class])
 class G2GattConnectorTest {
     private val context: Application = RuntimeEnvironment.getApplication()
     private val connector = G2GattConnector(context)
@@ -45,14 +49,16 @@ class G2GattConnectorTest {
     fun setUp() {
         shadowOf(context).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
         ManualGatt.latest = null
+        AutoConnectRecorder.autoConnects.clear()
     }
 
     @Test
     fun eachOperationCompletesOnlyOnItsOwnCallback() =
         runTest {
-            val opening = async { connector.connect(ARM) }
+            val opening = async { connector.connect(ARM, background = false) }
             runCurrent()
             val gatt = gatt()
+            assertEquals(listOf(false), AutoConnectRecorder.autoConnects)
             gatt.callback.onConnectionStateChange(
                 gatt.real,
                 BluetoothGatt.GATT_SUCCESS,
@@ -91,6 +97,64 @@ class G2GattConnectorTest {
         }
 
     @Test
+    fun aBackgroundConnectionWaitsForTheArmWithoutADeadlineThenSetsItUp() =
+        runTest {
+            val opening = async { connector.connect(ARM, background = true) }
+            runCurrent()
+            assertEquals(listOf(true), AutoConnectRecorder.autoConnects)
+            advanceTimeBy(60 * 60_000L)
+            val gatt = gatt()
+            assertTrue(opening.isActive)
+            assertFalse(gatt.isClosed)
+
+            gatt.callback.onConnectionStateChange(
+                gatt.real,
+                BluetoothGatt.GATT_SUCCESS,
+                BluetoothProfile.STATE_CONNECTED,
+            )
+            runCurrent()
+            gatt.callback.onMtuChanged(gatt.real, G2Protocol.REQUESTED_MTU, BluetoothGatt.GATT_SUCCESS)
+            runCurrent()
+            gatt.callback.onServicesDiscovered(gatt.real, BluetoothGatt.GATT_SUCCESS)
+            runCurrent()
+            gatt.callback.onDescriptorWrite(gatt.real, gatt.config, BluetoothGatt.GATT_SUCCESS)
+            runCurrent()
+            assertEquals(G2Side.RIGHT, opening.await().side)
+        }
+
+    @Test
+    fun aBackgroundLinkThatComesUpMustFinishItsSetupInTime() =
+        runTest {
+            val opening = async { runCatching { connector.connect(ARM, background = true) } }
+            runCurrent()
+            val gatt = gatt()
+            gatt.callback.onConnectionStateChange(
+                gatt.real,
+                BluetoothGatt.GATT_SUCCESS,
+                BluetoothProfile.STATE_CONNECTED,
+            )
+            runCurrent()
+            assertEquals(listOf("MTU"), gatt.started)
+
+            // The MTU answer never comes.
+            advanceTimeBy(G2Protocol.CONNECT_TIMEOUT_MS)
+            runCurrent()
+            assertEquals("setup timed out", opening.await().exceptionOrNull()?.message)
+            assertTrue(gatt.isClosed)
+        }
+
+    @Test
+    fun cancellingABackgroundConnectionClosesItsGattClient() =
+        runTest {
+            val opening = async { connector.connect(ARM, background = true) }
+            runCurrent()
+            val gatt = gatt()
+            opening.cancel()
+            runCurrent()
+            assertTrue(gatt.isClosed)
+        }
+
+    @Test
     fun aDisconnectDuringAWriteFailsItAndEndsTheNotifications() =
         runTest {
             val (gatt, link) = open()
@@ -113,7 +177,7 @@ class G2GattConnectorTest {
     @Test
     fun aFailedOpenClosesTheGattClient() =
         runTest {
-            val opening = async { runCatching { connector.connect(ARM) } }
+            val opening = async { runCatching { connector.connect(ARM, background = false) } }
             runCurrent()
             val gatt = gatt()
             gatt.callback.onConnectionStateChange(
@@ -134,7 +198,7 @@ class G2GattConnectorTest {
     @Test
     fun aLinkThatDropsBeforeConnectingClosesTheGattClient() =
         runTest {
-            val opening = async { runCatching { connector.connect(ARM) } }
+            val opening = async { runCatching { connector.connect(ARM, background = false) } }
             runCurrent()
             val gatt = gatt()
             gatt.callback.onConnectionStateChange(gatt.real, 133, BluetoothProfile.STATE_DISCONNECTED)
@@ -148,7 +212,7 @@ class G2GattConnectorTest {
     @Test
     fun cancellingTheOpenClosesTheGattClient() =
         runTest {
-            val opening = async { connector.connect(ARM) }
+            val opening = async { connector.connect(ARM, background = false) }
             runCurrent()
             val gatt = gatt()
             assertFalse(gatt.isClosed)
@@ -159,7 +223,7 @@ class G2GattConnectorTest {
 
     // Opens a link through every setup operation.
     private suspend fun TestScope.open(): Pair<ManualGatt, G2ArmLink> {
-        val opening = async { connector.connect(ARM) }
+        val opening = async { connector.connect(ARM, background = false) }
         runCurrent()
         val gatt = gatt()
         gatt.callback.onConnectionStateChange(gatt.real, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
@@ -246,5 +310,24 @@ class ManualGatt : ShadowBluetoothGatt() {
 
     companion object {
         var latest: ManualGatt? = null
+    }
+}
+
+/** Records the autoConnect argument of each connectGatt, which Robolectric's own shadow drops. */
+@Implements(BluetoothDevice::class)
+class AutoConnectRecorder : ShadowBluetoothDevice() {
+    @Implementation
+    override fun connectGatt(
+        context: Context,
+        autoConnect: Boolean,
+        callback: BluetoothGattCallback,
+        transport: Int,
+    ): BluetoothGatt {
+        autoConnects += autoConnect
+        return super.connectGatt(context, autoConnect, callback, transport)
+    }
+
+    companion object {
+        val autoConnects = mutableListOf<Boolean>()
     }
 }

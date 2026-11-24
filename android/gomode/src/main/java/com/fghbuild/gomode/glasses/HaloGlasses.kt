@@ -76,16 +76,19 @@ internal class HaloGlasses private constructor(
     companion object {
         /**
          * Connects [connection] to [device] and starts Go Mode's app on it, replacing whatever app
-         * ran there. The caller holds BLUETOOTH_CONNECT. A failure or cancellation disconnects.
+         * ran there. A [background] connection waits for the Halo to advertise; see
+         * [HaloConnection.connect]. The caller holds BLUETOOTH_CONNECT. A failure or cancellation
+         * disconnects.
          */
         suspend fun connect(
             context: Context,
             connection: HaloConnection,
             device: BluetoothDevice,
+            background: Boolean,
         ): HaloGlasses {
             var glasses: HaloGlasses? = null
             try {
-                val halo = connection.connect(device)
+                val halo = connection.connect(device, background = background)
                 if (halo.type != HaloDeviceType.HALO) {
                     throw GlassesException(
                         "Go Mode supports Halo only; this device is a Brilliant Frame",

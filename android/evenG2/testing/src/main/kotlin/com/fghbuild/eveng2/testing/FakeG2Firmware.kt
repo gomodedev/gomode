@@ -17,7 +17,11 @@ import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.G2TextPage
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.update
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -25,11 +29,28 @@ import java.util.concurrent.CopyOnWriteArrayList
 class FakeG2Firmware {
     @Volatile var authenticates: (G2Side) -> Boolean = { true }
 
+    // Bumped on each change of reachable, so waiting background connections look again.
+    private val reach = MutableStateFlow(0)
+
+    /** Whether an arm is in range: direct connections to others fail, background ones wait for it. */
     @Volatile var reachable: (G2Side) -> Boolean = { true }
+        set(value) {
+            field = value
+            reach.update { it + 1 }
+        }
+
+    /** Background connections that wait for their arm now, each standing for one pending GATT client. */
+    val waiting: StateFlow<Int> get() = waitingNow
+    private val waitingNow = MutableStateFlow(0)
+
+    @Volatile var answersPrelude = true
 
     @Volatile var answersUpdates = true
 
     @Volatile var answersCreate = true
+
+    /** Result code of page creation replies; 0 is success. */
+    @Volatile var createResult = 0L
 
     @Volatile var answersShutdown = true
 
@@ -44,8 +65,10 @@ class FakeG2Firmware {
 
     @Volatile var pageSession = 0L
 
-    /** The arm of every connection attempt, in order. */
+    /** The arm of every connection attempt, in order, and of every background one among them. */
     val attempts = CopyOnWriteArrayList<G2Side>()
+    val backgroundAttempts: List<G2Side> get() = backgroundSides
+    private val backgroundSides = CopyOnWriteArrayList<G2Side>()
     val links = CopyOnWriteArrayList<FakeG2Link>()
     val requests = CopyOnWriteArrayList<Request>()
 
@@ -59,9 +82,19 @@ class FakeG2Firmware {
     }
 
     val connector =
-        G2ArmConnector { arm ->
+        G2ArmConnector { arm, background ->
             attempts += arm.side
-            if (!reachable(arm.side)) throw G2Exception("unreachable")
+            if (background) {
+                backgroundSides += arm.side
+                waitingNow.update { it + 1 }
+                try {
+                    reach.first { reachable(arm.side) }
+                } finally {
+                    waitingNow.update { it - 1 }
+                }
+            } else if (!reachable(arm.side)) {
+                throw G2Exception("unreachable")
+            }
             failure(arm.side)?.let { throw it }
             FakeG2Link(arm, this).also {
                 links += it
@@ -128,6 +161,7 @@ class FakeG2Firmware {
 
             G2Protocol.SID_PRELUDE -> {
                 record("prelude")
+                if (!answersPrelude) return
                 link.notify(
                     sid,
                     sync,
@@ -172,7 +206,9 @@ class FakeG2Firmware {
                 val container = fields(checkNotNull(body.bytes(3)))
                 pageSession = checkNotNull(body.scalar(7))
                 record("create", String(checkNotNull(container.bytes(12))))
-                if (answersCreate) ack(1, 4, byteArrayOf())
+                // Proto3 omits a zero result.
+                val result = createResult
+                if (answersCreate) ack(1, 4, if (result == 0L) byteArrayOf() else proto { scalar(1, result) })
             }
 
             5L -> {
@@ -215,12 +251,16 @@ class FakeG2Link(
 
     @Volatile var closed = false
 
+    /** When set, writes fail with this reason while the link stays up. */
+    @Volatile var writeFailure: String? = null
+
     override val side: G2Side get() = arm.side
     override val notifications = channel
 
     override suspend fun write(packet: ByteArray) {
         lost?.let { throw it }
         if (closed) throw G2Exception("closed")
+        writeFailure?.let { throw G2Exception(it) }
         val sync = packet[2].toInt() and 0xFF
         val length = packet[3].toInt() and 0xFF
         val last = packet[4] == packet[5]

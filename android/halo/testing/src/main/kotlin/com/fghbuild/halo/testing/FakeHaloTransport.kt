@@ -14,7 +14,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -28,8 +31,22 @@ open class FakeHaloTransport(
     // One per successful connection, in order.
     val halos = CopyOnWriteArrayList<FakeHalo>()
 
-    // How many upcoming connection attempts fail as if the glasses were off.
+    // How many upcoming connection attempts fail as if the glasses were off. A background attempt
+    // fails only once its link came up, as when glasses connect and drop at once.
     var unreachableAttempts = 0
+
+    // While false, the glasses are off: direct attempts time out, and background attempts wait until
+    // the glasses are back, as Android's background connection does.
+    var present: Boolean
+        get() = presence.value
+        set(value) {
+            presence.value = value
+        }
+    private val presence = MutableStateFlow(true)
+
+    // Background attempts that wait for the glasses now, each standing for one pending GATT client.
+    val waiting: StateFlow<Int> get() = waitingNow
+    private val waitingNow = MutableStateFlow(0)
 
     // While set, connection attempts wait until cancelled, then fail with a transport error the way a
     // transport that wraps cancellation would.
@@ -38,9 +55,11 @@ open class FakeHaloTransport(
     // The device type the next connections report after service discovery.
     var connectedType = HaloDeviceType.HALO
 
-    // Addresses of every connection attempt, in order.
+    // Addresses of every connection attempt, in order, and how many were background attempts.
     val attempts = mutableListOf<String>()
     val connects get() = attempts.size
+    var backgroundConnects = 0
+        private set
     var disconnects = 0
 
     // Runs at the start of every connection attempt.
@@ -49,9 +68,21 @@ open class FakeHaloTransport(
     override suspend fun connect(
         device: BluetoothDevice,
         timeoutMs: Long,
+        background: Boolean,
     ): HaloDevice {
         connecting()
         attempts += device.address
+        if (background) {
+            backgroundConnects++
+            waitingNow.update { it + 1 }
+            try {
+                presence.first { it }
+            } finally {
+                waitingNow.update { it - 1 }
+            }
+        } else if (!present) {
+            throw HaloException("Connection timed out after ${timeoutMs}ms")
+        }
         if (hangConnects) {
             try {
                 awaitCancellation()
@@ -61,7 +92,12 @@ open class FakeHaloTransport(
         }
         if (unreachableAttempts > 0) {
             unreachableAttempts--
-            throw HaloException("Connection timed out after ${timeoutMs}ms")
+            throw HaloException(
+                when {
+                    background -> "Disconnected during connection (status=8)"
+                    else -> "Connection timed out after ${timeoutMs}ms"
+                },
+            )
         }
         return FakeHalo(device, connectedType).also { halos += it }.device
     }

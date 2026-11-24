@@ -1,4 +1,4 @@
-// G2Glasses lifecycle against fake arm links: both arms, AUTH failure, heartbeat, close causes, reconnect, races.
+// G2Glasses sessions against fake arm links: both arms, heartbeat, each close cause and its retryability, races.
 
 package com.fghbuild.eveng2
 
@@ -17,6 +17,7 @@ import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +33,8 @@ class G2GlassesTest {
     private val pair = pair("1")
 
     private suspend fun G2Glasses.await(predicate: (G2State) -> Boolean): G2State = state.first(predicate)
+
+    private suspend fun G2Glasses.closeCause(): G2CloseCause = (await { it is G2State.Closed } as G2State.Closed).cause
 
     private fun TestScope.record(glasses: G2Glasses): List<G2State> {
         val states = mutableListOf<G2State>()
@@ -64,6 +67,43 @@ class G2GlassesTest {
         }
 
     @Test
+    fun aBackgroundSessionWaitsForBothArmsWithoutADeadline() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.reachable = { false }
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair, background = true)
+            advanceTimeBy(60 * 60_000L)
+            assertEquals(G2State.Connecting(pair), glasses.state.value)
+            assertEquals(2, firmware.waiting.value)
+
+            firmware.reachable = { true }
+            glasses.await { it is G2State.Ready }
+            assertEquals(listOf(G2Side.LEFT, G2Side.RIGHT), firmware.backgroundAttempts.sorted())
+            assertEquals(0, firmware.waiting.value)
+        }
+
+    @Test
+    fun aBackgroundSessionGivesTheOtherArmTheConnectDeadlineOnceOneArmIsUp() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.reachable = { false }
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair, background = true)
+            advanceTimeBy(60_000)
+            val start = currentTime
+
+            firmware.reachable = { it == G2Side.RIGHT }
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.ConnectFailed(G2Side.LEFT, "timed out"), cause)
+            assertTrue(cause.retryable)
+            assertEquals(start + G2Protocol.CONNECT_TIMEOUT_MS, currentTime)
+            // The right arm's link and the left arm's pending connection are both released.
+            assertTrue(firmware.links.single().closed)
+            assertEquals(0, firmware.waiting.value)
+        }
+
+    @Test
     fun textBeyondTheCreationLimitArrivesByUpdate() =
         runTest {
             val firmware = FakeG2Firmware()
@@ -76,48 +116,49 @@ class G2GlassesTest {
         }
 
     @Test
-    fun authFailureClosesBothLinksAndRetries() =
+    fun authTimeoutEndsTheSessionAndClosesBothLinks() =
         runTest {
             val firmware = FakeG2Firmware()
             firmware.authenticates = { it == G2Side.LEFT }
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
-            val reconnecting = glasses.await { it is G2State.Reconnecting }
-            assertEquals(G2State.Reconnecting(pair, G2CloseCause.AuthTimedOut(G2Side.RIGHT), 2_000), reconnecting)
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.AuthTimedOut(G2Side.RIGHT), cause)
+            assertTrue(cause.retryable)
             assertEquals(G2Protocol.AUTH_TIMEOUT_MS, currentTime)
             // AUTH is re-sent until the deadline; nothing follows it.
             assertEquals(List(6) { "RIGHT auth" }, firmware.requests.map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
-
-            firmware.authenticates = { true }
-            glasses.await { it is G2State.Ready }
-            assertEquals(4, firmware.links.size)
         }
 
     @Test
-    fun rightArmDropReconnectsWithTheLatestText() =
+    fun rightArmDropEndsTheSessionAndTheNextConnectShowsTheLatestText() =
         runTest {
             val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.show("First")
             glasses.connect(pair)
             glasses.await { it is G2State.Ready }
+            val firstPage = firmware.pageSession
             firmware.requests.clear()
 
             firmware.link(G2Side.RIGHT).drop(status = 8)
-            assertEquals(
-                G2State.Reconnecting(pair, G2CloseCause.Disconnected(G2Side.RIGHT, 8), 2_000),
-                glasses.await { it is G2State.Reconnecting },
-            )
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.Disconnected(G2Side.RIGHT, 8), cause)
+            assertTrue(cause.retryable)
             // The right link is gone, so no shutdown is attempted; the left link is released.
             assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
+            // The host owns retries: the SDK opens nothing on its own.
+            advanceTimeBy(60_000)
+            assertEquals(2, firmware.links.size)
 
             glasses.show("Second")
-            val dropped = currentTime
+            glasses.connect(pair)
+            assertEquals(G2State.Connecting(pair), glasses.state.value)
             assertEquals(G2State.Ready(pair, "Second"), glasses.await { it is G2State.Ready })
-            assertEquals(2_000L, currentTime - dropped)
             assertEquals("RIGHT create Second", firmware.requests.last().toString())
+            assertTrue(firmware.pageSession != firstPage)
         }
 
     @Test
@@ -130,10 +171,7 @@ class G2GlassesTest {
             firmware.requests.clear()
 
             firmware.link(G2Side.LEFT).drop(status = 19)
-            assertEquals(
-                G2CloseCause.Disconnected(G2Side.LEFT, 19),
-                (glasses.await { it is G2State.Reconnecting } as G2State.Reconnecting).cause,
-            )
+            assertEquals(G2CloseCause.Disconnected(G2Side.LEFT, 19), glasses.closeCause())
             assertEquals(listOf("RIGHT shutdown"), firmware.requests.map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
         }
@@ -149,6 +187,7 @@ class G2GlassesTest {
 
             glasses.disconnect()
             assertEquals(G2State.Closed(G2CloseCause.Stopped), glasses.state.value)
+            assertFalse(G2CloseCause.Stopped.retryable)
             assertEquals(listOf("RIGHT shutdown"), firmware.requests.map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
             advanceTimeBy(60_000)
@@ -156,7 +195,7 @@ class G2GlassesTest {
         }
 
     @Test
-    fun wearerExitEndsTheConnection() =
+    fun wearerExitEndsTheSessionForGood() =
         runTest {
             val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
@@ -170,13 +209,29 @@ class G2GlassesTest {
             assertTrue(glasses.state.value is G2State.Ready)
 
             firmware.exitPage(type = 7, session = firmware.pageSession)
-            assertEquals(
-                G2State.Closed(G2CloseCause.PageExited(abnormal = false)),
-                glasses.await { it is G2State.Closed },
-            )
-            advanceTimeBy(60_000)
-            assertEquals(2, firmware.links.size)
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.PageExited(abnormal = false), cause)
+            assertFalse(cause.retryable)
+            // The glasses closed the page, so no shutdown is sent.
             assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
+            assertTrue(firmware.links.all { it.closed })
+        }
+
+    @Test
+    fun abnormalPageExitIsRetryable() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair)
+            glasses.await { it is G2State.Ready }
+            firmware.requests.clear()
+
+            firmware.exitPage(type = 6, session = firmware.pageSession)
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.PageExited(abnormal = true), cause)
+            assertTrue(cause.retryable)
+            assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
+            assertTrue(firmware.links.all { it.closed })
         }
 
     @Test
@@ -189,23 +244,54 @@ class G2GlassesTest {
             glasses.await { it is G2State.Ready }
             val sent = currentTime
             glasses.show("Lost")
-            val reconnecting = glasses.await { it is G2State.Reconnecting } as G2State.Reconnecting
-            assertEquals(G2CloseCause.CommandTimedOut(G2HubCommand.UPDATE_TEXT), reconnecting.cause)
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.CommandTimedOut(G2HubCommand.UPDATE_TEXT), cause)
+            assertTrue(cause.retryable)
             assertEquals(G2Protocol.COMMAND_TIMEOUT_MS, currentTime - sent)
         }
 
     @Test
-    fun connectFailuresBackOff() =
+    fun failedWriteEndsTheSession() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair)
+            glasses.await { it is G2State.Ready }
+            firmware.link(G2Side.RIGHT).writeFailure = "busy"
+            glasses.show("Lost")
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.WriteFailed(G2Side.RIGHT, "busy"), cause)
+            assertTrue(cause.retryable)
+            assertTrue(firmware.links.all { it.closed })
+        }
+
+    @Test
+    fun unreachableArmEndsTheSessionAsAConnectFailure() =
         runTest {
             val firmware = FakeG2Firmware()
             firmware.reachable = { it == G2Side.LEFT }
             val glasses = G2Glasses(firmware.connector, backgroundScope)
-            val states = record(glasses)
             glasses.connect(pair)
-            advanceTimeBy(2_000 + 5_000 + 10_000 + 30_000 + 30_000 + 1)
-            val reconnects = states.filterIsInstance<G2State.Reconnecting>()
-            assertEquals(listOf(2_000L, 5_000L, 10_000L, 30_000L, 30_000L, 30_000L), reconnects.map { it.delayMs })
-            assertTrue(reconnects.all { it.cause == G2CloseCause.ConnectFailed(G2Side.RIGHT, "unreachable") })
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.ConnectFailed(G2Side.RIGHT, "unreachable"), cause)
+            assertTrue(cause.retryable)
+            assertEquals(listOf(G2Side.LEFT), firmware.links.map { it.side })
+            assertTrue(firmware.links.all { it.closed })
+        }
+
+    @Test
+    fun unansweredPreludeTimesOut() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.answersPrelude = false
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair)
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.PreludeTimedOut, cause)
+            assertTrue(cause.retryable)
+            assertEquals(G2Protocol.COMMAND_TIMEOUT_MS, currentTime)
+            // No page was requested, so none is shut down.
+            assertEquals(listOf("RIGHT auth", "LEFT auth", "RIGHT prelude"), firmware.requests.map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
         }
 
@@ -230,29 +316,41 @@ class G2GlassesTest {
             firmware.answersCreate = false
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
-            val reconnecting = glasses.await { it is G2State.Reconnecting } as G2State.Reconnecting
-            assertEquals(G2CloseCause.CommandTimedOut(G2HubCommand.CREATE_PAGE), reconnecting.cause)
+            assertEquals(G2CloseCause.CommandTimedOut(G2HubCommand.CREATE_PAGE), glasses.closeCause())
             // The create request may have opened the page although its ACK never came.
             assertEquals(listOf("RIGHT create ", "RIGHT shutdown"), firmware.requests.drop(3).map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
         }
 
     @Test
-    fun unexpectedConnectorExceptionClosesTheConnection() =
+    fun refusedCreateShutsThePageDown() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.createResult = 1
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair)
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.CommandRejected(G2HubCommand.CREATE_PAGE, 1), cause)
+            assertTrue(cause.retryable)
+            assertEquals(listOf("RIGHT create ", "RIGHT shutdown"), firmware.requests.drop(3).map { it.toString() })
+            assertTrue(firmware.links.all { it.closed })
+        }
+
+    @Test
+    fun unexpectedConnectorExceptionEndsTheSessionForGood() =
         runTest {
             val firmware = FakeG2Firmware()
             val failure = SecurityException("BLUETOOTH_CONNECT")
             firmware.failure = { side -> failure.takeIf { side == G2Side.RIGHT } }
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
-            val closed = glasses.await { it is G2State.Closed } as G2State.Closed
+            val cause = glasses.closeCause()
+            assertFalse(cause.retryable)
             // Coroutine stack trace recovery may hand over a copy of the exception.
-            val error = (closed.cause as G2CloseCause.Failed).error
+            val error = (cause as G2CloseCause.Failed).error
             assertEquals(SecurityException::class, error::class)
             assertEquals(failure.message, error.message)
             assertTrue(firmware.links.all { it.closed })
-            advanceTimeBy(60_000)
-            assertEquals(1, firmware.links.size)
         }
 
     @Test

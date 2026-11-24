@@ -105,101 +105,101 @@ open class HaloConnection(
     // ---- Connection ----
 
     /**
-     * Overridable for testing: create the GATT connection. A GATT client that does not connect, by
-     * timeout, early disconnection, or cancellation, is closed so retries cannot leak clients.
+     * Overridable for testing: create the GATT connection and wait until its link is up, without a
+     * deadline of its own. [autoConnect] selects Android's background connection; see [connect]. A
+     * GATT client that does not connect, by early disconnection or cancellation, is closed so
+     * retries cannot leak clients.
      */
     protected open suspend fun connectGatt(
         device: BluetoothDevice,
-        timeoutMs: Long,
+        autoConnect: Boolean,
     ): BluetoothGatt =
-        withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine<BluetoothGatt> { cont ->
-                val gatt: BluetoothGatt? =
-                    device.connectGatt(
-                        context,
-                        false,
-                        object : BluetoothGattCallback() {
-                            override fun onConnectionStateChange(
-                                g: BluetoothGatt,
-                                status: Int,
-                                newState: Int,
-                            ) {
-                                when (newState) {
-                                    BluetoothProfile.STATE_CONNECTED -> {
-                                        if (cont.isActive) {
-                                            activeGatt = g
-                                            // Cancellation can still drop the result after this resume.
-                                            cont.resume(g) { _, _, _ -> closeGatt(g) }
-                                        }
-                                    }
-
-                                    BluetoothProfile.STATE_DISCONNECTED -> {
-                                        if (cont.isActive) {
-                                            closeGatt(g)
-                                            cont.resumeWithException(
-                                                HaloException("Disconnected during connection (status=$status)"),
-                                            )
-                                        } else if (g === activeGatt) {
-                                            // A late callback from an earlier connection's GATT is not this link's.
-                                            linkClosed.compareAndSet(
-                                                null,
-                                                HaloException("Device disconnected (status=$status)"),
-                                            )
-                                        }
+        suspendCancellableCoroutine { cont ->
+            val gatt: BluetoothGatt? =
+                device.connectGatt(
+                    context,
+                    autoConnect,
+                    object : BluetoothGattCallback() {
+                        override fun onConnectionStateChange(
+                            g: BluetoothGatt,
+                            status: Int,
+                            newState: Int,
+                        ) {
+                            when (newState) {
+                                BluetoothProfile.STATE_CONNECTED -> {
+                                    if (cont.isActive) {
+                                        activeGatt = g
+                                        // Cancellation can still drop the result after this resume.
+                                        cont.resume(g) { _, _, _ -> closeGatt(g) }
                                     }
                                 }
-                                currentGattCallback?.onConnectionStateChange(g, status, newState)
-                            }
 
-                            override fun onMtuChanged(
-                                g: BluetoothGatt,
-                                mtu: Int,
-                                status: Int,
-                            ) {
-                                currentGattCallback?.onMtuChanged(g, mtu, status)
+                                BluetoothProfile.STATE_DISCONNECTED -> {
+                                    if (cont.isActive) {
+                                        closeGatt(g)
+                                        cont.resumeWithException(
+                                            HaloException("Disconnected during connection (status=$status)"),
+                                        )
+                                    } else if (g === activeGatt) {
+                                        // A late callback from an earlier connection's GATT is not this link's.
+                                        linkClosed.compareAndSet(
+                                            null,
+                                            HaloException("Device disconnected (status=$status)"),
+                                        )
+                                    }
+                                }
                             }
+                            currentGattCallback?.onConnectionStateChange(g, status, newState)
+                        }
 
-                            override fun onServicesDiscovered(
-                                g: BluetoothGatt,
-                                status: Int,
-                            ) {
-                                currentGattCallback?.onServicesDiscovered(g, status)
-                            }
+                        override fun onMtuChanged(
+                            g: BluetoothGatt,
+                            mtu: Int,
+                            status: Int,
+                        ) {
+                            currentGattCallback?.onMtuChanged(g, mtu, status)
+                        }
 
-                            override fun onCharacteristicWrite(
-                                g: BluetoothGatt,
-                                c: BluetoothGattCharacteristic,
-                                status: Int,
-                            ) {
-                                currentGattCallback?.onCharacteristicWrite(g, c, status)
-                            }
+                        override fun onServicesDiscovered(
+                            g: BluetoothGatt,
+                            status: Int,
+                        ) {
+                            currentGattCallback?.onServicesDiscovered(g, status)
+                        }
 
-                            override fun onCharacteristicChanged(
-                                g: BluetoothGatt,
-                                c: BluetoothGattCharacteristic,
-                                value: ByteArray,
-                            ) {
-                                currentGattCallback?.onCharacteristicChanged(g, c, value)
-                            }
+                        override fun onCharacteristicWrite(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                            status: Int,
+                        ) {
+                            currentGattCallback?.onCharacteristicWrite(g, c, status)
+                        }
 
-                            @Suppress("DEPRECATION")
-                            override fun onCharacteristicChanged(
-                                g: BluetoothGatt,
-                                c: BluetoothGattCharacteristic,
-                            ) {
-                                currentGattCallback?.onCharacteristicChanged(g, c, c.value)
-                            }
-                        },
-                        BluetoothDevice.TRANSPORT_LE,
-                    )
-                if (gatt == null) {
-                    cont.resumeWithException(HaloException("connectGatt returned null"))
-                } else {
-                    // Runs on timeout too: withTimeoutOrNull cancels this coroutine.
-                    cont.invokeOnCancellation { closeGatt(gatt) }
-                }
+                        override fun onCharacteristicChanged(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                            value: ByteArray,
+                        ) {
+                            currentGattCallback?.onCharacteristicChanged(g, c, value)
+                        }
+
+                        @Suppress("DEPRECATION")
+                        override fun onCharacteristicChanged(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                        ) {
+                            currentGattCallback?.onCharacteristicChanged(g, c, c.value)
+                        }
+                    },
+                    BluetoothDevice.TRANSPORT_LE,
+                )
+            if (gatt == null) {
+                cont.resumeWithException(HaloException("connectGatt returned null"))
+            } else {
+                // Runs on a direct connection's timeout too: withTimeoutOrNull cancels this coroutine.
+                cont.invokeOnCancellation { closeGatt(gatt) }
             }
-        } ?: throw HaloException("Connection timed out after ${timeoutMs}ms")
+        }
 
     /** Overridable for testing: store the negotiated MTU. */
     protected open fun onMtuNegotiated(mtu: Int) {
@@ -239,14 +239,36 @@ open class HaloConnection(
      * for Lua and typed messages. The returned device's [HaloDevice.closeCause] reports when the link
      * ends. One connection at a time: connecting again replaces the previous device's link reporting,
      * so [disconnect] first.
+     *
+     * A direct connection fails when the link is not up within [timeoutMs]; use it for a device that
+     * was just scanned or chosen. A [background] connection is Android's autoConnect: the controller
+     * adds the device to its LE accept list and connects when it next advertises, with no deadline,
+     * at a lower scan duty cycle than a direct attempt. Use it to reconnect a device that went away.
+     * The accept-list entry takes its address type, and the identity of a device with private
+     * addresses, from the stack's record of the device; a bond keeps that record across Bluetooth
+     * restarts. A background connection therefore suits a device this method connected before, which
+     * requests the bond. Either way, the steps after the link is up each take at most [timeoutMs], and
+     * cancellation releases the GATT client, which also removes a pending background connection.
+     *
+     * TODO(hardware): Unverified on a Halo: whether it advertises a public, static random, or
+     * resolvable private address; whether its bond holds after the Halo restarts, so a background
+     * connection still matches it; and how long a background connection takes once a Halo is turned
+     * on. Log the address type of a scan result and time several reconnections after power cycles.
      */
     @Suppress("TooGenericExceptionCaught")
     open suspend fun connect(
         device: BluetoothDevice,
         timeoutMs: Long = 15_000,
+        background: Boolean = false,
     ): HaloDevice {
         linkClosed = MutableStateFlow(null)
-        val gatt = connectGatt(device, timeoutMs)
+        val gatt =
+            if (background) {
+                connectGatt(device, autoConnect = true)
+            } else {
+                withTimeoutOrNull(timeoutMs) { connectGatt(device, autoConnect = false) }
+                    ?: throw HaloException("Connection timed out after ${timeoutMs}ms")
+            }
 
         return try {
             gatt.device.createBond()

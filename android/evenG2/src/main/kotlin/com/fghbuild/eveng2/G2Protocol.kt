@@ -77,10 +77,4 @@ object G2Protocol {
 
     /** Interval between Even Hub heartbeats while a page is open. */
     const val HEARTBEAT_INTERVAL_MS = 4_000L
-
-    /**
-     * Delay before each consecutive reconnect; the last entry repeats. A session that reaches
-     * [G2State.Ready] starts the sequence over.
-     */
-    val RECONNECT_BACKOFF_MS: List<Long> = listOf(2_000L, 5_000L, 10_000L, 30_000L)
 }

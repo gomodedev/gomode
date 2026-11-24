@@ -7,18 +7,23 @@
 package com.fghbuild.halo.ble
 
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -27,10 +32,15 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowBluetoothDevice
 import java.util.UUID
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
+@Config(shadows = [AutoConnectRecorder::class])
 class HaloConnectionTest {
     private lateinit var btDevice: BluetoothDevice
 
@@ -46,6 +56,7 @@ class HaloConnectionTest {
 
     @Before
     fun setUp() {
+        AutoConnectRecorder.autoConnects.clear()
         val adapter =
             RuntimeEnvironment
                 .getApplication()
@@ -81,6 +92,24 @@ class HaloConnectionTest {
             val connection = HaloConnection(RuntimeEnvironment.getApplication())
             val error = runCatching { connection.connect(btDevice, timeoutMs = 1_000) }.exceptionOrNull()
             assertTrue("$error", error is HaloException)
+            assertEquals(listOf(false), AutoConnectRecorder.autoConnects)
+            assertTrue(Shadows.shadowOf(pendingGatt()).isClosed)
+        }
+
+    @Test
+    fun `a background connection waits past the direct deadline and cancelling it closes its GATT client`() =
+        runTest {
+            val connection = HaloConnection(RuntimeEnvironment.getApplication())
+            val attempt = async { connection.connect(btDevice, timeoutMs = 1_000, background = true) }
+            runCurrent()
+            assertEquals(listOf(true), AutoConnectRecorder.autoConnects)
+            // Android connects it whenever the device advertises; nothing times out meanwhile.
+            advanceTimeBy(60 * 60_000L)
+            assertTrue(attempt.isActive)
+            assertFalse(Shadows.shadowOf(pendingGatt()).isClosed)
+
+            attempt.cancel()
+            runCurrent()
             assertTrue(Shadows.shadowOf(pendingGatt()).isClosed)
         }
 
@@ -223,5 +252,24 @@ class HaloConnectionTest {
             UUID.fromString("0000180F-0000-1000-8000-00805F9B34FB"),
             HaloServiceDiscovery.BATTERY_SERVICE,
         )
+    }
+}
+
+/** Records the autoConnect argument of each connectGatt, which Robolectric's own shadow drops. */
+@Implements(BluetoothDevice::class)
+class AutoConnectRecorder : ShadowBluetoothDevice() {
+    @Implementation
+    override fun connectGatt(
+        context: Context,
+        autoConnect: Boolean,
+        callback: BluetoothGattCallback,
+        transport: Int,
+    ): BluetoothGatt {
+        autoConnects += autoConnect
+        return super.connectGatt(context, autoConnect, callback, transport)
+    }
+
+    companion object {
+        val autoConnects = mutableListOf<Boolean>()
     }
 }

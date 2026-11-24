@@ -7,6 +7,22 @@
 // notification channel with G2LinkLostException. Every platform call that throws on a missing
 // BLUETOOTH_CONNECT permission or a rejected argument goes through bluetoothCall(), so callers
 // see only G2Exception.
+//
+// A background connection passes autoConnect to connectGatt: Android adds the arm to the
+// controller's LE accept list and connects when the arm next advertises, without a deadline and at
+// a lower scan duty cycle than a direct connection, whose own deadline is the stack's (30 s in AOSP's
+// connection manager). The accept-list entry takes the arm's address type and identity from the
+// stack's record of the device, which the bond keeps across Bluetooth restarts; the first connection
+// to a scanned pair is therefore direct. The setup after a background link comes up is bounded by
+// G2Protocol.CONNECT_TIMEOUT_MS here, since G2Session bounds a background connection only from the
+// first arm's link. close() releases the GATT client, which also removes a pending background
+// connection.
+//
+// TODO(hardware): Unverified on a pair: each arm's advertised address type (public, static random,
+// or resolvable private), whether a background connection matches an arm after the glasses restart,
+// with and without a bond (see the bonding TODO in G2Auth.kt), and how far apart the two arms'
+// background links come up after the glasses wake. Log both arms' address types from a scan, then
+// time the links of several reconnections after power cycles.
 @file:Suppress("MissingPermission") // Library: the consuming app holds BLUETOOTH_CONNECT and BLUETOOTH_SCAN.
 
 package com.fghbuild.eveng2
@@ -26,18 +42,22 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 class G2GattConnector(
     private val context: Context,
 ) : G2ArmConnector {
-    override suspend fun connect(arm: G2Arm): G2ArmLink {
+    override suspend fun connect(
+        arm: G2Arm,
+        background: Boolean,
+    ): G2ArmLink {
         val adapter =
             context.getSystemService(BluetoothManager::class.java)?.adapter
                 ?: throw G2Exception("Bluetooth is not available")
         val link = G2GattLink(arm.side)
         var opened = false
         try {
-            link.open(context, bluetoothCall("getRemoteDevice") { adapter.getRemoteDevice(arm.address) })
+            link.open(context, bluetoothCall("getRemoteDevice") { adapter.getRemoteDevice(arm.address) }, background)
             opened = true
         } finally {
             // Failure or cancellation part way must not leave a GATT client behind.
@@ -143,12 +163,27 @@ private class G2GattLink(
     suspend fun open(
         context: Context,
         device: BluetoothDevice,
+        background: Boolean,
     ) {
         val gatt =
-            bluetoothCall("connectGatt") { device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE) }
-                ?: throw G2Exception("connectGatt returned null")
+            bluetoothCall("connectGatt") {
+                device.connectGatt(context, background, callback, BluetoothDevice.TRANSPORT_LE)
+            } ?: throw G2Exception("connectGatt returned null")
         this.gatt = gatt
         connected.await()
+        if (background) {
+            withTimeoutOrNull(G2Protocol.CONNECT_TIMEOUT_MS) { setUp(device, gatt) }
+                ?: throw G2Exception("setup timed out")
+        } else {
+            setUp(device, gatt)
+        }
+    }
+
+    // Bond, MTU, services, and notifications of a link that is up.
+    private suspend fun setUp(
+        device: BluetoothDevice,
+        gatt: BluetoothGatt,
+    ) {
         // See the bonding TODO in G2Auth.kt.
         bluetoothCall("createBond") { if (device.bondState == BluetoothDevice.BOND_NONE) device.createBond() }
         operation(Operation.MTU) { it.requestMtu(G2Protocol.REQUESTED_MTU) }
