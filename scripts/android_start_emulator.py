@@ -35,8 +35,10 @@ EMULATOR_ARGS = [
     # Fixture calls do not use a cellular modem. Emulator 37's internal modem can
     # fail to connect to ::1 here, repeatedly ANRing com.android.phone.
     # Headless software rendering does not need guest Vulkan.
+    # Keep emulated Wi-Fi on the QEMU backend. The netsim Wi-Fi packet streamer
+    # can lose IPv4 traffic and leave AndroidWifi unreachable after a Wi-Fi toggle.
     "-feature",
-    "-ModemSimulator,-Vulkan",
+    "-ModemSimulator,-Vulkan,-WiFiPacketStream",
     "-timezone",
     "Etc/UTC",
     "-wipe-data",
