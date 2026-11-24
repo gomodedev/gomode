@@ -29,6 +29,11 @@ waiting for both arms follow faceclaw's behaviour.
 for behaviour only and never copy their code. Clone sources into a fresh directory and
 run Python against them only with `python3 -I`.
 
+## Custom firmware
+
+`scripts/g2_cfw.py` builds and flashes the custom firmware of the pinned
+[g2flash](https://github.com/jimrandomh/g2flash). This SDK targets stock firmware and is untested on it.
+
 ## Hardware questions
 
 No pair was available when this module was written. Each open question that only a
