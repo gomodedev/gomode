@@ -1,0 +1,67 @@
+Even G2 SDK for Go Mode
+
+Portions of this module are derived from third-party sources under the terms
+below. The files that contain derived code name their source in their header.
+
+------------------------------------------------------------------------------
+Even Devices SDK (even-realities/flutter_enterprise_sdk)
+https://github.com/even-realities/flutter_enterprise_sdk
+Native source bundle source/native-sdk-0.1.0-beta.14.tar.gz, commit
+f931d52d4716fd150f885f5168b64faabf20783a.
+
+G2Frame.kt, G2Protobuf.kt, G2Auth.kt, and G2EvenHub.kt port and modify
+G2EvenHubTransport.kt, G2EvenHubCodec.kt, and G2BusinessAuthCodec.kt.
+src/test/resources/even-realities/contract.json is an unmodified copy of
+native/protocol/contract.json.
+
+The NOTICE of the Even Devices SDK reads:
+
+    Even Devices SDK
+    Copyright 2026 Hong Kong Even Realities Limited
+
+    Licensed under the Apache License, Version 2.0.
+    Third-party components retain their respective licenses; see
+    THIRD_PARTY_NOTICES.md and bundled license files.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use these files except in compliance with the License. The full text of the
+License is in LICENSE-APACHE-2.0 beside this file, and at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+
+------------------------------------------------------------------------------
+even-g2-protocol (ithinkthisiscool/even-g2-protocol)
+https://github.com/ithinkthisiscool/even-g2-protocol
+Commit f352806135c1a892eb10ca4d616f9fa0c186fc83.
+
+G2Prelude.kt, G2Auth.kt, G2EvenHub.kt, G2Arm.kt, and the golden bytes in
+G2PythonGoldenTest.kt follow its message builders and advertisement format.
+G2Session.kt follows its order after AUTH: prelude, text page, heartbeat.
+Its pyproject.toml declares the MIT License and the author "eveng2"; the
+repository has no LICENSE file.
+
+Copyright (c) eveng2
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

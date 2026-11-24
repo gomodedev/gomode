@@ -7,17 +7,19 @@ GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@v2.20.0
 
 ANDROID_LINT_TASKS := \
 	:car-dial-fixture:detekt :car-dial-fixture:ktlintCheck \
+	:even-g2-sdk:detekt :even-g2-sdk:ktlintCheck \
 	:gomode:detekt :gomode:ktlintCheck \
 	:halo-sdk:detekt :halo-sdk:ktlintCheck
 
 # Android lint needs compiled classes, so keep it with build-dependent checks.
 ANDROID_TEST_TASKS := \
-	:car-dial-fixture:lintDebug :gomode:lintDebug :halo-sdk:lintDebug \
-	:gomode:assembleDebug :halo-sdk:assembleDebug \
+	:car-dial-fixture:lintDebug :even-g2-sdk:lintDebug :gomode:lintDebug :halo-sdk:lintDebug \
+	:even-g2-sdk:assembleDebug :gomode:assembleDebug :halo-sdk:assembleDebug \
 	:gomode-sdk:assemble :mcp-sdk:assemble :oauth-sdk:assemble :voicegateway-sdk:assemble \
-	:gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest \
-	:gomode:testDebugUnitTest :halo-sdk:testDebugUnitTest \
-	:gomode:createDebugUnitTestCoverageReport :halo-sdk:createDebugUnitTestCoverageReport \
+	:even-g2-sdk:assembleDebugAndroidTest :gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest \
+	:even-g2-sdk:testDebugUnitTest :gomode:testDebugUnitTest :halo-sdk:testDebugUnitTest \
+	:even-g2-sdk:createDebugUnitTestCoverageReport :gomode:createDebugUnitTestCoverageReport \
+	:halo-sdk:createDebugUnitTestCoverageReport \
 	:car-dial-fixture:assembleDebug :car-dial-fixture:assembleDebugAndroidTest
 
 # ANDROID_VERBOSE=true replaces Gradle's --quiet with a plain log of every task
@@ -74,7 +76,7 @@ fix: node_modules/.modules.yaml
 	@uv run --locked ruff check --quiet --fix scripts
 	@uv run --locked ruff format scripts >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
-	@./scripts/android-checks.sh :gomode:ktlintFormat :halo-sdk:ktlintFormat :car-dial-fixture:ktlintFormat $(GRADLE_LOG_ARGS)
+	@./scripts/android-checks.sh :even-g2-sdk:ktlintFormat :gomode:ktlintFormat :halo-sdk:ktlintFormat :car-dial-fixture:ktlintFormat $(GRADLE_LOG_ARGS)
 	@pnpm exec node scripts/build_frontend.mjs --write
 	@uv run --locked python scripts/update_agents_file_index.py
 
@@ -113,7 +115,7 @@ frontend-build: node_modules/.modules.yaml
 build: android-sdk node_modules/.modules.yaml frontend-build
 	@pnpm exec node scripts/css_module_types.mjs --source-path web/src
 	@go build ./...
-	@cd ./android && ./gradlew :gomode:assembleDebug :halo-sdk:assembleDebug :gomode-sdk:assemble :mcp-sdk:assemble :oauth-sdk:assemble :voicegateway-sdk:assemble $(GRADLE_LOG_ARGS)
+	@cd ./android && ./gradlew :even-g2-sdk:assembleDebug :gomode:assembleDebug :halo-sdk:assembleDebug :gomode-sdk:assemble :mcp-sdk:assemble :oauth-sdk:assemble :voicegateway-sdk:assemble $(GRADLE_LOG_ARGS)
 
 # Benchmarks exercise the Go request paths; the browser package has no benchmark suite.
 benchmark:

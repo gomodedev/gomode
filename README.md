@@ -30,6 +30,7 @@ User and integration guides are at [docs.gomode.dev](https://docs.gomode.dev):
 - `internal/gatewayfrontend/`: optional test app embedded by `cmd/voice-gateway`.
 - `android/gomode/`: native WebView, voice, notifications, settings, and Halo
   shell.
+- `android/evenG2/`: Even Realities G2 smart-glasses Android SDK.
 - `android/halo/`: Halo smart-glasses Android SDK.
 
 Go package documentation is on [pkg.go.dev](https://pkg.go.dev/github.com/gomodedev/gomode).

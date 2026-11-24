@@ -67,6 +67,8 @@ jobs:
             android/gomode/build/reports/tests/
             android/gomode/build/test-results/
             android/car-dial-fixture/build/reports/
+            android/evenG2/build/reports/tests/
+            android/evenG2/build/test-results/
             android/halo/build/reports/tests/
             android/halo/build/test-results/
             android/gomode/build/reports/androidTests/connected/
