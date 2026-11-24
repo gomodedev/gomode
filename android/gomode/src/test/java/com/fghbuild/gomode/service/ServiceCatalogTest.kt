@@ -3,7 +3,6 @@ package com.fghbuild.gomode.service
 
 import android.net.Uri
 import android.webkit.WebView
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -12,6 +11,7 @@ import com.fghbuild.gomode.sdk.v1.Settings
 import com.fghbuild.gomode.sdk.v1.ToolGroup
 import com.fghbuild.gomode.sdk.v1.VoiceGatewaySettings
 import com.fghbuild.gomode.sdk.v1.WebShellSettings
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.ServiceBootstrapState
 import com.fghbuild.gomode.ui.web.ServiceShellKey
 import com.fghbuild.gomode.ui.web.ServiceShellSession

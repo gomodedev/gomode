@@ -8,7 +8,6 @@ import android.os.Looper
 import android.speech.SpeechRecognizer
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.data.LocalLlmModel
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -16,6 +15,7 @@ import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.VoiceTokenClient
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.observeVoiceStartup
 import com.fghbuild.gomode.ui.web.FrontendVoiceTools
 import com.fghbuild.gomode.ui.web.ServiceShellKey

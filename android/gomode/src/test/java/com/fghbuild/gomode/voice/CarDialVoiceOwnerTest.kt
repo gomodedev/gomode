@@ -10,12 +10,12 @@ import android.net.Uri
 import android.telecom.TelecomManager
 import com.fghbuild.eveng2.G2GattConnector
 import com.fghbuild.eveng2.G2Scanner
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceSettingsClient
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.web.HostedWebViewCompat
 import com.fghbuild.gomode.ui.web.HostedWebViewFeatures
 import com.fghbuild.gomode.ui.web.ServiceCallStage
@@ -27,6 +27,7 @@ import com.fghbuild.halo.ble.HaloConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -66,6 +67,7 @@ class CarDialVoiceOwnerTest {
     private lateinit var model: LocalModelOwner
     private lateinit var pages: ServiceShellOwner
     private lateinit var owner: CarDialVoiceOwner
+    private val glassesScope = CoroutineScope(SupervisorJob())
     private lateinit var glasses: GlassesOwner
     private lateinit var repository: SettingsRepository
     private val server = ServiceInstance("saved-server", "Saved server", url = "https://example.test")
@@ -84,14 +86,21 @@ class CarDialVoiceOwnerTest {
         repository = SettingsRepository(MemoryPreferences())
         pages = ServiceShellOwner(context, repository, glassesDisplay = { null })
         glasses =
-            GlassesOwner(context, repository, HaloConnection(context), G2Scanner(context), G2GattConnector(context))
+            GlassesOwner(
+                glassesScope,
+                context,
+                repository,
+                HaloConnection(context),
+                G2Scanner(context),
+                G2GattConnector(context),
+            )
         owner = CarDialVoiceOwner(context, repository, model, pages, glasses)
     }
 
     @After
     fun tearDown() {
         owner.close()
-        glasses.close()
+        glassesScope.cancel()
         pages.close()
         model.close()
         Dispatchers.resetMain()

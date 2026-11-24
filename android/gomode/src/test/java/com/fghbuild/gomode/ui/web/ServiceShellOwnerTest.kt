@@ -2,8 +2,8 @@
 package com.fghbuild.gomode.ui.web
 
 import android.net.ConnectivityManager
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.ServiceBootstrapState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterIsInstance

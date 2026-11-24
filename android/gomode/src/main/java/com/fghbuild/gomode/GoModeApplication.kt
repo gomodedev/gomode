@@ -18,6 +18,8 @@ import com.fghbuild.gomode.voice.LocalModelLoadDiagnostics
 import com.fghbuild.gomode.voice.LocalModelOwner
 import com.fghbuild.gomode.voice.VoiceErrorLog
 import com.fghbuild.halo.ble.HaloConnection
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 
 internal val Context.goModeSettingsDataStore by preferencesDataStore(name = "gomode_settings")
 
@@ -26,6 +28,9 @@ class GoModeApplication :
     Configuration.Provider {
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().build()
+
+    // The process's lifetime, within which the glasses owner runs; cancelling it ends that owner.
+    private val scope = MainScope()
 
     internal val settingsRepository by lazy { SettingsRepository(goModeSettingsDataStore) }
     private val localModelOwnerDelegate: Lazy<LocalModelOwner> =
@@ -64,7 +69,9 @@ class GoModeApplication :
         }
     internal val carDialVoiceOwner by carDialVoiceOwnerDelegate
     private val glassesOwnerDelegate =
-        lazy { GlassesOwner(this, settingsRepository, HaloConnection(this), G2Scanner(this), G2GattConnector(this)) }
+        lazy {
+            GlassesOwner(scope, this, settingsRepository, HaloConnection(this), G2Scanner(this), G2GattConnector(this))
+        }
     internal val glassesOwner by glassesOwnerDelegate
 
     // An owner that does not exist yet has no glasses connected; reading the display must not create one.
@@ -72,13 +79,13 @@ class GoModeApplication :
         if (glassesOwnerDelegate.isInitialized()) glassesOwner.connectedDisplay else null
 
     override fun onTerminate() {
-        if (glassesOwnerDelegate.isInitialized()) glassesOwner.close()
         if (modelLoadDiagnosticsDelegate.isInitialized()) modelLoadDiagnostics.close()
         if (voiceErrorsDelegate.isInitialized()) voiceErrors.close()
         if (carDialVoiceOwnerDelegate.isInitialized()) carDialVoiceOwner.close()
         if (serviceShellOwnerDelegate.isInitialized()) serviceShellOwner.close()
         if (modelDownloadsDelegate.isInitialized()) modelDownloads.close()
         if (localModelOwnerDelegate.isInitialized()) localModelOwner.close()
+        scope.cancel()
         super.onTerminate()
     }
 }

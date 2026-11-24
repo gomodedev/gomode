@@ -7,12 +7,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.gomode.MainActivity
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.service.ServiceSettingsClient
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.voicegateway.sdk.v2.TurnState
 import kotlinx.coroutines.Dispatchers

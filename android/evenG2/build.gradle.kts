@@ -33,9 +33,6 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
-    // The fake glasses compile into this module's tests and into each host's tests.
-    sourceSets.getByName("test").java.srcDir("src/sharedTest/kotlin")
-
     lint {
         warningsAsErrors = true
         abortOnError = true
@@ -53,7 +50,6 @@ kotlin {
 detekt {
     buildUponDefaultConfig = true
     config.setFrom(files("$rootDir/detekt.yml"))
-    source.from("src/sharedTest/kotlin")
     parallel = true
 }
 
@@ -86,6 +82,7 @@ dependencies {
 
     // The protocol and session tests are plain JVM tests; the GATT transport test runs on Robolectric's
     // Bluetooth shadows.
+    testImplementation(project(":even-g2-testing"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)

@@ -56,11 +56,6 @@ android {
     sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/speech-text"))
     sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/voice-choices"))
     sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("../e2e/voice-preview/scene"))
-    // Fakes compiled into both unit and instrumented tests, including the Even G2 SDK's fake glasses.
-    sourceSets.getByName("test").java.srcDir("src/sharedTest/java")
-    sourceSets.getByName("androidTest").java.srcDir("src/sharedTest/java")
-    sourceSets.getByName("test").java.srcDir("../evenG2/src/sharedTest/kotlin")
-    sourceSets.getByName("androidTest").java.srcDir("../evenG2/src/sharedTest/kotlin")
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
@@ -91,7 +86,6 @@ kotlin {
 detekt {
     buildUponDefaultConfig = true
     config.setFrom(files("$rootDir/detekt.yml"))
-    source.from("src/sharedTest/java")
     parallel = true
 }
 
@@ -116,6 +110,13 @@ val stageRobolectricSdkJar =
 tasks.withType<Test>().configureEach {
     dependsOn(stageRobolectricSdkJar)
     systemProperty("robolectric.dependency.dir", robolectricSdkJarDir.get().asFile.absolutePath)
+    // HaloEmulatorRenderingTest runs this bridge script, so a change to it or its lock reruns the tests.
+    inputs
+        .files(
+            rootProject.file("../scripts/halo_emulator_bridge.py"),
+            rootProject.file("../scripts/halo_emulator_bridge.py.lock"),
+        ).withPropertyName("haloEmulatorBridge")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 dependencies {
@@ -152,6 +153,9 @@ dependencies {
     // LiteRT's asynchronous JNI callbacks require its declared Kotlin/coroutine runtime ABI.
     implementation(libs.litertlm.android)
 
+    testImplementation(project(":even-g2-testing"))
+    testImplementation(project(":gomode-testing"))
+    testImplementation(project(":halo-testing"))
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.androidx.work.testing)
@@ -160,6 +164,9 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.robolectric)
     add(robolectricSdkJar.name, libs.robolectric.android.all)
+    androidTestImplementation(project(":even-g2-testing"))
+    androidTestImplementation(project(":gomode-testing"))
+    androidTestImplementation(project(":halo-testing"))
     androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(libs.androidx.junit)

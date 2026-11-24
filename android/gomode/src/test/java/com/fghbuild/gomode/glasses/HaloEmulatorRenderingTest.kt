@@ -1,9 +1,9 @@
-// Draws text through Go Mode's Halo app in the Brilliant Halo Lua emulator; skipped without a running bridge.
+// Draws text through Go Mode's Halo app in the Brilliant Halo Lua emulator, started once after a previous app's stop.
 //
-// Start the emulator bridge (caic's scripts/halo-emulator.py --bridge 127.0.0.1:8765), then run
-//   HALO_EMULATOR_BRIDGE_URL=ws://127.0.0.1:8765 ./gradlew :gomode:testDebugUnitTest \
-//     --tests '*HaloEmulatorRenderingTest' --rerun
-// The rendered frame is saved to build/halo-emulator/text.png for inspection.
+// The test starts scripts/halo_emulator_bridge.py through uv, so it needs uv on PATH and, on uv's first run, network
+// access to fetch the pinned emulator:
+//   ./gradlew :gomode:testDebugUnitTest --tests '*HaloEmulatorRenderingTest'
+// The bridge's stderr goes to build/halo-emulator/bridge.log and the rendered frame to build/halo-emulator/text.png.
 package com.fghbuild.gomode.glasses
 
 import android.graphics.BitmapFactory
@@ -19,19 +19,28 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.math.abs
 import kotlin.math.hypot
 
 private const val ACK_TIMEOUT_MS = 2_000L
 private const val FRAME_TIMEOUT_MS = 5_000L
-private const val STARTUP_SETTLE_MS = 500L
+private const val BRIDGE_STOP_TIMEOUT_S = 10L
+
+// A cold uv cache fetches and builds the pinned emulator before the bridge listens: about 16 s locally.
+private const val BRIDGE_START_TIMEOUT_MIN = 5L
+
+// Relative to the module directory, Gradle's working directory for unit tests.
+private const val BRIDGE_SCRIPT = "../../scripts/halo_emulator_bridge.py"
+private val OUTPUT_DIR = File("build/halo-emulator")
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -40,18 +49,43 @@ class HaloEmulatorRenderingTest {
 
     @Test
     fun textPagesDrawCenteredInsideTheCircleAndBlankTextClears() {
-        val url = System.getenv("HALO_EMULATOR_BRIDGE_URL")
-        assumeTrue("HALO_EMULATOR_BRIDGE_URL names no Halo emulator bridge", !url.isNullOrBlank())
+        OUTPUT_DIR.mkdirs()
+        val log = OUTPUT_DIR.resolve("bridge.log")
+        // The bridge prints its URL once it listens and exits when its stdin closes.
+        val process =
+            ProcessBuilder("uv", "run", "--locked", "--script", BRIDGE_SCRIPT, "--port", "0")
+                .redirectError(log)
+                .start()
+        try {
+            val firstLine = CompletableFuture.supplyAsync { process.inputStream.bufferedReader().readLine() }
+            val url =
+                try {
+                    firstLine.get(BRIDGE_START_TIMEOUT_MIN, TimeUnit.MINUTES)
+                } catch (_: TimeoutException) {
+                    error("$BRIDGE_SCRIPT did not listen within $BRIDGE_START_TIMEOUT_MIN min; see ${log.absolutePath}")
+                }
+            check(url != null && url.startsWith("ws://")) { "$BRIDGE_SCRIPT did not start; see ${log.absolutePath}" }
+            drawText(url)
+        } finally {
+            process.outputStream.close()
+            if (!process.waitFor(BRIDGE_STOP_TIMEOUT_S, TimeUnit.SECONDS)) process.destroyForcibly()
+        }
+    }
+
+    private fun drawText(url: String) {
         runBlocking {
             HaloEmulatorBridgeClient().use { bridge ->
-                bridge.connect(requireNotNull(url))
+                bridge.connect(url)
                 HALO_APP_LIBS.forEach { bridge.uploadFile(it, asset("halo/$it")) }
                 bridge.uploadFile("main.lua", asset(HALO_APP_MAIN))
-                startApp(bridge)
+                // Regression: the emulator queued a stop event that the next start consumed, so after a
+                // stop the app had to start twice. One start after a stop must run the app.
+                bridge.stop()
+                bridge.start("main.lua")
 
                 show(bridge, "Hello\nGo Mode")
                 val frame = awaitFrame(bridge) { it.isNotEmpty() }
-                File("build/halo-emulator").apply { mkdirs() }.resolve("text.png").writeBytes(frame)
+                OUTPUT_DIR.resolve("text.png").writeBytes(frame)
                 val text = litPixels(frame)
                 val center = (HaloDisplay.SIZE_PX - 1) / 2.0
                 val outside = text.filter { (x, y) -> hypot(x - center, y - center) > HaloDisplay.SIZE_PX / 2.0 }
@@ -69,18 +103,6 @@ class HaloEmulatorRenderingTest {
                 bridge.stop()
             }
         }
-    }
-
-    // The emulator's stop() queues a stop event that a script must consume, and start() does not drain
-    // the queue: after a stop with no script running, the next script ends at its first frame.sleep.
-    // That stale event is spent once, so a second start runs.
-    private suspend fun startApp(bridge: HaloEmulatorBridgeClient) {
-        repeat(2) {
-            bridge.start("main.lua")
-            delay(STARTUP_SETTLE_MS)
-            if (bridge.ping().running) return
-        }
-        error("Go Mode's Halo app did not start in the emulator")
     }
 
     private fun asset(path: String): String =
@@ -104,7 +126,10 @@ class HaloEmulatorRenderingTest {
                     ) { bridge.events.filterIsInstance<HaloEmulatorEvent.BluetoothSent>().first() }
                 if (acknowledged != null) return@forEachIndexed
             }
-            error("Halo emulator did not acknowledge message ${index + 1} for \"$text\"")
+            error(
+                "Halo emulator did not acknowledge message ${index + 1} for \"$text\"; " +
+                    "app running: ${bridge.ping().running}",
+            )
         }
     }
 

@@ -2,6 +2,7 @@
 
 package com.fghbuild.eveng2
 
+import com.fghbuild.eveng2.testing.FakeG2Firmware
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job

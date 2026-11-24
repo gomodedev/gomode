@@ -21,7 +21,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.fghbuild.gomode.data.GatewayVoiceSetup
 import com.fghbuild.gomode.data.LocalLlmModel
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeechStage
@@ -30,6 +29,7 @@ import com.fghbuild.gomode.data.SpeechStageLocation.GATEWAY
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.data.VoiceSetupPreference
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.settings.rememberSettingsEdits
 import com.fghbuild.gomode.voice.GatewayVoiceChoices

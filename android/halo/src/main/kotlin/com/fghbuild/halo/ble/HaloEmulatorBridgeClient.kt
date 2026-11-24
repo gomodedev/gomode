@@ -1,4 +1,4 @@
-// HaloEmulatorBridgeClient: WebSocket client for the Python Halo emulator bridge.
+// HaloEmulatorBridgeClient: WebSocket client for scripts/halo_emulator_bridge.py, which serves the Halo Lua emulator.
 package com.fghbuild.halo.ble
 
 import kotlinx.coroutines.CompletableDeferred

@@ -9,17 +9,19 @@ import android.bluetooth.le.ScanResult
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.fghbuild.eveng2.FakeG2Firmware
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Scanner
 import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.testing.FakeG2Firmware
 import com.fghbuild.gomode.data.GlassesDevice
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.glasses.GlassesScreen
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloScannedDevice
+import com.fghbuild.halo.testing.FakeHalo
+import com.fghbuild.halo.testing.FakeHaloTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
@@ -66,24 +68,19 @@ private val G2 = GlassesDevice.EvenG2(G2_PAIR)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class GlassesOwnerTest {
     private val context: Application = RuntimeEnvironment.getApplication()
-    private lateinit var repository: SettingsRepository
-    private lateinit var transport: ScanningHaloTransport
-    private lateinit var firmware: FakeG2Firmware
+    private val repository = SettingsRepository(MemoryPreferences())
+    private val transport = ScanningHaloTransport(context)
+    private val firmware = FakeG2Firmware()
     private lateinit var owner: GlassesOwner
 
     @Before
     fun setUp() {
         Dispatchers.setMain(StandardTestDispatcher())
         shadowOf(context).grantPermissions(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        repository = SettingsRepository(MemoryPreferences())
-        transport = ScanningHaloTransport(context)
-        firmware = FakeG2Firmware()
-        owner = GlassesOwner(context, repository, transport, G2Scanner(context), firmware.connector)
     }
 
     @After
     fun tearDown() {
-        owner.close()
         Dispatchers.resetMain()
     }
 
@@ -413,7 +410,7 @@ class GlassesOwnerTest {
             // The G2 page was cleared and closed, and both arms disconnected, before the Halo connection began.
             assertEquals(listOf(true, true), g2ClosedAtHaloAttempts)
             assertEquals(2, transport.halos.size)
-            assertTrue(transport.halos.last().lastShows("hello"))
+            assertTrue(transport.halos.last().lastSent(haloTextMessages("hello")))
             assertEquals(HALO_DISPLAY, owner.connectedDisplay)
             assertEquals(HALO, repository.settings.first { it.glasses == HALO }.glasses)
             assertTrue("$links", links.none { it is GlassesLink.Reconnecting })
@@ -437,14 +434,12 @@ class GlassesOwnerTest {
             assertEquals(listOf(null, HALO_TEXT_CAPACITY, null, G2_TEXT_CAPACITY, null), capacities)
         }
 
-    // Closes the owner before runTest waits for idle: a connected Even G2's heartbeat never idles.
+    // The owner lives in the test's background scope, so connected glasses end with the test.
     private fun runOwnerTest(body: suspend TestScope.() -> Unit) =
         runTest {
-            try {
-                body()
-            } finally {
-                owner.close()
-            }
+            owner =
+                GlassesOwner(backgroundScope, context, repository, transport, G2Scanner(context), firmware.connector)
+            body()
         }
 
     // Records every link state the owner publishes from now on.
@@ -471,6 +466,24 @@ class GlassesOwnerTest {
         runCurrent()
     }
 }
+
+// What a fake Halo was told to show through Go Mode's app on the glasses.
+private sealed interface Shown {
+    data object Clear : Shown
+
+    data class Page(
+        val lines: Int,
+    ) : Shown
+}
+
+private fun FakeHalo.shown(): List<Shown> =
+    messages.mapNotNull { (code, payload) ->
+        when {
+            code == HALO_CLEAR -> Shown.Clear
+            code == HALO_TEXT_PAGE && payload[0] == 0xFF.toByte() -> Shown.Page(lines = payload[5].toInt())
+            else -> null
+        }
+    }
 
 // Scans find one Halo and one Brilliant Frame, named through Robolectric's Bluetooth shadow.
 private class ScanningHaloTransport(

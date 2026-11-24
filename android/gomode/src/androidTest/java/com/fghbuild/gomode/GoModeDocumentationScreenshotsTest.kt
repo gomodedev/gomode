@@ -20,15 +20,17 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
-import com.fghbuild.eveng2.FakeG2Firmware
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
-import com.fghbuild.eveng2.fakeG2Scanner
+import com.fghbuild.eveng2.testing.FakeG2Firmware
+import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.ScanningFakeHalo
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -83,10 +85,10 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         directory.listFiles()?.forEach { check(it.delete()) { "Could not remove old screenshot ${it.name}" } }
 
         waitForTag("gomode-settings")
-        composeRule.onNodeWithTag("gomode-service-label").performTextReplacement("Development")
-        composeRule.onNodeWithTag("gomode-service-url").performTextReplacement(baseUrl)
-        device.pressBack()
-        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { !isImeVisible() }
+        // Back closes the Activity unless the keyboard is up, so each field waits for it.
+        fillServiceField("gomode-service-label", "Development")
+        fillServiceField("gomode-service-url", baseUrl)
+        dismissServiceKeyboard()
         capture(device, directory, "service-editor")
 
         composeRule.onNodeWithTag("gomode-create-service").performScrollTo().performClick()
@@ -174,8 +176,10 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         directory: File,
     ) {
         val app = composeRule.activity.application as GoModeApplication
+        val scope = MainScope()
         val glasses =
             GlassesOwner(
+                scope,
                 app,
                 app.settingsRepository,
                 ScanningFakeHalo(app, CAPTURE_HALO_ADDRESS),
@@ -198,7 +202,7 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
             }
             capture(device, directory, "glasses")
         } finally {
-            composeRule.runOnUiThread { glasses.close() }
+            scope.cancel()
         }
     }
 
@@ -248,6 +252,9 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         name: String,
     ) {
         composeRule.waitForIdle()
+        // Scenes show a first run. The prelaunch rule removes retained voice failures, which settings disclose.
+        val voiceErrors = (composeRule.activity.application as GoModeApplication).voiceErrors
+        check(voiceErrors.history.value.isEmpty()) { "Retained voice errors would appear in $name" }
         // Cold device/test initialization can reset the managed SystemUI profile.
         // Reapply it after shell readiness; the owning runner restores each value.
         val hiddenIcons =

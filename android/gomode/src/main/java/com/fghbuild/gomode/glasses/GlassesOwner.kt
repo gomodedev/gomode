@@ -23,7 +23,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -97,8 +96,8 @@ internal data class GlassesState(
 /**
  * The application owns one so the glasses stay connected across Activity replacement. One pair, a
  * Halo or an Even G2, is saved and connected at a time; connecting to another replaces it. A
- * connection to the saved glasses lasts until [disconnect], [forget], or [close], or until a
- * permanent failure, reconnecting in between with a delay that doubles from
+ * connection to the saved glasses lasts until [disconnect], [forget], the end of [parentScope], or
+ * a permanent failure, reconnecting in between with a delay that doubles from
  * [RECONNECT_INITIAL_DELAY_MS] to [RECONNECT_MAX_DELAY_MS] and resets after each successful
  * connection. This is the only reconnection policy for either model; see EvenG2Glasses.kt for how
  * it replaces G2Glasses' own. Auto-connect starts that connection when [start] first sees the saved
@@ -108,16 +107,23 @@ internal data class GlassesState(
  *
  * Halo scans and connects through [halo], Even G2 through [g2Scanner] and [g2Connector]; the link
  * logic depends on [GlassesDisplay] alone. A scan looks for both models at once.
+ *
+ * The owner's coroutines, including a connected Even G2's heartbeat, run on the main thread as
+ * children of [parentScope], the application's: cancelling it ends the owner and its connection.
  */
 internal class GlassesOwner(
+    parentScope: CoroutineScope,
     context: Context,
     private val settingsRepository: SettingsRepository,
     private val halo: HaloConnection,
     private val g2Scanner: G2PairScanner,
     g2Connector: G2ArmConnector,
-) : AutoCloseable {
+) {
     private val appContext = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope =
+        parentScope.coroutineContext.let { parent ->
+            CoroutineScope(parent + SupervisorJob(parent[Job]) + Dispatchers.Main.immediate)
+        }
     private val g2 = G2Glasses(g2Connector, scope)
 
     // Halo devices a scan found by address; connecting prefers them to a device made from the address.
@@ -245,11 +251,6 @@ internal class GlassesOwner(
 
     fun updateAutoConnect(enabled: Boolean) {
         scope.launch { settingsRepository.updateGlassesAutoConnect(enabled) }
-    }
-
-    override fun close() {
-        stopScan()
-        scope.cancel()
     }
 
     // The previous link finishes clearing and closing its glasses before the next one connects.

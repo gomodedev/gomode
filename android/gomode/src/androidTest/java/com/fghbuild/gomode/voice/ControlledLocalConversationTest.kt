@@ -20,13 +20,13 @@ import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.completeFixtureFrontend
 import com.fghbuild.gomode.data.LocalLlmModel
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.frontendPreparationFixtureScript
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceReadiness
 import com.fghbuild.gomode.service.ServiceSettingsClient
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.ServiceBootstrapState
 import com.fghbuild.gomode.ui.theme.GoModeTheme

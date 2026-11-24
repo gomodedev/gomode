@@ -31,11 +31,11 @@ import androidx.test.uiautomator.UiDevice
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.LocalEmulatorOnly
 import com.fghbuild.gomode.R
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.frontendPreparationFixtureScript
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
 import com.fghbuild.gomode.ui.web.ServiceShellOwner

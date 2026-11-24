@@ -3,7 +3,6 @@ package com.fghbuild.gomode.voice
 
 import android.net.Uri
 import android.webkit.CookieManager
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeakingVoiceOwner
 import com.fghbuild.gomode.data.SpeechStageLocation
@@ -11,6 +10,7 @@ import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceSettingsClient
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.web.ServiceShellKey
 import com.fghbuild.gomode.ui.web.ServiceShellSession
 import com.fghbuild.gomode.ui.web.WebShellLoadState

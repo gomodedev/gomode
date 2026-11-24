@@ -6,21 +6,48 @@
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@v2.20.0
 
 ANDROID_LINT_TASKS := \
-	:car-dial-fixture:detekt :car-dial-fixture:ktlintCheck \
-	:even-g2-sdk:detekt :even-g2-sdk:ktlintCheck \
-	:gomode:detekt :gomode:ktlintCheck \
-	:halo-sdk:detekt :halo-sdk:ktlintCheck
+	:car-dial-fixture:detekt \
+	:car-dial-fixture:ktlintCheck \
+	:even-g2-sdk:detekt \
+	:even-g2-sdk:ktlintCheck \
+	:even-g2-testing:detekt \
+	:even-g2-testing:ktlintCheck \
+	:gomode:detekt \
+	:gomode:ktlintCheck \
+	:gomode-testing:detekt \
+	:gomode-testing:ktlintCheck \
+	:halo-sdk:detekt \
+	:halo-sdk:ktlintCheck \
+	:halo-testing:detekt \
+	:halo-testing:ktlintCheck
 
 # Android lint needs compiled classes, so keep it with build-dependent checks.
 ANDROID_TEST_TASKS := \
-	:car-dial-fixture:lintDebug :even-g2-sdk:lintDebug :gomode:lintDebug :halo-sdk:lintDebug \
-	:even-g2-sdk:assembleDebug :gomode:assembleDebug :halo-sdk:assembleDebug \
-	:gomode-sdk:assemble :mcp-sdk:assemble :oauth-sdk:assemble :voicegateway-sdk:assemble \
-	:even-g2-sdk:assembleDebugAndroidTest :gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest \
-	:even-g2-sdk:testDebugUnitTest :gomode:testDebugUnitTest :halo-sdk:testDebugUnitTest \
-	:even-g2-sdk:createDebugUnitTestCoverageReport :gomode:createDebugUnitTestCoverageReport \
+	:car-dial-fixture:assembleDebug \
+	:car-dial-fixture:assembleDebugAndroidTest \
+	:car-dial-fixture:lintDebug \
+	:even-g2-sdk:assembleDebug \
+	:even-g2-sdk:assembleDebugAndroidTest \
+	:even-g2-sdk:createDebugUnitTestCoverageReport \
+	:even-g2-sdk:lintDebug \
+	:even-g2-sdk:testDebugUnitTest \
+	:even-g2-testing:lintDebug \
+	:gomode:assembleDebug \
+	:gomode:assembleDebugAndroidTest \
+	:gomode:createDebugUnitTestCoverageReport \
+	:gomode:lintDebug \
+	:gomode:testDebugUnitTest \
+	:gomode-sdk:assemble \
+	:gomode-testing:lintDebug \
+	:halo-sdk:assembleDebug \
+	:halo-sdk:assembleDebugAndroidTest \
 	:halo-sdk:createDebugUnitTestCoverageReport \
-	:car-dial-fixture:assembleDebug :car-dial-fixture:assembleDebugAndroidTest
+	:halo-sdk:lintDebug \
+	:halo-sdk:testDebugUnitTest \
+	:halo-testing:lintDebug \
+	:mcp-sdk:assemble \
+	:oauth-sdk:assemble \
+	:voicegateway-sdk:assemble
 
 # ANDROID_VERBOSE=true replaces Gradle's --quiet with a plain log of every task
 # and its outcome, so gate logs show which Android checks ran.
@@ -76,7 +103,15 @@ fix: node_modules/.modules.yaml
 	@uv run --locked ruff check --quiet --fix scripts
 	@uv run --locked ruff format scripts >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
-	@./scripts/android-checks.sh :even-g2-sdk:ktlintFormat :gomode:ktlintFormat :halo-sdk:ktlintFormat :car-dial-fixture:ktlintFormat $(GRADLE_LOG_ARGS)
+	@./scripts/android-checks.sh \
+		:car-dial-fixture:ktlintFormat \
+		:even-g2-sdk:ktlintFormat \
+		:even-g2-testing:ktlintFormat \
+		:gomode:ktlintFormat \
+		:gomode-testing:ktlintFormat \
+		:halo-sdk:ktlintFormat \
+		:halo-testing:ktlintFormat \
+		$(GRADLE_LOG_ARGS)
 	@pnpm exec node scripts/build_frontend.mjs --write
 	@uv run --locked python scripts/update_agents_file_index.py
 

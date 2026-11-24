@@ -1,11 +1,11 @@
 // Tests EvenG2Glasses against fake G2 firmware: the close cause it reports when Go Mode closes it.
 package com.fghbuild.gomode.glasses
 
-import com.fghbuild.eveng2.FakeG2Firmware
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Glasses
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.testing.FakeG2Firmware
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

@@ -17,20 +17,22 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
-import com.fghbuild.eveng2.FakeG2Firmware
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
-import com.fghbuild.eveng2.fakeG2Scanner
+import com.fghbuild.eveng2.testing.FakeG2Firmware
+import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.data.GlassesDevice
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.gomode.voice.LocalModelOwner
 import com.fghbuild.gomode.voice.ModelDownloadState
 import com.fghbuild.gomode.voice.localModelInstallation
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -66,7 +68,8 @@ class GlassesPairingTest {
             repository.settings.first { it.glasses != null }
             val firmware = FakeG2Firmware()
             val halo = ScanningFakeHalo(context, HALO_ADDRESS)
-            val glasses = GlassesOwner(context, repository, halo, fakeG2Scanner(), firmware.connector)
+            val glassesScope = MainScope()
+            val glasses = GlassesOwner(glassesScope, context, repository, halo, fakeG2Scanner(), firmware.connector)
             val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
             val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
             try {
@@ -107,7 +110,7 @@ class GlassesPairingTest {
                 composeRule.onNodeWithText("Halo · $HALO_ADDRESS").performScrollTo()
             } finally {
                 composeRule.runOnUiThread {
-                    glasses.close()
+                    glassesScope.cancel()
                     shellOwner.close()
                 }
                 models.close()

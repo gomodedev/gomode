@@ -1,5 +1,5 @@
-// Fake Halo glasses over a fake BLE transport that record each drawing, for unit and instrumented tests.
-package com.fghbuild.gomode.glasses
+// Fake Halo glasses over a fake BLE transport that record the files and typed messages they receive.
+package com.fghbuild.halo.testing
 
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCharacteristic
@@ -9,6 +9,7 @@ import com.fghbuild.halo.ble.HaloDevice
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloException
 import com.fghbuild.halo.ble.HaloProtocol
+import com.fghbuild.halo.msg.TxMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
@@ -16,21 +17,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import java.util.concurrent.CopyOnWriteArrayList
 
-// What a fake Halo was told to show.
-internal sealed interface Shown {
-    data object Clear : Shown
-
-    data class Page(
-        val lines: Int,
-    ) : Shown
-}
-
 /**
  * Replaces BLE with fake Halo glasses that run nothing but answer the REPL and data.lua's protocol.
  * Scanning stays the platform's; connect by address. Tests may read the recorded connections and
  * messages from any thread.
  */
-internal open class FakeHaloTransport(
+open class FakeHaloTransport(
     context: Context,
 ) : HaloConnection(context) {
     // One per successful connection, in order.
@@ -80,7 +72,7 @@ internal open class FakeHaloTransport(
     }
 }
 
-internal class FakeHalo(
+class FakeHalo(
     platformDevice: BluetoothDevice,
     type: HaloDeviceType,
 ) {
@@ -89,7 +81,8 @@ internal class FakeHalo(
 
     // Files the host wrote, and the typed messages it sent as (message code, payload).
     val files = mutableListOf<String>()
-    private val messages = CopyOnWriteArrayList<Pair<Int, ByteArray>>()
+    val messages: List<Pair<Int, ByteArray>> get() = sent
+    private val sent = CopyOnWriteArrayList<Pair<Int, ByteArray>>()
 
     // When set, data.lua acknowledges every typed-message chunk with a failure.
     var rejectMessages = false
@@ -113,23 +106,14 @@ internal class FakeHalo(
         closeCause.value = HaloException("Device disconnected (status=8)")
     }
 
-    fun shown(): List<Shown> =
-        messages.mapNotNull { (code, payload) ->
-            when {
-                code == HALO_CLEAR -> Shown.Clear
-                code == HALO_TEXT_PAGE && payload[0] == 0xFF.toByte() -> Shown.Page(lines = payload[5].toInt())
-                else -> null
-            }
-        }
-
-    /** Whether the newest drawing is the one [haloTextMessages] makes for [text]. */
-    fun lastShows(text: String): Boolean {
-        val expected = haloTextMessages(text).map { (code, message) -> code to message.pack() }
-        val last = messages.toList().takeLast(expected.size)
-        return last.size == expected.size &&
-            last.zip(expected).all { (sent, drawn) ->
-                sent.first == drawn.first &&
-                    sent.second.contentEquals(drawn.second)
+    /** Whether the newest typed messages are [expected], each as its code and packed payload. */
+    fun lastSent(expected: List<Pair<Int, TxMessage>>): Boolean {
+        val packed = expected.map { (code, message) -> code to message.pack() }
+        val last = sent.toList().takeLast(packed.size)
+        return last.size == packed.size &&
+            last.zip(packed).all { (actual, wanted) ->
+                actual.first == wanted.first &&
+                    actual.second.contentEquals(wanted.second)
             }
     }
 
@@ -165,7 +149,7 @@ internal class FakeHalo(
             received += packet.copyOfRange(HaloProtocol.SUBSEQUENT_MESSAGE_HEADER_SIZE, packet.size)
         }
         if (received.size == receivingSize) {
-            messages += receivingCode to received
+            sent += receivingCode to received
             receivingSize = -1
         }
     }

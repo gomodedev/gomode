@@ -1,5 +1,5 @@
 // In-memory preferences DataStore shared by unit and instrumented tests.
-package com.fghbuild.gomode.data
+package com.fghbuild.gomode.testing
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -16,7 +16,7 @@ import kotlinx.coroutines.sync.withLock
  * Serializes each read-modify-write, as DataStore does. SettingsRepository edits from its own IO
  * scope while tests edit from theirs, so an unserialized fake loses writes.
  */
-internal class MemoryPreferences : DataStore<Preferences> {
+class MemoryPreferences : DataStore<Preferences> {
     /**
      * Runs under the write lock before each transform. Throw to fail the write; suspend to hold a
      * save in progress, which also queues later writes behind it.

@@ -1,10 +1,20 @@
 // Fake Even G2 glasses behind fake arm links that answer AUTH, the prelude, and Even Hub, and a fake scan, for SDK and app tests.
 //
-// Hosts compile this file into their own test source sets, so it uses only the SDK's public API
-// and decodes protobuf with its own minimal reader, independent of the SDK's codec.
+// Decodes protobuf with its own minimal reader, independent of the SDK's codec.
 
-package com.fghbuild.eveng2
+package com.fghbuild.eveng2.testing
 
+import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2ArmConnector
+import com.fghbuild.eveng2.G2ArmLink
+import com.fghbuild.eveng2.G2Exception
+import com.fghbuild.eveng2.G2Frame
+import com.fghbuild.eveng2.G2LinkLostException
+import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2PairScanner
+import com.fghbuild.eveng2.G2Protocol
+import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.G2TextPage
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.flow
@@ -12,7 +22,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** Glasses that answer AUTH, the prelude, and Even Hub commands the way the vectors show. Thread-safe. */
-internal class FakeG2Firmware {
+class FakeG2Firmware {
     @Volatile var authenticates: (G2Side) -> Boolean = { true }
 
     @Volatile var reachable: (G2Side) -> Boolean = { true }
@@ -185,7 +195,7 @@ internal class FakeG2Firmware {
 }
 
 /** A scan that hears [pairs] at once and then nothing more until cancelled. */
-internal fun fakeG2Scanner(vararg pairs: G2Pair) =
+fun fakeG2Scanner(vararg pairs: G2Pair) =
     G2PairScanner {
         flow {
             pairs.forEach { emit(it) }
@@ -194,7 +204,7 @@ internal fun fakeG2Scanner(vararg pairs: G2Pair) =
     }
 
 /** One fake arm: reassembles the phone's packets for the firmware and notifies its replies. */
-internal class FakeG2Link(
+class FakeG2Link(
     val arm: G2Arm,
     private val firmware: FakeG2Firmware,
 ) : G2ArmLink {

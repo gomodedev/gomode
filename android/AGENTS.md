@@ -2,7 +2,9 @@
 
 `gomode/` is the native Android shell. `halo/` owns the Halo BLE SDK and
 `evenG2/` the Even Realities G2 BLE SDK; `sdk/gomode`, `sdk/mcp`, and
-`sdk/voicegateway` own generated Kotlin clients.
+`sdk/voicegateway` own generated Kotlin clients. Fakes that several test source
+sets share live in library modules named `testing/` beside their owner, which
+ktlint, detekt, and Android lint check like any other module.
 
 Use minSdk 33, target/compileSdk 36, Java 17, coroutines and StateFlow,
 `kotlinx.serialization`, and DataStore for persisted settings. Kotlin lines

@@ -16,25 +16,28 @@ import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
-import com.fghbuild.eveng2.FakeG2Firmware
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
-import com.fghbuild.eveng2.fakeG2Scanner
+import com.fghbuild.eveng2.testing.FakeG2Firmware
+import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.data.GlassesDevice
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceSetupMode
-import com.fghbuild.gomode.glasses.FakeHaloTransport
 import com.fghbuild.gomode.glasses.G2_DISPLAY
 import com.fghbuild.gomode.glasses.G2_TEXT_CAPACITY
 import com.fghbuild.gomode.glasses.GlassesLink
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.HALO_DISPLAY
 import com.fghbuild.gomode.glasses.HALO_TEXT_CAPACITY
+import com.fghbuild.gomode.glasses.haloTextMessages
+import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
+import com.fghbuild.halo.testing.FakeHaloTransport
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -83,7 +86,16 @@ class GlassesVoiceTranscriptTest {
                 repository.settings.first { it.showReasoning && !it.voiceSetup.deviceSpeech }
                 val context = InstrumentationRegistry.getInstrumentation().targetContext
                 val transport = FakeHaloTransport(context)
-                val glasses = GlassesOwner(context, repository, transport, fakeG2Scanner(), FakeG2Firmware().connector)
+                val glassesScope = MainScope()
+                val glasses =
+                    GlassesOwner(
+                        glassesScope,
+                        context,
+                        repository,
+                        transport,
+                        fakeG2Scanner(),
+                        FakeG2Firmware().connector,
+                    )
                 val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
                 val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
                 try {
@@ -105,7 +117,7 @@ class GlassesVoiceTranscriptTest {
                     val gateway = fixture.sessions.single()
 
                     gateway.send("""{"kind":"transcript.draft","id":"d1","text":"what is the"}""")
-                    composeRule.waitUntil(TIMEOUT_MS) { halo.lastShows("You: what is the") }
+                    composeRule.waitUntil(TIMEOUT_MS) { halo.lastSent(haloTextMessages("You: what is the")) }
 
                     gateway.send(
                         """{"kind":"transcript.delta","speaker":"user","text":"What is the code word?","draft_id":"d1"}""",
@@ -115,15 +127,15 @@ class GlassesVoiceTranscriptTest {
                         """{"kind":"transcript.delta","speaker":"assistant","text":"The code word is cedar."}""",
                     )
                     composeRule.waitUntil(TIMEOUT_MS) {
-                        halo.lastShows("You: What is the code word?\nThe code word is cedar.")
+                        halo.lastSent(haloTextMessages("You: What is the code word?\nThe code word is cedar."))
                     }
 
                     composeRule.onNodeWithContentDescription("End voice").performClick()
-                    composeRule.waitUntil(TIMEOUT_MS) { halo.lastShows("") }
+                    composeRule.waitUntil(TIMEOUT_MS) { halo.lastSent(haloTextMessages("")) }
                     assertEquals(GlassesLink.Connected(HALO_DISPLAY, HALO_TEXT_CAPACITY), glasses.state.value.link)
                 } finally {
                     composeRule.runOnUiThread {
-                        glasses.close()
+                        glassesScope.cancel()
                         shellOwner.close()
                     }
                     models.close()
@@ -152,8 +164,10 @@ class GlassesVoiceTranscriptTest {
                         .single()
                 val context = InstrumentationRegistry.getInstrumentation().targetContext
                 val firmware = FakeG2Firmware()
+                val glassesScope = MainScope()
                 val glasses =
                     GlassesOwner(
+                        glassesScope,
                         context,
                         repository,
                         FakeHaloTransport(context),
@@ -229,7 +243,7 @@ class GlassesVoiceTranscriptTest {
                 } finally {
                     composeRule.runOnUiThread {
                         carDial.close()
-                        glasses.close()
+                        glassesScope.cancel()
                         shellOwner.close()
                     }
                     models.close()

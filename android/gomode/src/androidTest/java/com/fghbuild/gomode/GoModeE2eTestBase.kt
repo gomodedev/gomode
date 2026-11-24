@@ -2,6 +2,7 @@
 package com.fghbuild.gomode
 
 import android.Manifest
+import android.util.AtomicFile
 import android.webkit.WebView
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -20,6 +21,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Rule
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
@@ -38,6 +40,9 @@ abstract class GoModeE2eTestBase {
                     enableSoftKeyboardWithHardwareKeyboard()
                     val context = InstrumentationRegistry.getInstrumentation().targetContext
                     runBlocking { context.goModeSettingsDataStore.edit { it.clear() } }
+                    // Settings disclose failures that earlier voice sessions retained. The log reads them
+                    // once per process, when first used, so this clears them only for a process that has not.
+                    AtomicFile(File(context.noBackupFilesDir, "voice-errors.json")).delete()
                     base.evaluate()
                 }
             }

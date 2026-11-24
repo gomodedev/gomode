@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
+import com.fghbuild.gomode.testing.MemoryPreferences
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking

@@ -1,9 +1,9 @@
 // Tests native settings autosave validation, explicit creation, active-session guards, and failed-write recovery.
 package com.fghbuild.gomode.ui.settings
 
-import com.fghbuild.gomode.data.MemoryPreferences
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.testing.MemoryPreferences
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
