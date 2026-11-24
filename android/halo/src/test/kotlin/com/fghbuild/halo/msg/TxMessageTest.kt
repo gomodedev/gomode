@@ -1,6 +1,7 @@
 // Unit tests for TxMessage types: wire format packing.
 package com.fghbuild.halo.msg
 
+import android.graphics.Paint
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -8,6 +9,7 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
 class TxMessageTest {
@@ -124,6 +126,25 @@ class TxMessageTest {
         assertEquals(10, packed.size)
         assertEquals(0xFF, packed[0].toInt() and 0xFF)
         assertEquals(1, packed[5].toInt() and 0xFF)
+    }
+
+    @Test
+    fun `text page starts a new line at each line feed`() {
+        val layout = RectangularTextLayout(width = 256, height = 128, fontSizePx = 16)
+        val page = TxTextPage(layout, "Hi\nthere\n\nall").rasterizeNextPage()!!
+
+        assertEquals(listOf("Hi", "there", "all"), page.lineTexts)
+    }
+
+    @Test
+    fun `centred text page lines start where their text is centred in the line`() {
+        val layout = RectangularTextLayout(width = 200, height = 32, fontSizePx = 16, textAlign = Paint.Align.CENTER)
+        val page = TxTextPage(layout, "Hi").rasterizeNextPage()!!
+
+        val packed = page.pack()
+        val x = ((packed[6].toInt() and 0xFF) shl 8) or (packed[7].toInt() and 0xFF)
+        val spriteCentre = x + page.rasterizedSprites.single().width / 2
+        assertTrue("sprite at x=$x", abs(spriteCentre - 100) <= 1)
     }
 
     // ---- TxSprite ----

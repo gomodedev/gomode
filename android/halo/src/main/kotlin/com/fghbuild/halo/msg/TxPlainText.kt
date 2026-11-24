@@ -11,8 +11,8 @@ data class TxPlainText(
 ) : TxMessage {
     init {
         require(paletteOffset in 1..15) { "paletteOffset must be 1–15, got $paletteOffset" }
-        require(x in 1..256) { "x must be 1–256 (Halo display), got $x" }
-        require(y in 1..256) { "y must be 1–256 (Halo display), got $y" }
+        require(x in 1..HaloDisplay.SIZE_PX) { "x must be 1–${HaloDisplay.SIZE_PX} (Halo display), got $x" }
+        require(y in 1..HaloDisplay.SIZE_PX) { "y must be 1–${HaloDisplay.SIZE_PX} (Halo display), got $y" }
     }
 
     override fun pack(): ByteArray {

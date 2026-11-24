@@ -7,12 +7,14 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.work.Configuration
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.gomode.voice.CarDialVoiceOwner
 import com.fghbuild.gomode.voice.LocalModelDownloads
 import com.fghbuild.gomode.voice.LocalModelLoadDiagnostics
 import com.fghbuild.gomode.voice.LocalModelOwner
 import com.fghbuild.gomode.voice.VoiceErrorLog
+import com.fghbuild.halo.ble.HaloConnection
 
 internal val Context.goModeSettingsDataStore by preferencesDataStore(name = "gomode_settings")
 
@@ -57,8 +59,11 @@ class GoModeApplication :
             CarDialVoiceOwner(this, settingsRepository, localModelOwner, serviceShellOwner)
         }
     internal val carDialVoiceOwner by carDialVoiceOwnerDelegate
+    private val glassesOwnerDelegate = lazy { GlassesOwner(this, settingsRepository, HaloConnection(this)) }
+    internal val glassesOwner by glassesOwnerDelegate
 
     override fun onTerminate() {
+        if (glassesOwnerDelegate.isInitialized()) glassesOwner.close()
         if (modelLoadDiagnosticsDelegate.isInitialized()) modelLoadDiagnostics.close()
         if (voiceErrorsDelegate.isInitialized()) voiceErrors.close()
         if (carDialVoiceOwnerDelegate.isInitialized()) carDialVoiceOwner.close()

@@ -5,6 +5,8 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCharacteristic
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -23,6 +25,12 @@ class HaloDevice(
     internal var maxDataLen: Int = 0,
     // Shared notification Flow — populated by HaloConnection.enableServices.
     internal var rawNotifications: Flow<ByteArray>? = null,
+    /**
+     * Why the link to the device ended, or null while it is up. [HaloConnection] sets it when the
+     * GATT link drops or the host disconnects; it never returns to null. A device not wired to a
+     * connection never closes.
+     */
+    val closeCause: StateFlow<HaloException?> = MutableStateFlow(null),
 ) {
     val uuid: String get() = platformDevice.address
 

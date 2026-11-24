@@ -1,15 +1,14 @@
-// Compose Halo screen for Go Mode native BLE device management.
+// Compose Halo screen: scans, connects, forgets, and sets auto-connect through the app-scoped GlassesOwner.
 package com.fghbuild.gomode.ui.halo
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -31,7 +30,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -39,9 +40,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.fghbuild.gomode.halo.HaloConnectionState
-import com.fghbuild.gomode.halo.HaloController
-import com.fghbuild.gomode.halo.HaloDeviceItem
+import com.fghbuild.gomode.glasses.GlassesLink
+import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.GlassesProblem
+import com.fghbuild.gomode.glasses.ScannedGlasses
 
 private val BluetoothPermissions =
     arrayOf(
@@ -51,24 +53,33 @@ private val BluetoothPermissions =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HaloScreen(
-    haloController: HaloController,
+internal fun HaloScreen(
+    owner: GlassesOwner,
     onNavigateBack: () -> Unit,
 ) {
-    val state by haloController.state.collectAsStateWithLifecycle()
+    val state by owner.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // The action that waits for the Bluetooth permission prompt; it runs only when both are granted.
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val permissionLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
         ) { grants ->
-            if (BluetoothPermissions.all { grants[it] == true }) {
-                haloController.startScan()
-            }
+            if (BluetoothPermissions.all { grants[it] == true }) pendingAction?.invoke()
+            pendingAction = null
         }
     val hasBluetoothPermissions =
         BluetoothPermissions.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
+    val withBluetooth = { action: () -> Unit ->
+        if (hasBluetoothPermissions) {
+            action()
+        } else if (!context.getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            pendingAction = action
+            permissionLauncher.launch(BluetoothPermissions)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -92,20 +103,29 @@ fun HaloScreen(
                     .testTag("gomode-halo-screen"),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            val savedAddress = state.savedAddress
             ListItem(
                 headlineContent = { Text("Connection") },
-                supportingContent = { Text(state.connectionState.label()) },
+                supportingContent = {
+                    Text(state.link.label(), modifier = Modifier.testTag("gomode-halo-link"))
+                },
                 leadingContent = {
-                    Icon(
-                        Icons.Filled.Bluetooth,
-                        contentDescription = null,
-                        tint = state.connectionState.tint(),
-                    )
+                    Icon(Icons.Filled.Bluetooth, contentDescription = null, tint = state.link.tint())
                 },
                 trailingContent = {
-                    if (state.connectionState == HaloConnectionState.Connected) {
-                        OutlinedButton(onClick = { haloController.disconnect() }) {
+                    if (state.link != GlassesLink.Disconnected) {
+                        OutlinedButton(
+                            onClick = owner::disconnect,
+                            modifier = Modifier.testTag("gomode-halo-disconnect"),
+                        ) {
                             Text("Disconnect")
+                        }
+                    } else if (savedAddress != null) {
+                        Button(
+                            onClick = { withBluetooth { owner.connect(savedAddress) } },
+                            modifier = Modifier.testTag("gomode-halo-connect"),
+                        ) {
+                            Text("Connect")
                         }
                     }
                 },
@@ -113,22 +133,22 @@ fun HaloScreen(
 
             ListItem(
                 headlineContent = { Text("Auto-connect") },
-                supportingContent = { Text("Reconnect to the last selected Halo when support is enabled.") },
+                supportingContent = { Text("Connect to the saved Halo when Go Mode opens.") },
                 trailingContent = {
                     Switch(
-                        checked = state.haloAutoConnect,
-                        onCheckedChange = { haloController.updateAutoConnect(it) },
+                        checked = state.autoConnect,
+                        onCheckedChange = owner::updateAutoConnect,
+                        modifier = Modifier.testTag("gomode-halo-auto-connect"),
                     )
                 },
             )
 
-            val selectedAddress = state.haloAddress
-            if (selectedAddress != null) {
+            if (savedAddress != null) {
                 ListItem(
-                    headlineContent = { Text("Selected device") },
-                    supportingContent = { Text(selectedAddress) },
+                    headlineContent = { Text("Saved device") },
+                    supportingContent = { Text(savedAddress) },
                     trailingContent = {
-                        TextButton(onClick = { haloController.forgetDevice() }) {
+                        TextButton(onClick = owner::forget, modifier = Modifier.testTag("gomode-halo-forget")) {
                             Text("Forget")
                         }
                     },
@@ -140,22 +160,24 @@ fun HaloScreen(
                     text = error,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag("gomode-halo-error"),
                 )
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            ScanButtonRow(
-                scanning = state.connectionState == HaloConnectionState.Scanning,
-                hasBluetoothPermissions = hasBluetoothPermissions,
-                onScan = { haloController.startScan() },
-                onRequestPermissions = {
-                    if (!context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) {
-                        permissionLauncher.launch(BluetoothPermissions)
-                    }
-                },
-                onStopScan = { haloController.stopScan() },
-            )
+            if (state.scanning) {
+                OutlinedButton(onClick = owner::stopScan, modifier = Modifier.testTag("gomode-halo-stop-scan")) {
+                    Text("Stop scan")
+                }
+            } else {
+                Button(
+                    onClick = { withBluetooth(owner::startScan) },
+                    modifier = Modifier.testTag("gomode-halo-scan"),
+                ) {
+                    Text("Scan")
+                }
+            }
 
             if (!hasBluetoothPermissions) {
                 Text(
@@ -176,9 +198,9 @@ fun HaloScreen(
                 state.devices.forEach { device ->
                     HaloDeviceRow(
                         device = device,
-                        selected = device.id == state.selectedDeviceId,
-                        connecting = state.connectionState == HaloConnectionState.Connecting,
-                        onConnect = { haloController.connect(device.id) },
+                        // The saved glasses already have the connection, or are getting it.
+                        linked = device.address == savedAddress && state.link != GlassesLink.Disconnected,
+                        onConnect = { withBluetooth { owner.connect(device.address) } },
                     )
                 }
             }
@@ -187,78 +209,48 @@ fun HaloScreen(
 }
 
 @Composable
-private fun ScanButtonRow(
-    scanning: Boolean,
-    hasBluetoothPermissions: Boolean,
-    onScan: () -> Unit,
-    onRequestPermissions: () -> Unit,
-    onStopScan: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (scanning) {
-            OutlinedButton(onClick = onStopScan) {
-                Text("Stop scan")
-            }
-        } else {
-            Button(
-                onClick = {
-                    if (hasBluetoothPermissions) {
-                        onScan()
-                    } else {
-                        onRequestPermissions()
-                    }
-                },
-            ) {
-                Text("Scan")
-            }
-        }
-    }
-}
-
-@Composable
 private fun HaloDeviceRow(
-    device: HaloDeviceItem,
-    selected: Boolean,
-    connecting: Boolean,
+    device: ScannedGlasses,
+    linked: Boolean,
     onConnect: () -> Unit,
 ) {
     ListItem(
         headlineContent = { Text(device.name, fontWeight = FontWeight.Medium) },
-        supportingContent = {
-            Text("${device.address.ifBlank { "Address unavailable" }} - ${device.rssi} dBm")
-        },
+        supportingContent = { Text("${device.address} - ${device.rssi} dBm") },
         trailingContent = {
-            Button(
-                onClick = onConnect,
-                enabled = !connecting,
-            ) {
-                if (selected && connecting) {
-                    Text("Connecting")
-                } else {
-                    Text("Connect")
-                }
+            Button(onClick = onConnect, enabled = !linked) {
+                Text("Connect")
             }
         },
     )
 }
 
 @Composable
-private fun HaloConnectionState.tint() =
+private fun GlassesLink.tint() =
     when (this) {
-        HaloConnectionState.Connected -> MaterialTheme.colorScheme.primary
-        HaloConnectionState.Error -> MaterialTheme.colorScheme.error
+        GlassesLink.Connected -> MaterialTheme.colorScheme.primary
+        is GlassesLink.Reconnecting -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-private fun HaloConnectionState.label(): String =
+private fun GlassesLink.label(): String =
     when (this) {
-        HaloConnectionState.Disconnected -> "Disconnected"
-        HaloConnectionState.Scanning -> "Scanning"
-        HaloConnectionState.Connecting -> "Waiting for pairing or connection"
-        HaloConnectionState.Connected -> "Connected"
-        HaloConnectionState.Error -> "Connection error"
+        GlassesLink.Disconnected -> {
+            "Disconnected"
+        }
+
+        GlassesLink.Connecting -> {
+            "Waiting for pairing or connection"
+        }
+
+        GlassesLink.Connected -> {
+            "Connected"
+        }
+
+        is GlassesLink.Reconnecting -> {
+            when (problem) {
+                GlassesProblem.UNREACHABLE -> "Halo not reachable. Turn it on and keep it close. Retrying."
+                GlassesProblem.UNRESPONSIVE -> "Halo stopped responding. Retrying."
+            }
+        }
     }

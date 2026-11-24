@@ -67,7 +67,7 @@ import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
-import com.fghbuild.gomode.halo.HaloController
+import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.service.CatalogNotification
 import com.fghbuild.gomode.service.CatalogService
 import com.fghbuild.gomode.service.ServiceCatalog
@@ -223,13 +223,8 @@ internal fun GoModeApp(
     val carVoiceState by carVoiceOwner.state.collectAsStateWithLifecycle()
     val carVoiceSession by carVoiceOwner.session.collectAsStateWithLifecycle()
     val carVoiceBusy = carVoiceState.status != CarDialStatus.IDLE && carVoiceState.status != CarDialStatus.FAILED
-    val haloController =
-        remember(settingsRepository) {
-            HaloController(context.applicationContext, settingsRepository)
-        }
-    DisposableEffect(haloController) {
-        onDispose { haloController.close() }
-    }
+    val glassesOwner = (context.applicationContext as GoModeApplication).glassesOwner
+    LaunchedEffect(glassesOwner) { glassesOwner.start() }
 
     val settings = shellSnapshot.settings
     val settingsEdits = rememberSettingsEdits(settingsRepository, settings)
@@ -602,7 +597,7 @@ internal fun GoModeApp(
                     settings = settings,
                     settingsRepository = settingsRepository,
                     settingsEdits = settingsEdits,
-                    haloController = haloController,
+                    glassesOwner = glassesOwner,
                     activeURL = activeURL,
                     serviceSession = serviceSession,
                     onSetNativeScreen = { if (!keyguard.isKeyguardLocked) activeNativeScreen = it },
@@ -881,7 +876,7 @@ private fun GoModeContent(
     settings: SettingsState,
     settingsRepository: SettingsRepository,
     settingsEdits: SettingsEdits,
-    haloController: HaloController,
+    glassesOwner: GlassesOwner,
     activeURL: String,
     serviceSession: ServiceShellSession,
     activeNativeScreen: NativeScreen?,
@@ -929,7 +924,7 @@ private fun GoModeContent(
     when {
         activeNativeScreen == NativeScreen.Halo -> {
             HaloScreen(
-                haloController = haloController,
+                owner = glassesOwner,
                 onNavigateBack = { onSetNativeScreen(NativeScreen.Settings) },
             )
         }

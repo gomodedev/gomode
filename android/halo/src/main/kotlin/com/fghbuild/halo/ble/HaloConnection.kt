@@ -16,8 +16,11 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.ParcelUuid
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -35,7 +38,12 @@ open class HaloConnection(
             bluetoothManager.adapter
                 ?: throw HaloException("Bluetooth not available on this device")
 
+    @Volatile
     private var activeGatt: BluetoothGatt? = null
+
+    // The close cause of the device returned by the latest connect; replaced by each connect.
+    @Volatile
+    private var linkClosed = MutableStateFlow<HaloException?>(null)
 
     @Volatile
     private var currentGattCallback: BluetoothGattCallback? = null
@@ -71,9 +79,13 @@ open class HaloConnection(
                         result: ScanResult,
                     ) {
                         val name = result.device.name ?: return
-                        if (name.startsWith("Halo ") || name.startsWith("Frame ")) {
-                            trySend(HaloScannedDevice(result.device, result.rssi))
-                        }
+                        val type =
+                            when {
+                                name.startsWith("Halo ") -> HaloDeviceType.HALO
+                                name.startsWith("Frame ") -> HaloDeviceType.FRAME
+                                else -> return
+                            }
+                        trySend(HaloScannedDevice(result.device, result.rssi, type))
                     }
 
                     override fun onScanFailed(errorCode: Int) {
@@ -92,14 +104,17 @@ open class HaloConnection(
 
     // ---- Connection ----
 
-    /** Overridable for testing: create the GATT connection. */
+    /**
+     * Overridable for testing: create the GATT connection. A GATT client that does not connect, by
+     * timeout, early disconnection, or cancellation, is closed so retries cannot leak clients.
+     */
     protected open suspend fun connectGatt(
         device: BluetoothDevice,
         timeoutMs: Long,
     ): BluetoothGatt =
         withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<BluetoothGatt> { cont ->
-                val gatt =
+                val gatt: BluetoothGatt? =
                     device.connectGatt(
                         context,
                         false,
@@ -113,14 +128,22 @@ open class HaloConnection(
                                     BluetoothProfile.STATE_CONNECTED -> {
                                         if (cont.isActive) {
                                             activeGatt = g
-                                            cont.resume(g)
+                                            // Cancellation can still drop the result after this resume.
+                                            cont.resume(g) { _, _, _ -> closeGatt(g) }
                                         }
                                     }
 
                                     BluetoothProfile.STATE_DISCONNECTED -> {
                                         if (cont.isActive) {
+                                            closeGatt(g)
                                             cont.resumeWithException(
                                                 HaloException("Disconnected during connection (status=$status)"),
+                                            )
+                                        } else if (g === activeGatt) {
+                                            // A late callback from an earlier connection's GATT is not this link's.
+                                            linkClosed.compareAndSet(
+                                                null,
+                                                HaloException("Device disconnected (status=$status)"),
                                             )
                                         }
                                     }
@@ -169,7 +192,12 @@ open class HaloConnection(
                         },
                         BluetoothDevice.TRANSPORT_LE,
                     )
-                if (gatt == null) cont.resumeWithException(HaloException("connectGatt returned null"))
+                if (gatt == null) {
+                    cont.resumeWithException(HaloException("connectGatt returned null"))
+                } else {
+                    // Runs on timeout too: withTimeoutOrNull cancels this coroutine.
+                    cont.invokeOnCancellation { closeGatt(gatt) }
+                }
             }
         } ?: throw HaloException("Connection timed out after ${timeoutMs}ms")
 
@@ -206,12 +234,18 @@ open class HaloConnection(
         } ?: throw HaloException("MTU negotiation timed out after ${timeoutMs}ms")
     }
 
+    /**
+     * Connects to [device], a scan result's or one the system knows by address, and returns it ready
+     * for Lua and typed messages. The returned device's [HaloDevice.closeCause] reports when the link
+     * ends. One connection at a time: connecting again replaces the previous device's link reporting,
+     * so [disconnect] first.
+     */
     @Suppress("TooGenericExceptionCaught")
     open suspend fun connect(
-        scanned: HaloScannedDevice,
+        device: BluetoothDevice,
         timeoutMs: Long = 15_000,
     ): HaloDevice {
-        val device = scanned.device
+        linkClosed = MutableStateFlow(null)
         val gatt = connectGatt(device, timeoutMs)
 
         return try {
@@ -225,26 +259,29 @@ open class HaloConnection(
 
             requestMtu(gatt, timeoutMs)
             enableServices(device, gatt, timeoutMs)
+        } catch (e: CancellationException) {
+            closeGatt(gatt)
+            throw e
         } catch (e: HaloException) {
-            try {
-                gatt.disconnect()
-            } catch (_: Exception) {
-            }
-            try {
-                gatt.close()
-            } catch (_: Exception) {
-            }
+            closeGatt(gatt)
             throw e
         } catch (e: Exception) {
-            try {
-                gatt.disconnect()
-            } catch (_: Exception) {
-            }
-            try {
-                gatt.close()
-            } catch (_: Exception) {
-            }
+            closeGatt(gatt)
             throw HaloException("Connection failed: ${e.message}", e)
+        }
+    }
+
+    // Releases a GATT client that will not carry this connection; Android keeps a small, shared pool.
+    @Suppress("SwallowedException") // A GATT client that already failed or closed has nothing left to release.
+    private fun closeGatt(gatt: BluetoothGatt) {
+        if (activeGatt === gatt) activeGatt = null
+        try {
+            gatt.disconnect()
+        } catch (_: Exception) {
+        }
+        try {
+            gatt.close()
+        } catch (_: Exception) {
         }
     }
 
@@ -257,6 +294,7 @@ open class HaloConnection(
         audioTxChar: BluetoothGattCharacteristic?,
         limits: HaloServiceDiscovery.PayloadLimits,
         notificationsFlow: Flow<ByteArray>,
+        closeCause: StateFlow<HaloException?>,
     ): HaloDevice =
         HaloDevice(
             platformDevice = platformDevice,
@@ -267,6 +305,7 @@ open class HaloConnection(
             maxStringLen = limits.maxStringLen,
             maxDataLen = limits.maxDataLen,
             rawNotifications = notificationsFlow,
+            closeCause = closeCause,
         )
 
     /** Overridable for testing: wire the writeSink to GATT writes. */
@@ -418,23 +457,18 @@ open class HaloConnection(
                 }
             }
 
-        val haloDevice = createHaloDevice(device, deviceType, txChar, rxChar, audioTxChar, limits, notificationsFlow)
+        val haloDevice =
+            createHaloDevice(device, deviceType, txChar, rxChar, audioTxChar, limits, notificationsFlow, linkClosed)
         wireWriteSink(haloDevice, gatt)
         return haloDevice
     }
 
     // ---- Disconnect ----
 
+    /** Ends the current link; its device's [HaloDevice.closeCause] reports the disconnect. */
     open suspend fun disconnect() {
-        try {
-            activeGatt?.disconnect()
-        } catch (_: Exception) {
-        }
-        try {
-            activeGatt?.close()
-        } catch (_: Exception) {
-        }
-        activeGatt = null
+        linkClosed.compareAndSet(null, HaloException("Disconnected by the host"))
+        activeGatt?.let(::closeGatt)
         currentGattCallback = null
     }
 

@@ -30,10 +30,16 @@ private const val SETTLE_CHECK_INTERVAL_MS = 100L
 @RunWith(AndroidJUnit4::class)
 @DocumentationCapture
 class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
-    // Both capture passes must start with the same permission state before Activity launch.
+    // Both capture passes must start with the same permission state before Activity launch. Grants
+    // persist across installs, so granting Bluetooth too keeps the Halo scene independent of earlier
+    // tests on the emulator.
     @get:Rule(order = 1)
-    val microphonePermissionRule: GrantPermissionRule =
-        GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
+    val permissionRule: GrantPermissionRule =
+        GrantPermissionRule.grant(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+        )
 
     override fun validateDeviceBeforeSetup() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())

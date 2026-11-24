@@ -10,9 +10,17 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -62,6 +70,69 @@ class HaloConnectionTest {
         frameService.addCharacteristic(frameTx)
         frameService.addCharacteristic(frameRx)
     }
+
+    // ---- GATT clients of failed connections ----
+
+    private fun pendingGatt() = Shadows.shadowOf(btDevice).bluetoothGatts.single()
+
+    @Test
+    fun `a connection that times out closes its GATT client`() =
+        runTest {
+            val connection = HaloConnection(RuntimeEnvironment.getApplication())
+            val error = runCatching { connection.connect(btDevice, timeoutMs = 1_000) }.exceptionOrNull()
+            assertTrue("$error", error is HaloException)
+            assertTrue(Shadows.shadowOf(pendingGatt()).isClosed)
+        }
+
+    @Test
+    fun `a disconnection during connection closes its GATT client`() =
+        runTest {
+            val connection = HaloConnection(RuntimeEnvironment.getApplication())
+            val attempt = async { runCatching { connection.connect(btDevice) } }
+            runCurrent()
+            Shadows.shadowOf(btDevice).simulateGattConnectionChange(133, BluetoothProfile.STATE_DISCONNECTED)
+            val error = attempt.await().exceptionOrNull()
+            assertTrue("$error", error is HaloException)
+            assertTrue(Shadows.shadowOf(pendingGatt()).isClosed)
+        }
+
+    @Test
+    fun `a cancelled connection stays cancelled and closes its GATT client`() =
+        runTest {
+            val connection = HaloConnection(RuntimeEnvironment.getApplication())
+            val attempt = async { connection.connect(btDevice) }
+            runCurrent()
+            attempt.cancel()
+            val error = runCatching { attempt.await() }.exceptionOrNull()
+            assertTrue("$error", error is CancellationException)
+            assertTrue(Shadows.shadowOf(pendingGatt()).isClosed)
+        }
+
+    @Test
+    fun `a cancellation during connection setup is not wrapped and closes its GATT client`() =
+        runTest {
+            // The setup steps after the link comes up run inside connect's failure handling.
+            val connection =
+                object : HaloConnection(RuntimeEnvironment.getApplication()) {
+                    override fun createHaloDevice(
+                        platformDevice: BluetoothDevice,
+                        type: HaloDeviceType,
+                        txChar: BluetoothGattCharacteristic,
+                        rxChar: BluetoothGattCharacteristic,
+                        audioTxChar: BluetoothGattCharacteristic?,
+                        limits: HaloServiceDiscovery.PayloadLimits,
+                        notificationsFlow: Flow<ByteArray>,
+                        closeCause: StateFlow<HaloException?>,
+                    ): HaloDevice = throw CancellationException("connection cancelled")
+                }
+            val attempt = async { runCatching { connection.connect(btDevice) } }
+            runCurrent()
+            Shadows.shadowOf(pendingGatt()).addDiscoverableService(haloService)
+            Shadows.shadowOf(btDevice).simulateGattConnectionChange(0, BluetoothProfile.STATE_CONNECTED)
+            val error = attempt.await().exceptionOrNull()
+            assertTrue("$error", error is CancellationException)
+            assertTrue(Shadows.shadowOf(pendingGatt()).isClosed)
+        }
 
     // ---- device type detection via service ----
 

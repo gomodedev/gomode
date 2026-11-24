@@ -84,6 +84,10 @@ class CircularTextLayout(
     }
 }
 
+/**
+ * Splits [text] into pages that fit [layout]. Lines wrap at whitespace, and a line feed starts a new
+ * line; blank lines collapse.
+ */
 class TxTextPage(
     private val layout: TextLayout,
     text: String,
@@ -130,18 +134,26 @@ class TxTextPage(
 
     fun rasterizeNextPage(): TextPageData? = measureNextPage()?.also { it.rasterize() }
 
+    // Returns how many characters of [text] the next line consumes, including a line feed that ends it.
     private fun breakText(
         text: String,
         paint: Paint,
         maxWidth: Float,
     ): Int {
-        val measured = paint.breakText(text, true, maxWidth, null)
-        if (measured >= text.length) return text.length
+        val lineEnd = text.indexOf('\n').let { if (it < 0) text.length else it }
+        val measured = paint.breakText(text, 0, lineEnd, true, maxWidth, null)
+        if (measured >= lineEnd) return min(lineEnd + 1, text.length)
         val lastWhitespace = text.substring(0, measured).indexOfLast { it.isWhitespace() }
         return if (lastWhitespace > 0) lastWhitespace + 1 else measured
     }
 }
 
+/**
+ * One page of lines. [pack] is the header: 0xFF, the layout's width and height, the line count,
+ * then each line's x and y on the display, all 16-bit big-endian except the 1-byte marker and
+ * count. Send it, then each of [rasterizedSprites] in order, under one message code; the device
+ * library text_page.lua draws the page once its last sprite arrives.
+ */
 class TextPageData internal constructor(
     private val layout: TextLayout,
     private val lines: List<TextLineData>,
@@ -168,8 +180,21 @@ class TextPageData internal constructor(
                 }
             canvas.drawText(line.text, x, -paint.fontMetrics.ascent, paint)
             sprites += bitmap.toMonochromeSprite()
-            line.width = textWidth
         }
+    }
+
+    // Where the line's sprite starts: aligned within the width the layout gave the line.
+    private fun spriteX(
+        line: TextLineData,
+        sprite: TxSprite,
+    ): Int {
+        val slack = max(0, line.width - sprite.width)
+        return line.xOffset +
+            when (layout.textAlign) {
+                Paint.Align.CENTER -> slack / 2
+                Paint.Align.RIGHT -> slack
+                else -> 0
+            }
     }
 
     override fun pack(): ByteArray {
@@ -183,8 +208,9 @@ class TextPageData internal constructor(
         header[5] = sprites.size.toByte()
         lines.forEachIndexed { index, line ->
             val offset = 6 + index * 4
-            header[offset] = (line.xOffset shr 8).toByte()
-            header[offset + 1] = (line.xOffset and 0xFF).toByte()
+            val x = spriteX(line, sprites[index])
+            header[offset] = (x shr 8).toByte()
+            header[offset + 1] = (x and 0xFF).toByte()
             header[offset + 2] = (line.yOffset shr 8).toByte()
             header[offset + 3] = (line.yOffset and 0xFF).toByte()
         }
@@ -194,7 +220,8 @@ class TextPageData internal constructor(
 
 internal data class TextLineData(
     val text: String,
-    var width: Int,
+    // The width the layout gives the line, which its text fits in.
+    val width: Int,
     val xOffset: Int,
     val yOffset: Int,
     val lineHeight: Int,
