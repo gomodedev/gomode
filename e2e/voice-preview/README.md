@@ -136,7 +136,7 @@ segment and chips must use system colors.
 
 The [web reference](../screenshots/voice/web-settings.webp), its
 [desktop layout](../screenshots/voice/web-desktop-settings.webp), and the
-[Android reference](../screenshots/android/voice-settings.webp) show the same
+[Android reference](../screenshots/android/voice-settings-light.webp) show the same
 setup: Voxtral recognition, GPT 6 Luna, client speech, and its speaking voice and speed.
 Both fixtures serve `scene/voice-choices.json`. The client speech option is
 "Browser" on web and "Local" on Android.

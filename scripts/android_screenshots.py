@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Capture and validate native Android documentation scenes on a running emulator.
 
-The runner renders the real Go Mode app twice against a host-neutral demo,
-compares decoded pixels, then publishes lossless WebP images.
+The runner renders the real Go Mode app twice in each system appearance against
+a host-neutral demo, compares decoded pixels, then publishes lossless WebP images
+named <scene>-light.webp and <scene>-dark.webp.
 Website repositories own importing these captures; their builds need no Gradle or emulator.
 The emulator must use the en-US display locale. Run through
 `make screenshots-update`.
@@ -38,7 +39,9 @@ SCENARIOS = (
     "voice-settings-all-in-one",
     "voice-settings-speed-menu",
 )
-EXPECTED_FILES = frozenset(f"{name}.webp" for name in SCENARIOS)
+# Each appearance maps to the `cmd uimode night` value that selects it.
+APPEARANCES = {"dark": "yes", "light": "no"}
+EXPECTED_FILES = frozenset(f"{name}-{appearance}.webp" for name in SCENARIOS for appearance in APPEARANCES)
 # The owned API35 stock emulator at 280dpi insets the SystemUI status bar by 42px.
 STATUS_BAR_HEIGHT_PX = 42
 # SystemUI antialiasing can vary by a couple of RGB levels inside that inset.
@@ -212,8 +215,8 @@ def compare(first: pathlib.Path, second: pathlib.Path, status_height: int) -> No
             raise RuntimeError(f"Android scene {name} SystemUI changed across {changed} pixels")
 
 
-def encode(source: pathlib.Path, output: pathlib.Path, name: str) -> None:
-    destination = output / f"{name}.webp"
+def encode(source: pathlib.Path, output: pathlib.Path, name: str, appearance: str) -> None:
+    destination = output / f"{name}-{appearance}.webp"
     subprocess.run(
         [
             "ffmpeg",
@@ -323,33 +326,36 @@ def _capture() -> int:
         hidden_icons = ",".join(sorted(hidden))
         for key in overrides[:3]:
             adb_command(adb, serial, "shell", "settings", "put", "global", key, "0")
-        adb_command(adb, serial, "shell", "cmd", "uimode", "night", "no")
         # The instrumentation enables and enters the profile after shell and
         # SystemUI readiness, and reapplies it per scene. Cold test initialization
         # can reset demo_allowed before the first Activity becomes visible.
         with tempfile.TemporaryDirectory(prefix="gomode-captures-") as temporary:
             work = pathlib.Path(temporary)
-            first, second = work / "first", work / "second"
-            render(first, serial, adb, hidden_icons)
-            status_height = status_bar_height(adb, serial)
-            if status_height != STATUS_BAR_HEIGHT_PX:
-                raise RuntimeError(
-                    f"Measured SystemUI inset {status_height}px disagrees with the {STATUS_BAR_HEIGHT_PX}px profile"
-                )
-            render(second, serial, adb, hidden_icons)
-            try:
-                compare(first, second, status_height)
-            except RuntimeError:
-                if FAILURES.exists():
-                    shutil.rmtree(FAILURES)
-                shutil.copytree(first, FAILURES / "first")
-                shutil.copytree(second, FAILURES / "second")
-                print(f"Failed captures preserved at {FAILURES}", file=sys.stderr)
-                raise
             output = work / "published"
             output.mkdir()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                list(executor.map(lambda name: encode(first, output, name), SCENARIOS))
+            for appearance, night in APPEARANCES.items():
+                adb_command(adb, serial, "shell", "cmd", "uimode", "night", night)
+                first, second = work / appearance / "first", work / appearance / "second"
+                render(first, serial, adb, hidden_icons)
+                status_height = status_bar_height(adb, serial)
+                if status_height != STATUS_BAR_HEIGHT_PX:
+                    raise RuntimeError(
+                        f"Measured SystemUI inset {status_height}px disagrees with the {STATUS_BAR_HEIGHT_PX}px profile"
+                    )
+                render(second, serial, adb, hidden_icons)
+                try:
+                    compare(first, second, status_height)
+                except RuntimeError:
+                    if FAILURES.exists():
+                        shutil.rmtree(FAILURES)
+                    shutil.copytree(first, FAILURES / appearance / "first")
+                    shutil.copytree(second, FAILURES / appearance / "second")
+                    print(f"Failed {appearance} captures preserved at {FAILURES}", file=sys.stderr)
+                    raise
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    encodings = [executor.submit(encode, first, output, name, appearance) for name in SCENARIOS]
+                    for encoding in encodings:
+                        encoding.result()
             publish_images(
                 output,
                 ROOT,
