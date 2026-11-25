@@ -213,9 +213,7 @@ internal fun VoiceSetupSetting(
             discovery = ChoiceDiscovery.Ready(choices)
         } catch (e: CancellationException) {
             throw e
-        } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception,
-        ) {
+        } catch (e: Exception) {
             // User-visible discovery boundary.
             discovery = ChoiceDiscovery.Failed(e.message ?: "Unable to load voice choices")
         }
@@ -269,9 +267,7 @@ internal fun VoiceSetupSetting(
                         saveFailure = null
                     } catch (e: CancellationException) {
                         throw e
-                    } catch (
-                        @Suppress("TooGenericExceptionCaught") e: Exception,
-                    ) {
+                    } catch (e: Exception) {
                         // Display failed persistence under the control that made it.
                         saveFailure = SaveFailure(control, "Unable to save ${control.noun}: ${e.message}")
                     } finally {

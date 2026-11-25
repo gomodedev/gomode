@@ -159,7 +159,7 @@ class HaloDevice(
 
     /** Check whether the Lua REPL is active by sending `print(1)` and expecting `"1"`. */
     suspend fun isLuaInReplState(timeoutMs: Long = 200): Boolean {
-        @Suppress("SwallowedException") // Intentional: probe timeout/error → not in REPL
+        // Intentional: probe timeout/error → not in REPL
         return try {
             sendString("print(1)", awaitResponse = true, timeoutMs = timeoutMs) == "1"
         } catch (e: HaloException) {

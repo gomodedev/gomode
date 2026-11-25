@@ -1,7 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.detekt)
     alias(libs.plugins.ktlint)
 }
 
@@ -38,18 +36,18 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+
+    // FakeHaloTransport for hosts' unit and instrumented tests.
+    testFixtures {
+        enable = true
+    }
 }
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        allWarningsAsErrors = true
+        freeCompilerArgs.add("-Wextra")
     }
-}
-
-detekt {
-    buildUponDefaultConfig = true
-    config.setFrom(files("$rootDir/detekt.yml"))
-    parallel = true
 }
 
 // Robolectric resolves the Android runtime jar for its tests by downloading it from Maven Central

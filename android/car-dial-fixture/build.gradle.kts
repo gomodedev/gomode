@@ -1,8 +1,6 @@
 // Test-only phone account and independent instrumentation for system-driven car dialing.
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.detekt)
     alias(libs.plugins.ktlint)
 }
 
@@ -26,11 +24,10 @@ android {
     }
 }
 kotlin {
-    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
-}
-detekt {
-    buildUponDefaultConfig = true
-    config.setFrom(files("$rootDir/detekt.yml"))
+    compilerOptions {
+        allWarningsAsErrors = true
+        freeCompilerArgs.add("-Wextra")
+    }
 }
 ktlint { version.set("1.8.0") }
 dependencies {

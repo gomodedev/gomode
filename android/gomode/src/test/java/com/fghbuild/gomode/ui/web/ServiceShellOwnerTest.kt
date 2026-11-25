@@ -6,6 +6,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.ServiceBootstrapState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -31,6 +32,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowNetwork
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ServiceShellOwnerTest {
     @Test

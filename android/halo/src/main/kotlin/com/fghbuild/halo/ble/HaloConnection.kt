@@ -183,7 +183,8 @@ open class HaloConnection(
                             currentGattCallback?.onCharacteristicChanged(g, c, value)
                         }
 
-                        @Suppress("DEPRECATION")
+                        // The callback deprecated in API 33, with its deprecated characteristic value.
+                        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
                         override fun onCharacteristicChanged(
                             g: BluetoothGatt,
                             c: BluetoothGattCharacteristic,
@@ -255,7 +256,6 @@ open class HaloConnection(
      * connection still matches it; and how long a background connection takes once a Halo is turned
      * on. Log the address type of a scan result and time several reconnections after power cycles.
      */
-    @Suppress("TooGenericExceptionCaught")
     open suspend fun connect(
         device: BluetoothDevice,
         timeoutMs: Long = 15_000,
@@ -294,7 +294,7 @@ open class HaloConnection(
     }
 
     // Releases a GATT client that will not carry this connection; Android keeps a small, shared pool.
-    @Suppress("SwallowedException") // A GATT client that already failed or closed has nothing left to release.
+    // A GATT client that already failed or closed has nothing left to release.
     private fun closeGatt(gatt: BluetoothGatt) {
         if (activeGatt === gatt) activeGatt = null
         try {
@@ -496,12 +496,10 @@ open class HaloConnection(
 
     // ---- System-connected device query ----
 
-    fun getSystemConnectedDevice(address: String): BluetoothDevice? {
-        @Suppress("SwallowedException")
-        return try {
+    fun getSystemConnectedDevice(address: String): BluetoothDevice? =
+        try {
             bluetoothManager.getConnectedDevices(BluetoothProfile.GATT).find { it.address == address }
         } catch (e: SecurityException) {
             null
         }
-    }
 }

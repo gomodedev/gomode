@@ -12,6 +12,7 @@ import com.fghbuild.gomode.voice.VoiceStartupSource
 import com.fghbuild.gomode.voice.VoiceStartupStage
 import com.fghbuild.gomode.voice.VoiceStartupTiming
 import com.fghbuild.gomode.voice.VoiceState
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
@@ -25,6 +26,7 @@ import org.robolectric.shadows.ShadowLog
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class PendingMicrophoneVoiceStartTest {
     @Test

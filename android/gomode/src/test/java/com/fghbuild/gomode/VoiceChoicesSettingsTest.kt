@@ -371,7 +371,7 @@ class VoiceChoicesSettingsTest {
                 repository.settings.first { it.activeServiceURL == base }
                 val withdrawn = GatewayVoiceSetup(followedChoiceID = "gone")
                 repository.updateSavedVoiceSetup(base) { it.copy(gateway = withdrawn) }
-                val gateway = GatewayVoiceChoices(base, Json { ignoreUnknownKeys = true }.decodeFromString(catalog))
+                val gateway = GatewayVoiceChoices(base, catalogJson.decodeFromString(catalog))
                 assertEquals("live", gateway.resolveSetup(repository.settings.value).choice.id)
                 server.enqueue(MockResponse().setBody(manifest))
                 server.enqueue(MockResponse().setBody(catalog))
@@ -506,3 +506,5 @@ class VoiceChoicesSettingsTest {
 
     private fun SettingsState.gateway(base: String) = gatewayVoiceSetups[base] ?: GatewayVoiceSetup()
 }
+
+private val catalogJson = Json { ignoreUnknownKeys = true }

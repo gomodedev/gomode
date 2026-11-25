@@ -2,7 +2,6 @@
 // The protected open methods let us inject test data without real BLE hardware.
 //
 // Pure parsing logic is tested separately in HaloServiceDiscoveryTest.
-@file:Suppress("MaxLineLength")
 
 package com.fghbuild.halo.ble
 

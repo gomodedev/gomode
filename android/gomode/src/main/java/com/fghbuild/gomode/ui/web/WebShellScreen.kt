@@ -1067,7 +1067,6 @@ internal class GoModeHostBridge {
     fun isPageVisible(): Boolean = pageVisible
 
     @JavascriptInterface
-    @Suppress("FunctionOnlyReturningConstant")
     fun shellVersion(): String = "3"
 
     @JavascriptInterface

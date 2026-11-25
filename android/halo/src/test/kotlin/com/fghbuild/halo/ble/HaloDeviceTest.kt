@@ -4,7 +4,6 @@
 // Test strategy: a Channel backs the link's notifications, and writeSink sends each response into
 // it while the write is in progress, as a device that answers at once does. HaloDevice shares each
 // notification with the readers subscribed when it arrives, so stream tests subscribe first.
-@file:Suppress("MaxLineLength")
 
 package com.fghbuild.halo.ble
 

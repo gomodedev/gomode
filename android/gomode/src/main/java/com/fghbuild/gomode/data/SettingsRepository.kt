@@ -518,9 +518,7 @@ class SettingsRepository(
             prefs.remove(Keys.HALO_ADDRESS)
             prefs.remove(Keys.EVEN_G2_PAIR)
             when (glasses) {
-                null -> {
-                    Unit
-                }
+                null -> {}
 
                 is GlassesDevice.Halo -> {
                     prefs[Keys.GLASSES_KIND] = GLASSES_KIND_HALO

@@ -70,6 +70,7 @@ import androidx.compose.material3.RichTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
@@ -381,8 +382,12 @@ private fun ServiceReconnectIndicator(detail: ServiceReconnectDetail) {
     val scope = rememberCoroutineScope()
     val tooltip = rememberTooltipState(isPersistent = true)
     val reason = serviceReconnectReasonText(detail.reason)
+
+    // Its replacement centers the tooltip on the anchor; this one aligns their start edges.
+    @Suppress("DEPRECATION")
+    val positionProvider = TooltipDefaults.rememberRichTooltipPositionProvider()
     TooltipBox(
-        positionProvider = TooltipDefaults.rememberRichTooltipPositionProvider(),
+        positionProvider = positionProvider,
         tooltip = {
             RichTooltip(
                 title = { Text("Service updates are reconnecting") },
@@ -1055,7 +1060,7 @@ private fun UsageMetric(
     val style = MaterialTheme.typography.labelSmall
     val iconSize = with(LocalDensity.current) { style.fontSize.toDp() * 1.25f }
     TooltipBox(
-        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
         tooltip = { RichTooltip { Text(description) } },
         state = rememberTooltipState(),
     ) {

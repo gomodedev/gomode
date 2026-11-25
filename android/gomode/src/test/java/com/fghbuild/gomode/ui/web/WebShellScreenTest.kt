@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
@@ -29,6 +30,7 @@ import org.robolectric.annotation.Config
     shadows = [HostedWebViewFeatures::class, HostedWebViewCompat::class],
     instrumentedPackages = ["androidx.webkit"],
 )
+@OptIn(ExperimentalCoroutinesApi::class)
 class WebShellScreenTest {
     @Test
     fun attachmentsBrowseDocumentsWithAllAcceptedFileTypes() {

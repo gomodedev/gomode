@@ -23,7 +23,6 @@ internal class ControlledRtcGateway(
     private var peer: PeerConnection? = null
     private var channel: DataChannel? = null
 
-    @Suppress("TooManyFunctions") // PeerConnection.Observer defines the native peer's required callbacks.
     fun answer(sdp: String): String {
         check(peer == null) { "The conversation unexpectedly created a second WebRTC transport" }
         val gathered = CountDownLatch(1)

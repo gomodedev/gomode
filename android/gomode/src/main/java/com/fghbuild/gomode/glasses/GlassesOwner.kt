@@ -265,9 +265,7 @@ internal class GlassesOwner(
 
     private fun press() {
         when {
-            firstPressHandler?.invoke() == true -> {
-                Unit
-            }
+            firstPressHandler?.invoke() == true -> {}
 
             mutablePresses.subscriptionCount.value == 0 -> {
                 notify(

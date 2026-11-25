@@ -174,10 +174,8 @@ internal class LocalModelDownloads(
                 workManager.enqueueUniqueWork(workName(model), ExistingWorkPolicy.REPLACE, request).await()
             } catch (failure: CancellationException) {
                 throw failure
-            } catch (
+            } catch (failure: Exception) {
                 // Scheduling is a user-action boundary; preserve partial data for recovery.
-                @Suppress("TooGenericExceptionCaught") failure: Exception,
-            ) {
                 Log.w("LocalModelDownloads", "Unable to schedule model installation", failure)
                 synchronized(this@LocalModelDownloads) {
                     if (pending[model] == request.id) {

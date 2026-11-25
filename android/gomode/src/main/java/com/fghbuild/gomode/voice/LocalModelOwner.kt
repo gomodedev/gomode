@@ -133,9 +133,8 @@ internal class LocalModelOwner(
                 }
             } catch (failure: CancellationException) {
                 throw failure
-            } catch (
-                @Suppress("TooGenericExceptionCaught") failure: Exception, // Preserve a failed native cleanup handle.
-            ) {
+            } catch (failure: Exception) {
+                // Preserve a failed native cleanup handle.
                 synchronized(this) {
                     if (selection?.model == model) {
                         mutableState.value = LocalModelState.Failed("Unable to unload or delete the model.")
@@ -259,17 +258,13 @@ internal class LocalModelOwner(
                         null
                     } catch (e: CancellationException) {
                         throw e
-                    } catch (
+                    } catch (e: Exception) {
                         // Preparation is an actionable UI boundary.
-                        @Suppress("TooGenericExceptionCaught") e: Exception,
-                    ) {
                         try {
                             allocated?.closeAndJoin()
                             allocated = null
-                        } catch (
+                        } catch (cleanupFailure: Exception) {
                             // Retain a failed disposal handle rather than allocating a replacement.
-                            @Suppress("TooGenericExceptionCaught") cleanupFailure: Exception,
-                        ) {
                             if (cleanupFailure !== e) e.addSuppressed(cleanupFailure)
                         }
                         publish(

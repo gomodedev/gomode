@@ -207,9 +207,7 @@ internal class TelecomCallController(
                 } catch (e: CancellationException) {
                     ready.complete(false)
                     throw e
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") e: Exception,
-                ) {
+                } catch (e: Exception) {
                     Log.w(TAG, "Telecom addCall failed", e)
                     ready.complete(false)
                 }

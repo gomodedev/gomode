@@ -103,8 +103,6 @@ class CarDialServerSwitchTest {
                     "cmd role get-role-holders $role",
                 ).lines()
                 .filter(String::isNotBlank)
-        var cookieID: String? = null
-        var bearerID: String? = null
         MockWebServer().use { cookieServer ->
             MockWebServer().use { bearerServer ->
                 val cookie = ServerVoiceSwitchTest.HostedVoiceFixture(false)
@@ -120,8 +118,8 @@ class CarDialServerSwitchTest {
                 bearerServer.start()
                 val cookieURL = cookieServer.url("/").toString().replace("localhost", "127.0.0.1")
                 try {
-                    cookieID = repository.addService("Car cookie", cookieURL)
-                    bearerID = repository.addService("Prepared bearer", bearerServer.url("/").toString())
+                    val cookieID = repository.addService("Car cookie", cookieURL)
+                    val bearerID = repository.addService("Prepared bearer", bearerServer.url("/").toString())
                     repository.updateSavedVoiceSetup(null) {
                         it.copy(preference = it.preference.copy(mode = VoiceSetupMode.FOLLOW_GATEWAY))
                     }
@@ -129,7 +127,7 @@ class CarDialServerSwitchTest {
                     repository.updateSavedVoiceSetup(null) {
                         it.copy(preference = it.preference.copy(languageModel = VoiceLanguageModel.GATEWAY))
                     }
-                    repository.switchService(requireNotNull(bearerID))
+                    repository.switchService(bearerID)
                     repository.settings.first {
                         it.activeServiceId == bearerID &&
                             it.voiceLanguageTag == "fr-CA" &&
@@ -178,7 +176,7 @@ class CarDialServerSwitchTest {
                     awaitCondition {
                         (cookie.setupMessages + cookie.messages).any { message ->
                             val text = message.optJSONObject("context")?.optString("text").orEmpty()
-                            modelSections(text, requireNotNull(cookieID)).any { section ->
+                            modelSections(text, cookieID).any { section ->
                                 runCatching { org.json.JSONObject(section) }
                                     .getOrNull()
                                     ?.optJSONObject("focus")
@@ -190,8 +188,8 @@ class CarDialServerSwitchTest {
                     cookie.withdrawServiceResources()
                     assertTrue(device.wait(Until.hasObject(By.desc("End voice")), 15_000))
                     assertTrue(device.wait(Until.hasObject(By.text("Hosted service")), 15_000))
-                    probe(cookie, requireNotNull(cookieID), cookie)
-                    cookie.sessions.single().send(switchCommand(requireNotNull(bearerID)))
+                    probe(cookie, cookieID, cookie)
+                    cookie.sessions.single().send(switchCommand(bearerID))
                     awaitCondition { repository.settings.value.activeServiceId == bearerID }
                     awaitCondition {
                         cookie.messages.any {
@@ -205,7 +203,7 @@ class CarDialServerSwitchTest {
                     }
                     assertEquals(1, cookie.sessions.size)
                     assertEquals(0, bearer.sessions.size)
-                    probe(cookie, requireNotNull(bearerID), bearer)
+                    probe(cookie, bearerID, bearer)
                     val conversation = cookie.callMetadata.first().getString("openai/session")
                     cookie.sessions.single().send(
                         """
@@ -229,11 +227,11 @@ class CarDialServerSwitchTest {
                             .getJSONObject("result")
                             .getString("sessionID"),
                     )
-                    cookie.sessions.single().send(switchCommand(requireNotNull(cookieID)))
+                    cookie.sessions.single().send(switchCommand(cookieID))
                     awaitCondition { repository.settings.value.activeServiceId == cookieID }
-                    probe(cookie, requireNotNull(cookieID), cookie)
+                    probe(cookie, cookieID, cookie)
                     // Only the active server accepts tools.
-                    probe(cookie, requireNotNull(bearerID), bearer, expectSuccess = false)
+                    probe(cookie, bearerID, bearer, expectSuccess = false)
                     assertEquals(
                         listOf(conversation, conversation),
                         cookie.callMetadata.map { it.getString("openai/session") },

@@ -436,9 +436,11 @@ internal class VoiceSession(
 
     private fun ownsAttempt(attempt: Long): Boolean = attemptGeneration.get() == attempt
 
-    /** Connect via WebRTC data channel through the configured service voice gateway. */
-    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
-    override fun connect(preserveTranscript: Boolean, conversationID: String?) {
+    /** Connect via WebRTC data channel through the configured service voice gateway; the UI shows every failure. */
+    override fun connect(
+        preserveTranscript: Boolean,
+        conversationID: String?,
+    ) {
         if (!preserveTranscript) startupTimingOwner = startupTiming()
         val timing = startupTimingOwner
         val attempt = invalidateAttempt()
@@ -797,7 +799,6 @@ internal class VoiceSession(
         startMicLevelMonitoring(attempt)
     }
 
-    @Suppress("TooManyFunctions") // PeerConnection.Observer has many required overrides.
     private fun createPeerConnectionObserver(
         attempt: Long,
         gatewayClient: ApiClient,
@@ -842,9 +843,7 @@ internal class VoiceSession(
                         )
                     }
 
-                    else -> {
-                        Unit
-                    }
+                    else -> {}
                 }
             }
         }
@@ -1078,9 +1077,7 @@ internal class VoiceSession(
             formatVoiceRTCDiagnostics(diagnostics)
         } catch (e: CancellationException) {
             throw e
-        } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception,
-        ) {
+        } catch (e: Exception) {
             Log.w(TAG, "Voice RTC diagnostics failed", e)
             fallback
         }
@@ -1355,7 +1352,7 @@ internal class VoiceSession(
         }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Transport boundary: terminate visibly without replaying a failed send.
+    // Transport boundary: terminate visibly without replaying a failed send.
     private fun sendOnChannel(
         dc: DataChannel,
         text: String,
@@ -1426,7 +1423,7 @@ internal class VoiceSession(
         send(Json.encodeToString(SessionSetup.serializer(), setup))
     }
 
-    @Suppress("TooGenericExceptionCaught") // Error boundary: malformed messages must not crash.
+    // Error boundary: malformed messages must not crash.
     private suspend fun handleServerMessage(
         text: String,
         attempt: Long,
@@ -1923,9 +1920,7 @@ internal class VoiceSession(
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception,
-        ) {
+        } catch (e: Exception) {
             if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
             _state.update { it.copy(activeTool = null) }
             val errMsg = e.message ?: "Unknown error"
@@ -2468,7 +2463,6 @@ internal fun voiceAudioFocusRequest(onDisconnect: () -> Unit): AudioFocusRequest
             }
         }.build()
 
-@Suppress("CyclomaticComplexMethod") // Simple exhaustive mapping, no logic.
 private fun audioDeviceTypeName(type: Int): String =
     when (type) {
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"

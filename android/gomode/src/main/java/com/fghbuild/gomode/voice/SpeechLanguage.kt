@@ -183,7 +183,7 @@ internal class AndroidSpeechLanguage(
             )
         }
 
-    @Suppress("TooGenericExceptionCaught") // Platform providers can throw rather than delivering their error callback.
+    // Platform providers can throw rather than delivering their error callback.
     private suspend fun withRecognizer(block: suspend (SpeechRecognizer) -> SpeechLanguageState): SpeechLanguageState =
         try {
             block(recognizer())
@@ -202,7 +202,7 @@ internal class AndroidSpeechLanguage(
         }
 
     // A provider may support downloads without supporting their newer event listener.
-    @Suppress("TooGenericExceptionCaught") // Listener exceptions cannot propagate to the suspended caller's boundary.
+    // Listener exceptions cannot propagate to the suspended caller's boundary.
     private fun requestWithoutEvents(recognizer: SpeechRecognizer): SpeechLanguageState =
         try {
             recognizer.triggerModelDownload(intent())

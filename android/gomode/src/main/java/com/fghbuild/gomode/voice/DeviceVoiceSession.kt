@@ -436,9 +436,7 @@ internal class DeviceVoiceSession(
                             setError("connection: ${describeFailure(e)}")
                         }
                     }
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") e: Exception,
-                ) {
+                } catch (e: Exception) {
                     if (ownsAttempt(attempt)) {
                         timing?.finishFailure(e)
                         setError("connection: ${describeFailure(e)}")
@@ -677,7 +675,7 @@ internal class DeviceVoiceSession(
             }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Error boundary: malformed messages must not crash.
+    // Error boundary: malformed messages must not crash.
     private suspend fun handleServerMessage(
         text: String,
         attempt: Long,
@@ -1091,9 +1089,7 @@ internal class DeviceVoiceSession(
                     }
                 } catch (e: CancellationException) {
                     throw e
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") e: Exception,
-                ) {
+                } catch (e: Exception) {
                     if (currentTurn()) {
                         setError("llm: ${describeFailure(e)}")
                     }
@@ -1185,9 +1181,7 @@ internal class DeviceVoiceSession(
             return result.structuredContent
         } catch (e: CancellationException) {
             throw e
-        } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception,
-        ) {
+        } catch (e: Exception) {
             if (!currentTurn()) return errorJson("Turn was interrupted")
             if (endIfConversationChanged(voiceConversation)) return errorJson("Conversation authorization changed")
             _state.update { it.copy(activeTool = null) }
@@ -1308,9 +1302,7 @@ internal class DeviceVoiceSession(
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception,
-        ) {
+        } catch (e: Exception) {
             if (!ownsAttempt(attempt) || webSocket !== origin) return
             _state.update { it.copy(activeTool = null) }
             val errMsg = e.message ?: "Unknown error"
@@ -1544,7 +1536,7 @@ internal class DeviceVoiceSession(
         }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Transport boundary: terminate visibly without replaying a failed send.
+    // Transport boundary: terminate visibly without replaying a failed send.
     private fun sendOn(
         webSocket: WebSocket,
         text: String,

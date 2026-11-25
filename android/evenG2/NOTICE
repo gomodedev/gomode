@@ -122,7 +122,7 @@ Commit c8fd8e85c77e8f378cce52029dd1225e4ab11caa, the commit that
 scripts/g2_cfw.py pins.
 
 The wire formats in G2Settings.kt, G2CfwStream.kt, G2Panel.kt, G2EvenHub.kt,
-and the fake glasses in testing/ follow patches/settings_ext.c,
+and the fake glasses in src/testFixtures/ follow patches/settings_ext.c,
 message_transport.c, transport_compression.c, zlib_glue.c, display_list.c,
 rle.h, texture_draw.c, and gesture_fwd.c, the receivers of the messages above.
 

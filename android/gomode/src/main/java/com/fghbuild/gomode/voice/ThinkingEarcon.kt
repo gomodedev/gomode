@@ -87,9 +87,8 @@ internal class AndroidThinkingEarcon(
                         fade.apply(VolumeShaper.Operation.PLAY)
                         main.postDelayed({ synchronized(lock) { finishStop(playback) } }, THINKING_FADE_OUT_MS)
                     }
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") error: Exception, // Preserve voice state.
-                ) {
+                } catch (error: Exception) {
+                    // Preserve voice state.
                     Log.w("GoModeThinkingEarcon", "Could not fade thinking piano", error)
                     finishStop(playback)
                 }
@@ -117,9 +116,8 @@ internal class AndroidThinkingEarcon(
                 }
                 Thread({ stream(playback) }, "GoModeThinkingPiano").start()
                 changed(playback.revision, true, null)
-            } catch (
-                @Suppress("TooGenericExceptionCaught") error: Exception, // Audio failure must not break settings.
-            ) {
+            } catch (error: Exception) {
+                // Audio failure must not break settings.
                 current = null
                 playback.cancelled = true
                 abandonFocus(playback)
@@ -136,9 +134,8 @@ internal class AndroidThinkingEarcon(
             playback.track?.flush()
             playback.fade?.close()
             playback.fade = null
-        } catch (
-            @Suppress("TooGenericExceptionCaught") error: Exception, // Worker teardown still releases the track.
-        ) {
+        } catch (error: Exception) {
+            // Worker teardown still releases the track.
             Log.w("GoModeThinkingEarcon", "Could not stop thinking piano", error)
         }
         abandonFocus(playback)
@@ -171,9 +168,8 @@ internal class AndroidThinkingEarcon(
                     offset += written
                 }
             }
-        } catch (
-            @Suppress("TooGenericExceptionCaught") error: Exception, // Audio failure must not end the voice call.
-        ) {
+        } catch (error: Exception) {
+            // Audio failure must not end the voice call.
             if (!playback.cancelled) {
                 failure = error
                 Log.w("GoModeThinkingEarcon", "Could not play thinking piano", error)

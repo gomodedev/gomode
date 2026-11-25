@@ -115,7 +115,6 @@ class G2FrameAssembler {
     private val streams = LinkedHashMap<Long, Stream>()
 
     /** Accept one notification; returns a message once its final packet arrives with a valid CRC. */
-    @Suppress("CyclomaticComplexMethod") // One linear validation of the packet header.
     fun accept(data: ByteArray): G2Message? {
         if (data.size < HEADER || data[0].u != 0xAA) return null
         val address = data[1].u

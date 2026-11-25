@@ -22,16 +22,14 @@ internal class SystemUiRule : TestRule {
                 val failures = mutableListOf<Throwable>()
                 try {
                     base.evaluate()
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") failure: Throwable, // JUnit failures include AssertionError.
-                ) {
+                } catch (failure: Throwable) {
+                    // JUnit failures include AssertionError.
                     failures.add(failure)
                 }
                 try {
                     collapse(device)
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") failure: Throwable, // Retain cleanup failures too.
-                ) {
+                } catch (failure: Throwable) {
+                    // Retain cleanup failures too.
                     failures.add(failure)
                 }
                 MultipleFailureException.assertEmpty(failures)

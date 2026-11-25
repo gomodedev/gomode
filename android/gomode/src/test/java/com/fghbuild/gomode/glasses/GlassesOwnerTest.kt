@@ -32,6 +32,7 @@ import com.fghbuild.halo.msg.ClickType
 import com.fghbuild.halo.testing.FakeHalo
 import com.fghbuild.halo.testing.FakeHaloTransport
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -73,6 +74,7 @@ private val G2_PAIR =
 private val HALO = GlassesDevice.Halo(ADDRESS)
 private val G2 = GlassesDevice.EvenG2(G2_PAIR)
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class GlassesOwnerTest {

@@ -192,9 +192,7 @@ internal object G2Draw {
 
         fun flush() {
             when {
-                count == 0 -> {
-                    Unit
-                }
+                count == 0 -> {}
 
                 count <= SHORT_RUN -> {
                     out.u8((count shl 4) or color)

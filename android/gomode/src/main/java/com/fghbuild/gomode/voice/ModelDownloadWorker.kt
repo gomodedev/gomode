@@ -49,9 +49,8 @@ class ModelDownloadWorker(
                     Result.success()
                 } catch (failure: CancellationException) {
                     throw failure
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") failure: Exception, // Report storage/native cleanup failure.
-                ) {
+                } catch (failure: Exception) {
+                    // Report storage/native cleanup failure.
                     Log.w("ModelDownloadWorker", "Unable to delete model", failure)
                     failure("Unable to delete the model.")
                 }
@@ -138,10 +137,8 @@ class ModelDownloadWorker(
             // The app can move into the background before WorkManager promotes this resumed worker.
             // Keep the request and partial data so a later permitted attempt resumes the transfer.
             return Result.retry()
-        } catch (
+        } catch (failure: Exception) {
             // Native background execution/storage failures need actionable recovery in Settings.
-            @Suppress("TooGenericExceptionCaught") failure: Exception,
-        ) {
             Log.w("ModelDownloadWorker", "Unable to install model", failure)
             return failure("Unable to complete the download. Check storage.")
         } finally {

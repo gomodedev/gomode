@@ -196,7 +196,7 @@ class McpClientTest {
                 )
                 val verified = client.readResource("fixture://context", "conversation")
                 assertEquals(1L, checkNotNull(verified.context).version)
-                assertTrue(checkNotNull(verified.context?.content).contains("資料 public _meta intact 日本語"))
+                assertTrue(checkNotNull(verified.context.content).contains("資料 public _meta intact 日本語"))
                 for (uri in listOf("host://ordinary", "fixture://catalog", "gomode://notifications")) {
                     server.enqueue(response(uri, malformed.first()))
                     client.readResource(uri, "conversation")
@@ -484,7 +484,7 @@ class McpClientTest {
                     }.exceptionOrNull()
                 assertTrue(failure is com.fghbuild.mcp.sdk.v1.ApiException)
                 assertEquals("-32602", (failure as com.fghbuild.mcp.sdk.v1.ApiException).code)
-                assertEquals(errorMessage, failure?.message)
+                assertEquals(errorMessage, failure.message)
                 for ((args, timezone) in listOf(validArgs to "America/Toronto", generatedArgs to "Asia/Kolkata")) {
                     val request = requireNotNull(server.takeRequest(5, TimeUnit.SECONDS))
                     val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject

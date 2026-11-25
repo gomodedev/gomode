@@ -119,8 +119,11 @@ class ServiceMonitor(
         _state.value = ServiceMonitorState()
     }
 
-    @Suppress("TooGenericExceptionCaught") // Native monitoring must retry transient service and network failures.
-    private suspend fun run(serviceURL: String, settings: Settings) {
+    // Native monitoring must retry transient service and network failures.
+    private suspend fun run(
+        serviceURL: String,
+        settings: Settings,
+    ) {
         val group =
             settings.webShell.toolGroups
                 .orEmpty()
@@ -295,7 +298,7 @@ class ServiceMonitor(
         }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Each model resource fails independently; cancellation propagates.
+    // Each model resource fails independently; cancellation propagates.
     private suspend fun refreshResource(
         client: ServiceResourceClient,
         plan: ServiceMonitoringPlan,

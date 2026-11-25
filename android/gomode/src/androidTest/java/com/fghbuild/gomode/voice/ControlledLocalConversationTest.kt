@@ -615,8 +615,8 @@ class ControlledLocalConversationTest {
     private class QuietChime : VoiceChimePlayer {
         override fun playConnected() = Unit
 
-        override fun playDisconnected(onFinished: () -> Unit) {
-            onFinished()
+        override fun playDisconnected(onComplete: () -> Unit) {
+            onComplete()
         }
     }
 

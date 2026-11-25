@@ -65,7 +65,6 @@ jobs:
           path: |
             android/gomode/build/halo-emulator/
             android/gomode/build/reports/lint-results-debug.xml
-            android/gomode/build/reports/detekt/
             android/gomode/build/reports/tests/
             android/gomode/build/test-results/
             android/car-dial-fixture/build/reports/

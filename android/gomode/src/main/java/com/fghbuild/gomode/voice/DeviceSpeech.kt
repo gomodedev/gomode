@@ -141,7 +141,7 @@ internal class AndroidDeviceSpeech(
                 main.post { completeSpeech(utteranceId, null) }
             }
 
-            @Suppress("DEPRECATION") // UtteranceProgressListener requires the pre-API-21 overload.
+            @Suppress("OVERRIDE_DEPRECATION") // UtteranceProgressListener requires the pre-API-21 overload.
             override fun onError(utteranceId: String?) {
                 main.post { completeSpeech(utteranceId, "Text-to-speech failed") }
             }
@@ -218,7 +218,7 @@ internal class AndroidDeviceSpeech(
         main.post { startListeningAttempt(onResult, onPartial, onIdle, onError, allowRecovery = true) }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Platform and pipe startup failures terminate recognition through onError.
+    // Platform and pipe startup failures terminate recognition through onError.
     private fun startListeningAttempt(
         onResult: (String) -> Unit,
         onPartial: (String) -> Unit,

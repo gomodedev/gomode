@@ -7,6 +7,7 @@ import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Process
 import android.telecom.TelecomManager
 import com.fghbuild.eveng2.G2GattConnector
 import com.fghbuild.eveng2.G2Scanner
@@ -26,6 +27,7 @@ import com.fghbuild.gomode.ui.web.completeFrontendPreparation
 import com.fghbuild.halo.ble.HaloConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,10 +59,12 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowLog
+import org.robolectric.shadows.ShadowRoleManager
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class CarDialVoiceOwnerTest {
     private val context: Application = RuntimeEnvironment.getApplication()
@@ -81,7 +85,7 @@ class CarDialVoiceOwnerTest {
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             PackageManager.DONT_KILL_APP,
         )
-        shadowOf(context.getSystemService(RoleManager::class.java)).addHeldRole(RoleManager.ROLE_CALL_REDIRECTION)
+        ShadowRoleManager.addRoleHolder(RoleManager.ROLE_CALL_REDIRECTION, context.packageName, Process.myUserHandle())
         model = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
         repository = SettingsRepository(MemoryPreferences())
         pages = ServiceShellOwner(context, repository, glassesDisplay = { null })
@@ -220,8 +224,11 @@ class CarDialVoiceOwnerTest {
         runTest {
             val identity = owner.request(server)
             testScheduler.runCurrent()
-            shadowOf(context.getSystemService(RoleManager::class.java))
-                .removeHeldRole(RoleManager.ROLE_CALL_REDIRECTION)
+            ShadowRoleManager.removeRoleHolder(
+                RoleManager.ROLE_CALL_REDIRECTION,
+                context.packageName,
+                Process.myUserHandle(),
+            )
             testScheduler.advanceTimeBy(251)
             testScheduler.runCurrent()
             assertFalse(owner.isBusy)
@@ -254,9 +261,11 @@ class CarDialVoiceOwnerTest {
             assertFalse(owner.attach(expired, Any()))
             val revoked = owner.request(server)
             assertTrue(owner.attach(revoked, activity))
-            shadowOf(
-                context.getSystemService(RoleManager::class.java),
-            ).removeHeldRole(RoleManager.ROLE_CALL_REDIRECTION)
+            ShadowRoleManager.removeRoleHolder(
+                RoleManager.ROLE_CALL_REDIRECTION,
+                context.packageName,
+                Process.myUserHandle(),
+            )
             owner.start(revoked, activity)
             assertFalse(owner.isBusy)
             assertFalse(owner.attach(revoked, Any()))

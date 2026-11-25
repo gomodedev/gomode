@@ -140,9 +140,8 @@ internal class VoiceErrorLog(
                 require(bytes.size <= MAX_VOICE_ERROR_FILE_BYTES) { "Voice error record exceeds its bound" }
                 Json.decodeFromString<List<VoiceErrorRecord>>(bytes.decodeToString()).take(MAX_VOICE_ERRORS)
             }
-        } catch (
-            @Suppress("TooGenericExceptionCaught") failure: Exception, // An unreadable record must not block voice.
-        ) {
+        } catch (failure: Exception) {
+            // An unreadable record must not block voice.
             Log.w(TAG, "Discarding unreadable voice error record", failure)
             emptyList()
         }
@@ -153,15 +152,13 @@ internal class VoiceErrorLog(
             try {
                 output.write(Json.encodeToString(entries).toByteArray())
                 file.finishWrite(output)
-            } catch (
-                @Suppress("TooGenericExceptionCaught") failure: Exception, // Roll back a partial write.
-            ) {
+            } catch (failure: Exception) {
+                // Roll back a partial write.
                 file.failWrite(output)
                 throw failure
             }
-        } catch (
-            @Suppress("TooGenericExceptionCaught") failure: Exception, // Recording must not break voice.
-        ) {
+        } catch (failure: Exception) {
+            // Recording must not break voice.
             Log.w(TAG, "Unable to save voice error record", failure)
         }
     }

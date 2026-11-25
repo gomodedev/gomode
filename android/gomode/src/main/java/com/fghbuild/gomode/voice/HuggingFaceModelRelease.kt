@@ -104,10 +104,8 @@ internal suspend fun resolveHuggingFaceRelease(
                                         ).also { pin -> pin.artifact(source) }
                                     }
                                 if (continuation.isActive) continuation.resume(release)
-                            } catch (
+                            } catch (failure: Exception) {
                                 // Complete the suspended worker with the metadata or transport failure.
-                                @Suppress("TooGenericExceptionCaught") failure: Exception,
-                            ) {
                                 if (continuation.isActive) continuation.resumeWithException(failure)
                             }
                         }
@@ -119,10 +117,8 @@ internal suspend fun resolveHuggingFaceRelease(
         try {
             stream.write(Json.encodeToString(pin).toByteArray())
             saved.finishWrite(stream)
-        } catch (
+        } catch (failure: Exception) {
             // AtomicFile requires rollback when serialization or writing fails.
-            @Suppress("TooGenericExceptionCaught") failure: Exception,
-        ) {
             saved.failWrite(stream)
             throw failure
         }

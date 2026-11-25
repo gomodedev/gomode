@@ -265,7 +265,7 @@ internal class ServiceCatalog(
         return snapshots.asStateFlow()
     }
 
-    @Suppress("TooGenericExceptionCaught") // Tool failures are returned to the caller without affecting other services.
+    // Tool failures are returned to the caller without affecting other services.
     suspend fun execute(
         name: String,
         args: JsonObject,
@@ -478,8 +478,11 @@ internal class ServiceCatalog(
                 value.identity.token == entry.bearerStore.token.value &&
                 (value.mcp?.authorization?.isCurrent() != false)
 
-        @Suppress("TooGenericExceptionCaught") // Each service independently retries network/discovery/schema failures.
-        private suspend fun connect(identity: ParticipantIdentity, ready: ServiceBootstrapState.Ready) {
+        // Each service independently retries network/discovery/schema failures.
+        private suspend fun connect(
+            identity: ParticipantIdentity,
+            ready: ServiceBootstrapState.Ready,
+        ) {
             var retryMs = 1_000L
             while (true) {
                 status = ServiceReadiness.CONNECTING

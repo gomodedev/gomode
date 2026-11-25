@@ -64,8 +64,11 @@ fun serviceMonitoringPlan(resources: List<ResourceDescriptor>): ServiceMonitorin
     return ServiceMonitoringPlan(modelResources = models, notificationResourceURI = alerts?.uri)
 }
 
-@Suppress("TooGenericExceptionCaught") // Model context is advisory; cancellation still propagates.
-suspend fun readInitialServiceContext(client: ServiceResourceClient, sessionID: String?): String =
+// Model context is advisory; cancellation still propagates.
+suspend fun readInitialServiceContext(
+    client: ServiceResourceClient,
+    sessionID: String?,
+): String =
     try {
         val plan = serviceMonitoringPlan(client.listResources(sessionID))
         coroutineScope {

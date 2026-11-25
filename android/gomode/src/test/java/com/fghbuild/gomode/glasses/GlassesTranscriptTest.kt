@@ -15,6 +15,7 @@ import com.fghbuild.gomode.voice.withUserTurnStart
 import com.fghbuild.halo.msg.TextPageData
 import com.fghbuild.voicegateway.sdk.v2.MessageKind
 import com.fghbuild.voicegateway.sdk.v2.TranscriptDraft
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -56,6 +57,7 @@ private val G2_FIT = G2ScreenFit(G2TextPage())
 private val HALO = GlassesLink.Connected(HALO_DISPLAY, HaloScreenFit)
 private val G2 = GlassesLink.Connected(G2_DISPLAY, G2_FIT)
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class GlassesTranscriptTest {

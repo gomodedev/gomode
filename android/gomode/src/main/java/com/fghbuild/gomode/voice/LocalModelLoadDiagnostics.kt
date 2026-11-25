@@ -141,9 +141,8 @@ internal class LocalModelLoadDiagnostics(
                 Log.w(TAG, "local_load_recovered ${Json.encodeToString(saved.latest)}")
             }
             mutableHistory.value = saved
-        } catch (
-            @Suppress("TooGenericExceptionCaught") failure: Exception, // Diagnostics must never prevent model loading.
-        ) {
+        } catch (failure: Exception) {
+            // Diagnostics must never prevent model loading.
             Log.w(TAG, "Unable to recover model load diagnostics", failure)
         }
     }
@@ -268,9 +267,8 @@ internal class LocalModelLoadDiagnostics(
                         ),
                 )
             persist()
-        } catch (
-            @Suppress("TooGenericExceptionCaught") failure: Exception, // Sampling failure cannot interrupt native work.
-        ) {
+        } catch (failure: Exception) {
+            // Sampling failure cannot interrupt native work.
             Log.w(TAG, "Unable to sample model load memory", failure)
         }
     }
@@ -281,15 +279,13 @@ internal class LocalModelLoadDiagnostics(
             try {
                 output.write(Json.encodeToString(history).toByteArray())
                 file.finishWrite(output)
-            } catch (
-                @Suppress("TooGenericExceptionCaught") failure: Exception, // Roll back a partially written record.
-            ) {
+            } catch (failure: Exception) {
+                // Roll back a partially written record.
                 file.failWrite(output)
                 throw failure
             }
-        } catch (
-            @Suppress("TooGenericExceptionCaught") failure: Exception, // Diagnostics must not break voice preparation.
-        ) {
+        } catch (failure: Exception) {
+            // Diagnostics must not break voice preparation.
             Log.w(TAG, "Unable to save model load diagnostics", failure)
         }
     }

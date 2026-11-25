@@ -42,16 +42,14 @@ internal class ModelFreeSpeechRule : TestRule {
                     // Android expires this override after 60 seconds if instrumentation dies.
                     overrideRecognizer(device, "i32 1 s16 ${context.packageName} s16 $provider")
                     base.evaluate()
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") failure: Throwable, // Preserve JUnit assertion failures.
-                ) {
+                } catch (failure: Throwable) {
+                    // Preserve JUnit assertion failures.
                     failures.add(failure)
                 }
                 try {
                     overrideRecognizer(device, "i32 0")
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") failure: Throwable, // Cleanup must not mask test failures.
-                ) {
+                } catch (failure: Throwable) {
+                    // Cleanup must not mask test failures.
                     failures.add(failure)
                 }
                 try {
@@ -59,9 +57,8 @@ internal class ModelFreeSpeechRule : TestRule {
                         val result = device.executeShellCommand("pm revoke ${context.packageName} $permission")
                         check(result.isBlank()) { result }
                     }
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") failure: Throwable, // Retain permission failures.
-                ) {
+                } catch (failure: Throwable) {
+                    // Retain permission failures.
                     failures.add(failure)
                 }
                 MultipleFailureException.assertEmpty(failures)

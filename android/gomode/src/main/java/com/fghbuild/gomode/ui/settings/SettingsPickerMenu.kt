@@ -145,9 +145,7 @@ internal class PickerSave(
                 write()
             } catch (e: CancellationException) {
                 throw e
-            } catch (
-                @Suppress("TooGenericExceptionCaught") e: Exception,
-            ) {
+            } catch (e: Exception) {
                 // Display failed persistence.
                 error = "Unable to save $noun: ${e.message}"
             } finally {

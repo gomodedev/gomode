@@ -340,10 +340,8 @@ internal class CarDialVoiceOwner(
                 } catch (error: CancellationException) {
                     next.timing.finish(VoiceStartupOutcome.CANCELED)
                     throw error
-                } catch (
+                } catch (error: Exception) {
                     // This boundary maps setup failures to a native, non-sensitive call status.
-                    @Suppress("TooGenericExceptionCaught") error: Exception,
-                ) {
                     Log.w("GoModeCarDial", "Voice setup failed", error)
                     next.timing.finishFailure(error)
                     fail(current, next)

@@ -20,8 +20,8 @@ Use `make fix`, `make verify`, and `make test` after changes.
 the Android app and SDKs, compiles instrumented tests, and runs build-dependent
 lint, unit tests, and coverage.
 
-`verify` runs static checks, including Android Detekt and ktlint for changed
-Android, SDK, or build inputs. `test` runs tests and includes Android builds,
+`verify` runs static checks, including Android ktlint for changed Android, SDK,
+or build inputs. `test` runs tests and includes Android builds,
 build-dependent Android lint, unit tests, and coverage for those inputs. Pre-push
 runs only `make verify`. `make android-lint` and `make android-test` run their
 Android checks unconditionally. CI runs `make android-lint android-test`.

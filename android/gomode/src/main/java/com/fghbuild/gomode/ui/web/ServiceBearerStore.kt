@@ -114,12 +114,12 @@ internal class ServiceBearerStore(
         }
         val value = message.opt("bearerToken")
         val token =
-            when (value) {
-                JSONObject.NULL -> {
+            when {
+                value == JSONObject.NULL -> {
                     null
                 }
 
-                is String -> {
+                value is String -> {
                     value.takeIf {
                         it.isNotBlank() &&
                             it.length <= MAX_TOKEN_LENGTH &&

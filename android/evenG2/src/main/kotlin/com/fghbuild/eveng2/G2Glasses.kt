@@ -104,7 +104,7 @@ class G2Glasses(
         publish(current, G2State.Closed(G2CloseCause.Stopped))
     }
 
-    @Suppress("TooGenericExceptionCaught") // A host connector may throw anything; the session still ends with a cause.
+    // A host connector may throw anything; the session still ends with a cause.
     private suspend fun runSession(
         current: Long,
         pair: G2Pair,

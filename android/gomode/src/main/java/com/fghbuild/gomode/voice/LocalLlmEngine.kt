@@ -208,9 +208,8 @@ internal class LiteRtLmRunner(
                 initializedBackend = backend.name
                 diagnostics.finish(attempt)
                 break
-            } catch (
-                @Suppress("TooGenericExceptionCaught") e: Throwable, // Record native Errors too, then rethrow them.
-            ) {
+            } catch (e: Throwable) {
+                // Record native Errors too, then rethrow them.
                 diagnostics.finish(attempt, e)
                 when (e) {
                     is CancellationException -> {
@@ -231,9 +230,8 @@ internal class LiteRtLmRunner(
                 if (engine !== attemptEngine && attemptEngine?.isInitialized() == true) {
                     try {
                         closeNativeResource(attemptEngine)
-                    } catch (
-                        @Suppress("TooGenericExceptionCaught") e: Exception, // Retry after cleanup failure.
-                    ) {
+                    } catch (e: Exception) {
+                        // Retry after cleanup failure.
                         failure.addSuppressed(e)
                     }
                 }
@@ -316,9 +314,8 @@ internal class LiteRtLmRunner(
     private fun closeNativeResource(resource: AutoCloseable) {
         try {
             resource.close()
-        } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception, // Continue releasing the other native resources.
-        ) {
+        } catch (e: Exception) {
+            // Continue releasing the other native resources.
             Log.w(TAG, "Failed closing LiteRT-LM resource", e)
             throw e
         }

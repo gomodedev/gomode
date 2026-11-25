@@ -29,7 +29,6 @@ import kotlin.math.roundToInt
 internal const val GOMODE_DEFAULT_TIMEOUT_MS = 30_000L
 internal const val GOMODE_LOAD_TIMEOUT_MS = 60_000L
 
-@Suppress("UnnecessaryAbstractClass")
 abstract class GoModeE2eTestBase {
     @get:Rule(order = 0)
     val clearSettingsRule =

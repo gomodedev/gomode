@@ -77,7 +77,6 @@ internal object G2ProtoReader {
      */
     fun all(data: ByteArray): List<Pair<Int, G2ProtoField>>? = decode(data, lenient = true)
 
-    @Suppress("CyclomaticComplexMethod", "ReturnCount") // One linear walk over the wire types.
     private fun decode(
         data: ByteArray,
         lenient: Boolean,

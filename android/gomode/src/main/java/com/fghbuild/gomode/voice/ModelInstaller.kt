@@ -155,10 +155,8 @@ internal suspend fun installModel(
                                     Files.move(partial.toPath(), destination.toPath())
                                     continuation.resume(destination)
                                 }
-                            } catch (
+                            } catch (failure: Exception) {
                                 // Resume its suspended caller.
-                                @Suppress("TooGenericExceptionCaught") failure: Exception,
-                            ) {
                                 if (continuation.isActive) continuation.resumeWithException(failure)
                             } finally {
                                 finished.complete(Unit)

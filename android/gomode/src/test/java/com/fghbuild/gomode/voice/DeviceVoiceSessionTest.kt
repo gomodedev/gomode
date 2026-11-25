@@ -1012,6 +1012,9 @@ class DeviceVoiceSessionTest {
                 var transports = 0
                 var pendingSwitch: CompletableDeferred<Unit>? = null
                 val switchBlocked = Channel<Unit>()
+
+                // switchServer reads the session it is passed to, so the session cannot be a val.
+                @Suppress("CAN_BE_VAL_LATEINIT")
                 lateinit var session: DeviceVoiceSession
                 session =
                     DeviceVoiceSession(

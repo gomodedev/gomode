@@ -36,7 +36,7 @@ class MicrophoneAudioSourceTest {
             val started = CompletableDeferred<Unit>()
             val failed = CompletableDeferred<String>()
             val failRead = AtomicBoolean()
-            ShadowAudioRecord.setSource(
+            val recordSource =
                 object : ShadowAudioRecord.AudioRecordSource {
                     override fun readInByteArray(
                         buffer: ByteArray,
@@ -47,8 +47,8 @@ class MicrophoneAudioSourceTest {
                         started.complete(Unit)
                         return if (failRead.get()) AudioRecord.ERROR_DEAD_OBJECT else 0
                     }
-                },
-            )
+                }
+            ShadowAudioRecord.setSourceProvider { recordSource }
             try {
                 source.open { failed.complete(it) }
                 withContext(Dispatchers.Default) { withTimeout(5_000) { started.await() } }

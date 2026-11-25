@@ -41,7 +41,7 @@ internal class MicrophoneAudioSource(
     private var onCaptureError: (String) -> Unit = {}
     private var failure: String? = null
 
-    @Suppress("TooGenericExceptionCaught") // Platform capture and pipe failures are reported to the session owner.
+    // Platform capture and pipe failures are reported to the session owner.
     fun open(onError: (String) -> Unit): ParcelFileDescriptor {
         check(failure == null) { failure.orEmpty() }
         onCaptureError = onError
@@ -152,7 +152,7 @@ internal class RecognitionAudioBuffer : java.io.Closeable {
     private var pipe: Array<ParcelFileDescriptor>? = null
     private var evictionReader: FileInputStream? = null
 
-    @Suppress("TooGenericExceptionCaught") // Descriptor setup must close both endpoints on failure.
+    // Descriptor setup must close both endpoints on failure.
     fun openSource(): ParcelFileDescriptor {
         closePipe()
         val endpoints = ParcelFileDescriptor.createPipe()

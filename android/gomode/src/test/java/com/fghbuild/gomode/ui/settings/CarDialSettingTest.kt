@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
+import android.os.Process
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -31,6 +32,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowRoleManager
 
 @RunWith(RobolectricTestRunner::class)
 class CarDialSettingTest {
@@ -44,7 +46,8 @@ class CarDialSettingTest {
     @Before
     fun setUp() {
         shadowOf(activity.application).grantPermissions(Manifest.permission.RECORD_AUDIO)
-        shadowOf(activity.getSystemService(RoleManager::class.java)).addAvailableRole(RoleManager.ROLE_CALL_REDIRECTION)
+        // An empty holder makes the role available but held by no app, as Robolectric's addAvailableRole did.
+        ShadowRoleManager.addRoleHolder(RoleManager.ROLE_CALL_REDIRECTION, "", Process.myUserHandle())
     }
 
     @Test
@@ -105,6 +108,7 @@ class CarDialSettingTest {
         if (result == PackageManager.PERMISSION_GRANTED) {
             shadowOf(activity.application).grantPermissions(Manifest.permission.RECORD_AUDIO)
         }
+        @Suppress("DEPRECATION") // Android delivers the answer here; the Activity Result registry reads it.
         activity.onRequestPermissionsResult(request.requestCode, request.requestedPermissions, intArrayOf(result))
     }
 
@@ -114,7 +118,7 @@ class CarDialSettingTest {
         composeRule.onNodeWithText("Enable dial-to-start").performClick()
         val chooser = shadowOf(activity).nextStartedActivityForResult
         assertNotNull("Role chooser was not requested", chooser)
-        roles.addHeldRole(RoleManager.ROLE_CALL_REDIRECTION)
+        ShadowRoleManager.addRoleHolder(RoleManager.ROLE_CALL_REDIRECTION, activity.packageName, Process.myUserHandle())
         shadowOf(activity).receiveResult(chooser.intent, Activity.RESULT_OK, null)
         status("Dial-to-start is on.")
         assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, componentState())
@@ -141,8 +145,6 @@ class CarDialSettingTest {
         composeRule.onNodeWithText("Select Go Mode again").performClick()
         assertNotNull("Role chooser was not requested", shadowOf(activity).nextStartedActivityForResult)
     }
-
-    private val roles get() = shadowOf(activity.getSystemService(RoleManager::class.java))
 
     private val savedServer =
         SettingsState(services = listOf(ServiceInstance("saved")), loadState = SettingsLoadState.Ready)

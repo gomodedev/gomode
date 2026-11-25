@@ -1,10 +1,8 @@
 // Gradle configuration for the Go Mode Android shell app.
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
-    alias(libs.plugins.detekt)
     alias(libs.plugins.ktlint)
 }
 
@@ -51,20 +49,39 @@ android {
     }
 
     // Share the note score without bundling web source.
-    sourceSets.getByName("main").assets.srcDir(rootProject.file("../web/assets"))
-    sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/assets"))
-    sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/speech-text"))
-    sourceSets.getByName("test").resources.srcDir(rootProject.file("../web/testdata/voice-choices"))
-    sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("../e2e/voice-preview/scene"))
+    sourceSets
+        .getByName("main")
+        .assets.directories
+        .add(rootProject.file("../web/assets").path)
+    sourceSets
+        .getByName("test")
+        .resources.directories
+        .add(rootProject.file("../web/assets").path)
+    sourceSets
+        .getByName("test")
+        .resources.directories
+        .add(rootProject.file("../web/testdata/speech-text").path)
+    sourceSets
+        .getByName("test")
+        .resources.directories
+        .add(rootProject.file("../web/testdata/voice-choices").path)
+    sourceSets
+        .getByName("androidTest")
+        .assets.directories
+        .add(rootProject.file("../e2e/voice-preview/scene").path)
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
 
+    // MemoryPreferences for this module's unit and instrumented tests.
+    testFixtures {
+        enable = true
+    }
+
     lint {
         warningsAsErrors = true
         abortOnError = true
-        xmlReport = true
         // Go Mode hosts LAN/private backends during the WebView spike.
         disable +=
             setOf(
@@ -79,14 +96,9 @@ android {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        allWarningsAsErrors = true
+        freeCompilerArgs.add("-Wextra")
     }
-}
-
-detekt {
-    buildUponDefaultConfig = true
-    config.setFrom(files("$rootDir/detekt.yml"))
-    parallel = true
 }
 
 // Robolectric resolves the Android runtime jar for its tests by downloading it from Maven Central
@@ -153,9 +165,13 @@ dependencies {
     // LiteRT's asynchronous JNI callbacks require its declared Kotlin/coroutine runtime ABI.
     implementation(libs.litertlm.android)
 
-    testImplementation(project(":even-g2-testing"))
-    testImplementation(project(":gomode-testing"))
-    testImplementation(project(":halo-testing"))
+    testFixturesApi(libs.androidx.datastore.preferences)
+    // The Compose compiler plugin compiles every Kotlin source set of this module, fixtures included,
+    // and requires the Compose runtime on their classpath.
+    testFixturesImplementation(platform(libs.androidx.compose.bom))
+    testFixturesImplementation(libs.androidx.compose.runtime)
+    testImplementation(testFixtures(project(":even-g2-sdk")))
+    testImplementation(testFixtures(project(":halo-sdk")))
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.androidx.work.testing)
@@ -164,9 +180,8 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.robolectric)
     add(robolectricSdkJar.name, libs.robolectric.android.all)
-    androidTestImplementation(project(":even-g2-testing"))
-    androidTestImplementation(project(":gomode-testing"))
-    androidTestImplementation(project(":halo-testing"))
+    androidTestImplementation(testFixtures(project(":even-g2-sdk")))
+    androidTestImplementation(testFixtures(project(":halo-sdk")))
     androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(libs.androidx.junit)

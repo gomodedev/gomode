@@ -9,7 +9,6 @@ import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 
 // Robolectric has no Chromium provider; advertise only the page-isolation capabilities.
-@Suppress("UtilityClassWithPublicConstructor") // Robolectric constructs shadow instances.
 @Implements(WebViewFeature::class)
 class HostedWebViewFeatures {
     companion object {
@@ -20,21 +19,20 @@ class HostedWebViewFeatures {
     }
 }
 
-@Suppress("UtilityClassWithPublicConstructor") // Robolectric constructs shadow instances.
 @Implements(WebViewCompat::class)
 class HostedWebViewCompat {
     companion object {
+        // Match the platform API; Robolectric has no media renderer.
         @JvmStatic
         @Implementation
-        @Suppress("UnusedParameter") // Match the platform API; Robolectric has no media renderer.
         fun setAudioMuted(
             view: WebView,
             muted: Boolean,
         ) = Unit
 
+        // Match the platform API; the test invokes page callbacks directly.
         @JvmStatic
         @Implementation
-        @Suppress("UnusedParameter") // Match the platform API; the test invokes page callbacks directly.
         fun addDocumentStartJavaScript(
             view: WebView,
             script: String,

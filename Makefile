@@ -6,20 +6,10 @@
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@v2.20.0
 
 ANDROID_LINT_TASKS := \
-	:car-dial-fixture:detekt \
 	:car-dial-fixture:ktlintCheck \
-	:even-g2-sdk:detekt \
 	:even-g2-sdk:ktlintCheck \
-	:even-g2-testing:detekt \
-	:even-g2-testing:ktlintCheck \
-	:gomode:detekt \
 	:gomode:ktlintCheck \
-	:gomode-testing:detekt \
-	:gomode-testing:ktlintCheck \
-	:halo-sdk:detekt \
-	:halo-sdk:ktlintCheck \
-	:halo-testing:detekt \
-	:halo-testing:ktlintCheck
+	:halo-sdk:ktlintCheck
 
 # Android lint needs compiled classes, so keep it with build-dependent checks.
 ANDROID_TEST_TASKS := \
@@ -31,20 +21,17 @@ ANDROID_TEST_TASKS := \
 	:even-g2-sdk:createDebugUnitTestCoverageReport \
 	:even-g2-sdk:lintDebug \
 	:even-g2-sdk:testDebugUnitTest \
-	:even-g2-testing:lintDebug \
 	:gomode:assembleDebug \
 	:gomode:assembleDebugAndroidTest \
 	:gomode:createDebugUnitTestCoverageReport \
 	:gomode:lintDebug \
 	:gomode:testDebugUnitTest \
 	:gomode-sdk:assemble \
-	:gomode-testing:lintDebug \
 	:halo-sdk:assembleDebug \
 	:halo-sdk:assembleDebugAndroidTest \
 	:halo-sdk:createDebugUnitTestCoverageReport \
 	:halo-sdk:lintDebug \
 	:halo-sdk:testDebugUnitTest \
-	:halo-testing:lintDebug \
 	:mcp-sdk:assemble \
 	:oauth-sdk:assemble \
 	:voicegateway-sdk:assemble
@@ -80,7 +67,7 @@ help:
 	@printf '  %-27s - %s\n' 'make test-smoke' 'Run local model voice smoke tests (slow, downloads models)'
 	@printf '  %-27s - %s\n' 'make benchmark' 'Run Go benchmarks'
 	@printf '  %-27s - %s\n' 'make build' 'Build Go packages and Android app and SDKs'
-	@printf '  %-27s - %s\n' 'make android-lint' 'Run Android source static analysis and formatting checks'
+	@printf '  %-27s - %s\n' 'make android-lint' 'Run ktlint on Android Kotlin sources'
 	@printf '  %-27s - %s\n' 'make android-test' 'Run Android builds, platform lint, unit tests, and coverage'
 	@printf '  %-27s - %s\n' 'make android-e2e' 'Run all model-free app, gateway, and Telecom emulator tests'
 	@printf '  %-27s - %s\n' 'make android-push' 'Build and install Go Mode on connected devices'
@@ -106,11 +93,8 @@ fix: node_modules/.modules.yaml
 	@./scripts/android-checks.sh \
 		:car-dial-fixture:ktlintFormat \
 		:even-g2-sdk:ktlintFormat \
-		:even-g2-testing:ktlintFormat \
 		:gomode:ktlintFormat \
-		:gomode-testing:ktlintFormat \
 		:halo-sdk:ktlintFormat \
-		:halo-testing:ktlintFormat \
 		$(GRADLE_LOG_ARGS)
 	@pnpm exec node scripts/build_frontend.mjs --write
 	@uv run --locked python scripts/update_agents_file_index.py

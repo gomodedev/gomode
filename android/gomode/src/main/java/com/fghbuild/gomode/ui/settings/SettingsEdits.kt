@@ -192,9 +192,7 @@ internal class SettingsEdits(
                 saved
             } catch (e: CancellationException) {
                 throw e
-            } catch (
-                @Suppress("TooGenericExceptionCaught") e: Exception,
-            ) {
+            } catch (e: Exception) {
                 // Native persistence boundary: keep the draft and report failed writes.
                 error = "Unable to save settings: ${e.message}"
                 false

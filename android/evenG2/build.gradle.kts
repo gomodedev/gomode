@@ -1,8 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.detekt)
     alias(libs.plugins.ktlint)
 }
 
@@ -34,6 +32,11 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
+    // FakeG2Firmware for this module's tests and its hosts' unit and instrumented tests.
+    testFixtures {
+        enable = true
+    }
+
     lint {
         warningsAsErrors = true
         abortOnError = true
@@ -44,14 +47,9 @@ android {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        allWarningsAsErrors = true
+        freeCompilerArgs.add("-Wextra")
     }
-}
-
-detekt {
-    buildUponDefaultConfig = true
-    config.setFrom(files("$rootDir/detekt.yml"))
-    parallel = true
 }
 
 // Robolectric resolves the Android runtime jar for its tests by downloading it from Maven Central
@@ -85,7 +83,6 @@ dependencies {
 
     // The protocol and session tests are plain JVM tests; the GATT transport test runs on Robolectric's
     // Bluetooth shadows.
-    testImplementation(project(":even-g2-testing"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)

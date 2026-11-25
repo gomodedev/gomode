@@ -112,9 +112,7 @@ class AndroidVoiceChime : VoiceChimePlayer {
                     delay(voiceChimeDurationMs())
                 } catch (error: CancellationException) {
                     throw error
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") error: Exception,
-                ) {
+                } catch (error: Exception) {
                     Log.w(TAG, "Could not play voice chime", error)
                 } finally {
                     track?.release()
