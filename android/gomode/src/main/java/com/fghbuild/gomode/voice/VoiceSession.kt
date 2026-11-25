@@ -2202,6 +2202,10 @@ data class VoiceState(
     /** active is true from connection start until voice ends. */
     val active: Boolean
         get() = connected || connectStatus != null || listening || speaking
+
+    /** started is true while connecting or connected: the voice button, or a glasses press, then ends voice. */
+    val started: Boolean
+        get() = connected || connectStatus != null
 }
 
 /** Replace only the current ephemeral hypothesis; stale clears cannot erase newer input. */

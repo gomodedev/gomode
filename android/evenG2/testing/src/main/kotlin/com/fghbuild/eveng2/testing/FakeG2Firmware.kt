@@ -119,12 +119,57 @@ class FakeG2Firmware {
                 scalar(5, G2TextPage().widgetId)
                 scalar(6, session)
             }
+        deviceEvent(G2Side.RIGHT, proto { bytes(3, system) })
+    }
+
+    /**
+     * The [side] arm reports a touchpad event of [type] (0 click, 3 double click) on the default
+     * page's text container, as the enterprise contract vector g2_evenhub_click_hex does.
+     */
+    fun touch(
+        side: G2Side,
+        type: Long,
+    ) {
+        val page = G2TextPage()
+        val text =
+            proto {
+                scalar(1, page.containerId)
+                bytes(2, page.containerName.toByteArray())
+                // Proto3 omits a zero enum.
+                if (type != 0L) scalar(3, type)
+            }
+        deviceEvent(side, proto { bytes(2, text) })
+    }
+
+    /**
+     * The [side] arm reports a system event of [type] from [source] (0 unspecified, 1 right temple, 2
+     * R1 ring, 3 left temple) for the current page; proto3 omits a zero type or source.
+     */
+    fun systemInput(
+        side: G2Side,
+        type: Long,
+        source: Long,
+    ) {
+        val system =
+            proto {
+                if (type != 0L) scalar(1, type)
+                if (source != 0L) scalar(2, source)
+                scalar(5, G2TextPage().widgetId)
+                scalar(6, pageSession)
+            }
+        deviceEvent(side, proto { bytes(3, system) })
+    }
+
+    private fun deviceEvent(
+        side: G2Side,
+        event: ByteArray,
+    ) {
         val payload =
             proto {
                 scalar(1, 2)
-                bytes(13, proto { bytes(3, system) })
+                bytes(13, event)
             }
-        link(G2Side.RIGHT).notify(G2Protocol.SID_EVEN_HUB, 1, G2Protocol.FLAG_NOTIFY, payload)
+        link(side).notify(G2Protocol.SID_EVEN_HUB, 1, G2Protocol.FLAG_NOTIFY, payload)
     }
 
     @Synchronized

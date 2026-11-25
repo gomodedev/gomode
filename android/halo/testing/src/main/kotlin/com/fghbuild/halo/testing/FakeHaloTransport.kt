@@ -9,6 +9,8 @@ import com.fghbuild.halo.ble.HaloDevice
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloException
 import com.fghbuild.halo.ble.HaloProtocol
+import com.fghbuild.halo.msg.ClickType
+import com.fghbuild.halo.msg.HaloMessageCodes
 import com.fghbuild.halo.msg.TxMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
@@ -140,6 +142,17 @@ class FakeHalo(
 
     fun drop() {
         closeCause.value = HaloException("Device disconnected (status=8)")
+    }
+
+    /** The app on the glasses reports a button press of [type] the way Brilliant's apps send one. */
+    fun pressButton(type: ClickType) {
+        val code: Byte =
+            when (type) {
+                ClickType.SINGLE -> 1
+                ClickType.DOUBLE -> 2
+                ClickType.LONG -> 3
+            }
+        notifications.trySend(byteArrayOf(HaloProtocol.DATA_PREFIX, HaloMessageCodes.RX_CLICK.toByte(), code))
     }
 
     /** Whether the newest typed messages are [expected], each as its code and packed payload. */

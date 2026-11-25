@@ -1,5 +1,7 @@
 // Even G2's GlassesDisplay: one firmware text container, created on connect and updated in place.
 //
+// The page's text container captures the touchpads and an R1 ring, whose clicks are presses.
+//
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
 // another. connect() returns at the session's first G2State.Ready and fails if it reaches
 // G2State.Closed first; once connected, Closed sets closeCause. A retryable G2CloseCause is a
@@ -23,6 +25,7 @@ import com.fghbuild.gomode.sdk.v1.DisplayShape
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,6 +63,7 @@ internal class EvenG2Glasses private constructor(
     override val description = G2_DISPLAY
     override val screenFit = G2ScreenFit(glasses.page)
     override val closeCause: StateFlow<Exception?> = ended.asStateFlow()
+    override val presses: Flow<Unit> = glasses.presses
 
     /** Shows [text], cut to the firmware's limit, and waits until the glasses acknowledge it. */
     override suspend fun showText(text: String) {

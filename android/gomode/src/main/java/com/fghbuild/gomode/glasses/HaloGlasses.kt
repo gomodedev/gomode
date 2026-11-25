@@ -1,4 +1,4 @@
-// Halo's GlassesDisplay: Go Mode's Lua app on the glasses draws text pages rasterized on the phone.
+// Halo's GlassesDisplay: Go Mode's Lua app draws text pages rasterized on the phone and reports button presses.
 package com.fghbuild.gomode.glasses
 
 import android.bluetooth.BluetoothDevice
@@ -10,13 +10,19 @@ import com.fghbuild.halo.ble.HaloConnection
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloException
 import com.fghbuild.halo.msg.CircularTextLayout
+import com.fghbuild.halo.msg.ClickType
 import com.fghbuild.halo.msg.HaloDisplay
 import com.fghbuild.halo.msg.HalosideApp
+import com.fghbuild.halo.msg.RxClick
 import com.fghbuild.halo.msg.TxCode
 import com.fghbuild.halo.msg.TxMessage
 import com.fghbuild.halo.msg.TxTextPage
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 // Message codes that Go Mode's Halo app, assets/halo/main.lua, handles.
@@ -57,10 +63,22 @@ internal fun haloTextMessages(text: String): List<Pair<Int, TxMessage>> {
     return listOf(HALO_TEXT_PAGE to page) + page.rasterizedSprites.map { HALO_TEXT_PAGE to it }
 }
 
+/**
+ * The presses in the data of Go Mode's Halo app, which reports each single press of the button.
+ * They end with the link, whose end the device data reports as a [HaloException].
+ */
+internal fun haloPresses(data: Flow<ByteArray>): Flow<Unit> =
+    RxClick()
+        .attach(data)
+        .filter { it == ClickType.SINGLE }
+        .map { }
+        .catch { if (it !is HaloException) throw it }
+
 internal class HaloGlasses private constructor(
     private val connection: HaloConnection,
     private val app: HalosideApp,
     override val closeCause: StateFlow<Exception?>,
+    override val presses: Flow<Unit>,
 ) : GlassesDisplay {
     override val description = HALO_DISPLAY
     override val screenFit = HaloScreenFit
@@ -104,7 +122,9 @@ internal class HaloGlasses private constructor(
                         .bufferedReader()
                         .use { it.readText() }
                 app.start(main, HALO_APP_LIBS)
-                return HaloGlasses(connection, app, halo.closeCause).also { glasses = it }
+                return HaloGlasses(connection, app, halo.closeCause, haloPresses(halo.dataResponse)).also {
+                    glasses = it
+                }
             } catch (e: HaloException) {
                 throw GlassesException("Could not start Go Mode on Halo: ${e.message}", e)
             } catch (e: SecurityException) {

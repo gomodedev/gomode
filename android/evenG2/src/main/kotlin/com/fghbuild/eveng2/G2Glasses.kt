@@ -8,7 +8,7 @@
 // G2Glasses, and each page starts with the latest text from show(). A superseded session never
 // publishes state. A replaced or stopped session stays in `job` until it has finished, so a
 // later connect() joins it and never runs two sessions at once. An exception that escapes a
-// session ends it with G2CloseCause.Failed.
+// session ends it with G2CloseCause.Failed. presses reports the current session's presses only.
 
 package com.fghbuild.eveng2
 
@@ -16,8 +16,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -35,6 +38,14 @@ class G2Glasses(
     private var generation = 0L
 
     val state: StateFlow<G2State> = mutableState.asStateFlow()
+
+    private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
+
+    /**
+     * Each press of a touchpad or an R1 ring while a page is open; see [G2EvenHub.press]. Other
+     * gestures are not reported, and a press that nobody collects is lost.
+     */
+    val presses: SharedFlow<Unit> = mutablePresses.asSharedFlow()
 
     /**
      * Run one session with [pair], replacing any previous one. The state is [G2State.Connecting]
@@ -89,7 +100,16 @@ class G2Glasses(
         background: Boolean,
     ) {
         val session =
-            G2Session(pair, connector, background, page, ids, desired) { publish(current, G2State.Ready(pair, it)) }
+            G2Session(
+                pair,
+                connector,
+                background,
+                page,
+                ids,
+                desired,
+                onReady = { publish(current, G2State.Ready(pair, it)) },
+                onPress = { press(current) },
+            )
         val cause =
             try {
                 session.run()
@@ -108,5 +128,16 @@ class G2Glasses(
         synchronized(lock) {
             if (current == generation) mutableState.value = state
         }
+    }
+
+    private fun press(current: Long) {
+        synchronized(lock) {
+            if (current == generation) mutablePresses.tryEmit(Unit)
+        }
+    }
+
+    private companion object {
+        // Presses a slow collector may lag behind; a person presses far slower than one is handled.
+        const val PRESS_BUFFER = 8
     }
 }

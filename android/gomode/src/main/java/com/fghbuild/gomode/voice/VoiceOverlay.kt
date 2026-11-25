@@ -476,7 +476,7 @@ private fun VoiceToolbar(
     contentInset: Dp,
     transcriptControl: @Composable () -> Unit,
 ) {
-    val active = voiceState.connected || voiceState.connectStatus != null
+    val active = voiceState.started
     Row(
         // The settings glyph starts 8dp inside its bounded 48dp touch target.
         modifier =

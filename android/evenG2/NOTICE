@@ -41,7 +41,8 @@ https://github.com/ithinkthisiscool/even-g2-protocol
 Commit f352806135c1a892eb10ca4d616f9fa0c186fc83.
 
 G2Prelude.kt, G2Auth.kt, G2EvenHub.kt, G2Arm.kt, and the golden bytes in
-G2PythonGoldenTest.kt follow its message builders and advertisement format.
+G2PythonGoldenTest.kt follow its message builders, device event decoder, and
+advertisement format; the device events come from its tests.
 G2Session.kt follows its order after AUTH: prelude, text page, heartbeat.
 Its pyproject.toml declares the MIT License and the author "eveng2"; the
 repository has no LICENSE file.

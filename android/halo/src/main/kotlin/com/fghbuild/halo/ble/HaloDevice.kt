@@ -3,13 +3,24 @@ package com.fghbuild.halo.ble
 
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCharacteristic
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 class HaloDevice(
@@ -23,8 +34,9 @@ class HaloDevice(
     // Lua strings: MTU − 3; raw data: MTU − 4 (one byte for 0x01 header).
     internal var maxStringLen: Int = 0,
     internal var maxDataLen: Int = 0,
-    // Shared notification Flow — populated by HaloConnection.enableServices.
-    internal var rawNotifications: Flow<ByteArray>? = null,
+    // The link's notifications, which HaloConnection.enableServices enables while one collector
+    // collects them; the device collects them once and shares them with every reader.
+    rawNotifications: Flow<ByteArray>? = null,
     /**
      * Why the link to the device ended, or null while it is up. [HaloConnection] sets it when the
      * GATT link drops or the host disconnects; it never returns to null. A device not wired to a
@@ -34,21 +46,53 @@ class HaloDevice(
 ) {
     val uuid: String get() = platformDevice.address
 
-    // ---- Rx streams filtered from the shared notification Flow ----
+    // ---- Rx streams shared from the link's notifications ----
+
+    // One collection of rawNotifications feeds every reader until the link ends: a second
+    // collection of HaloConnection's flow would take the GATT callback from the first and disable
+    // notifications when it ends. A notification reaches the readers subscribed when it arrives,
+    // so a write that awaits a reply subscribes first; see writeAndAwait.
+    private val pump = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+    private val notifications = MutableSharedFlow<ByteArray>(extraBufferCapacity = NOTIFICATION_BUFFER)
+    private val notificationsEnd = MutableStateFlow<Throwable?>(null)
+
+    init {
+        if (rawNotifications == null) {
+            notificationsEnd.value = HaloException("RX notifications not available")
+        } else {
+            pump.launch {
+                val cause = runCatching { rawNotifications.collect(notifications::emit) }.exceptionOrNull()
+                endNotifications(cause ?: HaloException("Notifications ended"))
+            }
+            pump.launch { endNotifications(closeCause.filterNotNull().first()) }
+        }
+    }
+
+    private fun endNotifications(cause: Throwable) {
+        notificationsEnd.compareAndSet(null, cause)
+        pump.cancel()
+    }
+
+    // Each notification from the time of collection; fails with why the link ended once it does.
+    private val received: Flow<ByteArray> =
+        flow {
+            coroutineScope {
+                launch { throw notificationsEnd.filterNotNull().first() }
+                notifications.collect { emit(it) }
+            }
+        }
 
     /** Lua print() output and errors — UTF-8 strings (data[0] != 0x01). */
-    val stringResponse: Flow<String>
-        get() =
-            rawNotifications!!
-                .filter { it.isNotEmpty() && it[0] != HaloProtocol.DATA_PREFIX }
-                .map { String(it, Charsets.UTF_8) }
+    val stringResponse: Flow<String> =
+        received
+            .filter { it.isNotEmpty() && it[0] != HaloProtocol.DATA_PREFIX }
+            .map { String(it, Charsets.UTF_8) }
 
     /** Raw data sent by the device via frame.bluetooth.send() — first byte 0x01 stripped. */
-    val dataResponse: Flow<ByteArray>
-        get() =
-            rawNotifications!!
-                .filter { it.isNotEmpty() && it[0] == HaloProtocol.DATA_PREFIX }
-                .map { it.copyOfRange(1, it.size) }
+    val dataResponse: Flow<ByteArray> =
+        received
+            .filter { it.isNotEmpty() && it[0] == HaloProtocol.DATA_PREFIX }
+            .map { it.copyOfRange(1, it.size) }
 
     // ---- Control signals (single-byte writes on LUA TX) ----
 
@@ -104,15 +148,13 @@ class HaloDevice(
             throw HaloException("Lua string exceeds max length ($maxStringLen): ${bytes.size}")
         }
 
-        if (awaitResponse) {
-            sendRaw(RawWrite(tx, bytes, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
-            return withTimeoutOrNull(timeoutMs) {
-                stringResponse.first()
-            } ?: throw HaloException("Timeout waiting for Lua string response")
-        } else {
-            sendRaw(RawWrite(tx, bytes, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
+        val write = RawWrite(tx, bytes, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        if (!awaitResponse) {
+            sendRaw(write)
             return null
         }
+        return writeAndAwait(write, timeoutMs) { stringResponse.first() }
+            ?: throw HaloException("Timeout waiting for Lua string response")
     }
 
     /** Check whether the Lua REPL is active by sending `print(1)` and expecting `"1"`. */
@@ -146,14 +188,13 @@ class HaloDevice(
             throw HaloException("Data payload exceeds max length ($maxDataLen)")
         }
 
-        if (awaitResponse) {
-            sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
-            withTimeoutOrNull(timeoutMs) {
-                dataResponse.first()
-            } ?: throw HaloException("Timeout waiting for data response")
-        } else {
-            sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
+        val write = RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        if (!awaitResponse) {
+            sendRaw(write)
+            return
         }
+        writeAndAwait(write, timeoutMs) { dataResponse.first() }
+            ?: throw HaloException("Timeout waiting for data response")
     }
 
     // ---- Audio streaming ----
@@ -191,6 +232,9 @@ class HaloDevice(
     companion object {
         private const val CONTROL_SETTLE_DELAY_MS = 200L
         private const val MESSAGE_ACK_TIMEOUT_MS = 5000L
+
+        // Notifications a slow reader may lag behind before the pump waits for it.
+        private const val NOTIFICATION_BUFFER = 64
     }
 
     /**
@@ -242,24 +286,20 @@ class HaloDevice(
 
             payload.copyInto(packet, headerSize, sent, sent + chunkSize)
 
-            sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
-            awaitMessageAck(msgCode)
+            val write = RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            val ack =
+                writeAndAwait(write, MESSAGE_ACK_TIMEOUT_MS) {
+                    dataResponse.first {
+                        it.contentEquals(HaloProtocol.DATA_ACK_SUCCESS) ||
+                            it.contentEquals(HaloProtocol.DATA_ACK_FAILURE)
+                    }
+                } ?: throw HaloException("Timeout waiting for message ACK (msgCode=0x${msgCode.toString(16)})")
+            if (ack.contentEquals(HaloProtocol.DATA_ACK_FAILURE)) {
+                throw HaloException("Device rejected message chunk (msgCode=0x${msgCode.toString(16)})")
+            }
 
             sent += chunkSize
         } while (sent < payload.size)
-    }
-
-    private suspend fun awaitMessageAck(msgCode: Int) {
-        val ack =
-            withTimeoutOrNull(MESSAGE_ACK_TIMEOUT_MS) {
-                dataResponse.first {
-                    it.contentEquals(HaloProtocol.DATA_ACK_SUCCESS) || it.contentEquals(HaloProtocol.DATA_ACK_FAILURE)
-                }
-            } ?: throw HaloException("Timeout waiting for message ACK (msgCode=0x${msgCode.toString(16)})")
-
-        if (ack.contentEquals(HaloProtocol.DATA_ACK_FAILURE)) {
-            throw HaloException("Device rejected message chunk (msgCode=0x${msgCode.toString(16)})")
-        }
     }
 
     // ---- File upload ----
@@ -327,4 +367,17 @@ class HaloDevice(
     private suspend fun sendRaw(write: RawWrite) {
         writeSink(write)
     }
+
+    // Sends [write] and returns the [reply] read within [timeoutMs], or null. The reply's reader
+    // subscribes before the write, so a device that answers at once is not missed.
+    private suspend fun <T> writeAndAwait(
+        write: RawWrite,
+        timeoutMs: Long,
+        reply: suspend () -> T,
+    ): T? =
+        coroutineScope {
+            val answer = async(start = CoroutineStart.UNDISPATCHED) { withTimeoutOrNull(timeoutMs) { reply() } }
+            sendRaw(write)
+            answer.await()
+        }
 }

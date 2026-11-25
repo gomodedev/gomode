@@ -60,6 +60,22 @@ class RxMessageTest {
             assertEquals(listOf(ClickType.SINGLE), flow.toList())
         }
 
+    // A collector of presses must outlive a malformed packet.
+    @Test
+    fun `click drops unknown types and short packets`() =
+        runTest {
+            val parser = RxClick()
+            val flow =
+                parser.attach(
+                    flowOf(
+                        byteArrayOf(0x0B, 0x04),
+                        byteArrayOf(0x0B),
+                        byteArrayOf(0x0B, 0x01),
+                    ),
+                )
+            assertEquals(listOf(ClickType.SINGLE), flow.toList())
+        }
+
     @Test
     fun `click filters empty packets`() =
         runTest {

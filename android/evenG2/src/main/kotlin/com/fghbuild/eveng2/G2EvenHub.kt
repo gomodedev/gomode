@@ -1,4 +1,4 @@
-// G2EvenHub: Even Hub (SID 0xE0) text page, in-place text update, heartbeat, shutdown, replies, and exit events.
+// G2EvenHub: Even Hub (SID 0xE0) text page, in-place text update, heartbeat, shutdown, replies, presses, and exits.
 //
 // Ported and modified from G2EvenHubCodec.kt of the Even Realities enterprise SDK
 // 0.1.0-beta.14 (Apache-2.0, Copyright 2026 Hong Kong Even Realities Limited), narrowed to one
@@ -23,9 +23,25 @@
 // ID, 2: container name, 3: byte offset 0, 4: content byte length, 5: content}; the ID routes
 // the update, the name must match. Heartbeat and shutdown bodies are empty.
 //
-// The glasses report a page exit as event command 2, branch 13, system event (branch 3)
-// {1: event type, 5: widget ID, 6: page session ID}; type 6 is an abnormal exit and 7 an exit.
-// Only an exit that names this page's widget and session closes it.
+// The glasses report input and page exits as event command 2, branch 13, whose body holds one
+// event: a text event (branch 2) {1: container ID, 2: container name, 3: event type}, or a system
+// event (branch 3) {1: event type, 2: source (0 unspecified, 1 right temple, 2 R1 ring, 3 left
+// temple), 3: IMU sample, 4: exit reason, 5: widget ID, 6: page session ID}; a list event (branch
+// 1) cannot name this page's text container. Event types: 0 click, 1 scroll up, 2 scroll down,
+// 3 double click, 4 and 5 foreground enter and exit, 6 abnormal exit, 7 exit, 8 IMU data, 9 long
+// press, 10 its release. Proto3 omits type 0, so a click carries no type. Only an exit that names
+// this page's widget and session closes it. A press is a click: a text event that names this
+// page's container, which captures input, or a system event from a touchpad or the ring whose
+// widget and session, when present, are this page's. Either arm may report input, as the enterprise SDK accepts it from
+// both. The enterprise contract vector g2_evenhub_click_hex is a text event click; the README of
+// Even Realities' @evenrealities/even_hub_sdk 0.0.16 npm package (MIT) says source-aware input,
+// whose sources include the ring, arrives as system events.
+//
+// TODO(hardware): Confirm on a real pair, on stock firmware, which event one touchpad click and one
+// R1 ring click send, from which arm, and that a double click sends only type 3, not a click
+// first. Log every event command 2 message while tapping each temple and the ring once. If one
+// press arrives twice (from both arms, or as both a text and a system event), accept only one arm
+// or one form in press(); otherwise every press would start and at once end voice.
 //
 // TODO(hardware): The Python library's live-confirmed create page omits the page session ID
 // (field 7); the enterprise SDK sends it and matches exit events against it. Confirm on a real
@@ -117,7 +133,12 @@ sealed interface G2HubReply {
 object G2EvenHub {
     private const val EVENT_COMMAND = 2L
     private const val EVENT_BRANCH = 13
+    private const val TEXT_EVENT = 2
     private const val SYSTEM_EVENT = 3
+    private const val CLICK = 0L
+
+    // Input sources of a system event: right temple touchpad, R1 ring, left temple touchpad.
+    private val PRESS_SOURCES = 1L..3L
     private const val ABNORMAL_EXIT = 6L
     private const val EXIT = 7L
     private val BRANCHES = 3..26
@@ -246,6 +267,49 @@ object G2EvenHub {
         page: G2TextPage,
         session: Long,
     ): G2CloseCause.PageExited? {
+        val (branch, system) = deviceEvent(message) ?: return null
+        if (branch != SYSTEM_EVENT) return null
+        val type = system.scalar(1) ?: 0L
+        if (type != ABNORMAL_EXIT && type != EXIT) return null
+        if (system.scalar(5) != page.widgetId || system.scalar(6) != session) return null
+        return G2CloseCause.PageExited(abnormal = type == ABNORMAL_EXIT)
+    }
+
+    /**
+     * Whether [message] is a press on the page identified by [page] and [session]: a click on its
+     * text container, or a system click from a temple touchpad or the R1 ring. Other input, such as
+     * a double click, a scroll, a long press, or a click of an unspecified source, is not one.
+     */
+    fun press(
+        message: G2Message,
+        page: G2TextPage,
+        session: Long,
+    ): Boolean {
+        val (branch, event) = deviceEvent(message) ?: return false
+        return when (branch) {
+            TEXT_EVENT -> {
+                event.keys.all { it in 1..3 } &&
+                    event.scalar(1) == page.containerId &&
+                    (2 !in event || event.bytes(2)?.let(::decodeUtf8) == page.containerName) &&
+                    event.enum(3) == CLICK
+            }
+
+            SYSTEM_EVENT -> {
+                event.keys.all { it in 1..6 } &&
+                    event.enum(1) == CLICK &&
+                    event.scalar(2) in PRESS_SOURCES &&
+                    (5 !in event || event.scalar(5) == page.widgetId) &&
+                    (6 !in event || event.scalar(6) == session)
+            }
+
+            else -> {
+                false
+            }
+        }
+    }
+
+    // The single event of a device event message, as its branch and fields; null when [message] is not one.
+    private fun deviceEvent(message: G2Message): Pair<Int, Map<Int, G2ProtoField>>? {
         if (message.sid != G2Protocol.SID_EVEN_HUB || message.result != 0) return null
         val root = G2ProtoReader.fields(message.payload) ?: return null
         if ((root.scalar(1) ?: 0L) != EVENT_COMMAND ||
@@ -254,11 +318,10 @@ object G2EvenHub {
             return null
         }
         val event = root.bytes(EVENT_BRANCH)?.let(G2ProtoReader::fields) ?: return null
-        if (event.keys != setOf(SYSTEM_EVENT)) return null
-        val system = event.bytes(SYSTEM_EVENT)?.let(G2ProtoReader::fields) ?: return null
-        val type = system.scalar(1) ?: 0L
-        if (type != ABNORMAL_EXIT && type != EXIT) return null
-        if (system.scalar(5) != page.widgetId || system.scalar(6) != session) return null
-        return G2CloseCause.PageExited(abnormal = type == ABNORMAL_EXIT)
+        val branch = event.keys.singleOrNull() ?: return null
+        return event.bytes(branch)?.let(G2ProtoReader::fields)?.let { branch to it }
     }
+
+    // An enum [field]: proto3 omits its zero value; null when it has another wire type.
+    private fun Map<Int, G2ProtoField>.enum(field: Int): Long? = if (field in this) scalar(field) else 0L
 }

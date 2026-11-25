@@ -3,11 +3,15 @@
 // Generated from even-g2-protocol commit f352806135c1a892eb10ca4d616f9fa0c186fc83 (MIT) by
 // loading transport/transport.py and widgets/evenhub.py with `python3 -I` and calling
 // auth_frame() with its counter at 41, PRELUDE_F5872, build_create_input_page(101, "Hello"),
-// build_text_upgrade(…), build_heartbeat(103), and frame_pb(…, 0xE0, 0x20, seq).
+// build_text_upgrade(…), build_heartbeat(103), and frame_pb(…, 0xE0, 0x20, seq). The device events
+// come from tests/test_g2_widgets.py, which built them by hand from the Even app's proto schema and
+// never sent them to glasses.
 
 package com.fghbuild.eveng2
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class G2PythonGoldenTest {
@@ -66,6 +70,20 @@ class G2PythonGoldenTest {
         assertEquals("x".repeat(300), String(stream, 28, 300))
         assertEquals("1974", stream.copyOfRange(stream.size - 2, stream.size).hex())
     }
+
+    // Root field 2, which the enterprise vectors omit, carries 1 in these events.
+    @Test
+    fun onlyAClickOnTheTextContainerIsAPress() {
+        val page = G2TextPage(containerName = "t")
+        val longPress = hex("080210016a09120708011201741809")
+        assertFalse(G2EvenHub.press(event(longPress), page, 1))
+        // The same text event without its type is a click.
+        assertTrue(G2EvenHub.press(event(hex("080210016a0712050801120174")), page, 1))
+        val listClick = hex("080210016a070a05080412016d")
+        assertFalse(G2EvenHub.press(event(listClick), page.copy(containerId = 4, containerName = "m"), 1))
+    }
+
+    private fun event(payload: ByteArray) = G2Message(1, G2Protocol.SID_EVEN_HUB, G2Protocol.FLAG_NOTIFY, payload)
 
     @Test
     fun crcCheckValue() {

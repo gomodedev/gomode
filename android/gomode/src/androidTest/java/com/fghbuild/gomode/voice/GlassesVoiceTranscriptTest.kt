@@ -1,4 +1,4 @@
-// Exercises shell and car-dial voice sessions over WebRTC drawing their transcripts on fake Halo and Even G2 glasses.
+// Voice over WebRTC with fake Halo and Even G2 glasses: transcripts drawn on them and presses that toggle voice.
 package com.fghbuild.gomode.voice
 
 import android.Manifest
@@ -6,6 +6,8 @@ import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -22,6 +24,7 @@ import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.eveng2.testing.FakeG2Firmware
 import com.fghbuild.eveng2.testing.fakeG2Scanner
+import com.fghbuild.gomode.LocalEmulatorOnly
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -36,6 +39,7 @@ import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
+import com.fghbuild.halo.msg.ClickType
 import com.fghbuild.halo.testing.FakeHaloTransport
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -145,9 +149,145 @@ class GlassesVoiceTranscriptTest {
             }
         }
 
+    @Test
+    fun aHaloButtonPressStartsVoiceAndTheNextPressEndsIt() =
+        pressesStartAndEndVoice(GlassesDevice.Halo(HALO_ADDRESS)) { _, transport, _ ->
+            transport.halos.single().pressButton(ClickType.SINGLE)
+        }
+
+    @LocalEmulatorOnly
+    @Test
+    fun anR1RingClickStartsVoiceAndAnEvenG2TouchpadClickEndsIt() =
+        pressesStartAndEndVoice(GlassesDevice.EvenG2(G2_PAIR)) { press, _, firmware ->
+            if (press == 0) firmware.systemInput(G2Side.RIGHT, type = 0, source = 2) else firmware.touch(G2Side.LEFT, 0)
+        }
+
+    // Connects [device] with Go Mode open and its service ready, then presses it twice through [press],
+    // given the press's index and the fakes: the first press starts voice and the second ends it.
+    private fun pressesStartAndEndVoice(
+        device: GlassesDevice,
+        press: (Int, FakeHaloTransport, FakeG2Firmware) -> Unit,
+    ) = runBlocking {
+        MockWebServer().use { server ->
+            val fixture = ServerVoiceSwitchTest.HostedVoiceFixture(bearer = false)
+            server.dispatcher = fixture
+            server.start()
+            val repository = SettingsRepository(MemoryPreferences())
+            repository.addService("Local stack", server.url("/").toString())
+            repository.updateSavedVoiceSetup(null) {
+                it.copy(preference = it.preference.copy(mode = VoiceSetupMode.FOLLOW_GATEWAY))
+            }
+            repository.settings.first { it.services.isNotEmpty() && !it.voiceSetup.deviceSpeech }
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val transport = FakeHaloTransport(context)
+            val firmware = FakeG2Firmware()
+            val glassesScope = MainScope()
+            val glasses =
+                GlassesOwner(glassesScope, context, repository, transport, fakeG2Scanner(), firmware.connector)
+            val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
+            val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
+            try {
+                composeRule.runOnUiThread { glasses.connect(device) }
+                withTimeout(TIMEOUT_MS) { glasses.state.first { it.link is GlassesLink.Connected } }
+                composeRule.setContent { GoModeTheme { GoModeApp(shellOwner, models, glasses) } }
+                composeRule.waitUntil(TIMEOUT_MS) {
+                    composeRule
+                        .onAllNodes(hasTestTag("gomode-voice-connect") and isEnabled())
+                        .fetchSemanticsNodes()
+                        .isNotEmpty()
+                }
+
+                press(0, transport, firmware)
+                composeRule.waitUntil(TIMEOUT_MS) { fixture.sessions.size == 1 }
+                composeRule.waitUntil(TIMEOUT_MS) {
+                    composeRule.onAllNodesWithContentDescription("End voice").fetchSemanticsNodes().isNotEmpty()
+                }
+
+                press(1, transport, firmware)
+                composeRule.waitUntil(TIMEOUT_MS) {
+                    composeRule.onAllNodesWithContentDescription("End voice").fetchSemanticsNodes().isEmpty()
+                }
+                assertEquals(1, fixture.sessions.size)
+                assertTrue(glasses.state.value.link is GlassesLink.Connected)
+            } finally {
+                composeRule.runOnUiThread {
+                    glassesScope.cancel()
+                    shellOwner.close()
+                }
+                models.close()
+                fixture.close()
+            }
+        }
+    }
+
     // The car-dial owner feeds the glasses from the call it owns, on its own; Go Mode only hosts the page.
     @Test
     fun aCarDialCallShowsItsTranscriptOnEvenG2AndDeclaresTheG2Display() =
+        connectedCarDialCall { call ->
+            val gateway = call.fixture.sessions.single()
+            gateway.send(
+                """{"kind":"transcript.delta","speaker":"user","text":"What is the code word?"}""",
+            )
+            gateway.send(
+                """{"kind":"transcript.delta","speaker":"assistant","text":"The code word is cedar."}""",
+            )
+            composeRule.waitUntil(TIMEOUT_MS) {
+                call.firmware.shownText() == "You: What is the code word?\nThe code word is cedar."
+            }
+            // Every MCP request since the G2 connected declared its display.
+            val displays =
+                call.fixture.requestMetadata.map {
+                    it
+                        .optJSONObject("io.modelcontextprotocol/clientCapabilities")
+                        ?.optJSONObject("extensions")
+                        ?.optJSONObject("com.fghbuild.gomode/display")
+                        ?.toString()
+                }
+            assertTrue(
+                displays.toString(),
+                displays.isNotEmpty() &&
+                    displays.all {
+                        it ==
+                            """{"width":576,"height":288,"shape":"rectangle","colorSpace":"luminance","bitsPerPixel":4}"""
+                    },
+            )
+
+            composeRule.runOnUiThread { call.carDial.cancel() }
+            composeRule.waitUntil(TIMEOUT_MS) { call.firmware.shownText() == "" }
+            assertEquals(
+                GlassesLink.Connected(G2_DISPLAY, G2ScreenFit(G2TextPage())),
+                call.glasses.state.value.link,
+            )
+        }
+
+    // Telecom owns a released call's hang-up, so the call outlives the shell; a press still ends it.
+    @Test
+    fun aPressEndsACarDialCallThatOutlivesTheShell() =
+        connectedCarDialCall { call ->
+            composeRule.runOnUiThread { check(call.carDial.releaseToShell(call.identity, call.activity)) }
+            composeRule.runOnIdle { call.mounted.value = false }
+            composeRule.waitForIdle()
+            assertEquals(CarDialStatus.CONNECTED, call.carDial.state.value.status)
+
+            call.firmware.touch(G2Side.RIGHT, 0)
+            composeRule.waitUntil(TIMEOUT_MS) { call.carDial.state.value.status == CarDialStatus.IDLE }
+            composeRule.waitUntil(TIMEOUT_MS) { call.firmware.shownText() == "" }
+        }
+
+    private class CarDialCall(
+        val fixture: ServerVoiceSwitchTest.HostedVoiceFixture,
+        val firmware: FakeG2Firmware,
+        val glasses: GlassesOwner,
+        val carDial: CarDialVoiceOwner,
+        val identity: String,
+        val activity: Any,
+        // Whether GoModeApp, which hosts the service page, stays composed.
+        val mounted: MutableState<Boolean>,
+    )
+
+    // Connects a fake Even G2, starts a car-dial call to a hosted service, and runs [body] once it
+    // connects; the shell hosts the service page whose frontend the call waits for.
+    private fun connectedCarDialCall(body: (CarDialCall) -> Unit) =
         runBlocking {
             MockWebServer().use { server ->
                 val fixture = ServerVoiceSwitchTest.HostedVoiceFixture(bearer = false)
@@ -184,6 +324,7 @@ class GlassesVoiceTranscriptTest {
                     device.executeShellCommand("cmd role get-role-holders $role").lines().filter(String::isNotBlank)
                 val component = ComponentName(context, CarDialRedirectionService::class.java)
                 val originalEnabled = context.packageManager.getComponentEnabledSetting(component)
+                val mounted = mutableStateOf(true)
                 try {
                     context.packageManager.setComponentEnabledSetting(
                         component,
@@ -193,8 +334,9 @@ class GlassesVoiceTranscriptTest {
                     device.executeShellCommand("cmd role add-role-holder $role ${context.packageName}")
                     composeRule.runOnUiThread { glasses.connect(GlassesDevice.EvenG2(G2_PAIR)) }
                     withTimeout(TIMEOUT_MS) { glasses.state.first { it.link is GlassesLink.Connected } }
-                    // The shell hosts the service page whose frontend the call waits for.
-                    composeRule.setContent { GoModeTheme { GoModeApp(shellOwner, models, glasses) } }
+                    composeRule.setContent {
+                        if (mounted.value) GoModeTheme { GoModeApp(shellOwner, models, glasses) }
+                    }
                     composeRule.waitUntil(TIMEOUT_MS) {
                         composeRule
                             .onAllNodes(hasTestTag("gomode-voice-connect") and isEnabled())
@@ -202,45 +344,17 @@ class GlassesVoiceTranscriptTest {
                             .isNotEmpty()
                     }
                     val activity = Any()
-                    composeRule.runOnUiThread {
-                        val identity = requireNotNull(carDial.request(service))
-                        check(carDial.attach(identity, activity))
-                        carDial.start(identity, activity)
-                    }
+                    val identity =
+                        composeRule.runOnUiThread {
+                            val identity = requireNotNull(carDial.request(service))
+                            check(carDial.attach(identity, activity))
+                            carDial.start(identity, activity)
+                            identity
+                        }
                     composeRule.waitUntil(TIMEOUT_MS) {
                         fixture.sessions.size == 1 && carDial.state.value.status == CarDialStatus.CONNECTED
                     }
-                    val gateway = fixture.sessions.single()
-                    gateway.send(
-                        """{"kind":"transcript.delta","speaker":"user","text":"What is the code word?"}""",
-                    )
-                    gateway.send(
-                        """{"kind":"transcript.delta","speaker":"assistant","text":"The code word is cedar."}""",
-                    )
-                    composeRule.waitUntil(TIMEOUT_MS) {
-                        firmware.shownText() == "You: What is the code word?\nThe code word is cedar."
-                    }
-                    // Every MCP request since the G2 connected declared its display.
-                    val displays =
-                        fixture.requestMetadata.map {
-                            it
-                                .optJSONObject("io.modelcontextprotocol/clientCapabilities")
-                                ?.optJSONObject("extensions")
-                                ?.optJSONObject("com.fghbuild.gomode/display")
-                                ?.toString()
-                        }
-                    assertTrue(
-                        displays.toString(),
-                        displays.isNotEmpty() &&
-                            displays.all {
-                                it ==
-                                    """{"width":576,"height":288,"shape":"rectangle","colorSpace":"luminance","bitsPerPixel":4}"""
-                            },
-                    )
-
-                    composeRule.runOnUiThread { carDial.cancel() }
-                    composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
-                    assertEquals(GlassesLink.Connected(G2_DISPLAY, G2ScreenFit(G2TextPage())), glasses.state.value.link)
+                    body(CarDialCall(fixture, firmware, glasses, carDial, identity, activity, mounted))
                 } finally {
                     composeRule.runOnUiThread {
                         carDial.close()

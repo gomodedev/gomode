@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.gomode.GoModeApplication
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
@@ -225,7 +226,7 @@ internal fun GoModeApp(
     val carVoiceOwner = (context.applicationContext as GoModeApplication).carDialVoiceOwner
     val carVoiceState by carVoiceOwner.state.collectAsStateWithLifecycle()
     val carVoiceSession by carVoiceOwner.session.collectAsStateWithLifecycle()
-    val carVoiceBusy = carVoiceState.status != CarDialStatus.IDLE && carVoiceState.status != CarDialStatus.FAILED
+    val carVoiceBusy = carVoiceState.status.busy
     LaunchedEffect(glassesOwner) { glassesOwner.start() }
 
     val settings = shellSnapshot.settings
@@ -578,6 +579,91 @@ internal fun GoModeApp(
                             (authReady && configuredVoiceAvailable && shellRecovery == null)
                     )
             )
+    val connectVoice = {
+        manualStartup?.finish(VoiceStartupOutcome.SUPERSEDED)
+        connectAfterMicPermission = null
+        val timing = VoiceStartupTiming(VoiceStartupSource.MANUAL)
+        manualStartup = timing
+        activeNativeScreen = null
+        carVoiceOwner.cancel()
+        prepareAllPages = true
+        // Manual starts are enabled only after these prerequisites.
+        // Record checkpoints without adding a second preparation wait.
+        timing.enter(VoiceStartupStage.PAGE)
+        timing.enter(VoiceStartupStage.SIGN_IN)
+        timing.enter(VoiceStartupStage.TOOLS)
+        timing.enter(VoiceStartupStage.FRONTEND)
+        if ((localSelection != null || bearerStore.authReady.value) &&
+            (activeURL.isBlank() || serviceSession.isFrontendReady)
+        ) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO,
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                timing.enter(VoiceStartupStage.TRANSPORT)
+                manualVoiceSession.connect()
+                observeVoiceStartup(scope, manualVoiceSession, timing)
+            } else {
+                timing.enter(VoiceStartupStage.MICROPHONE)
+                connectAfterMicPermission =
+                    PendingMicrophoneVoiceStart(serviceSession, manualVoiceSession, timing)
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        } else {
+            timing.finish(VoiceStartupOutcome.FAILED)
+        }
+    }
+    // Reads the car call's live state: a glasses press can end voice while this shell is stopped and its
+    // composed state is stale.
+    val disconnectVoice = { reason: String ->
+        connectAfterMicPermission?.timing?.finish(VoiceStartupOutcome.CANCELED)
+        connectAfterMicPermission = null
+        if (carVoiceOwner.state.value.status != CarDialStatus.IDLE) {
+            carVoiceOwner.cancel()
+        } else {
+            manualStartup?.finish(VoiceStartupOutcome.CANCELED)
+            manualVoiceSession.disconnect(reason)
+        }
+    }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val openAppNotice = stringResource(R.string.glasses_notice_open_app)
+    val addServiceNotice = stringResource(R.string.glasses_notice_add_service)
+    val voiceUnavailableNotice = stringResource(R.string.glasses_notice_voice_unavailable)
+    val allowMicrophoneNotice = stringResource(R.string.glasses_notice_allow_microphone)
+    val pressVoice = {
+        when {
+            // CarDialVoiceOwner takes a press that ends its call first, also while this shell is stopped.
+            manualVoiceSession.state.value.started -> {
+                disconnectVoice("glasses press")
+            }
+
+            // Only a visible Activity may start the microphone's foreground service.
+            !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) -> {
+                glassesOwner.notify(openAppNotice)
+            }
+
+            activeURL.isBlank() -> {
+                glassesOwner.notify(addServiceNotice)
+            }
+
+            // Settings hides the voice button, and leaving it would discard its drafts.
+            !voiceAvailable || activeNativeScreen == NativeScreen.Settings -> {
+                glassesOwner.notify(voiceUnavailableNotice)
+            }
+
+            else -> {
+                connectVoice()
+                if (connectAfterMicPermission != null) {
+                    glassesOwner.notify(allowMicrophoneNotice)
+                } else {
+                    notifyVoiceStartFailure(scope, manualVoiceSession, glassesOwner)
+                }
+            }
+        }
+    }
+    val currentPressVoice by rememberUpdatedState(pressVoice)
+    LaunchedEffect(glassesOwner) { glassesOwner.presses.collect { currentPressVoice() } }
     val density = LocalDensity.current
     val keyboardOpen = WindowInsets.ime.getBottom(density) > 0
 
@@ -715,51 +801,8 @@ internal fun GoModeApp(
                     showUsageStats = settings.showUsageStats,
                     voiceState = voiceState,
                     voiceEnabled = voiceAvailable,
-                    onConnect = {
-                        manualStartup?.finish(VoiceStartupOutcome.SUPERSEDED)
-                        connectAfterMicPermission = null
-                        val timing = VoiceStartupTiming(VoiceStartupSource.MANUAL)
-                        manualStartup = timing
-                        activeNativeScreen = null
-                        carVoiceOwner.cancel()
-                        prepareAllPages = true
-                        // Manual starts are enabled only after these prerequisites.
-                        // Record checkpoints without adding a second preparation wait.
-                        timing.enter(VoiceStartupStage.PAGE)
-                        timing.enter(VoiceStartupStage.SIGN_IN)
-                        timing.enter(VoiceStartupStage.TOOLS)
-                        timing.enter(VoiceStartupStage.FRONTEND)
-                        if ((localSelection != null || bearerStore.authReady.value) &&
-                            (activeURL.isBlank() || serviceSession.isFrontendReady)
-                        ) {
-                            if (ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO,
-                                ) == PackageManager.PERMISSION_GRANTED
-                            ) {
-                                timing.enter(VoiceStartupStage.TRANSPORT)
-                                manualVoiceSession.connect()
-                                observeVoiceStartup(scope, manualVoiceSession, timing)
-                            } else {
-                                timing.enter(VoiceStartupStage.MICROPHONE)
-                                connectAfterMicPermission =
-                                    PendingMicrophoneVoiceStart(serviceSession, manualVoiceSession, timing)
-                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            }
-                        } else {
-                            timing.finish(VoiceStartupOutcome.FAILED)
-                        }
-                    },
-                    onDisconnect = {
-                        connectAfterMicPermission?.timing?.finish(VoiceStartupOutcome.CANCELED)
-                        connectAfterMicPermission = null
-                        if (carVoiceState.status != CarDialStatus.IDLE) {
-                            carVoiceOwner.cancel()
-                        } else {
-                            manualStartup?.finish(VoiceStartupOutcome.CANCELED)
-                            manualVoiceSession.disconnect("user hang-up")
-                        }
-                    },
+                    onConnect = connectVoice,
+                    onDisconnect = { disconnectVoice("user hang-up") },
                     onSelectMicrophoneMode = { voiceSession.setMicrophoneMode(it) },
                     onSelectDevice = selectAudioDevice,
                     onOpenSettings = { if (!keyguard.isKeyguardLocked) activeNativeScreen = NativeScreen.Settings },
@@ -792,6 +835,18 @@ internal fun GoModeApp(
                 )
             }
         }
+    }
+}
+
+// The wearer started voice without looking at the phone, so a failure to start is shown on the glasses.
+private fun notifyVoiceStartFailure(
+    scope: CoroutineScope,
+    session: VoiceSessionController,
+    glassesOwner: GlassesOwner,
+) {
+    scope.launch {
+        val result = session.state.first { it.connected || it.error != null || it.connectStatus == null }
+        result.error?.let(glassesOwner::notify)
     }
 }
 

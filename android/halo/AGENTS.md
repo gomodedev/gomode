@@ -23,9 +23,10 @@ holds `FakeHaloTransport`, fake glasses for hosts' unit and instrumented tests.
 
 ## Design Decisions
 
-**Channel + `receiveAsFlow()` for test notifications.** `MutableSharedFlow(replay=0)` drops
-values emitted before a collector starts. `Channel.UNLIMITED` buffers values and delivers
-to cold flow collectors — matches send-then-receive pattern.
+**`Channel` for test notifications.** `HaloDevice` collects its notification flow once and
+shares each notification with the readers subscribed when it arrives. Give each test device its
+own `Channel.UNLIMITED`, answer a write from `writeSink`, and subscribe a stream test's reader
+before sending.
 
 **`open` class with protected overridable methods.** `BluetoothGatt` has no settable
 callback. Tests subclass `HaloConnection` and override `connectGatt()`, `createHaloDevice()`,

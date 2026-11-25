@@ -10,7 +10,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class G2ContractVectorsTest {
@@ -96,8 +98,11 @@ class G2ContractVectorsTest {
     }
 
     @Test
-    fun clickIsNeitherAReplyNorAnExit() {
+    fun clickIsAPressOfItsContainerAndNeitherAReplyNorAnExit() {
         val click = message("g2_evenhub_click_hex")
+        assertTrue(G2EvenHub.press(click, demoPage, 123))
+        assertFalse(G2EvenHub.press(click, demoPage.copy(containerId = 2), 123))
+        assertFalse(G2EvenHub.press(click, demoPage.copy(containerName = "other"), 123))
         assertNull(G2EvenHub.reply(click, G2HubCommand.CREATE_PAGE, 42, 7))
         assertNull(G2EvenHub.pageExit(click, demoPage, 123))
     }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notices on the glasses when their press cannot start voice; read at a glance, so short. -->
+<resources>
+    <string name="glasses_notice_open_app">Open Go Mode on your phone to start voice</string>
+    <string name="glasses_notice_add_service">Add a service in Go Mode to use voice</string>
+    <string name="glasses_notice_voice_unavailable">Voice is not ready; check your phone</string>
+    <string name="glasses_notice_allow_microphone">Allow the microphone on your phone</string>
+</resources>

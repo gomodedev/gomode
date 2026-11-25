@@ -1,11 +1,9 @@
 // Unit tests for HaloDevice: Lua REPL, raw data, control signals, typed messages, file upload.
 // Uses Robolectric to shadow android.bluetooth.BluetoothDevice.
 //
-// Test strategy: notificationFlow is backed by a Channel.  writeSink emits
-// responses into the channel AFTER capturing the write.  HaloDevice's
-// send-then-receive pattern means `stringResponse.first()` / `dataResponse.first()`
-// picks up the response from the channel.  Channel.receiveAsFlow() supports
-// multiple independent collectors (unlike consumeAsFlow).
+// Test strategy: a Channel backs the link's notifications, and writeSink sends each response into
+// it while the write is in progress, as a device that answers at once does. HaloDevice shares each
+// notification with the readers subscribed when it arrives, so stream tests subscribe first.
 @file:Suppress("MaxLineLength")
 
 package com.fghbuild.halo.ble
@@ -13,10 +11,14 @@ package com.fghbuild.halo.ble
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
@@ -221,6 +223,8 @@ class HaloDeviceTest {
     fun `sendMessage splits payload across chunks`() =
         runTest {
             val writes = mutableListOf<HaloDevice.RawWrite>()
+            // A new device collects its own link's notifications.
+            notificationChannel = Channel(Channel.UNLIMITED)
             device =
                 HaloDevice(
                     platformDevice = btDevice,
@@ -324,6 +328,8 @@ class HaloDeviceTest {
     @Test
     fun `clearDisplay FRAME`() =
         runTest {
+            // A new device collects its own link's notifications.
+            notificationChannel = Channel(Channel.UNLIMITED)
             device =
                 HaloDevice(
                     platformDevice = btDevice,
@@ -383,7 +389,7 @@ class HaloDeviceTest {
             // Collect a fixed number of items then stop, to avoid timing issues.
             val r = mutableListOf<String>()
             val job =
-                backgroundScope.launch {
+                backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) {
                     device.stringResponse.take(2).collect { r.add(it) }
                 }
             notificationChannel.send(stringPacket("hello"))
@@ -398,7 +404,7 @@ class HaloDeviceTest {
         runTest {
             val r = mutableListOf<ByteArray>()
             val job =
-                backgroundScope.launch {
+                backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) {
                     device.dataResponse.take(1).collect { r.add(it) }
                 }
             notificationChannel.send(stringPacket("ignored")) // filtered out
@@ -406,6 +412,39 @@ class HaloDeviceTest {
             job.join()
             assertEquals(1, r.size)
             assertArrayEquals(byteArrayOf(0x42, 0x55), r[0])
+        }
+
+    @Test
+    fun `a reader of device data does not take the replies to writes`() =
+        runTest {
+            val clicks =
+                backgroundScope.async(start = CoroutineStart.UNDISPATCHED) { device.dataResponse.take(2).toList() }
+            device.writeSink = { notificationChannel.send(dataAck) }
+            notificationChannel.send(dataPacket(0x0B, 0x01))
+            device.sendMessage(msgCode = 0x20, payload = byteArrayOf(1))
+            assertEquals(listOf(listOf<Byte>(0x0B, 0x01), listOf<Byte>(0x00, 0x00)), clicks.await().map { it.toList() })
+        }
+
+    @Test
+    fun `readers fail with why the link ended`() =
+        runTest {
+            val closeCause = MutableStateFlow<HaloException?>(null)
+            notificationChannel = Channel(Channel.UNLIMITED)
+            device =
+                HaloDevice(
+                    platformDevice = btDevice,
+                    txChar = txChar,
+                    maxStringLen = 500,
+                    rawNotifications = notificationChannel.receiveAsFlow(),
+                    closeCause = closeCause,
+                )
+            device.writeSink = { closeCause.value = HaloException("Device disconnected (status=8)") }
+            try {
+                device.sendString("print(1)")
+                fail("Expected the end of the link")
+            } catch (e: HaloException) {
+                assertEquals("Device disconnected (status=8)", e.message)
+            }
         }
 
     // =========================================================================

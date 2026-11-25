@@ -1,11 +1,12 @@
 // RxClick: parse Halo button click events from dataResponse.
-// msgCode 0x0B, payload: [type] where 1=single, 2=double, 3=long.
+// msgCode 0x0B, payload: [type] where 1=single, 2=double, 3=long, as Brilliant's example apps send
+// it. A packet of another type is dropped, as Brilliant's brilliant-msg RxClick does.
 package com.fghbuild.halo.msg
 
 import com.fghbuild.halo.ble.HaloDevice
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 
 enum class ClickType { SINGLE, DOUBLE, LONG }
 
@@ -16,12 +17,12 @@ class RxClick(
     fun attach(dataResponse: Flow<ByteArray>): Flow<ClickType> =
         dataResponse
             .filter { it.isNotEmpty() && it[0].toInt() and 0xFF == msgCode }
-            .map { data ->
+            .mapNotNull { data ->
                 when (data.getOrNull(1)?.toInt()) {
                     1 -> ClickType.SINGLE
                     2 -> ClickType.DOUBLE
                     3 -> ClickType.LONG
-                    else -> throw IllegalArgumentException("Unknown click type: ${data.getOrNull(1)}")
+                    else -> null
                 }
             }
 }

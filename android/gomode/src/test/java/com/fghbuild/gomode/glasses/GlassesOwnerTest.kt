@@ -19,12 +19,14 @@ import com.fghbuild.eveng2.G2Scanner
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.eveng2.testing.FakeG2Firmware
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.glasses.GlassesScreen
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloScannedDevice
+import com.fghbuild.halo.msg.ClickType
 import com.fghbuild.halo.testing.FakeHalo
 import com.fghbuild.halo.testing.FakeHaloTransport
 import kotlinx.coroutines.Dispatchers
@@ -537,6 +539,92 @@ class GlassesOwnerTest {
             owner.disconnect()
             runCurrent()
             assertEquals(listOf(null, HaloScreenFit, null, G2ScreenFit(G2TextPage()), null), fits)
+        }
+
+    @Test
+    fun pressesOfHaloAndEvenG2ReachTheCollectorAndOtherGesturesDoNot() =
+        runOwnerTest {
+            val presses = mutableListOf<Unit>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.presses.collect { presses += it } }
+            connectSavedGlasses()
+            val halo = transport.halos.single()
+            halo.pressButton(ClickType.DOUBLE)
+            halo.pressButton(ClickType.LONG)
+            halo.pressButton(ClickType.SINGLE)
+            runCurrent()
+            assertEquals(1, presses.size)
+
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
+            firmware.touch(G2Side.RIGHT, type = 3)
+            firmware.touch(G2Side.RIGHT, type = 0)
+            firmware.systemInput(G2Side.LEFT, type = 0, source = 2)
+            runCurrent()
+            assertEquals(3, presses.size)
+            // Nothing a press does reaches the glasses on its own.
+            assertEquals(GlassesLink.Connected(G2_DISPLAY, G2ScreenFit(G2TextPage())), owner.state.value.link)
+            assertEquals("", firmware.shownText())
+        }
+
+    @Test
+    fun aPressThatNothingCollectsSaysOnTheGlassesToOpenGoMode() =
+        runOwnerTest {
+            connectSavedGlasses()
+            val halo = transport.halos.single()
+            halo.pressButton(ClickType.SINGLE)
+            runCurrent()
+            assertTrue(halo.lastSent(haloTextMessages(context.getString(R.string.glasses_notice_open_app))))
+
+            advanceTimeBy(GLASSES_NOTICE_MS + 1)
+            assertTrue(halo.lastSent(haloTextMessages("")))
+        }
+
+    @Test
+    fun theFirstPressHandlerTakesThePressesItActsOnAndLeavesTheRest() =
+        runOwnerTest {
+            val presses = mutableListOf<Unit>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.presses.collect { presses += it } }
+            var take = true
+            var offered = 0
+            owner.takePressesFirst {
+                offered++
+                take
+            }
+            connectSavedGlasses()
+            val halo = transport.halos.single()
+            halo.pressButton(ClickType.SINGLE)
+            runCurrent()
+            assertEquals(1 to 0, offered to presses.size)
+
+            take = false
+            halo.pressButton(ClickType.SINGLE)
+            runCurrent()
+            assertEquals(2 to 1, offered to presses.size)
+
+            owner.takePressesFirst(null)
+            halo.pressButton(ClickType.SINGLE)
+            runCurrent()
+            assertEquals(2 to 2, offered to presses.size)
+        }
+
+    @Test
+    fun aNoticeOutlastsBlankTextAndYieldsToText() =
+        runOwnerTest {
+            connectSavedGlasses()
+            val halo = transport.halos.single()
+            owner.notify("Notice")
+            runCurrent()
+            assertTrue(halo.lastSent(haloTextMessages("Notice")))
+            // A transcript that clears as voice fails to start must not erase the notice that says why.
+            owner.show("")
+            advanceTimeBy(GLASSES_NOTICE_MS / 2)
+            assertTrue(halo.lastSent(haloTextMessages("Notice")))
+
+            owner.show("You: hello")
+            runCurrent()
+            assertTrue(halo.lastSent(haloTextMessages("You: hello")))
+            advanceTimeBy(GLASSES_NOTICE_MS + 1)
+            assertTrue(halo.lastSent(haloTextMessages("You: hello")))
         }
 
     // The owner lives in the test's background scope, so connected glasses end with the test.

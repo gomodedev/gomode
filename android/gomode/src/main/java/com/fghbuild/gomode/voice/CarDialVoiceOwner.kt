@@ -70,7 +70,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val STARTUP_TIMEOUT_MS = 60_000L
 
-internal enum class CarDialStatus { IDLE, WAITING, CONNECTING, PREPARING, CONNECTED, FAILED }
+internal enum class CarDialStatus {
+    IDLE,
+    WAITING,
+    CONNECTING,
+    PREPARING,
+    CONNECTED,
+    FAILED,
+    ;
+
+    /** Whether a car call is starting or running. */
+    val busy: Boolean get() = this != IDLE && this != FAILED
+}
 
 // Fixed messages are safe above keyguard; provider errors stay in diagnostic logs.
 internal enum class CarDialFailure(
@@ -156,6 +167,12 @@ internal class CarDialVoiceOwner(
             IntentFilter(VoiceService.ACTION_HANG_UP),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
+        // A press of the glasses ends a starting or running call, also one that no Activity hosts any
+        // more; GoModeApp's shell handles every other press.
+        glasses.takePressesFirst {
+            mutableState.value.status.busy
+                .also { if (it) cancel() }
+        }
         // Like the native call surface, the glasses show the call's transcript while the phone is locked.
         scope.launch {
             session.collectLatest { voice ->
@@ -182,7 +199,7 @@ internal class CarDialVoiceOwner(
     }
 
     fun request(server: ServiceInstance): String? {
-        val manualActive = manualSessions.any { it.state.value.connected || it.state.value.connectStatus != null }
+        val manualActive = manualSessions.any { it.state.value.started }
         if (request != null || manualActive || !eligible()) return null
         val next = CarDialRequest(server)
         request = next
@@ -602,6 +619,7 @@ internal class CarDialVoiceOwner(
 
     override fun close() {
         cancel()
+        glasses.takePressesFirst(null)
         context.unregisterReceiver(hangupReceiver)
         scope.cancel()
     }

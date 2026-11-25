@@ -218,6 +218,38 @@ class G2GlassesTest {
         }
 
     @Test
+    fun clicksFromEitherTempleAndTheRingArePressesThatKeepThePageOpen() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            val presses = mutableListOf<Unit>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.presses.toList(presses) }
+            glasses.connect(pair)
+            glasses.await { it is G2State.Ready }
+            firmware.requests.clear()
+
+            firmware.touch(G2Side.RIGHT, type = 0)
+            firmware.touch(G2Side.LEFT, type = 0)
+            firmware.systemInput(G2Side.RIGHT, type = 0, source = 2)
+            runCurrent()
+            assertEquals(3, presses.size)
+
+            // Double clicks, scrolls, and long presses are not presses.
+            for (type in listOf(1L, 2L, 3L, 9L, 10L)) {
+                firmware.touch(G2Side.RIGHT, type)
+                firmware.systemInput(G2Side.RIGHT, type, source = 2)
+            }
+            // A system click names its touchpad or the ring; one of an unspecified source is not a press.
+            firmware.systemInput(G2Side.RIGHT, type = 0, source = 0)
+            firmware.systemInput(G2Side.RIGHT, type = 0, source = 4)
+            runCurrent()
+            assertEquals(3, presses.size)
+            assertTrue(glasses.state.value is G2State.Ready)
+            assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
+            assertTrue(firmware.links.none { it.closed })
+        }
+
+    @Test
     fun abnormalPageExitIsRetryable() =
         runTest {
             val firmware = FakeG2Firmware()

@@ -1,4 +1,4 @@
-// Draws text through Go Mode's Halo app in the Brilliant Halo Lua emulator, started once after a previous app's stop.
+// Runs Go Mode's Halo app once after a stop in the Brilliant Halo Lua emulator: it draws text and reports presses.
 //
 // The test starts scripts/halo_emulator_bridge.py through uv, so it needs uv on PATH and, on uv's first run, network
 // access to fetch the pinned emulator:
@@ -19,9 +19,12 @@ import com.fghbuild.halo.msg.TextPageData
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,6 +41,9 @@ import kotlin.math.hypot
 private const val ACK_TIMEOUT_MS = 2_000L
 private const val FRAME_TIMEOUT_MS = 5_000L
 private const val BRIDGE_STOP_TIMEOUT_S = 10L
+
+// data.lua's acknowledgement of a typed message, as the app passes it to frame.bluetooth.send.
+private val DATA_ACK = byteArrayOf(0x01, 0x00, 0x00)
 
 // A cold uv cache fetches and builds the pinned emulator before the bridge listens: about 16 s locally.
 private const val BRIDGE_START_TIMEOUT_MIN = 5L
@@ -67,7 +73,7 @@ class HaloEmulatorRenderingTest {
     private val context = RuntimeEnvironment.getApplication()
 
     @Test
-    fun fittedPagesDrawCentredInsideTheCircleAndBlankTextClears() {
+    fun fittedPagesDrawCentredInsideTheCircleBlankTextClearsAndASinglePressIsReported() {
         OUTPUT_DIR.mkdirs()
         val log = OUTPUT_DIR.resolve("bridge.log")
         // The bridge prints its URL once it listens and exits when its stdin closes.
@@ -84,14 +90,14 @@ class HaloEmulatorRenderingTest {
                     error("$BRIDGE_SCRIPT did not listen within $BRIDGE_START_TIMEOUT_MIN min; see ${log.absolutePath}")
                 }
             check(url != null && url.startsWith("ws://")) { "$BRIDGE_SCRIPT did not start; see ${log.absolutePath}" }
-            drawText(url)
+            runApp(url)
         } finally {
             process.outputStream.close()
             if (!process.waitFor(BRIDGE_STOP_TIMEOUT_S, TimeUnit.SECONDS)) process.destroyForcibly()
         }
     }
 
-    private fun drawText(url: String) {
+    private fun runApp(url: String) {
         runBlocking {
             HaloEmulatorBridgeClient().use { bridge ->
                 bridge.connect(url)
@@ -119,9 +125,33 @@ class HaloEmulatorRenderingTest {
                 show(bridge, " ")
                 awaitFrame(bridge) { it.isEmpty() }
                 println("blank: the frame cleared")
+
+                checkPresses(bridge)
                 bridge.stop()
             }
         }
+    }
+
+    // Of the button's gestures and an IMU tap, only the single press reaches HaloGlasses' presses, and
+    // the app sends nothing else but late acknowledgements. The emulator reports what the app passes
+    // to frame.bluetooth.send, which is what HaloDevice.dataResponse yields once it strips the 0x01
+    // that the firmware prepends.
+    private suspend fun checkPresses(bridge: HaloEmulatorBridgeClient) {
+        bridge.buttonDouble()
+        bridge.buttonLong()
+        bridge.imuTap()
+        bridge.buttonSingle()
+        val sent = mutableListOf<List<Byte>>()
+        withTimeout(FRAME_TIMEOUT_MS) {
+            haloPresses(
+                bridge.events
+                    .filterIsInstance<HaloEmulatorEvent.BluetoothSent>()
+                    .map { it.data }
+                    .onEach { if (!it.contentEquals(DATA_ACK)) sent += it.toList() },
+            ).first()
+        }
+        assertEquals(listOf(listOf<Byte>(0x0B, 0x01)), sent)
+        println("press: a single press sent 0B 01; double, long, and IMU tap sent nothing")
     }
 
     // Every lit pixel is inside the display circle and the text sits in its middle, both ways.

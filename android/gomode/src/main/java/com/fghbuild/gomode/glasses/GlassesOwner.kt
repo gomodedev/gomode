@@ -1,4 +1,4 @@
-// Owns the one pair of glasses across Activities: scanning, the saved device, auto-connect, reconnection, and text.
+// Owns the one pair of glasses across Activities: scanning, the saved device, auto-connect, reconnection, text, and presses.
 package com.fghbuild.gomode.glasses
 
 import android.Manifest
@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import com.fghbuild.eveng2.G2ArmConnector
 import com.fghbuild.eveng2.G2Glasses
 import com.fghbuild.eveng2.G2PairScanner
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
@@ -34,11 +35,15 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
@@ -55,6 +60,12 @@ internal const val RECONNECT_MAX_DELAY_MS = 60_000L
 
 // Bounds the best-effort clear when the user disconnects; the glasses may already be out of range.
 private const val CLEAR_ON_DISCONNECT_TIMEOUT_MS = 3_000L
+
+/** How long a [GlassesOwner.notify] notice stays, long enough to read at a glance. */
+internal const val GLASSES_NOTICE_MS = 4_000L
+
+// Presses a slow collector may lag behind; a person presses far slower than one is handled.
+private const val PRESS_BUFFER = 8
 
 /** The glasses connection as the glasses screen shows it. */
 internal sealed interface GlassesLink {
@@ -106,7 +117,8 @@ internal data class GlassesState(
  * connection to the saved glasses lasts until [disconnect], [forget], the end of [parentScope], or
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
- * settings. Every connection shows the latest [show] text. Callers hold BLUETOOTH_SCAN before
+ * settings. Every connection shows the latest [show] text, or a [notify] notice over it, and reports
+ * its [presses]. Callers hold BLUETOOTH_SCAN before
  * [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
  * connecting on its own.
  *
@@ -145,6 +157,9 @@ internal class GlassesOwner(
     // Halo devices a scan found by address; connecting prefers them to a device made from the address.
     private val scanned = mutableMapOf<String, BluetoothDevice>()
     private val text = MutableStateFlow("")
+    private val notice = MutableStateFlow<String?>(null)
+    private var noticeJob: Job? = null
+    private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
     private var scanJob: Job? = null
     private var linkJob: Job? = null
     private var started = false
@@ -200,9 +215,69 @@ internal class GlassesOwner(
         }
     }
 
-    /** Shows [text] on the glasses now and after every reconnection, as [GlassesDisplay.showText]. */
+    /**
+     * Each press of the connected glasses that the [takePressesFirst] handler leaves; see
+     * [GlassesDisplay.presses]. While nothing collects them, as when no Activity is open to start
+     * voice, a press instead shows a notice that says so.
+     */
+    val presses: SharedFlow<Unit> = mutablePresses.asSharedFlow()
+
+    // Main thread only, like every press.
+    private var firstPressHandler: (() -> Boolean)? = null
+
+    /**
+     * Offers each press to [handler] before [presses]; it returns whether it acted on the press. Work
+     * that outlives every Activity, such as a car call, ends through it. Null removes the handler.
+     */
+    fun takePressesFirst(handler: (() -> Boolean)?) {
+        firstPressHandler = handler
+    }
+
+    /**
+     * Shows [text] on the glasses now and after every reconnection, as [GlassesDisplay.showText].
+     * Text that is not blank ends a [notify] notice.
+     */
     fun show(text: String) {
         this.text.value = text
+        if (text.isNotBlank()) endNotice()
+    }
+
+    /**
+     * Shows [message] over the [show] text for [GLASSES_NOTICE_MS], until [show] sends text that is not
+     * blank, or until the next notice: feedback on the glasses for a press the phone cannot act on.
+     */
+    fun notify(message: String) {
+        endNotice()
+        notice.value = message
+        noticeJob =
+            scope.launch {
+                delay(GLASSES_NOTICE_MS)
+                notice.value = null
+            }
+    }
+
+    private fun endNotice() {
+        noticeJob?.cancel()
+        noticeJob = null
+        notice.value = null
+    }
+
+    private fun press() {
+        when {
+            firstPressHandler?.invoke() == true -> {
+                Unit
+            }
+
+            mutablePresses.subscriptionCount.value == 0 -> {
+                notify(
+                    appContext.getString(R.string.glasses_notice_open_app),
+                )
+            }
+
+            else -> {
+                mutablePresses.tryEmit(Unit)
+            }
+        }
     }
 
     fun startScan() {
@@ -368,15 +443,22 @@ internal class GlassesOwner(
         }
     }
 
-    // Shows each text until the connection ends, and returns why it ended: the glasses' close cause
-    // once they report one. Cancellation clears the display, best effort, and every exit closes the
-    // glasses.
+    // Shows each text and reports each press until the connection ends, and returns why it ended: the
+    // glasses' close cause once they report one. Cancellation clears the display, best effort, and
+    // every exit closes the glasses.
     private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
         try {
             coroutineScope {
-                val drawing = launch { text.collect(glasses::showText) }
+                val drawing =
+                    launch {
+                        combine(text, notice) { text, notice -> notice ?: text }
+                            .distinctUntilChanged()
+                            .collect(glasses::showText)
+                    }
+                val pressing = launch { glasses.presses.collect { press() } }
                 val cause = glasses.closeCause.filterNotNull().first()
                 drawing.cancel()
+                pressing.cancel()
                 Log.w(TAG, "Glasses connection ended: ${cause.message}")
                 cause.asGlassesException()
             }

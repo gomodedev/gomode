@@ -7,6 +7,7 @@
 // does: send the prelude to the right arm and wait for its ACK; create the text page; send a
 // heartbeat every G2Protocol.HEARTBEAT_INTERVAL_MS. The text is updated in place whenever the
 // host's text differs from the acknowledged one. Every Even Hub command goes to the right arm.
+// Once the page may be open, a press from either arm is reported and leaves the page open.
 // A dropped link, a missing or refused reply, or a page exit event ends the session with a
 // G2CloseCause. From the moment the create request is written, the page may be open: unless
 // the right link is gone or the glasses closed the page, every exit shuts it down before both
@@ -89,6 +90,7 @@ internal class G2Session(
     private val ids: G2Ids,
     private val desired: StateFlow<String>,
     private val onReady: (String) -> Unit,
+    private val onPress: () -> Unit,
 ) {
     private val links = ConcurrentHashMap<G2Side, G2ArmLink>()
     private val inbox = Channel<Inbound>(INBOX_CAPACITY)
@@ -180,7 +182,7 @@ internal class G2Session(
         }
     }
 
-    /** Accept one inbound item: throws on a lost link or an exit of this session's page. */
+    /** Accept one inbound item: throws on a lost link or an exit of this session's page, and reports presses. */
     private fun accept(inbound: Inbound): Inbound.Message {
         when (inbound) {
             is Inbound.Lost -> {
@@ -188,10 +190,11 @@ internal class G2Session(
             }
 
             is Inbound.Message -> {
-                val session = pageSession
-                if (inbound.side == G2Side.RIGHT && session != null) {
+                val session = pageSession ?: return inbound
+                if (inbound.side == G2Side.RIGHT) {
                     G2EvenHub.pageExit(inbound.message, page, session)?.let { throw G2Closed(it) }
                 }
+                if (G2EvenHub.press(inbound.message, page, session)) onPress()
                 return inbound
             }
         }
