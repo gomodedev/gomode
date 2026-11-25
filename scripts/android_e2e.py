@@ -23,7 +23,7 @@ import time
 from collections.abc import Iterator
 
 from android_devices import adb_path, print_failure, ready_device_serials, selected_device_serial
-from android_sdk import find_sdkmanager
+from android_sdk import AVD_NAME, find_sdkmanager
 
 SETTINGS = {
     "service": "gomode-test",
@@ -154,6 +154,37 @@ def require_emulator(adb: str, serial: str) -> None:
     credentials = re.findall(r"^\s+CredentialType: ([A-Z_]+)$", primary[1], re.MULTILINE) if primary else []
     if credentials != ["NONE"]:
         raise RuntimeError("Android tests require an emulator without a secure credential; device was not changed")
+
+
+def ensure_fixture_route(adb: str, serial: str) -> None:
+    """Wait for the IPv4 default route WebRTC needs on the owned stock AVD."""
+    if AVD_NAME not in subprocess.check_output([adb, "-s", serial, "emu", "avd", "name"], text=True).splitlines():
+        return
+    # Route lookup uses a documentation address and sends no packets. An IPv6
+    # association alone lets adb reverse work but leaves WebRTC without IPv4.
+    route = [adb, "-s", serial, "shell", "ip", "-4", "route", "get", "192.0.2.1"]
+    deadline = time.monotonic() + 30
+    attempted_connect = False
+    while True:
+        result = subprocess.run(route, capture_output=True, text=True, timeout=5, check=False)
+        if result.returncode == 0 and " dev wlan0 " in result.stdout and " src " in result.stdout:
+            return
+        if time.monotonic() >= deadline:
+            detail = (result.stderr or result.stdout).strip()
+            raise RuntimeError(f"AndroidWifi did not provision an IPv4 default route: {detail}")
+        if not attempted_connect:
+            print("Restoring the stock emulator's AndroidWifi IPv4 route...", flush=True)
+            # Rejoining an already-associated AP can leave the old link
+            # properties in place. Wait for teardown before requesting a new link.
+            for state in ("disabled", "enabled"):
+                shell(adb, serial, "cmd", "wifi", "set-wifi-enabled", state)
+                while not shell(adb, serial, "cmd", "wifi", "status").startswith(f"Wifi is {state}"):
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"Stock emulator Wi-Fi did not reach state {state}")
+                    time.sleep(0.25)
+            shell(adb, serial, "cmd", "wifi", "connect-network", "AndroidWifi", "open")
+            attempted_connect = True
+        time.sleep(0.25)
 
 
 def prepare_apks(adb: str, serial: str, telecom: bool, verbose: bool) -> None:
@@ -526,6 +557,7 @@ def main() -> int:
         forward_ports(adb, serial, [hosted, gateway, production]),
     ):
         if module != "telecom":
+            ensure_fixture_route(adb, serial)
             arguments = {
                 "baseUrl": f"http://localhost:{hosted}",
                 "gatewayBaseUrl": f"http://localhost:{gateway}",
@@ -543,6 +575,7 @@ def main() -> int:
                     True,
                 )
             )
+            ensure_fixture_route(adb, serial)
             results.append(
                 run_suite(
                     adb,
@@ -555,6 +588,7 @@ def main() -> int:
                 )
             )
         if module != "app":
+            ensure_fixture_route(adb, serial)
             results.append(
                 run_suite(
                     adb,

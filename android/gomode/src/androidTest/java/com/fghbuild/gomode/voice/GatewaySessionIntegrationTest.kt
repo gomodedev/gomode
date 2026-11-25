@@ -42,6 +42,7 @@ import org.junit.Test
 import org.junit.rules.TestRule
 import org.junit.runner.RunWith
 import java.io.File
+import java.net.Inet4Address
 
 // Uses production session clients against a controlled server for text and WebRTC
 // transports, background setup, caller identity, network recovery, and Telecom ownership.
@@ -204,9 +205,11 @@ class GatewaySessionIntegrationTest {
         }
         val wifiEnabled = device.executeShellCommand("settings get global wifi_on").trim() == "1"
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        var stockWifi = false
         try {
-            device.executeShellCommand("svc wifi enable")
-            awaitTransport(connectivity, NetworkCapabilities.TRANSPORT_WIFI)
+            setWifiEnabled(device, true)
+            awaitWifiRoute(connectivity)
+            stockWifi = device.executeShellCommand("cmd wifi status").contains("Wifi is connected to \"AndroidWifi\"")
             awaitConnected(session)
             // The stock fixture disables its modem. Cycling Wi-Fi exercises actual
             // route replacement and the offline wait without requiring a carrier.
@@ -219,17 +222,38 @@ class GatewaySessionIntegrationTest {
                             }
                         }
                     }
-                device.executeShellCommand("svc wifi disable")
+                setWifiEnabled(device, false)
                 withTimeout(TIMEOUT_MS) { recovering.await() }
                 assertNull(session.state.value.error)
                 assertTrue("Telecom call ended while offline", calls.isStarted)
-                device.executeShellCommand("svc wifi enable")
-                awaitTransport(connectivity, NetworkCapabilities.TRANSPORT_WIFI)
+                setWifiEnabled(device, true)
+                // Ask for the stock AP explicitly. CI has reported a completed scan
+                // after enabling Wi-Fi without ever attempting to rejoin AndroidWifi.
+                if (stockWifi) device.executeShellCommand("cmd wifi connect-network AndroidWifi open")
+                awaitWifiRoute(connectivity)
                 awaitConnected(session)
                 assertTrue("Telecom call ended during handoff", calls.isStarted)
             }
         } finally {
-            device.executeShellCommand(if (wifiEnabled) "svc wifi enable" else "svc wifi disable")
+            withContext(NonCancellable) {
+                setWifiEnabled(device, wifiEnabled)
+                if (wifiEnabled && stockWifi && !hasWifiRoute(connectivity)) {
+                    device.executeShellCommand("cmd wifi connect-network AndroidWifi open")
+                }
+            }
+        }
+    }
+
+    private suspend fun setWifiEnabled(
+        device: UiDevice,
+        enabled: Boolean,
+    ) {
+        val state = if (enabled) "enabled" else "disabled"
+        device.executeShellCommand("cmd wifi set-wifi-enabled $state")
+        withTimeout(TIMEOUT_MS) {
+            while (!device.executeShellCommand("cmd wifi status").startsWith("Wifi is $state")) {
+                delay(50)
+            }
         }
     }
 
@@ -239,22 +263,20 @@ class GatewaySessionIntegrationTest {
         assertTrue(ready.connected)
     }
 
-    private suspend fun awaitTransport(
-        connectivity: ConnectivityManager,
-        transport: Int,
-    ) {
+    private suspend fun awaitWifiRoute(connectivity: ConnectivityManager) {
         withTimeout(TIMEOUT_MS) {
-            while (connectivity.activeNetwork?.let {
-                    connectivity
-                        .getNetworkCapabilities(
-                            it,
-                        )?.hasTransport(transport)
-                } !=
-                true
-            ) {
+            while (!hasWifiRoute(connectivity)) {
                 delay(50)
             }
         }
+    }
+
+    private fun hasWifiRoute(connectivity: ConnectivityManager): Boolean {
+        val network = connectivity.activeNetwork ?: return false
+        return connectivity.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+            connectivity.getLinkProperties(network)?.routes?.any {
+                it.isDefaultRoute && it.destination.address is Inet4Address
+            } == true
     }
 
     private suspend fun prepareSpeechLanguage(speech: AndroidDeviceSpeech) {
