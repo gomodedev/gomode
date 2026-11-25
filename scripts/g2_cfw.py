@@ -9,18 +9,19 @@
 #
 # Usage, from a computer with Bluetooth LE next to the glasses:
 #
-#   uv run --locked --script scripts/g2_cfw.py --check   # build, find the pair, connect; write nothing
+#   uv run --locked --script scripts/g2_cfw.py --check   # build and test the connection without starting OTA
 #   uv run --locked --script scripts/g2_cfw.py           # build, find the pair, flash both arms
 #
-# g2flash (https://github.com/jimrandomh/g2flash, GPL-3.0) owns the firmware: its build_cfw.sh
+# g2flash (https://github.com/maruel/g2flash, GPL-3.0) owns the firmware. Its build_cfw.sh
 # downloads stock G2 2.3.0.24 from Even's CDN, applies the committed patch set, and checks both
 # images against pinned SHA-256 hashes. This script clones it at G2FLASH_COMMIT, so the pin
 # fixes the image. It runs g2flash.py with this script's interpreter, which provides bleak.
 #
 # Flashing voids the warranty and can brick an arm; g2flash asks the user to type a warranty
-# phrase before it writes. --check stops before the OTA BEGIN and FILE_CHECK writes, so it
-# skips that prompt. Installing an update from the Even app, or flashing the stock image,
-# restores stock firmware.
+# phrase before it writes. On Linux the flasher asks BlueZ to pair each arm before OTA.
+# --check also exercises pairing and authentication, then stops before OTA BEGIN without
+# the warranty prompt. Installing an update from the Even app, or flashing the stock
+# image, restores stock firmware.
 #
 # Each arm advertises as "Even G2_<pair>_<L|R>_<MAC tail>" only while no phone holds it: quit
 # Go Mode and the Even app, or turn off the phone's Bluetooth, before running. On macOS bleak
@@ -44,8 +45,8 @@ from pathlib import Path
 from bleak import BleakScanner
 from bleak.exc import BleakError
 
-G2FLASH_URL = "https://github.com/jimrandomh/g2flash"
-G2FLASH_COMMIT = "c8fd8e85c77e8f378cce52029dd1225e4ab11caa"
+G2FLASH_URL = "https://github.com/maruel/g2flash"
+G2FLASH_COMMIT = "54a4987ac8bf6d8f974c1994a0ab6d47a091cacd"
 # build_cfw.sh at G2FLASH_COMMIT writes this image after checking its pinned hash.
 CFW_IMAGE = "g2_2.3.0.24_cfw.bin"
 SCAN_SECONDS = 15.0
@@ -67,7 +68,8 @@ def checkout(directory: Path) -> None:
     git = ["git", "-C", str(directory)]
     has_commit = subprocess.run([*git, "cat-file", "-e", f"{G2FLASH_COMMIT}^{{commit}}"], capture_output=True)
     if has_commit.returncode != 0:
-        subprocess.run([*git, "fetch", "--quiet", "origin"], check=True)
+        # An existing cache may still have the upstream g2flash repository as origin.
+        subprocess.run([*git, "fetch", "--quiet", G2FLASH_URL, G2FLASH_COMMIT], check=True)
     subprocess.run([*git, "checkout", "--quiet", "--detach", G2FLASH_COMMIT], check=True)
     # Ignored files (the downloaded and built images) may stay; tracked edits would change the image.
     dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
@@ -113,7 +115,7 @@ def choose(pairs: list[Pair], serial: str | None) -> Pair:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build g2flash's custom firmware and flash it onto an Even G2 pair.")
-    parser.add_argument("--check", action="store_true", help="connect and authenticate both arms; write nothing")
+    parser.add_argument("--check", action="store_true", help="pair on Linux and authenticate both arms without OTA")
     parser.add_argument("--pair", help="pair number from the arms' advertised names, when several pairs advertise")
     args = parser.parse_args()
 
