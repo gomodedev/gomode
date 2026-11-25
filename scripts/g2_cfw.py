@@ -61,20 +61,40 @@ class Pair:
 
 
 def checkout(directory: Path) -> None:
-    """Clone or update g2flash and detach it at G2FLASH_COMMIT."""
-    if not directory.exists():
-        directory.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "clone", "--quiet", G2FLASH_URL, str(directory)], check=True)
+    """Prepare the cache and verify its revision before running any g2flash code."""
     git = ["git", "-C", str(directory)]
-    has_commit = subprocess.run([*git, "cat-file", "-e", f"{G2FLASH_COMMIT}^{{commit}}"], capture_output=True)
-    if has_commit.returncode != 0:
-        # An existing cache may still have the upstream g2flash repository as origin.
-        subprocess.run([*git, "fetch", "--quiet", G2FLASH_URL, G2FLASH_COMMIT], check=True)
-    subprocess.run([*git, "checkout", "--quiet", "--detach", G2FLASH_COMMIT], check=True)
-    # Ignored files (the downloaded and built images) may stay; tracked edits would change the image.
-    dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
+    try:
+        if not directory.exists():
+            directory.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "clone", "--quiet", G2FLASH_URL, str(directory)], check=True)
+        root = subprocess.run(
+            [*git, "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        if Path(root).resolve() != directory.resolve():
+            raise SystemExit(
+                f"{directory} must be the root of the g2flash checkout. Git found {root}. "
+                "Move the cache aside and run again."
+            )
+        has_commit = subprocess.run([*git, "cat-file", "-e", f"{G2FLASH_COMMIT}^{{commit}}"], capture_output=True)
+        if has_commit.returncode != 0:
+            # An existing cache may still have the upstream g2flash repository as origin.
+            subprocess.run([*git, "fetch", "--quiet", G2FLASH_URL, G2FLASH_COMMIT], check=True)
+        subprocess.run([*git, "checkout", "--quiet", "--detach", G2FLASH_COMMIT], check=True)
+        head = subprocess.run(
+            [*git, "rev-parse", "--verify", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        if head != G2FLASH_COMMIT:
+            raise SystemExit(f"Expected g2flash {G2FLASH_COMMIT} in {directory}, but HEAD is {head}.")
+        # Git ignores the downloaded and built images. Local source edits fail verification.
+        dirty = subprocess.run(
+            [*git, "status", "--porcelain", "--untracked-files=normal"], capture_output=True, text=True, check=True
+        ).stdout
+    except subprocess.CalledProcessError as error:
+        detail = f"\n{error.stderr.strip()}" if error.stderr else ""
+        raise SystemExit(f"Could not verify g2flash {G2FLASH_COMMIT} in {directory}.{detail}") from error
     if dirty:
-        raise SystemExit(f"{directory} has local changes; delete it and run again:\n{dirty}")
+        raise SystemExit(f"{directory} has local changes. Move the checkout aside and run again.\n{dirty}")
+    print(f"Using g2flash {head} from {directory}", flush=True)
 
 
 def build(directory: Path) -> Path:
