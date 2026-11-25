@@ -381,7 +381,7 @@ internal fun GoModeApp(
         showVoiceTranscript(
             manualVoiceSession.state,
             settingsRepository.settings.map { it.showTranscriptOnGlasses },
-            glassesOwner.textCapacity,
+            glassesOwner.screenFit,
             glassesOwner::show,
         )
     }

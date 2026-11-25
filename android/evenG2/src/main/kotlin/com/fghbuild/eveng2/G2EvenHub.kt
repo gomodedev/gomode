@@ -67,6 +67,26 @@ data class G2TextPage(
         require(containerId in 1..UINT32_MAX && widgetId in 1..UINT32_MAX)
         require(decodeUtf8(containerName.toByteArray()) == containerName && containerName.toByteArray().size in 1..15)
     }
+
+    /**
+     * Whether the container shows all of [text] without scrolling, as the stock firmware wraps it;
+     * see [G2TextLayout]. Text over [G2Display.MAX_TEXT_BYTES] never fits: [G2Glasses.show] refuses
+     * it. The first call reads the firmware font table unless [loadMetrics] did.
+     */
+    fun fits(text: String): Boolean {
+        if (text.toByteArray().size > G2Display.MAX_TEXT_BYTES) return false
+        // TODO(hardware): pretext documents the line height and glyph widths, not where a text
+        // container puts its first line or whether it spaces lines further apart. On a real pair,
+        // show 10 and then 11 lines of "Hg" in the default 576×288 container: 10 should show whole
+        // and 11 scroll. If not, correct this.
+        val inner = 2 * padding
+        return G2TextLayout.lineCount(text, width - inner) * G2TextLayout.lineHeightPx <= height - inner
+    }
+
+    companion object {
+        /** Reads the firmware font table that [fits] measures with, 130 KB, on an IO thread. */
+        suspend fun loadMetrics() = G2TextLayout.load()
+    }
 }
 
 /** Even Hub commands the client awaits; values are the request, reply, and result codes. */

@@ -62,10 +62,10 @@ internal sealed interface GlassesLink {
 
     data object Connecting : GlassesLink
 
-    /** The glasses are up and show [display], which fits [textCapacity] characters of prose. */
+    /** The glasses are up and show [display], one screen of which shows what [screenFit] fits. */
     data class Connected(
         val display: Display,
-        val textCapacity: Int,
+        val screenFit: ScreenFit,
     ) : GlassesLink
 
     /** The connection ended or failed with [problem]; the owner tries again on its own. */
@@ -179,9 +179,9 @@ internal class GlassesOwner(
     val connectedDisplay: Display?
         get() = (state.value.link as? GlassesLink.Connected)?.display
 
-    /** The connected glasses' [GlassesDisplay.textCapacity], or null without a connection. */
-    val textCapacity: Flow<Int?> =
-        state.map { (it.link as? GlassesLink.Connected)?.textCapacity }.distinctUntilChanged()
+    /** The connected glasses' [GlassesDisplay.screenFit], or null without a connection. */
+    val screenFit: Flow<ScreenFit?> =
+        state.map { (it.link as? GlassesLink.Connected)?.screenFit }.distinctUntilChanged()
 
     fun start() {
         if (started) return
@@ -325,7 +325,7 @@ internal class GlassesOwner(
                     val glasses = if (background) connectInBackground(connect) else connect(false)
                     retryDelayMs = RECONNECT_INITIAL_DELAY_MS
                     mutableState.update {
-                        it.copy(link = GlassesLink.Connected(glasses.description, glasses.textCapacity))
+                        it.copy(link = GlassesLink.Connected(glasses.description, glasses.screenFit))
                     }
                     showUntilClosed(glasses)
                 } catch (e: GlassesException) {

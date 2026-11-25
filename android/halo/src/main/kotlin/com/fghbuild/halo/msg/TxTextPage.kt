@@ -24,12 +24,23 @@ abstract class TextLayout(
         require(fontSizePx > 0) { "fontSizePx must be positive" }
     }
 
-    open val startY: Float = 0f
+    /**
+     * Where a page of [lineCount] lines, each [lineHeight] high, starts; null when that many lines
+     * cannot sit in the layout's area.
+     */
+    abstract fun pageTop(
+        lineCount: Int,
+        lineHeight: Float,
+    ): Float?
 
+    /** The width and position of a line at [lineY], or null when no line fits there. */
     abstract fun lineLayout(
         lineY: Float,
         lineHeight: Float,
     ): LineLayout?
+
+    /** Whether one page holds all of [text], laid out as [TxTextPage] lays out its first page. */
+    fun fitsOnePage(text: String): Boolean = !TxTextPage(this, text).also { it.measureNextPage() }.hasMoreText
 }
 
 data class LineLayout(
@@ -44,6 +55,12 @@ class RectangularTextLayout(
     typeface: Typeface = Typeface.DEFAULT,
     textAlign: Paint.Align = Paint.Align.LEFT,
 ) : TextLayout(width, height, fontSizePx, typeface, textAlign) {
+    // Pages start at the top.
+    override fun pageTop(
+        lineCount: Int,
+        lineHeight: Float,
+    ): Float = 0f
+
     override fun lineLayout(
         lineY: Float,
         lineHeight: Float,
@@ -53,6 +70,10 @@ class RectangularTextLayout(
     }
 }
 
+/**
+ * Lines inside a circle inscribed in the display, [circleMarginPx] from its edge. A page sits in the
+ * middle of the circle, where lines are widest: a short text is centred and wraps less.
+ */
 class CircularTextLayout(
     width: Int,
     height: Int,
@@ -69,7 +90,10 @@ class CircularTextLayout(
         require(radius > 0f) { "circleMarginPx leaves no drawable area" }
     }
 
-    override val startY: Float = centerY - radius
+    override fun pageTop(
+        lineCount: Int,
+        lineHeight: Float,
+    ): Float? = (centerY - lineCount * lineHeight / 2f).takeIf { it >= centerY - radius }
 
     override fun lineLayout(
         lineY: Float,
@@ -85,8 +109,9 @@ class CircularTextLayout(
 }
 
 /**
- * Splits [text] into pages that fit [layout]. Lines wrap at whitespace, and a line feed starts a new
- * line; blank lines collapse.
+ * Splits [text] into pages that fit [layout]. Lines wrap at whitespace, a line feed starts a new
+ * line, and blank lines collapse. A page holds the fewest lines that take the rest of the text, or
+ * as many as fit, starting at [TextLayout.pageTop] for that many lines.
  */
 class TxTextPage(
     private val layout: TextLayout,
@@ -103,16 +128,43 @@ class TxTextPage(
 
         val paint = textPaint(layout)
         val lineHeight = max(layout.fontSizePx.toFloat(), paint.fontMetrics.let { it.descent - it.ascent })
+        // Where lines start depends on how many there are, so try each count until one takes the text.
+        var page: PageLines? = null
+        var lineCount = 1
+        while (page?.rest?.isEmpty() != true) {
+            val top = layout.pageTop(lineCount, lineHeight) ?: break
+            page = layOutLines(paint, top, lineHeight, lineCount) ?: break
+            lineCount++
+        }
+        if (page == null || page.lines.isEmpty()) return null
+        remainingText = page.rest
+        return TextPageData(layout, page.lines)
+    }
+
+    fun rasterizeNextPage(): TextPageData? = measureNextPage()?.also { it.rasterize() }
+
+    private class PageLines(
+        val lines: List<TextLineData>,
+        val rest: String,
+    )
+
+    // Lays the remaining text out in at most [maxLines] lines from [top]; null when one of those lines
+    // has no room in the layout or for the next character.
+    private fun layOutLines(
+        paint: Paint,
+        top: Float,
+        lineHeight: Float,
+        maxLines: Int,
+    ): PageLines? {
         val lines = mutableListOf<TextLineData>()
-        var pageRemainder = remainingText
-        var y = layout.startY
-
-        while (pageRemainder.isNotEmpty() && y + lineHeight <= layout.height) {
-            val lineLayout = layout.lineLayout(y, lineHeight) ?: break
-            val breakIndex = breakText(pageRemainder, paint, lineLayout.width.toFloat())
-            if (breakIndex <= 0) break
-
-            val lineText = pageRemainder.substring(0, breakIndex).trim()
+        var rest = remainingText
+        var y = top
+        repeat(maxLines) {
+            if (rest.isEmpty()) return PageLines(lines, rest)
+            val lineLayout = layout.lineLayout(y, lineHeight) ?: return null
+            val breakIndex = breakText(rest, paint, lineLayout.width.toFloat())
+            if (breakIndex <= 0) return null
+            val lineText = rest.substring(0, breakIndex).trim()
             if (lineText.isNotEmpty()) {
                 lines +=
                     TextLineData(
@@ -123,16 +175,11 @@ class TxTextPage(
                         lineHeight = lineHeight.toInt(),
                     )
             }
-            pageRemainder = pageRemainder.substring(breakIndex).trimStart()
+            rest = rest.substring(breakIndex).trimStart()
             y += lineHeight
         }
-
-        if (lines.isEmpty()) return null
-        remainingText = pageRemainder
-        return TextPageData(layout, lines)
+        return PageLines(lines, rest)
     }
-
-    fun rasterizeNextPage(): TextPageData? = measureNextPage()?.also { it.rasterize() }
 
     // Returns how many characters of [text] the next line consumes, including a line feed that ends it.
     private fun breakText(

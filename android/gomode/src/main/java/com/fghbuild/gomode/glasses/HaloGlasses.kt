@@ -28,12 +28,15 @@ internal const val HALO_APP_MAIN = "halo/main.lua"
 internal val HALO_APP_LIBS = listOf("data.min.lua", "sprite.min.lua", "text_page.lua")
 
 // About eight lines fit the circle; large enough to read at a glance.
-internal const val HALO_FONT_SIZE_PX = 24
+private const val HALO_FONT_SIZE_PX = 24
 
-// Eight lines of 8 to 18 characters fit the circle. GlassesTranscriptTest lays the longest transcripts
-// out with HALO_FONT_SIZE_PX and checks that one page holds them; a run of wide capitals can still
-// overflow it.
-internal const val HALO_TEXT_CAPACITY = 96
+// How Go Mode's pages lay text out in Halo's circle.
+private val HALO_LAYOUT = CircularTextLayout(HaloDisplay.SIZE_PX, HaloDisplay.SIZE_PX, HALO_FONT_SIZE_PX)
+
+/** One page of [haloTextMessages]: Halo shows a text whole when its first page holds all of it. */
+internal data object HaloScreenFit : ScreenFit {
+    override fun fits(text: String): Boolean = HALO_LAYOUT.fitsOnePage(text)
+}
 
 /** Halo's display as MCP requests declare it: a circle whose sprites choose 16 colours from 24-bit RGB. */
 internal val HALO_DISPLAY =
@@ -50,8 +53,7 @@ internal val HALO_DISPLAY =
  * display's circle, or a clear when [text] is blank.
  */
 internal fun haloTextMessages(text: String): List<Pair<Int, TxMessage>> {
-    val layout = CircularTextLayout(HaloDisplay.SIZE_PX, HaloDisplay.SIZE_PX, HALO_FONT_SIZE_PX)
-    val page = TxTextPage(layout, text).rasterizeNextPage() ?: return listOf(HALO_CLEAR to TxCode(0))
+    val page = TxTextPage(HALO_LAYOUT, text).rasterizeNextPage() ?: return listOf(HALO_CLEAR to TxCode(0))
     return listOf(HALO_TEXT_PAGE to page) + page.rasterizedSprites.map { HALO_TEXT_PAGE to it }
 }
 
@@ -61,7 +63,7 @@ internal class HaloGlasses private constructor(
     override val closeCause: StateFlow<Exception?>,
 ) : GlassesDisplay {
     override val description = HALO_DISPLAY
-    override val textCapacity = HALO_TEXT_CAPACITY
+    override val screenFit = HaloScreenFit
 
     override suspend fun showText(text: String) {
         try {

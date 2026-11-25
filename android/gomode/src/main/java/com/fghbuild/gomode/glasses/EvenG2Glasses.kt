@@ -16,6 +16,7 @@ import com.fghbuild.eveng2.G2Glasses
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.G2State
+import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.sdk.v1.DisplayColorSpace
 import com.fghbuild.gomode.sdk.v1.DisplayShape
@@ -40,12 +41,15 @@ internal val G2_DISPLAY =
         bitsPerPixel = bitsPerPixel(G2Display.GREY_LEVELS),
     )
 
-// TODO(hardware): An unmeasured estimate. Hypothesis: the firmware font sets about 9 lines of about
-// 40 characters in the 576×288 container, and wrapping at words loses some of each line, so 240
-// characters keep a margin. No source states the font's metrics. On a real pair, show transcripts of
-// 200 to 400 characters of ordinary prose through EvenG2Glasses and note where the firmware cuts or
-// scrolls them; set this to about 90% of the largest that shows whole.
-internal const val G2_TEXT_CAPACITY = 240
+/**
+ * One G2 text container: the firmware shows a text whole when [G2TextPage.fits] it as [g2Text]
+ * sends it, before the byte limit cuts it.
+ */
+internal data class G2ScreenFit(
+    val page: G2TextPage,
+) : ScreenFit {
+    override fun fits(text: String): Boolean = page.fits(utf8(text))
+}
 
 internal class EvenG2Glasses private constructor(
     private val glasses: G2Glasses,
@@ -54,7 +58,7 @@ internal class EvenG2Glasses private constructor(
     private var watcher: Job? = null
 
     override val description = G2_DISPLAY
-    override val textCapacity = G2_TEXT_CAPACITY
+    override val screenFit = G2ScreenFit(glasses.page)
     override val closeCause: StateFlow<Exception?> = ended.asStateFlow()
 
     /** Shows [text], cut to the firmware's limit, and waits until the glasses acknowledge it. */
@@ -92,6 +96,8 @@ internal class EvenG2Glasses private constructor(
         ): EvenG2Glasses {
             var connected: EvenG2Glasses? = null
             try {
+                // Before the first transcript frame measures on the main thread.
+                G2TextPage.loadMetrics()
                 glasses.connect(pair, background)
                 val first = glasses.state.first { it is G2State.Ready || it is G2State.Closed }
                 if (first is G2State.Closed) throw first.cause.toGlassesException()
@@ -115,14 +121,16 @@ internal class EvenG2Glasses private constructor(
  * a page too short for its text, the firmware limit cuts the end.
  */
 internal fun g2Text(text: String): String {
-    // Encoding replaces unpaired surrogates, which UTF-8 cannot carry.
-    val bytes = text.replace("\u0000", "").toByteArray()
+    val bytes = utf8(text).toByteArray()
     if (bytes.size <= G2Display.MAX_TEXT_BYTES) return bytes.decodeToString()
     var end = G2Display.MAX_TEXT_BYTES
     // Cut before a code point's continuation bytes.
     while (bytes[end].toInt() and 0xC0 == 0x80) end--
     return bytes.decodeToString(0, end)
 }
+
+// [text] without NUL and with unpaired surrogates, which UTF-8 cannot carry, replaced as encoding does.
+private fun utf8(text: String): String = text.replace("\u0000", "").toByteArray().decodeToString()
 
 private fun G2CloseCause.toGlassesException(): GlassesException {
     val problem =

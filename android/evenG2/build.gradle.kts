@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.detekt)
     alias(libs.plugins.ktlint)
 }
@@ -79,6 +80,8 @@ tasks.withType<Test>().configureEach {
 dependencies {
     // Coroutines: the session exposes StateFlow and suspends on BLE operations.
     api(libs.kotlinx.coroutines.core)
+    // Reads the firmware font table that G2TextLayout measures text with.
+    implementation(libs.kotlinx.serialization.json)
 
     // The protocol and session tests are plain JVM tests; the GATT transport test runs on Robolectric's
     // Bluetooth shadows.
@@ -87,8 +90,6 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
     add(robolectricSdkJar.name, libs.robolectric.android.all)
-    // Reads the enterprise SDK's contract.json wire vectors.
-    testImplementation(libs.kotlinx.serialization.json)
 }
 
 // ktlint formatting and checks for the hand-written Kotlin in this module.

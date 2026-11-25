@@ -13,8 +13,8 @@ internal interface GlassesDisplay {
     /** The display as MCP requests declare it while these glasses are connected. */
     val description: Display
 
-    /** How many characters of ordinary prose one screen shows before cutting the rest. */
-    val textCapacity: Int
+    /** Whether one screen shows a text whole, measured in the layout [showText] uses. */
+    val screenFit: ScreenFit
 
     /**
      * Why the connection ended, or null while it is up. Once set, it stays set. A permanent
@@ -31,6 +31,14 @@ internal interface GlassesDisplay {
 
     /** Disconnects; [closeCause] then reports the disconnection. */
     suspend fun close()
+}
+
+/**
+ * Whether one screen of a display shows all of a text, laid out as that display lays it out. A
+ * display's implementation is a value: two connections to the same model have equal fits.
+ */
+internal interface ScreenFit {
+    fun fits(text: String): Boolean
 }
 
 /** The bits a pixel needs to take one of [values] levels or colours. */

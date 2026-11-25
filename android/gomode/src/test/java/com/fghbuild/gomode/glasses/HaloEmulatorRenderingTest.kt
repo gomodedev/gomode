@@ -3,21 +3,25 @@
 // The test starts scripts/halo_emulator_bridge.py through uv, so it needs uv on PATH and, on uv's first run, network
 // access to fetch the pinned emulator:
 //   ./gradlew :gomode:testDebugUnitTest --tests '*HaloEmulatorRenderingTest'
-// The bridge's stderr goes to build/halo-emulator/bridge.log and the rendered frame to build/halo-emulator/text.png.
+// The bridge's stderr goes to build/halo-emulator/bridge.log, the frame of a two-line page to
+// build/halo-emulator/short.png, and the frame of a transcript fitted to one page to build/halo-emulator/text.png.
 package com.fghbuild.gomode.glasses
 
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import com.fghbuild.gomode.voice.TranscriptEntry
+import com.fghbuild.gomode.voice.TranscriptSpeaker
+import com.fghbuild.gomode.voice.VoiceState
 import com.fghbuild.halo.ble.HaloEmulatorBridgeClient
 import com.fghbuild.halo.ble.HaloEmulatorEvent
 import com.fghbuild.halo.msg.HaloDisplay
+import com.fghbuild.halo.msg.TextPageData
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,13 +46,28 @@ private const val BRIDGE_START_TIMEOUT_MIN = 5L
 private const val BRIDGE_SCRIPT = "../../scripts/halo_emulator_bridge.py"
 private val OUTPUT_DIR = File("build/halo-emulator")
 
+// Wide capitals end the reply, so the fitted page is full and its widest lines matter.
+private val FITTED_TRANSCRIPT =
+    VoiceState(
+        connected = true,
+        transcript =
+            listOf(
+                TranscriptEntry(TranscriptSpeaker.USER, "What does the sign on the mountain say?", final = true),
+                TranscriptEntry(
+                    TranscriptSpeaker.ASSISTANT,
+                    "It says: WARNING. MAXIMUM WIND ON WOMBAT MOUNTAIN. WALK WITH A MAP AND MOW NO MEADOWS.",
+                    final = true,
+                ),
+            ),
+    )
+
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class HaloEmulatorRenderingTest {
     private val context = RuntimeEnvironment.getApplication()
 
     @Test
-    fun textPagesDrawCenteredInsideTheCircleAndBlankTextClears() {
+    fun fittedPagesDrawCentredInsideTheCircleAndBlankTextClears() {
         OUTPUT_DIR.mkdirs()
         val log = OUTPUT_DIR.resolve("bridge.log")
         // The bridge prints its URL once it listens and exits when its stdin closes.
@@ -84,18 +103,18 @@ class HaloEmulatorRenderingTest {
                 bridge.start("main.lua")
 
                 show(bridge, "Hello\nGo Mode")
-                val frame = awaitFrame(bridge) { it.isNotEmpty() }
-                OUTPUT_DIR.resolve("text.png").writeBytes(frame)
-                val text = litPixels(frame)
-                val center = (HaloDisplay.SIZE_PX - 1) / 2.0
-                val outside = text.filter { (x, y) -> hypot(x - center, y - center) > HaloDisplay.SIZE_PX / 2.0 }
-                assertTrue("lit pixels outside the circle: $outside", outside.isEmpty())
-                println("circle: ${text.size} lit pixels, none outside the display circle")
-                val meanX = text.sumOf { it.first } / text.size.toDouble()
-                assertTrue("text centred at x=$meanX", abs(meanX - center) < HaloDisplay.SIZE_PX / 16.0)
-                println("centring: mean lit x=$meanX for centre $center")
-                assertEquals("lines drawn", 2, rowBands(text.map { it.second }))
+                val short = awaitFrame(bridge) { rowBands(it.map { (_, y) -> y }) == 2 }
+                OUTPUT_DIR.resolve("short.png").writeBytes(short)
                 println("lines: 2 bands of lit rows")
+                checkCentred("short", litPixels(short))
+
+                val fitted = glassesTranscriptText(FITTED_TRANSCRIPT, HaloScreenFit)
+                val lines = (haloTextMessages(fitted).first().second as TextPageData).lineTexts
+                show(bridge, fitted)
+                val frame = awaitFrame(bridge) { rowBands(it.map { (_, y) -> y }) == lines.size }
+                OUTPUT_DIR.resolve("text.png").writeBytes(frame)
+                println("fitted: ${lines.size} bands of lit rows for \"$fitted\"")
+                checkCentred("fitted", litPixels(frame))
 
                 show(bridge, " ")
                 awaitFrame(bridge) { it.isEmpty() }
@@ -103,6 +122,21 @@ class HaloEmulatorRenderingTest {
                 bridge.stop()
             }
         }
+    }
+
+    // Every lit pixel is inside the display circle and the text sits in its middle, both ways.
+    private fun checkCentred(
+        name: String,
+        text: List<Pair<Int, Int>>,
+    ) {
+        val center = (HaloDisplay.SIZE_PX - 1) / 2.0
+        val outside = text.filter { (x, y) -> hypot(x - center, y - center) > HaloDisplay.SIZE_PX / 2.0 }
+        assertTrue("$name: lit pixels outside the circle: $outside", outside.isEmpty())
+        val meanX = text.sumOf { it.first } / text.size.toDouble()
+        assertTrue("$name: text centred at x=$meanX", abs(meanX - center) < HaloDisplay.SIZE_PX / 16.0)
+        val middleY = (text.minOf { it.second } + text.maxOf { it.second }) / 2.0
+        assertTrue("$name: text centred at y=$middleY", abs(middleY - center) < HaloDisplay.SIZE_PX / 16.0)
+        println("$name: ${text.size} lit pixels inside the circle, centred at x=$meanX, y=$middleY for $center")
     }
 
     private fun asset(path: String): String =

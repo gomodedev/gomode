@@ -1,13 +1,13 @@
 // Tests the transcript lines glasses show, their fit on the connected display, frame coalescing, and clearing.
 package com.fghbuild.gomode.glasses
 
+import com.fghbuild.eveng2.G2Display
+import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.gomode.voice.TranscriptEntry
 import com.fghbuild.gomode.voice.TranscriptKind
 import com.fghbuild.gomode.voice.TranscriptSpeaker
 import com.fghbuild.gomode.voice.VoiceState
-import com.fghbuild.halo.msg.CircularTextLayout
-import com.fghbuild.halo.msg.HaloDisplay
-import com.fghbuild.halo.msg.TxTextPage
+import com.fghbuild.halo.msg.TextPageData
 import com.fghbuild.voicegateway.sdk.v2.MessageKind
 import com.fghbuild.voicegateway.sdk.v2.TranscriptDraft
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +36,19 @@ private const val REPLY =
     "Three items are open. The plumber comes on Tuesday to move the sink drain. The electrician still has to " +
         "quote the under-cabinet lights. The countertop template is booked for the following Monday morning."
 
+// Capitals as wide as the font has: the last 96 characters of the reply overflow one Halo page.
+private const val WIDE_REPLY =
+    "WOW. MAXIMUM WARMTH WARNING ON WOMBAT MOUNTAIN. WHAM, MOW, WOMB, MEMO, WAWA, MUMM, WWWW, MMMM, " +
+        "WAMW MWAW WOMW MOWM WMWM MWMW WWMM MMWW, WOW WOW WOW MOM MOM MOM, MAMMOTH MEMORY WAVE AT NOON."
+
+// A link reads as one unbroken word, longer than a page.
+private const val LINK_REPLY =
+    "Open https://example.com/share/" +
+        "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz" +
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-end"
+
+private val G2_FIT = G2ScreenFit(G2TextPage())
+
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class GlassesTranscriptTest {
@@ -50,7 +63,7 @@ class GlassesTranscriptTest {
             )
         assertEquals(
             "You: What is the code word?\nThe code word is cedar.",
-            glassesTranscriptText(state, HALO_TEXT_CAPACITY),
+            glassesTranscriptText(state, HaloScreenFit),
         )
     }
 
@@ -60,72 +73,99 @@ class GlassesTranscriptTest {
             active(
                 EARLIER,
             ).copy(transcriptDraft = TranscriptDraft(MessageKind.TranscriptDraft, "d1", "and the"))
-        assertEquals("You: and the", glassesTranscriptText(state, HALO_TEXT_CAPACITY))
+        assertEquals("You: and the", glassesTranscriptText(state, HaloScreenFit))
     }
 
     @Test
     fun aDeviceRecognitionDraftShowsAsTheUsersLine() {
         val state = active(EARLIER + TranscriptEntry(TranscriptSpeaker.USER, "and the", final = false))
-        assertEquals("You: and the", glassesTranscriptText(state, HALO_TEXT_CAPACITY))
+        assertEquals("You: and the", glassesTranscriptText(state, HaloScreenFit))
     }
 
     @Test
     fun aLongReplyKeepsItsNewestWordsAndDropsTheQuestion() {
-        val text = glassesTranscriptText(active(exchange(QUESTION, REPLY)), HALO_TEXT_CAPACITY)
+        val text = glassesTranscriptText(active(exchange(QUESTION, REPLY)), HaloScreenFit)
         assertTrue(text, text.startsWith("…") && text.endsWith("Monday morning."))
         assertFalse(text, text.contains("You:") || text.contains('\n'))
-        assertTrue(text, text.length <= HALO_TEXT_CAPACITY)
+        assertOneHaloPage(text)
         // The cut starts at a word.
         assertTrue(text, REPLY.contains(" " + text.removePrefix("…")))
     }
 
     @Test
     fun aLongQuestionKeepsItsLabelAndNewestWordsAboveAShortReply() {
-        val text = glassesTranscriptText(active(exchange(QUESTION, "Yes.")), HALO_TEXT_CAPACITY)
-        val lines = text.lines()
-        assertEquals(2, lines.size)
-        assertTrue(text, lines[0].startsWith("You: …") && lines[0].endsWith("starting with the plumbing?"))
-        assertEquals("Yes.", lines[1])
-    }
-
-    @Test
-    fun theLongestTranscriptsFitOneHaloPage() {
-        val layout = CircularTextLayout(HaloDisplay.SIZE_PX, HaloDisplay.SIZE_PX, HALO_FONT_SIZE_PX)
-        for (state in listOf(
-            active(exchange(QUESTION, REPLY)),
-            active(exchange(QUESTION, "Yes, the plumbing first.")),
-        )) {
-            val text = glassesTranscriptText(state, HALO_TEXT_CAPACITY)
-            val page = TxTextPage(layout, text)
-            page.measureNextPage()
-            assertFalse("Halo cuts \"${page.remainingText()}\" from \"$text\"", page.hasMoreText)
+        for (reply in listOf("Yes.", "Yes, the plumbing first.")) {
+            val text = glassesTranscriptText(active(exchange(QUESTION, reply)), HaloScreenFit)
+            val lines = text.lines()
+            assertEquals(2, lines.size)
+            assertTrue(text, lines[0].startsWith("You: …") && lines[0].endsWith("starting with the plumbing?"))
+            assertEquals(reply, lines[1])
+            assertOneHaloPage(text)
         }
     }
 
     @Test
-    fun aLargerDisplayKeepsTheWholeReplyAndTheNewestWordsOfTheQuestion() {
-        val text = glassesTranscriptText(active(exchange(QUESTION, REPLY)), G2_TEXT_CAPACITY)
-        val lines = text.lines()
-        assertEquals(2, lines.size)
-        assertTrue(text, lines[0].startsWith("You: …") && lines[0].endsWith("starting with the plumbing?"))
-        assertEquals(REPLY, lines[1])
-        assertTrue(text, text.length <= G2_TEXT_CAPACITY)
+    fun wideCapitalsKeepTheNewestWordsOnOneHaloPage() {
+        assertFalse(HaloScreenFit.fits(WIDE_REPLY.takeLast(96)))
+        val text = glassesTranscriptText(active(exchange(QUESTION, WIDE_REPLY)), HaloScreenFit)
+        assertTrue(text, text.startsWith("…") && text.endsWith("MAMMOTH MEMORY WAVE AT NOON."))
+        assertTrue(text, WIDE_REPLY.contains(" " + text.removePrefix("…")))
+        assertOneHaloPage(text)
     }
 
     @Test
-    fun framesFollowTheConnectedDisplaysCapacityAndClearWithoutGlasses() =
+    fun aWordLongerThanAPageKeepsItsNewestCharactersOnOneHaloPage() {
+        for (state in listOf(
+            active(exchange(QUESTION, LINK_REPLY)),
+            active(EARLIER).withDraft(LINK_REPLY),
+        )) {
+            val text = glassesTranscriptText(state, HaloScreenFit)
+            val label = if (state.transcriptDraft != null) "You: …" else "…"
+            assertTrue(text, text.startsWith(label) && text.endsWith("XYZ-end"))
+            // The cut falls inside the link, so the page shows its end and not the word before it.
+            assertTrue(text, LINK_REPLY.endsWith(text.removePrefix(label)) && !text.contains("Open"))
+            assertOneHaloPage(text)
+            // The page has no room for one more character of the link.
+            val kept = text.length - label.length
+            assertFalse(HaloScreenFit.fits(label + LINK_REPLY.takeLast(kept + 1)))
+        }
+    }
+
+    @Test
+    fun theLargerG2DisplayShowsTheWholeExchangeAndCutsALongerOne() {
+        assertEquals("You: $QUESTION\n$REPLY", glassesTranscriptText(active(exchange(QUESTION, REPLY)), G2_FIT))
+        val reply = List(4) { REPLY }.joinToString(" ")
+        val text = glassesTranscriptText(active(exchange(QUESTION, reply)), G2_FIT)
+        assertTrue(text, text.startsWith("…") && text.endsWith("Monday morning.") && !text.contains("You:"))
+        assertTrue(text, text.length > 2 * REPLY.length)
+        assertTrue(text, G2_FIT.fits(text))
+    }
+
+    @Test
+    fun g2KeepsTheNewestCharactersWithinItsByteLimit() {
+        // U+1D400 takes 4 UTF-8 bytes and is drawn 4 px wide: 520 of them fit ten lines but not 1999 bytes.
+        val bold = "\uD835\uDC00"
+        val text = glassesTranscriptText(active(exchange(QUESTION, bold.repeat(520))), G2_FIT)
+        assertTrue(text.take(4), text.startsWith("…$bold") && text.endsWith(bold))
+        assertTrue(text.toByteArray().size <= G2Display.MAX_TEXT_BYTES)
+        // The glasses get the whole text: the byte limit cuts nothing.
+        assertEquals(text, g2Text(text))
+    }
+
+    @Test
+    fun framesFollowTheConnectedDisplaysFitAndClearWithoutGlasses() =
         runTest {
-            val capacity = MutableStateFlow<Int?>(HALO_TEXT_CAPACITY)
-            val frames = follow(MutableStateFlow(active(exchange(QUESTION, REPLY))), capacity = capacity)
-            capacity.value = G2_TEXT_CAPACITY
+            val fit = MutableStateFlow<ScreenFit?>(HaloScreenFit)
+            val frames = follow(MutableStateFlow(active(exchange(QUESTION, REPLY))), fit = fit)
+            fit.value = G2_FIT
             advanceTimeBy(GLASSES_FRAME_INTERVAL_MS)
             runCurrent()
-            capacity.value = null
+            fit.value = null
             advanceTimeBy(GLASSES_FRAME_INTERVAL_MS)
             runCurrent()
             assertEquals(3, frames.size)
             assertFalse(frames[0], frames[0].contains("You:"))
-            assertTrue(frames[1], frames[1].startsWith("You: …") && frames[1].endsWith(REPLY))
+            assertEquals("You: $QUESTION\n$REPLY", frames[1])
             assertEquals("", frames[2])
         }
 
@@ -191,7 +231,7 @@ class GlassesTranscriptTest {
             val voice = MutableStateFlow(VoiceState(transcript = EARLIER))
             val job =
                 launch {
-                    showVoiceTranscript(voice, MutableStateFlow(true), MutableStateFlow(HALO_TEXT_CAPACITY)) {
+                    showVoiceTranscript(voice, MutableStateFlow(true), MutableStateFlow(HaloScreenFit)) {
                         error("Idle sent \"$it\"")
                     }
                 }
@@ -209,7 +249,7 @@ class GlassesTranscriptTest {
                     showVoiceTranscript(
                         MutableStateFlow(active(EARLIER)),
                         MutableStateFlow(true),
-                        MutableStateFlow(HALO_TEXT_CAPACITY),
+                        MutableStateFlow(HaloScreenFit),
                         frames::add,
                     )
                 }
@@ -219,14 +259,21 @@ class GlassesTranscriptTest {
             assertEquals(listOf("You: What time is it?\nIt is noon.", ""), frames)
         }
 
+    // The Halo page that shows [text] holds all of it, whatever the fit says.
+    private fun assertOneHaloPage(text: String) {
+        val page = haloTextMessages(text).first().second as TextPageData
+        val shown = page.lineTexts.joinToString("").filterNot(Char::isWhitespace)
+        assertEquals(text.filterNot(Char::isWhitespace), shown)
+    }
+
     // Records what a fake display is told to show until the test ends.
     private fun TestScope.follow(
         voice: MutableStateFlow<VoiceState>,
         enabled: MutableStateFlow<Boolean> = MutableStateFlow(true),
-        capacity: MutableStateFlow<Int?> = MutableStateFlow(HALO_TEXT_CAPACITY),
+        fit: MutableStateFlow<ScreenFit?> = MutableStateFlow(HaloScreenFit),
     ): List<String> {
         val frames = mutableListOf<String>()
-        backgroundScope.launch { showVoiceTranscript(voice, enabled, capacity, frames::add) }
+        backgroundScope.launch { showVoiceTranscript(voice, enabled, fit, frames::add) }
         runCurrent()
         return frames
     }

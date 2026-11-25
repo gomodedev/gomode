@@ -19,17 +19,18 @@ import androidx.test.uiautomator.UiDevice
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.eveng2.testing.FakeG2Firmware
 import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceSetupMode
+import com.fghbuild.gomode.glasses.G2ScreenFit
 import com.fghbuild.gomode.glasses.G2_DISPLAY
-import com.fghbuild.gomode.glasses.G2_TEXT_CAPACITY
 import com.fghbuild.gomode.glasses.GlassesLink
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.HALO_DISPLAY
-import com.fghbuild.gomode.glasses.HALO_TEXT_CAPACITY
+import com.fghbuild.gomode.glasses.HaloScreenFit
 import com.fghbuild.gomode.glasses.haloTextMessages
 import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.GoModeApp
@@ -132,7 +133,7 @@ class GlassesVoiceTranscriptTest {
 
                     composeRule.onNodeWithContentDescription("End voice").performClick()
                     composeRule.waitUntil(TIMEOUT_MS) { halo.lastSent(haloTextMessages("")) }
-                    assertEquals(GlassesLink.Connected(HALO_DISPLAY, HALO_TEXT_CAPACITY), glasses.state.value.link)
+                    assertEquals(GlassesLink.Connected(HALO_DISPLAY, HaloScreenFit), glasses.state.value.link)
                 } finally {
                     composeRule.runOnUiThread {
                         glassesScope.cancel()
@@ -239,7 +240,7 @@ class GlassesVoiceTranscriptTest {
 
                     composeRule.runOnUiThread { carDial.cancel() }
                     composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
-                    assertEquals(GlassesLink.Connected(G2_DISPLAY, G2_TEXT_CAPACITY), glasses.state.value.link)
+                    assertEquals(GlassesLink.Connected(G2_DISPLAY, G2ScreenFit(G2TextPage())), glasses.state.value.link)
                 } finally {
                     composeRule.runOnUiThread {
                         carDial.close()

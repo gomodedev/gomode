@@ -17,6 +17,7 @@ import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Protocol
 import com.fghbuild.eveng2.G2Scanner
 import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.eveng2.testing.FakeG2Firmware
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
@@ -136,7 +137,7 @@ class GlassesOwnerTest {
             owner.show("after\nreplacement")
             runCurrent()
 
-            assertEquals(GlassesLink.Connected(HALO_DISPLAY, HALO_TEXT_CAPACITY), owner.state.value.link)
+            assertEquals(GlassesLink.Connected(HALO_DISPLAY, HaloScreenFit), owner.state.value.link)
             assertEquals(0, transport.disconnects)
             assertEquals(
                 listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Page(lines = 2)),
@@ -359,7 +360,7 @@ class GlassesOwnerTest {
             owner.start()
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected }
-            assertEquals(GlassesLink.Connected(G2_DISPLAY, G2_TEXT_CAPACITY), owner.state.value.link)
+            assertEquals(GlassesLink.Connected(G2_DISPLAY, G2ScreenFit(G2TextPage())), owner.state.value.link)
             // MCP requests declare a 576×288 rectangle of 16 grey levels.
             assertEquals(G2_DISPLAY, owner.connectedDisplay)
             assertEquals(G2, repository.settings.first { it.glasses != null }.glasses)
@@ -526,21 +527,16 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun theTextCapacityFollowsTheConnectedDisplay() =
+    fun theScreenFitFollowsTheConnectedDisplay() =
         runOwnerTest {
-            val capacities = mutableListOf<Int?>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-                owner.textCapacity.collect {
-                    capacities +=
-                        it
-                }
-            }
+            val fits = mutableListOf<ScreenFit?>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.screenFit.collect { fits += it } }
             connectSavedGlasses()
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
             owner.disconnect()
             runCurrent()
-            assertEquals(listOf(null, HALO_TEXT_CAPACITY, null, G2_TEXT_CAPACITY, null), capacities)
+            assertEquals(listOf(null, HaloScreenFit, null, G2ScreenFit(G2TextPage()), null), fits)
         }
 
     // The owner lives in the test's background scope, so connected glasses end with the test.

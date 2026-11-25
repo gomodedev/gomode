@@ -24,7 +24,8 @@ import kotlinx.coroutines.launch
 class G2Glasses(
     private val connector: G2ArmConnector,
     private val scope: CoroutineScope,
-    private val page: G2TextPage = G2TextPage(),
+    /** The text container each session's page shows. */
+    val page: G2TextPage = G2TextPage(),
 ) {
     private val lock = Any()
     private val mutableState = MutableStateFlow<G2State>(G2State.Idle)
