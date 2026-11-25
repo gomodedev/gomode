@@ -283,7 +283,7 @@ Annotations provide optional metadata for MCP resources and content.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `audience` | `Role[]` | Audience describes who the data is intended for. |  |
-| `priority` | `int` | Priority describes importance from 0 to 1, with 1 most important. |  |
+| `priority` | `float64` | Priority describes importance from 0 to 1, with 1 most important. |  |
 | `lastModified` | `string` | LastModified is an ISO 8601 timestamp for the last modification time. |  |
 
 ### ContentBlock

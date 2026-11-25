@@ -339,7 +339,7 @@ async function mcpCallTool(name: string, args: JsonObject, opts?: McpToolCallOpt
   )) as {
     _meta?: MetaObject;
     structuredContent?: JsonObject;
-    content?: Array<{ type?: string; text?: string }>;
+    content?: McpContentBlock[];
     isError?: boolean;
   };
   return {
@@ -349,9 +349,22 @@ async function mcpCallTool(name: string, args: JsonObject, opts?: McpToolCallOpt
   };
 }
 
-function textContentAsStructuredError(content: Array<{ type?: string; text?: string }> | undefined): JsonObject {
-  const text = content?.find((block) => block.type === "text")?.text;
+interface McpContentBlock {
+  type?: string;
+  text?: string;
+  annotations?: { audience?: unknown };
+}
+
+// The browser has no glasses, so a block for the user alone reaches neither the model nor a display.
+function textContentAsStructuredError(content: McpContentBlock[] | undefined): JsonObject {
+  const text = content?.find((block) => block.type === "text" && !isUserOnly(block))?.text;
   return text === undefined ? {} : { error: text };
+}
+
+// The audience of glasses content, which gomode.DisplayExtension documents.
+function isUserOnly(block: McpContentBlock): boolean {
+  const audience = block.annotations?.audience;
+  return Array.isArray(audience) && audience.length === 1 && audience[0] === "user";
 }
 
 function mcpParamHeaders(tool: McpToolDescriptor | undefined, args: JsonObject): Record<string, string> {

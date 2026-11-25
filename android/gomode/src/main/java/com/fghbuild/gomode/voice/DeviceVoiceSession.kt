@@ -104,6 +104,39 @@ internal fun textSessionWebSocketURL(
 }
 
 /**
+ * DeviceVoiceSetupSource says who prepares each connection of a [DeviceVoiceSession]. Owners pick it
+ * from the language model: gateway and local-model sessions share a conversation, keyword engines
+ * prepare the selected service.
+ */
+internal sealed interface DeviceVoiceSetupSource {
+    /** [conversation] prepares each connection from the ServiceCatalog, whose MCP clients declare the display. */
+    class Shared(
+        val conversation: VoiceConversation,
+    ) : DeviceVoiceSetupSource
+
+    /** [prepare] resolves the selected service for the connection's session ID. */
+    class SelectedService(
+        val prepare: suspend (sessionID: String) -> VoiceSetup,
+    ) : DeviceVoiceSetupSource {
+        /** Prepares the active service with an MCP client whose requests declare [glassesDisplay]. */
+        constructor(
+            settingsRepository: SettingsRepository,
+            settingsClient: ServiceSettingsClient,
+            bearerTokenFor: (String) -> String?,
+            glassesDisplay: () -> Display?,
+        ) : this({ sessionID ->
+            prepareVoiceSetup(
+                settingsRepository,
+                settingsClient,
+                bearerTokenFor,
+                VoiceSetupMcp.Service(glassesDisplay),
+                sessionID = sessionID,
+            )
+        })
+    }
+}
+
+/**
  * DeviceVoiceSession owns Android speech recognition, synthesis, and turn orchestration.
  * [VoiceLanguageModel.GATEWAY] sends recognized text to the gateway over WebSocket;
  * [VoiceLanguageModel.LOCAL_LLM] runs inference on the phone. Tool calls use the same session routing.
@@ -114,12 +147,9 @@ internal fun textSessionWebSocketURL(
 internal class DeviceVoiceSession(
     private val appContext: Context,
     private val settingsRepository: SettingsRepository,
-    private val settingsClient: ServiceSettingsClient = ServiceSettingsClient(),
-    private val bearerTokenFor: (String) -> String? = { null },
-    private val glassesDisplay: () -> Display?,
+    private val setupSource: DeviceVoiceSetupSource,
     private val frontendTools: FrontendVoiceTools = FrontendVoiceTools(),
     private val isAuthorityCurrent: () -> Boolean = { true },
-    voiceConversation: VoiceConversation? = null,
     private val languageTag: String,
     private val localModelOwner: LocalModelOwner = (appContext.applicationContext as GoModeApplication).localModelOwner,
     private val speech: DeviceSpeech =
@@ -131,15 +161,6 @@ internal class DeviceVoiceSession(
     private val callController: VoiceCallController = NoopVoiceCallController(),
     private val switchServer: suspend (String) -> Unit = { id -> settingsRepository.switchService(id) },
     private val startupTiming: () -> VoiceStartupTiming? = { null },
-    private val setupProvider: suspend (String) -> VoiceSetup = { sessionID ->
-        prepareVoiceSetup(
-            settingsRepository,
-            settingsClient,
-            bearerTokenFor,
-            VoiceSetupMcp.Service(glassesDisplay),
-            sessionID = sessionID,
-        )
-    },
     private val webSocketFactory: (Request, WebSocketListener) -> WebSocket = { request, listener ->
         deviceWebSocketClient.newWebSocket(request, listener)
     },
@@ -148,8 +169,11 @@ internal class DeviceVoiceSession(
         createOnDeviceEngine(appContext, engineType, ioDispatcher)
     },
 ) : VoiceSessionController {
-    private val sharedConversation = voiceConversation
-    private var voiceConversation: VoiceConversation? = null
+    // A session joins the shared conversation at its first connect. Until then teardown must not finish
+    // it: LocalModelOwner may already have begun it for a prepared local model.
+    private var joinedConversation = false
+    private val voiceConversation: VoiceConversation?
+        get() = (setupSource as? DeviceVoiceSetupSource.Shared)?.conversation?.takeIf { joinedConversation }
     private val foreground = VoiceForegroundLease(appContext)
     private val json =
         Json {
@@ -302,10 +326,15 @@ internal class DeviceVoiceSession(
             return
         }
         val engineType = settingsRepository.settings.value.voiceSetup.effectiveLanguageModel
-        voiceConversation =
-            sharedConversation.takeIf {
-                engineType == VoiceLanguageModel.GATEWAY || engineType == VoiceLanguageModel.LOCAL_LLM
-            }
+        // The owner picked the source for the language model it saw; a mismatch means settings changed since.
+        val shared = setupSource is DeviceVoiceSetupSource.Shared
+        if ((engineType == VoiceLanguageModel.LOCAL_LLM && !shared) ||
+            (engineType == VoiceLanguageModel.NEEDLE_WHISTLE && shared)
+        ) {
+            setError(VOICE_SETTINGS_CHANGED)
+            return
+        }
+        joinedConversation = true
         try {
             if (engineType == VoiceLanguageModel.GATEWAY) {
                 voiceConversation?.begin(preserveTranscript, this.conversationID)
@@ -332,7 +361,6 @@ internal class DeviceVoiceSession(
                         foreground.start(initialVoiceCallerName(settingsRepository.settings.value))
                     }
                     if (engineType == VoiceLanguageModel.LOCAL_LLM) {
-                        checkNotNull(voiceConversation) { "Local conversation owner is unavailable" }
                         setStatus("Preparing local model…")
                         timing?.enter(VoiceStartupStage.MODEL)
                         preparedLocalModel = localModelOwner.acquire()
@@ -341,8 +369,15 @@ internal class DeviceVoiceSession(
                     timing?.enter(VoiceStartupStage.TOOLS)
                     val setup =
                         preparedLocalModel?.setup ?: try {
-                            voiceConversation?.prepare(pinnedVoice)
-                                ?: setupProvider(this@DeviceVoiceSession.conversationID)
+                            when (setupSource) {
+                                is DeviceVoiceSetupSource.Shared -> {
+                                    setupSource.conversation.prepare(pinnedVoice)
+                                }
+
+                                is DeviceVoiceSetupSource.SelectedService -> {
+                                    setupSource.prepare(this@DeviceVoiceSession.conversationID)
+                                }
+                            }
                         } catch (e: VoiceSetupException) {
                             if (engineType != VoiceLanguageModel.NEEDLE_WHISTLE) {
                                 if (ownsAttempt(attempt)) setError(e.message ?: "Voice setup failed")
@@ -865,7 +900,7 @@ internal class DeviceVoiceSession(
                         interruptReply()
                     }
                     if (currentRecognition()) {
-                        _state.update { it.copy(transcript = it.transcript.replaceUserDraft(text, final = false)) }
+                        _state.update { it.withDeviceUserText(text, final = false) }
                     }
                 }
             },
@@ -906,11 +941,11 @@ internal class DeviceVoiceSession(
         turnIdle = false
         output.clear()
         _state.update {
-            it.copy(
-                listening = false,
-                turnState = TurnState.Thinking,
-                transcript = it.transcript.replaceUserDraft(text, final = true),
-            )
+            it
+                .copy(
+                    listening = false,
+                    turnState = TurnState.Thinking,
+                ).withDeviceUserText(text, final = true)
         }
         val currentEngine = engine
         if (currentEngine != null && currentEngine.engineType != VoiceLanguageModel.GATEWAY) {
@@ -1121,7 +1156,7 @@ internal class DeviceVoiceSession(
             if (conversation != null) {
                 val result = conversation.execute(name, args, sessionID, languageTag) { currentTurn() }
                 if (!currentTurn()) return errorJson("Turn was interrupted")
-                _state.update { it.copy(activeTool = null) }
+                _state.update { it.copy(activeTool = null).withUserContent(result?.userContent) }
                 return result?.structuredContent ?: errorJson("Unknown catalog tool")
             }
             val frontendResult =
@@ -1141,7 +1176,7 @@ internal class DeviceVoiceSession(
             require(name !in frontendToolNames) { "Frontend voice tool is unavailable: $name" }
             val result = client.callTool(name, args, sessionID, locale = languageTag)
             if (!currentTurn()) return errorJson("Turn was interrupted")
-            _state.update { it.copy(activeTool = null) }
+            _state.update { it.copy(activeTool = null).withUserContent(result.userContent) }
             if (result.isError) {
                 val errMsg = result.structuredContent["error"]?.jsonPrimitive?.content ?: "Tool error"
                 Log.e(TAG, "Tool $name failed: $errMsg")
@@ -1235,7 +1270,7 @@ internal class DeviceVoiceSession(
                         ownsAttempt(attempt) && webSocket === origin
                     }
                 if (!ownsAttempt(attempt) || webSocket !== origin) return
-                _state.update { it.copy(activeTool = null) }
+                _state.update { it.copy(activeTool = null).withUserContent(result?.userContent) }
                 sendToolResult(id, name, result?.structuredContent ?: errorJson("Unknown catalog tool"))
                 return
             }
@@ -1259,7 +1294,7 @@ internal class DeviceVoiceSession(
             require(name !in frontendToolNames) { "Frontend voice tool is unavailable: $name" }
             val result = client.callTool(name, args, sessionID, locale = languageTag)
             if (!ownsAttempt(attempt) || webSocket !== origin) return
-            _state.update { it.copy(activeTool = null) }
+            _state.update { it.copy(activeTool = null).withUserContent(result.userContent) }
             if (result.isError) {
                 val errMsg = result.structuredContent["error"]?.jsonPrimitive?.content ?: "Tool error"
                 Log.e(TAG, "Tool $name failed: $errMsg")
@@ -1401,7 +1436,7 @@ internal class DeviceVoiceSession(
     }
 
     override fun clearTranscript() {
-        _state.update { it.copy(transcript = emptyList()) }
+        _state.update { it.copy(transcript = emptyList(), userContent = null) }
     }
 
     override fun injectText(

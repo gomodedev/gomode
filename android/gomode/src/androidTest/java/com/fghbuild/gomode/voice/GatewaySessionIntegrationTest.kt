@@ -148,19 +148,19 @@ class GatewaySessionIntegrationTest {
                     DeviceVoiceSession(
                         appContext = context,
                         settingsRepository = repository,
-                        glassesDisplay = { null },
+                        setupSource =
+                            DeviceVoiceSetupSource.SelectedService {
+                                finishSetup.await()
+                                prepareVoiceSetup(
+                                    repository,
+                                    ServiceSettingsClient(),
+                                    { null },
+                                    VoiceSetupMcp.Service { null },
+                                )
+                            },
                         languageTag = "en-US",
                         callController = calls,
                         speech = speech,
-                        setupProvider = {
-                            finishSetup.await()
-                            prepareVoiceSetup(
-                                repository,
-                                ServiceSettingsClient(),
-                                { null },
-                                VoiceSetupMcp.Service { null },
-                            )
-                        },
                     )
                 try {
                     prepareSpeechLanguage(speech)

@@ -33,6 +33,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"iter"
 	"log/slog"
@@ -330,7 +332,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		t := ToolCallResult{
 			Meta:       res.Meta,
 			ResultType: ResultTypeComplete,
-			Content:    []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
+			Content:    toolResultContent(&res),
 			IsError:    res.IsError,
 		}
 		if !res.IsError {
@@ -803,7 +805,7 @@ func (h *Handler) dispatchCompat(ctx context.Context, method Method, params json
 		}
 		out := compatCallToolResult{
 			Meta:    res.Meta,
-			Content: []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
+			Content: toolResultContent(&res),
 			IsError: res.IsError,
 		}
 		if !res.IsError {
@@ -897,7 +899,10 @@ type SkillsRegistry interface {
 type RawToolResult struct {
 	Meta       MetaObject
 	Structured any
-	IsError    bool
+	// Content follows the text block that represents Structured in the
+	// result's content, such as the blocks GlassesText and GlassesImage build.
+	Content []ContentBlock
+	IsError bool
 }
 
 // ResourceUpdate describes authoritative state invalidations from the registry.
@@ -1138,6 +1143,42 @@ func ClientDisplay(m *RequestMeta) (d gomode.Display, ok bool, err error) {
 	}
 	return d, true, nil
 }
+
+// GlassesText returns a text content block that a Go Mode client shows on the
+// connected glasses and never gives the model, as [gomode.DisplayExtension]
+// documents. Add it to [ToolResult.Content] when the request declares a
+// display; the client lays text out and pages a long one.
+func GlassesText(text string) ContentBlock {
+	return ContentBlock{Type: ContentTypeText, Text: text, Annotations: Annotations{Audience: []Role{RoleUser}}}
+}
+
+// GlassesImage returns an image content block that a Go Mode client shows on
+// the connected glasses d describes and never gives the model, as
+// [gomode.DisplayExtension] documents. It encodes img as a PNG, which d must
+// draw, and img must fit d: at most d.Width by d.Height pixels. Draw it for
+// d's shape and colours; the client reduces colours to d.BitsPerPixel. Add
+// the block to [ToolResult.Content]; on a display that draws text alone, add
+// a [GlassesText] block instead.
+func GlassesImage(d *gomode.Display, img image.Image) (ContentBlock, error) {
+	if !d.DrawsImages(pngMIMEType) {
+		return ContentBlock{}, errors.New("the display draws no PNG images")
+	}
+	if size := img.Bounds().Size(); size.X <= 0 || size.Y <= 0 || size.X > d.Width || size.Y > d.Height {
+		return ContentBlock{}, fmt.Errorf("a %dx%d image does not fit the %dx%d display", size.X, size.Y, d.Width, d.Height)
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, img); err != nil {
+		return ContentBlock{}, err
+	}
+	return ContentBlock{
+		Type:        ContentTypeImage,
+		Data:        base64.StdEncoding.EncodeToString(b.Bytes()),
+		MimeType:    pngMIMEType,
+		Annotations: Annotations{Audience: []Role{RoleUser}},
+	}, nil
+}
+
+const pngMIMEType = "image/png"
 
 // RequestParams contains common MCP request metadata.
 type RequestParams struct {
@@ -1399,7 +1440,7 @@ type Annotations struct {
 	// Audience describes who the data is intended for.
 	Audience []Role `json:"audience,omitempty"`
 	// Priority describes importance from 0 to 1, with 1 most important.
-	Priority *int `json:"priority,omitempty"`
+	Priority *float64 `json:"priority,omitempty"`
 	// LastModified is an ISO 8601 timestamp for the last modification time.
 	LastModified string `json:"lastModified,omitempty"`
 }
@@ -2084,8 +2125,11 @@ type ToolSpec struct {
 type ToolResult[T any] struct {
 	Meta       MetaObject
 	Structured any
-	IsError    bool
-	_          [0]T
+	// Content follows the text block that represents Structured; see
+	// [RawToolResult.Content].
+	Content []ContentBlock
+	IsError bool
+	_       [0]T
 }
 
 // TypedToolResult returns a successful structured tool result.
@@ -2109,7 +2153,13 @@ func ToolErrorWithMeta[T any](message string, meta MetaObject) ToolResult[T] {
 }
 
 func (r ToolResult[T]) toRawToolResult() RawToolResult {
-	return RawToolResult{Meta: r.Meta, Structured: r.Structured, IsError: r.IsError}
+	return RawToolResult{Meta: r.Meta, Structured: r.Structured, Content: r.Content, IsError: r.IsError}
+}
+
+// toolResultContent is the content of r's CallToolResult: the text that
+// represents r.Structured, then r.Content.
+func toolResultContent(r *RawToolResult) []ContentBlock {
+	return append([]ContentBlock{{Type: ContentTypeText, Text: toolResultText(r.Structured)}}, r.Content...)
 }
 
 func toolResultText(v any) string {

@@ -904,6 +904,9 @@ class ServerVoiceSwitchTest {
         @Volatile var serviceItems: String? = null
 
         @Volatile var serviceContext: String? = null
+
+        // The JSON content blocks that tools/call returns beside its structured result.
+        @Volatile var toolContent = "[]"
         private val withdrawItems = CountDownLatch(1)
 
         fun withdrawServiceResources() {
@@ -1048,7 +1051,7 @@ class ServerVoiceSwitchTest {
                                 callMetadata += rpc.getJSONObject("params").getJSONObject("_meta")
                                 toolStarted.countDown()
                                 check(mcpToolGate?.await(30, TimeUnit.SECONDS) != false)
-                                """{"resultType":"complete","content":[],"structuredContent":{"source":"${if (bearer) "bearer" else "cookie"}"}}"""
+                                """{"resultType":"complete","content":$toolContent,"structuredContent":{"source":"${if (bearer) "bearer" else "cookie"}"}}"""
                             }
 
                             else -> {

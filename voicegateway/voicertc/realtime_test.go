@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -320,6 +321,9 @@ func TestLlamaRealtimeSession(t *testing.T) {
 			t.Fatal("barge in retained completed generation PCM")
 		}
 		sink.waitForKind(t, voicev2.MessageKindInterrupted, 1)
+		if kinds := sink.kinds(); slices.Index(kinds, voicev2.MessageKindUserSpeechStarted) < slices.Index(kinds, voicev2.MessageKindInterrupted) {
+			t.Fatalf("kinds = %v, want the new speech reported after the interruption it causes", kinds)
+		}
 		if input := peer.next(t); len(input.audio) == 0 {
 			t.Fatalf("idle generation must not cancel; preserve new microphone: %+v", input)
 		}

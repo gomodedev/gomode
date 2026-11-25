@@ -50,7 +50,10 @@ class SpeechTextFilterSessionTest {
                 DeviceVoiceSession(
                     appContext = context,
                     settingsRepository = repository,
-                    glassesDisplay = { null },
+                    setupSource =
+                        DeviceVoiceSetupSource.SelectedService {
+                            standaloneVoiceSetup().copy(gatewayEndpointURL = "https://gateway.example")
+                        },
                     languageTag = "en-US",
                     speech = speech,
                     voiceChimePlayer = SilentChime(),
@@ -58,7 +61,6 @@ class SpeechTextFilterSessionTest {
                         object : ThinkingEarcon {
                             override fun setThinking(active: Boolean) = Unit
                         },
-                    setupProvider = { standaloneVoiceSetup().copy(gatewayEndpointURL = "https://gateway.example") },
                     webSocketFactory = { _, listener ->
                         ready.complete(listener)
                         socket

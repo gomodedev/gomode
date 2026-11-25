@@ -520,6 +520,24 @@ func TestGeminiBridgeSession(t *testing.T) {
 			t.Fatalf("gateway ordering: %v", sink.kinds())
 		}
 	})
+	t.Run("user speech start precedes its late transcript", func(t *testing.T) {
+		// Input transcription has no order with responses; the speech start does.
+		sink := &realtimeEventSink{events: make(chan struct{}, 1)}
+		s := &realtimeBridgeSession{ctx: t.Context(), sink: sink}
+		for _, event := range []genai.RealtimeEvent{
+			{Kind: genai.RealtimeEventInputSpeechStart},
+			{Kind: genai.RealtimeEventTranscriptOutput, Content: genai.RealtimeContent{Text: "Done."}},
+			{Kind: genai.RealtimeEventTranscriptInput, Content: genai.RealtimeContent{Text: "Show the build.", Final: true}},
+		} {
+			if err := s.handleEvent(&event); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want := []voicev2.MessageKind{voicev2.MessageKindUserSpeechStarted, voicev2.MessageKindTranscriptDelta, voicev2.MessageKindAssistantTextDelta, voicev2.MessageKindTranscriptDelta}
+		if !slices.Equal(sink.kinds(), want) {
+			t.Fatalf("gateway ordering: %v, want %v", sink.kinds(), want)
+		}
+	})
 	t.Run("empty server instructions", func(t *testing.T) {
 		s, sink := newGeminiGateway(t, func(ctx context.Context, ws *websocket.Conn) {
 			setup := readGeminiFixture(t, ctx, ws)["setup"].(map[string]any)

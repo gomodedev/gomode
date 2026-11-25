@@ -102,6 +102,12 @@ export interface Display {
    * 2^BitsPerPixel luminance levels or colours, as ColorSpace defines.
    */
   bitsPerPixel: number /* int */;
+  /**
+   * ImageTypes lists the MIME types of the glasses image blocks the client
+   * draws on this display, such as "image/png". It is empty when the client
+   * draws glasses text alone, as on Even Realities G2.
+   */
+  imageTypes?: string[];
 }
 
 /**

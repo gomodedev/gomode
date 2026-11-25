@@ -227,10 +227,9 @@ class ControlledLocalConversationTest {
                             DeviceVoiceSession(
                                 context,
                                 repository,
-                                glassesDisplay = { null },
+                                DeviceVoiceSetupSource.Shared(conversation),
                                 languageTag = "en-US",
                                 speech = speech,
-                                voiceConversation = conversation,
                                 localModelOwner = owner,
                                 voiceChimePlayer = QuietChime(),
                             )
@@ -373,10 +372,9 @@ class ControlledLocalConversationTest {
                                 DeviceVoiceSession(
                                     context,
                                     repository,
-                                    glassesDisplay = { null },
+                                    DeviceVoiceSetupSource.Shared(conversation),
                                     languageTag = "en-US",
                                     speech = speech,
-                                    voiceConversation = conversation,
                                     localModelOwner = owner,
                                     voiceChimePlayer = QuietChime(),
                                 )

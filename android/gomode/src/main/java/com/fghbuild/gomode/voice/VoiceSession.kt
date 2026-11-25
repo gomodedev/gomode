@@ -1320,7 +1320,7 @@ internal class VoiceSession(
     }
 
     override fun clearTranscript() {
-        _state.update { it.copy(transcript = emptyList(), transcriptDraft = null) }
+        _state.update { it.copy(transcript = emptyList(), transcriptDraft = null, userContent = null) }
     }
 
     override fun injectText(
@@ -1506,6 +1506,10 @@ internal class VoiceSession(
 
                 MessageKind.ReasoningDelta -> {
                     handleReasoningDelta(json.decodeFromString(ReasoningDelta.serializer(), text))
+                }
+
+                MessageKind.UserSpeechStarted -> {
+                    _state.update { it.withUserTurnStart() }
                 }
 
                 MessageKind.SpeechStarted -> {
@@ -1726,7 +1730,7 @@ internal class VoiceSession(
             userSpeechActive = true
             if (speakerActive) interruptClientTurn()
         }
-        _state.update { it.copy(transcript = it.transcript.replaceUserDraft(text, final = false)) }
+        _state.update { it.withDeviceUserText(text, final = false) }
     }
 
     private fun finishListening() {
@@ -1739,7 +1743,7 @@ internal class VoiceSession(
     private fun submitUserUtterance(text: String) {
         if (speakerActive) interruptClientTurn()
         userSpeechActive = false
-        _state.update { it.copy(listening = false, transcript = it.transcript.replaceUserDraft(text, final = true)) }
+        _state.update { it.copy(listening = false).withDeviceUserText(text, final = true) }
         flushPendingNotifications(allowResponse = false)
         clientTurnIdle = false
         speakerActive = true
@@ -1904,7 +1908,7 @@ internal class VoiceSession(
                     ownsAttempt(attempt) && dataChannel === originChannel
                 }
             if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
-            _state.update { it.copy(activeTool = null) }
+            _state.update { it.copy(activeTool = null).withUserContent(result?.userContent) }
             sendToolResult(
                 id,
                 name,
@@ -2187,6 +2191,16 @@ data class VoiceState(
     val transcript: List<TranscriptEntry> = emptyList(),
     /** Ephemeral gateway hypothesis; excluded from transcript history and recovery. */
     val transcriptDraft: TranscriptDraft? = null,
+    /** The user content of the newest tool result that had some; see [withUserContent]. */
+    val userContent: HeldUserContent? = null,
+    /**
+     * The user turns started in this session, counted when the session learns of them in order with
+     * the tool results: device recognition's first words of an utterance, or the gateway's
+     * user.speech.started. A gateway's user transcript does not count: a realtime provider
+     * transcribes user audio apart from its replies, so the line of the speech that called a tool
+     * can arrive after the tool's result.
+     */
+    val userTurnStarts: Int = 0,
     /** RMS mic input level, normalized 0..1. */
     val micLevel: Float = 0f,
     /** Available audio input/output devices. */
@@ -2206,6 +2220,40 @@ data class VoiceState(
     /** started is true while connecting or connected: the voice button, or a glasses press, then ends voice. */
     val started: Boolean
         get() = connected || connectStatus != null
+}
+
+/** A tool result's [content] that arrived after the user's [userTurnStarts]th turn started; see [VoiceState.userTurnStarts]. */
+data class HeldUserContent(
+    val content: List<UserContent>,
+    val userTurnStarts: Int,
+)
+
+/**
+ * The user content that the glasses show instead of the transcript: [VoiceState.userContent] while
+ * the user has started no turn since it arrived. The transcript resumes once the user's next turn
+ * starts, as [VoiceState.userTurnStarts] counts it.
+ */
+internal val VoiceState.heldUserContent: List<UserContent>
+    get() = userContent?.takeIf { it.userTurnStarts == userTurnStarts }?.content.orEmpty()
+
+/** Holds [content], when a tool result has some, in place of earlier user content. */
+internal fun VoiceState.withUserContent(content: List<UserContent>?): VoiceState =
+    if (content.isNullOrEmpty()) this else copy(userContent = HeldUserContent(content, userTurnStarts))
+
+/** Counts the start of a user turn; see [VoiceState.userTurnStarts]. */
+internal fun VoiceState.withUserTurnStart(): VoiceState = copy(userTurnStarts = userTurnStarts + 1)
+
+/**
+ * [replaceUserDraft] for device recognition, which starts a user turn with the first words of an
+ * utterance: the transcript then holds no live hypothesis.
+ */
+internal fun VoiceState.withDeviceUserText(
+    text: String,
+    final: Boolean,
+): VoiceState {
+    val drafting = transcript.lastOrNull()?.let { it.speaker == TranscriptSpeaker.USER && !it.final } == true
+    val next = copy(transcript = transcript.replaceUserDraft(text, final))
+    return if (text.isNotBlank() && !drafting) next.withUserTurnStart() else next
 }
 
 /** Replace only the current ephemeral hypothesis; stale clears cannot erase newer input. */

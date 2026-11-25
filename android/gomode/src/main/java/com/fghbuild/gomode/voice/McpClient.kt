@@ -10,6 +10,8 @@
 // display client capability extension, so glasses connected mid-session reach the next request.
 package com.fghbuild.gomode.voice
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Base64
 import android.util.Log
 import com.fghbuild.gomode.sdk.v1.ClientExtensions
@@ -20,6 +22,8 @@ import com.fghbuild.gomode.service.credentialedHTTPClient
 import com.fghbuild.mcp.sdk.v1.ApiClient
 import com.fghbuild.mcp.sdk.v1.ApiException
 import com.fghbuild.mcp.sdk.v1.ClientCapabilities
+import com.fghbuild.mcp.sdk.v1.ContentBlock
+import com.fghbuild.mcp.sdk.v1.ContentType
 import com.fghbuild.mcp.sdk.v1.Implementation
 import com.fghbuild.mcp.sdk.v1.JSONPresence
 import com.fghbuild.mcp.sdk.v1.JSONRPCNotification
@@ -34,6 +38,7 @@ import com.fghbuild.mcp.sdk.v1.ResourceTemplatesListResult
 import com.fghbuild.mcp.sdk.v1.ResourcesListResult
 import com.fghbuild.mcp.sdk.v1.ResourcesReadParams
 import com.fghbuild.mcp.sdk.v1.ResourcesReadResult
+import com.fghbuild.mcp.sdk.v1.Role
 import com.fghbuild.mcp.sdk.v1.ServerDiscoverResult
 import com.fghbuild.mcp.sdk.v1.SubscriptionFilter
 import com.fghbuild.mcp.sdk.v1.SubscriptionsListenParams
@@ -71,10 +76,40 @@ internal class InvalidMcpResponse(
     }
 }
 
+/**
+ * A tool result as the shell uses it. [structuredContent] is what the model receives. [userContent]
+ * holds, in order, the content blocks whose audience is the user alone, which the connected glasses
+ * show and the model never receives; see [userOnlyContent].
+ */
 data class McpToolResult(
     val structuredContent: JsonObject,
     val isError: Boolean = false,
+    val userContent: List<UserContent> = emptyList(),
 )
+
+/**
+ * Content of a tool result for the user alone: [Text], or an [Image] decoded from a PNG of at most
+ * [MAX_USER_IMAGE_BYTES], sampled down to at most [MAX_USER_IMAGE_PX] pixels a side.
+ */
+sealed interface UserContent {
+    data class Text(
+        val text: String,
+    ) : UserContent
+
+    /** Equal only to an image of the same [image], since a Bitmap compares by identity. */
+    data class Image(
+        val image: Bitmap,
+    ) : UserContent
+}
+
+// Bounds the PNG of a user-only image block; a 576 by 288 grey card is a few KiB.
+internal const val MAX_USER_IMAGE_BYTES = 1 shl 20
+
+// Bounds a decoded image's memory; every display is smaller, and each scales the image to fit.
+internal const val MAX_USER_IMAGE_PX = 1024
+
+/** The MIME type of the image blocks the shell draws on glasses that declare it. */
+internal const val PNG_MIME_TYPE = "image/png"
 
 /** [display] returns the display to declare on the next request, or null to declare none. */
 class McpClient(
@@ -207,11 +242,14 @@ class McpClient(
                 name = name,
                 paramHeaders = mcpParamHeaders(toolsByName[name], args),
             )
+        val content = result.content.orEmpty()
         val structuredContent =
-            (result.structuredContent as? JSONPresence.Value)?.value?.jsonObject ?: textContentAsStructuredError(result)
+            (result.structuredContent as? JSONPresence.Value)?.value?.jsonObject
+                ?: textContentAsStructuredError(content)
         return McpToolResult(
             structuredContent = structuredContent,
             isError = result.isError ?: false,
+            userContent = userOnlyContent(content),
         )
     }
 
@@ -325,12 +363,55 @@ internal fun newSubscriptionHTTPClient(): OkHttpClient =
         .readTimeout(SUBSCRIPTION_READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
         .build()
 
-private fun textContentAsStructuredError(result: ToolCallResult): JsonObject {
+// The model never receives a block for the user alone, glasses or not.
+private fun textContentAsStructuredError(content: List<ContentBlock>): JsonObject {
     val text =
-        result.content.orEmpty().firstNotNullOfOrNull { block ->
-            block.takeIf { it.type.value == "text" }?.text
+        content.firstNotNullOfOrNull { block ->
+            block.takeIf { it.type == ContentType.Text && !it.isUserOnly() }?.text
         } ?: return JsonObject(emptyMap())
     return buildJsonObject { put("error", text) }
+}
+
+/**
+ * Of the blocks of [content] whose audience is exactly the user, the last text and the last PNG
+ * image, in their order: a display shows the last of them it draws, so these serve every display.
+ * Only that image is decoded, and it is skipped when its encoding is broken or it is too large.
+ */
+internal fun userOnlyContent(content: List<ContentBlock>): List<UserContent> {
+    val text = content.indexOfLast { it.isUserOnly() && it.type == ContentType.Text && it.text != null }
+    val image =
+        content.indexOfLast {
+            it.isUserOnly() && it.type == ContentType.Image && it.mimeType == PNG_MIME_TYPE && it.data != null
+        }
+    return listOf(text, image).filter { it >= 0 }.sorted().mapNotNull { i ->
+        val block = content[i]
+        if (i == text) block.text?.let(UserContent::Text) else block.data?.let(::decodeUserImage)
+    }
+}
+
+private fun ContentBlock.isUserOnly(): Boolean = annotations?.audience == listOf(Role.User)
+
+private fun decodeUserImage(data: String): UserContent.Image? {
+    // Base64 holds 3 bytes in 4 characters; refuse a larger block before decoding it.
+    if (data.length / 4 * 3 > MAX_USER_IMAGE_BYTES) return null
+    val png =
+        try {
+            Base64.decode(data, Base64.DEFAULT)
+        } catch (e: IllegalArgumentException) {
+            Log.w("GoModeMcp", "User image block is not base64", e)
+            return null
+        }
+    if (png.size > MAX_USER_IMAGE_BYTES) return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(png, 0, png.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outMimeType != PNG_MIME_TYPE) {
+        Log.w("GoModeMcp", "User image block is not a PNG")
+        return null
+    }
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_USER_IMAGE_PX) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return BitmapFactory.decodeByteArray(png, 0, png.size, options)?.let(UserContent::Image)
 }
 
 private fun mcpParamHeaders(

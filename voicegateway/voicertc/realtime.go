@@ -378,6 +378,9 @@ func (s *llamaRealtimeSession) acceptMicPCM(ctx context.Context, pcm []byte) (er
 			if err := s.interruptLocked(ctx); err != nil {
 				return err
 			}
+			if err := s.sendLocked(&voicev2.UserSpeechStarted{Kind: voicev2.MessageKindUserSpeechStarted}); err != nil {
+				return err
+			}
 		}
 		if err := s.enqueueMicrophoneLocked(chunk); err != nil {
 			return err

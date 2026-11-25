@@ -1,6 +1,8 @@
 // Tests native MCP requests, tool result normalization, and SSE configuration.
 package com.fghbuild.gomode.voice
 
+import android.graphics.Bitmap
+import android.util.Base64
 import com.fghbuild.gomode.glasses.G2_DISPLAY
 import com.fghbuild.gomode.glasses.HALO_DISPLAY
 import com.fghbuild.gomode.sdk.v1.Display
@@ -33,6 +35,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.GraphicsMode
+import java.io.ByteArrayOutputStream
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
@@ -241,6 +245,72 @@ class McpClientTest {
     }
 
     @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun `the last user-only block is for the glasses and never for the model`() =
+        runTest {
+            MockWebServer().use { server ->
+                server.start()
+                val client = McpClient(server.url("/mcp").toString(), "2026-07-28", { null }, display = { null })
+
+                suspend fun call(content: String): McpToolResult {
+                    server.enqueue(
+                        MockResponse().setBody(
+                            """{"jsonrpc":"2.0","id":1,"result":{"resultType":"complete","content":[$content]}}""",
+                        ),
+                    )
+                    return client.callTool("glance", JsonObject(emptyMap()), sessionID = null, locale = null)
+                }
+
+                fun userOnly(block: String) = block.dropLast(1) + ""","annotations":{"audience":["user"]}}"""
+
+                fun image(
+                    width: Int,
+                    height: Int,
+                    mimeType: String = "image/png",
+                ): String {
+                    val png = ByteArrayOutputStream()
+                    Bitmap
+                        .createBitmap(
+                            width,
+                            height,
+                            Bitmap.Config.ARGB_8888,
+                        ).compress(Bitmap.CompressFormat.PNG, 100, png)
+                    val data = Base64.encodeToString(png.toByteArray(), Base64.NO_WRAP)
+                    return userOnly("""{"type":"image","data":"$data","mimeType":"$mimeType"}""")
+                }
+                val card = userOnly("""{"type":"text","text":"Glasses card"}""")
+                val both =
+                    """{"type":"text","text":"Both","annotations":{"audience":["user","assistant"],"priority":0.9}}"""
+
+                // Only text the model may read becomes the result without structured content.
+                val mixed = call("$card,${image(40, 20)},$both,$card")
+                assertEquals(buildJsonObject { put("error", "Both") }, mixed.structuredContent)
+                assertEquals(JsonObject(emptyMap()), call(card).structuredContent)
+                // The last text and the last image, in their order, serve every display.
+                val (shown, last) = mixed.userContent
+                assertEquals(40 to 20, (shown as UserContent.Image).image.let { it.width to it.height })
+                assertEquals(UserContent.Text("Glasses card"), last)
+                assertEquals(2, mixed.userContent.size)
+                val many =
+                    call(
+                        (1..40).joinToString(",") { "${image(it, 1)},${userOnly("""{"type":"text","text":"$it"}""")}" },
+                    )
+                assertEquals(2, many.userContent.size)
+                assertEquals(40, (many.userContent[0] as UserContent.Image).image.width)
+                assertEquals(UserContent.Text("40"), many.userContent[1])
+                val sampled = call(image(4096, 64)).userContent.single() as UserContent.Image
+                assertTrue("${sampled.image.width}", sampled.image.width <= MAX_USER_IMAGE_PX)
+
+                // The shell skips a block it cannot show.
+                val jpeg = image(4, 4, "image/jpeg")
+                val broken = userOnly("""{"type":"image","data":"not base64!","mimeType":"image/png"}""")
+                val audio = userOnly("""{"type":"audio","data":"AAAA","mimeType":"audio/wav"}""")
+                assertEquals(listOf(UserContent.Text("Glasses card")), call("$jpeg,$card,$broken,$audio").userContent)
+                assertEquals(emptyList<UserContent>(), call(both).userContent)
+            }
+        }
+
+    @Test
     fun `each request declares the glasses display connected at that moment`() =
         runTest {
             MockWebServer().use { server ->
@@ -268,7 +338,8 @@ class McpClientTest {
                 val halo =
                     Json.parseToJsonElement(
                         """{"com.fghbuild.gomode/display":
-                        {"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4}}""",
+                        {"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4,
+                        "imageTypes":["image/png"]}}""",
                     )
 
                 val g2 =

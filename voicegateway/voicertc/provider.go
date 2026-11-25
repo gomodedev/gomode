@@ -595,6 +595,16 @@ func (s *realtimeBridgeSession) handleEvent(event *genai.RealtimeEvent) error {
 				out = append(out, mustGatewayServerMessage(&voicev2.AssistantTextDelta{Kind: voicev2.MessageKindAssistantTextDelta, Text: text, ResponseID: gatewayResponseID(s.id, event.ResponseID)}))
 			}
 		}
+	case genai.RealtimeEventInputSpeechStart:
+		// The provider's voice activity detection orders this before its reply,
+		// unlike the input transcript; see voicev2.UserSpeechStarted. OpenAI sends
+		// input_audio_buffer.speech_started under server VAD. Gemini Live sends
+		// voiceActivity under its default automatic activity detection: genai
+		// v0.11.5's recording providers/gemini/testdata/TestClient/Scoreboard/
+		// gemini-3.8-live/Realtime-5.ndjson, whose setup leaves detection at its
+		// default, receives ACTIVITY_START, inputTranscription, ACTIVITY_END,
+		// then toolCall.
+		out = append(out, mustGatewayServerMessage(&voicev2.UserSpeechStarted{Kind: voicev2.MessageKindUserSpeechStarted}))
 	case genai.RealtimeEventInterrupted:
 		s.sink.clearAssistantAudio()
 		s.assistantSpeaking = false

@@ -36,6 +36,9 @@ internal class VoiceSetupException(
     val stage: SpeechStage? = null,
 ) : Exception(message)
 
+/** Reports settings that changed between preparing a voice session and connecting it. */
+internal const val VOICE_SETTINGS_CHANGED = "Voice settings changed. Try connecting again."
+
 // Foreground ownership starts at the user's connect action, before discovery can suspend.
 internal fun initialVoiceCallerName(settings: SettingsState): String =
     settings.services.firstOrNull { it.id == settings.activeServiceId }?.label ?: "Go Mode"
@@ -245,6 +248,6 @@ internal fun ensureVoiceSettingsCurrent(
         captured.speakingVoices != current.speakingVoices ||
         captured.synthesisVoices != current.synthesisVoices
     ) {
-        throw VoiceSetupException("Voice settings changed. Try connecting again.")
+        throw VoiceSetupException(VOICE_SETTINGS_CHANGED)
     }
 }

@@ -9,6 +9,8 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -119,7 +121,7 @@ class GlassesOwnerTest {
             assertTrue(halo.files.toString(), halo.files.containsAll(listOf("text_page.lua", "main.lua")))
             assertEquals(listOf(Shown.Clear), halo.shown())
 
-            owner.show("one\ntwo")
+            owner.show(GlassesFrame.Text("one\ntwo"))
             runCurrent()
             assertEquals(listOf(Shown.Clear, Shown.Page(lines = 2)), halo.shown())
         }
@@ -130,13 +132,13 @@ class GlassesOwnerTest {
             connectSavedGlasses()
             val first = Robolectric.buildActivity(ComponentActivity::class.java).setup()
             first.get().setContent { GlassesScreen(owner, onNavigateBack = {}) }
-            owner.show("before")
+            owner.show(GlassesFrame.Text("before"))
             runCurrent()
 
             first.pause().stop().destroy()
             val second = Robolectric.buildActivity(ComponentActivity::class.java).setup()
             second.get().setContent { GlassesScreen(owner, onNavigateBack = {}) }
-            owner.show("after\nreplacement")
+            owner.show(GlassesFrame.Text("after\nreplacement"))
             runCurrent()
 
             assertEquals(GlassesLink.Connected(HALO_DISPLAY, HaloScreenFit), owner.state.value.link)
@@ -153,7 +155,7 @@ class GlassesOwnerTest {
         runOwnerTest {
             connectSavedGlasses()
             assertEquals(HALO_DISPLAY, owner.connectedDisplay)
-            owner.show("hello")
+            owner.show(GlassesFrame.Text("hello"))
             runCurrent()
             // Connecting to saved glasses is direct.
             assertEquals(0, transport.backgroundConnects)
@@ -263,7 +265,7 @@ class GlassesOwnerTest {
         runOwnerTest {
             connectSavedGlasses()
             transport.halos.single().rejectMessages = true
-            owner.show("hello")
+            owner.show(GlassesFrame.Text("hello"))
             runCurrent()
             assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNRESPONSIVE), owner.state.value.link)
             assertEquals(1, transport.disconnects)
@@ -273,7 +275,7 @@ class GlassesOwnerTest {
     fun forgettingClearsTheDisplayDisconnectsAndStopsReconnecting() =
         runOwnerTest {
             connectSavedGlasses()
-            owner.show("hello")
+            owner.show(GlassesFrame.Text("hello"))
             runCurrent()
 
             owner.forget()
@@ -367,9 +369,9 @@ class GlassesOwnerTest {
             assertEquals(G2_DISPLAY, owner.connectedDisplay)
             assertEquals(G2, repository.settings.first { it.glasses != null }.glasses)
 
-            owner.show("one\ntwo")
+            owner.show(GlassesFrame.Text("one\ntwo"))
             runCurrent()
-            owner.show("three")
+            owner.show(GlassesFrame.Text("three"))
             runCurrent()
             assertEquals(
                 listOf(
@@ -389,7 +391,7 @@ class GlassesOwnerTest {
         runOwnerTest {
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected }
-            owner.show("hello")
+            owner.show(GlassesFrame.Text("hello"))
             runCurrent()
             assertEquals(emptyList<G2Side>(), firmware.backgroundAttempts)
 
@@ -447,7 +449,7 @@ class GlassesOwnerTest {
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected }
             firmware.answersUpdates = false
-            owner.show("hello")
+            owner.show(GlassesFrame.Text("hello"))
             owner.state.first { it.link is GlassesLink.Reconnecting }
             assertEquals(GlassesLink.Reconnecting(GlassesProblem.UNRESPONSIVE), owner.state.value.link)
             assertTrue(firmware.links.all { it.closed })
@@ -496,7 +498,7 @@ class GlassesOwnerTest {
             firmware.connected = { haloDisconnectsAtG2Arms += transport.disconnects }
             transport.connecting = { g2ClosedAtHaloAttempts += firmware.links.all { it.closed } }
             connectSavedGlasses()
-            owner.show("hello")
+            owner.show(GlassesFrame.Text("hello"))
             runCurrent()
 
             owner.connect(G2)
@@ -529,10 +531,34 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun theScreenFitFollowsTheConnectedDisplay() =
+    fun anImageDrawsOnHaloAndEvenG2WhichDrawsNoImagesIsLeftBlank() =
+        runOwnerTest {
+            connectSavedGlasses()
+            val image = Bitmap.createBitmap(64, 40, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.GREEN) }
+            owner.notify("Open Go Mode")
+            owner.show(GlassesFrame.Image(image))
+            runCurrent()
+            val halo = transport.halos.single()
+            // The image ends the notice; its 40 rows take two strips.
+            assertTrue(halo.lastSent(haloImageMessages(image)))
+            assertEquals(Shown.Page(lines = 2), halo.shown().last())
+
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
+            runCurrent()
+            assertEquals("", firmware.shownText())
+        }
+
+    @Test
+    fun theScreenFollowsTheConnectedDisplay() =
         runOwnerTest {
             val fits = mutableListOf<ScreenFit?>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.screenFit.collect { fits += it } }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                owner.screen.collect {
+                    fits +=
+                        it?.screenFit
+                }
+            }
             connectSavedGlasses()
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
@@ -616,11 +642,11 @@ class GlassesOwnerTest {
             runCurrent()
             assertTrue(halo.lastSent(haloTextMessages("Notice")))
             // A transcript that clears as voice fails to start must not erase the notice that says why.
-            owner.show("")
+            owner.show(GlassesFrame.Text(""))
             advanceTimeBy(GLASSES_NOTICE_MS / 2)
             assertTrue(halo.lastSent(haloTextMessages("Notice")))
 
-            owner.show("You: hello")
+            owner.show(GlassesFrame.Text("You: hello"))
             runCurrent()
             assertTrue(halo.lastSent(haloTextMessages("You: hello")))
             advanceTimeBy(GLASSES_NOTICE_MS + 1)
@@ -684,7 +710,7 @@ private fun FakeHalo.shown(): List<Shown> =
     messages.mapNotNull { (code, payload) ->
         when {
             code == HALO_CLEAR -> Shown.Clear
-            code == HALO_TEXT_PAGE && payload[0] == 0xFF.toByte() -> Shown.Page(lines = payload[5].toInt())
+            code == HALO_PAGE && payload[0] == 0xFF.toByte() -> Shown.Page(lines = payload[5].toInt())
             else -> null
         }
     }

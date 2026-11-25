@@ -110,6 +110,7 @@ documents. Servers must ignore fields they do not know.
 | `shape` | `DisplayShape` | Shape is the visible area within the Width by Height pixels. | yes |
 | `colorSpace` | `DisplayColorSpace` | ColorSpace is what a pixel value represents. | yes |
 | `bitsPerPixel` | `int` | BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of 2^BitsPerPixel luminance levels or colours, as ColorSpace defines. | yes |
+| `imageTypes` | `string[]` | ImageTypes lists the MIME types of the glasses image blocks the client draws on this display, such as "image/png". It is empty when the client draws glasses text alone, as on Even Realities G2. |  |
 
 ### ClientExtensions
 

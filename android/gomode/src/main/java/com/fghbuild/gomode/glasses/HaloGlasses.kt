@@ -1,11 +1,13 @@
-// Halo's GlassesDisplay: Go Mode's Lua app draws text pages rasterized on the phone and reports button presses.
+// Halo's GlassesDisplay: Go Mode's Lua app draws text and image pages rasterized on the phone and reports presses.
 package com.fghbuild.gomode.glasses
 
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.graphics.Bitmap
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.sdk.v1.DisplayColorSpace
 import com.fghbuild.gomode.sdk.v1.DisplayShape
+import com.fghbuild.gomode.voice.PNG_MIME_TYPE
 import com.fghbuild.halo.ble.HaloConnection
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloException
@@ -15,6 +17,7 @@ import com.fghbuild.halo.msg.HaloDisplay
 import com.fghbuild.halo.msg.HalosideApp
 import com.fghbuild.halo.msg.RxClick
 import com.fghbuild.halo.msg.TxCode
+import com.fghbuild.halo.msg.TxImagePage
 import com.fghbuild.halo.msg.TxMessage
 import com.fghbuild.halo.msg.TxTextPage
 import kotlinx.coroutines.NonCancellable
@@ -25,8 +28,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
-// Message codes that Go Mode's Halo app, assets/halo/main.lua, handles.
-internal const val HALO_TEXT_PAGE = 0x20
+// Message codes that Go Mode's Halo app, assets/halo/main.lua, handles. A page is text or an image.
+internal const val HALO_PAGE = 0x20
 internal const val HALO_CLEAR = 0x21
 
 /** Go Mode's Halo app: its main.lua asset and the halo-sdk Lua libraries it requires. */
@@ -44,7 +47,10 @@ internal data object HaloScreenFit : ScreenFit {
     override fun fits(text: String): Boolean = HALO_LAYOUT.fitsOnePage(text)
 }
 
-/** Halo's display as MCP requests declare it: a circle whose sprites choose 16 colours from 24-bit RGB. */
+/**
+ * Halo's display as MCP requests declare it: a circle whose sprites choose 16 colours from 24-bit RGB,
+ * on which PNG images draw.
+ */
 internal val HALO_DISPLAY =
     Display(
         width = HaloDisplay.SIZE_PX,
@@ -52,6 +58,7 @@ internal val HALO_DISPLAY =
         shape = DisplayShape.Circle,
         colorSpace = DisplayColorSpace.RGB,
         bitsPerPixel = bitsPerPixel(HaloDisplay.COLORS),
+        imageTypes = listOf(PNG_MIME_TYPE),
     )
 
 /**
@@ -60,7 +67,17 @@ internal val HALO_DISPLAY =
  */
 internal fun haloTextMessages(text: String): List<Pair<Int, TxMessage>> {
     val page = TxTextPage(HALO_LAYOUT, text).rasterizeNextPage() ?: return listOf(HALO_CLEAR to TxCode(0))
-    return listOf(HALO_TEXT_PAGE to page) + page.rasterizedSprites.map { HALO_TEXT_PAGE to it }
+    return listOf(HALO_PAGE to page) + page.rasterizedSprites.map { HALO_PAGE to it }
+}
+
+/**
+ * The typed messages that make Go Mode's Halo app show [image], fitted to the display and centred in
+ * up to [HaloDisplay.COLORS] colours of its own; see [TxImagePage].
+ */
+internal fun haloImageMessages(image: Bitmap): List<Pair<Int, TxMessage>> {
+    val size = HaloDisplay.SIZE_PX
+    val page = TxImagePage(fitImage(image, size, size), size, size)
+    return listOf(HALO_PAGE to page) + page.sprites.map { HALO_PAGE to it }
 }
 
 /**
@@ -79,17 +96,28 @@ internal class HaloGlasses private constructor(
     private val app: HalosideApp,
     override val closeCause: StateFlow<Exception?>,
     override val presses: Flow<Unit>,
-) : GlassesDisplay {
+) : GlassesImageDisplay {
     override val description = HALO_DISPLAY
     override val screenFit = HaloScreenFit
 
-    override suspend fun showText(text: String) {
+    override suspend fun showText(text: String) = send(haloTextMessages(text), "text")
+
+    private suspend fun send(
+        messages: List<Pair<Int, TxMessage>>,
+        what: String,
+    ) {
         try {
-            haloTextMessages(text).forEach { (code, message) -> app.send(code, message) }
+            messages.forEach { (code, message) -> app.send(code, message) }
         } catch (e: HaloException) {
-            throw GlassesException("Halo did not take the text: ${e.message}", e, problem = GlassesProblem.UNRESPONSIVE)
+            throw GlassesException(
+                "Halo did not take the $what: ${e.message}",
+                e,
+                problem = GlassesProblem.UNRESPONSIVE,
+            )
         }
     }
+
+    override suspend fun showImage(image: Bitmap) = send(haloImageMessages(image), "image")
 
     override suspend fun close() = connection.disconnect()
 

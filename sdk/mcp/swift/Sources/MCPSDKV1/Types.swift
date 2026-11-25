@@ -712,11 +712,11 @@ public struct Annotations: Codable {
     /// Audience describes who the data is intended for.
     public let audience: [Role]?
     /// Priority describes importance from 0 to 1, with 1 most important.
-    public let priority: Int?
+    public let priority: Double?
     /// LastModified is an ISO 8601 timestamp for the last modification time.
     public let lastModified: String?
 
-    public init(audience: [Role]? = nil, priority: Int? = nil, lastModified: String? = nil) {
+    public init(audience: [Role]? = nil, priority: Double? = nil, lastModified: String? = nil) {
         self.audience = audience
         self.priority = priority
         self.lastModified = lastModified

@@ -79,6 +79,7 @@ MessageKind identifies a voice gateway WebRTC data-channel message.
 | `reasoning.delta` | MessageKindReasoningDelta streams provider reasoning text. |
 | `speech.started` | MessageKindSpeechStarted reports that speech output started. |
 | `speech.ended` | MessageKindSpeechEnded reports that speech output ended. |
+| `user.speech.started` | MessageKindUserSpeechStarted reports that the gateway detected the start of user speech. |
 | `tool.call` | MessageKindToolCall asks the client to execute a tool. |
 | `turn.status` | MessageKindTurnStatus reports gateway work on the current turn. |
 | `interrupted` | MessageKindInterrupted reports an interruption. |
@@ -671,6 +672,24 @@ SpeechEnded is a gateway message that reports speech output ended.
 |-------|------|-------------|----------|
 | `kind` | `MessageKind` | Kind is "speech.ended". | yes |
 | `speaker` | `Speaker` | Speaker identifies whose speech output ended. | yes |
+
+### UserSpeechStarted
+
+UserSpeechStarted is a gateway message that reports the start of user speech
+that the gateway's voice activity detection, or its realtime provider's,
+detected: the start of a new user turn.
+
+The gateway sends it in order with its other messages, before anything it
+sends in reply to that speech. A user transcript.delta gives no such order:
+a realtime provider transcribes user audio apart from its responses, so the
+transcript of the speech that caused a tool call can arrive after the tool
+call or the reply. Noise that the detection takes for speech also starts a
+turn, and the gateway sends none for user.message text or for sessions in
+which the client recognizes speech.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `MessageKind` | Kind is "user.speech.started". | yes |
 
 ### ToolCall
 

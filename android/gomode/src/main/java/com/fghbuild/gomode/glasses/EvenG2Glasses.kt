@@ -1,4 +1,4 @@
-// Even G2's GlassesDisplay: one firmware text container, created on connect and updated in place.
+// Even G2's GlassesDisplay: one firmware text container, created on connect and updated in place; no images.
 //
 // The page's text container captures the touchpads and an R1 ring, whose clicks are presses.
 //
@@ -34,7 +34,23 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Even G2's display of one eye as MCP requests declare it: 16 grey levels, which the glasses show in green. */
+/**
+ * Even G2's display of one eye as MCP requests declare it: 16 grey levels, which the glasses show in
+ * green, and no image types, since Go Mode draws only text on stock firmware.
+ *
+ * Stock firmware draws an image only in an Even Hub image container of at most 288 by 144 pixels, four
+ * to a page: the image container rows of the page schema in the enterprise SDK's
+ * docs/enterprise/enterprise-flutter-sdk.md (commit e49130b), and "Up to 288 x 144 px per container"
+ * on hub.evenrealities.com/docs/build/display. A full-display image would take a 2x2 grid of them. No
+ * source shows that grid on a pair, and MentraOS (Apache-2.0) commit 9f100b466 reports the firmware
+ * refusing transfers into containers beyond about 200 by 100, so declaring images would promise what
+ * hosts may not get.
+ *
+ * TODO(hardware): On a pair on stock firmware, rebuild the page with four 288 by 144 image containers
+ * over the event-capturing text container and send each, one at a time, an uncompressed 4-bit BMP
+ * (compressMode 0, 4 KiB fragments) through updateImage, whose wire format G2EvenHubCodec.kt of the
+ * enterprise SDK holds. If all four draw, add image/png to imageTypes here and make EvenG2Glasses a GlassesImageDisplay.
+ */
 internal val G2_DISPLAY =
     Display(
         width = G2Display.WIDTH_PX,

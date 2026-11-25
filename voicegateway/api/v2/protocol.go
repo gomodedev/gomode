@@ -42,6 +42,9 @@ const (
 	MessageKindSpeechStarted MessageKind = "speech.started"
 	// MessageKindSpeechEnded reports that speech output ended.
 	MessageKindSpeechEnded MessageKind = "speech.ended"
+	// MessageKindUserSpeechStarted reports that the gateway detected the start
+	// of user speech.
+	MessageKindUserSpeechStarted MessageKind = "user.speech.started"
 	// MessageKindToolCall asks the client to execute a tool.
 	MessageKindToolCall MessageKind = "tool.call"
 	// MessageKindTurnStatus reports gateway work on the current turn.
@@ -389,6 +392,22 @@ type SpeechEnded struct {
 	Kind MessageKind `json:"kind"`
 	// Speaker identifies whose speech output ended.
 	Speaker Speaker `json:"speaker"`
+}
+
+// UserSpeechStarted is a gateway message that reports the start of user speech
+// that the gateway's voice activity detection, or its realtime provider's,
+// detected: the start of a new user turn.
+//
+// The gateway sends it in order with its other messages, before anything it
+// sends in reply to that speech. A user transcript.delta gives no such order:
+// a realtime provider transcribes user audio apart from its responses, so the
+// transcript of the speech that caused a tool call can arrive after the tool
+// call or the reply. Noise that the detection takes for speech also starts a
+// turn, and the gateway sends none for user.message text or for sessions in
+// which the client recognizes speech.
+type UserSpeechStarted struct {
+	// Kind is "user.speech.started".
+	Kind MessageKind `json:"kind"`
 }
 
 // TurnStatus is a gateway message that reports work on the current turn.

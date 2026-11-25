@@ -5,6 +5,7 @@ package gomode
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // DisplayExtension identifies the client capability extension that declares
@@ -22,6 +23,9 @@ import (
 // [DisplayShape] or [DisplayColorSpace] value it does not know. Adding an
 // optional field or an enumeration value is not breaking; any other change
 // to the settings object takes the identifier "com.fghbuild.gomode/display-v2".
+// The client, not the server, chooses Width and Height, and Validate sets no
+// upper bound on them: a server bounds what it allocates from them, for
+// example by drawing at most 1024 pixels a side and keeping the aspect ratio.
 //
 // Example request metadata with a Halo connected:
 //
@@ -30,11 +34,38 @@ import (
 //	    "extensions": {
 //	      "com.fghbuild.gomode/display": {
 //	        "width": 256, "height": 256, "shape": "circle",
-//	        "colorSpace": "rgb", "bitsPerPixel": 4
+//	        "colorSpace": "rgb", "bitsPerPixel": 4,
+//	        "imageTypes": ["image/png"]
 //	      }
 //	    }
 //	  }
 //	}
+//
+// # Glasses content
+//
+// A tool draws on the declared display by adding glasses blocks to the
+// content of its CallToolResult: content blocks whose annotations.audience is
+// exactly ["user"]. A glasses block is a text block, or an image block of a
+// MIME type in [Display].ImageTypes whose image is at most Width by Height
+// pixels. The client never gives the model a block whose audience is exactly
+// ["user"], with or without glasses, so a tool returns its model-facing result
+// in structuredContent or in other blocks beside its glasses blocks. In Go,
+// mcp.GlassesText and mcp.GlassesImage build glasses blocks.
+//
+// Of a result's glasses blocks, the client shows the last one that the
+// connected display draws, in place of the voice transcript. It holds it
+// through the assistant's reply until the user starts speaking again, as the
+// client's speech recognition or the voice gateway's voice activity detection
+// reports, then shows the transcript again; noise taken for speech also ends
+// it. A later result's glasses block replaces it, and the end of the voice
+// session clears it. It shows even when the user hides the transcript on the
+// glasses.
+//
+// The client lays text out. A text longer than one screen shows in screens of
+// at most 20, each ending with a marker such as "2/3", that advance on their
+// own after their reading time and start again after the last. The client
+// centres an image, scales one larger than the display down to fit, and picks
+// its 2^BitsPerPixel levels or colours as ColorSpace defines.
 const DisplayExtension = "com.fghbuild.gomode/display"
 
 // ClientExtensions holds the settings objects of the Go Mode client capability
@@ -61,6 +92,16 @@ type Display struct {
 	// BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of
 	// 2^BitsPerPixel luminance levels or colours, as ColorSpace defines.
 	BitsPerPixel int `json:"bitsPerPixel"`
+	// ImageTypes lists the MIME types of the glasses image blocks the client
+	// draws on this display, such as "image/png". It is empty when the client
+	// draws glasses text alone, as on Even Realities G2.
+	ImageTypes []string `json:"imageTypes,omitempty"`
+}
+
+// DrawsImages reports whether the client draws glasses image blocks of
+// mimeType on d.
+func (d *Display) DrawsImages(mimeType string) bool {
+	return slices.Contains(d.ImageTypes, mimeType)
 }
 
 // Validate returns an error if d is not a well-formed display description.

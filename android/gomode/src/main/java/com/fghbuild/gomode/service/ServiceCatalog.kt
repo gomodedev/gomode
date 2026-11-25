@@ -343,6 +343,7 @@ internal class ServiceCatalog(
                 put("result", result.structuredContent)
             },
             result.isError,
+            result.userContent,
         )
     }
 

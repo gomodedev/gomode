@@ -6,13 +6,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"iter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -286,6 +291,32 @@ func TestHandler(t *testing.T) {
 				}
 				if _, ok := result["_meta"]; ok {
 					t.Fatalf("successful tools/call result has metadata: %#v", result)
+				}
+			})
+
+			t.Run("tool content follows the text of the structured result", func(t *testing.T) {
+				registry := &subscriptionTestRegistry{callResult: RawToolResult{
+					Structured: TextOutput{Result: "2 tasks running"},
+					Content:    []ContentBlock{GlassesText("caic\n2 running")},
+				}}
+				h := &Handler{Log: testlog.New(t), Registry: registry}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/example/v1/mcp", strings.NewReader(nativeMCPRequestJSON("tools/call", `"name":"echo","arguments":{}`)))
+				req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
+				req.Header.Set("Mcp-Method", string(MethodToolsCall))
+				req.Header.Set("Mcp-Name", "echo")
+				w := httptest.NewRecorder()
+				h.HandleMCP(w, req)
+				var response struct {
+					Result struct {
+						Content json.RawMessage `json:"content"`
+					} `json:"result"`
+				}
+				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+					t.Fatal(err)
+				}
+				want := `[{"type":"text","text":"2 tasks running"},{"type":"text","text":"caic\n2 running","annotations":{"audience":["user"]}}]`
+				if got := string(response.Result.Content); got != want {
+					t.Fatalf("content = %s\nwant %s", got, want)
 				}
 			})
 
@@ -1248,8 +1279,13 @@ func TestClientDisplay(t *testing.T) {
 		}{
 			{
 				"halo",
-				`{"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4}`,
-				gomode.Display{Width: 256, Height: 256, Shape: gomode.DisplayShapeCircle, ColorSpace: gomode.DisplayColorSpaceRGB, BitsPerPixel: 4},
+				`{"width":256,"height":256,"shape":"circle","colorSpace":"rgb","bitsPerPixel":4,"imageTypes":["image/png"]}`,
+				gomode.Display{Width: 256, Height: 256, Shape: gomode.DisplayShapeCircle, ColorSpace: gomode.DisplayColorSpaceRGB, BitsPerPixel: 4, ImageTypes: []string{"image/png"}},
+			},
+			{
+				"g2",
+				`{"width":576,"height":288,"shape":"rectangle","colorSpace":"luminance","bitsPerPixel":4}`,
+				gomode.Display{Width: 576, Height: 288, Shape: gomode.DisplayShapeRectangle, ColorSpace: gomode.DisplayColorSpaceLuminance, BitsPerPixel: 4},
 			},
 			{
 				"unknown field",
@@ -1261,7 +1297,7 @@ func TestClientDisplay(t *testing.T) {
 				t.Parallel()
 				meta := callTool(t, `{"extensions":{"com.fghbuild.gomode/display":`+tc.display+`}}`)
 				got, ok, err := ClientDisplay(meta)
-				if err != nil || !ok || got != tc.want {
+				if err != nil || !ok || !reflect.DeepEqual(got, tc.want) {
 					t.Fatalf("ClientDisplay = %+v, %t, %v; want %+v", got, ok, err, tc.want)
 				}
 			})
@@ -1294,11 +1330,82 @@ func TestClientDisplay(t *testing.T) {
 				t.Parallel()
 				meta := callTool(t, `{"extensions":{"com.fghbuild.gomode/display":`+tc.display+`}}`)
 				got, ok, err := ClientDisplay(meta)
-				if err == nil || !ok || got != (gomode.Display{}) || !strings.Contains(err.Error(), tc.want) {
+				if err == nil || !ok || !reflect.DeepEqual(got, gomode.Display{}) || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("ClientDisplay = %+v, %t, %v; want error containing %q", got, ok, err, tc.want)
 				}
 			})
 		}
+	})
+}
+
+func TestGlassesText(t *testing.T) {
+	t.Parallel()
+	b := GlassesText("Build green")
+	if err := b.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The draft schema's TextContent, with the audience Go Mode clients show on glasses.
+	if want := `{"type":"text","text":"Build green","annotations":{"audience":["user"]}}`; string(got) != want {
+		t.Fatalf("GlassesText = %s, want %s", got, want)
+	}
+}
+
+func TestGlassesImage(t *testing.T) {
+	t.Parallel()
+	g2 := gomode.Display{Width: 576, Height: 288, Shape: gomode.DisplayShapeRectangle, ColorSpace: gomode.DisplayColorSpaceLuminance, BitsPerPixel: 4, ImageTypes: []string{"image/png"}}
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, size := range []image.Point{{576, 288}, {100, 40}} {
+			t.Run(fmt.Sprintf("%dx%d", size.X, size.Y), func(t *testing.T) {
+				t.Parallel()
+				img := image.NewGray(image.Rectangle{Max: size})
+				img.SetGray(size.X-1, size.Y-1, color.Gray{Y: 0xFF})
+				b, err := GlassesImage(&g2, img)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := b.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				if b.Type != ContentTypeImage || b.MimeType != "image/png" || !slices.Equal(b.Annotations.Audience, []Role{RoleUser}) {
+					t.Fatalf("GlassesImage = %+v", b)
+				}
+				data, err := base64.StdEncoding.DecodeString(b.Data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				decoded, err := png.Decode(bytes.NewReader(data))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if decoded.Bounds().Size() != size || color.GrayModel.Convert(decoded.At(size.X-1, size.Y-1)) != (color.Gray{Y: 0xFF}) {
+					t.Fatalf("decoded %v with corner %v", decoded.Bounds(), decoded.At(size.X-1, size.Y-1))
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, size := range []image.Point{{577, 288}, {576, 289}, {0, 0}} {
+			t.Run(fmt.Sprintf("%dx%d", size.X, size.Y), func(t *testing.T) {
+				t.Parallel()
+				if _, err := GlassesImage(&g2, image.NewGray(image.Rectangle{Max: size})); err == nil || !strings.Contains(err.Error(), "does not fit the 576x288 display") {
+					t.Fatalf("GlassesImage error = %v, want a fit error", err)
+				}
+			})
+		}
+		t.Run("text only", func(t *testing.T) {
+			t.Parallel()
+			textOnly := g2
+			textOnly.ImageTypes = nil
+			if _, err := GlassesImage(&textOnly, image.NewGray(image.Rect(0, 0, 8, 8))); err == nil || err.Error() != "the display draws no PNG images" {
+				t.Fatalf("GlassesImage error = %v, want a text-only error", err)
+			}
+		})
 	})
 }
 

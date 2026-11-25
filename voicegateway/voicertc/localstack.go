@@ -490,6 +490,9 @@ func (s *localStackSession) acceptMicPCM(ctx context.Context, pcm []byte) error 
 	utterance, speechActive := s.vad.push(pcm)
 	onset := speechActive && !s.micActive
 	s.micActive = speechActive
+	if onset {
+		s.reportUserSpeech()
+	}
 	if (s.clientOutput && onset) || (speechActive && s.isSpeaking()) {
 		// New user speech while the assistant is talking is a barge-in.
 		s.bargeIn(voicev2.InterruptSourceUser, "")
@@ -513,6 +516,18 @@ func (s *localStackSession) close() error {
 	s.mu.Unlock()
 	s.events.Unlock()
 	return s.turns.Wait()
+}
+
+// reportUserSpeech tells the client that user speech started, before the turn
+// that the speech starts reports anything.
+func (s *localStackSession) reportUserSpeech() {
+	s.events.Lock()
+	defer s.events.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed {
+		s.emit(&voicev2.UserSpeechStarted{Kind: voicev2.MessageKindUserSpeechStarted})
+	}
 }
 
 // reportTurnState sends state unless a newer turn superseded generation. It

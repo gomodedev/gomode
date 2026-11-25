@@ -113,6 +113,7 @@ func (s *localStackSession) startLiveUtterance() *liveUtterance {
 		s.emit(&voicev2.TranscriptDraft{Kind: voicev2.MessageKindTranscriptDraft, ID: s.liveDraftID})
 	}
 	s.liveDraftID = u.id
+	s.emit(&voicev2.UserSpeechStarted{Kind: voicev2.MessageKindUserSpeechStarted})
 	s.emit(&voicev2.TranscriptDraft{Kind: voicev2.MessageKindTranscriptDraft, ID: u.id})
 	s.emit(&voicev2.TurnStatus{Kind: voicev2.MessageKindTurnStatus, State: voicev2.TurnStateIdle})
 	lang := s.language

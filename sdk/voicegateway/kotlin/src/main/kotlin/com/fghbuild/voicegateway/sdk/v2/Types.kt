@@ -192,6 +192,10 @@ sealed interface MessageKind {
         override val value = "speech.ended"
     }
     @Serializable
+    data object UserSpeechStarted : MessageKind {
+        override val value = "user.speech.started"
+    }
+    @Serializable
     data object ToolCall : MessageKind {
         override val value = "tool.call"
     }
@@ -234,6 +238,7 @@ object MessageKindSerializer : KSerializer<MessageKind> {
             "reasoning.delta" -> MessageKind.ReasoningDelta
             "speech.started" -> MessageKind.SpeechStarted
             "speech.ended" -> MessageKind.SpeechEnded
+            "user.speech.started" -> MessageKind.UserSpeechStarted
             "tool.call" -> MessageKind.ToolCall
             "turn.status" -> MessageKind.TurnStatus
             "interrupted" -> MessageKind.Interrupted
@@ -1294,6 +1299,25 @@ data class SpeechEnded(
     val kind: MessageKind,
     /** Speaker identifies whose speech output ended. */
     val speaker: Speaker,
+)
+
+/**
+ * UserSpeechStarted is a gateway message that reports the start of user speech
+ * that the gateway's voice activity detection, or its realtime provider's,
+ * detected: the start of a new user turn.
+ *
+ * The gateway sends it in order with its other messages, before anything it
+ * sends in reply to that speech. A user transcript.delta gives no such order:
+ * a realtime provider transcribes user audio apart from its responses, so the
+ * transcript of the speech that caused a tool call can arrive after the tool
+ * call or the reply. Noise that the detection takes for speech also starts a
+ * turn, and the gateway sends none for user.message text or for sessions in
+ * which the client recognizes speech.
+ */
+@Serializable
+data class UserSpeechStarted(
+    /** Kind is "user.speech.started". */
+    val kind: MessageKind,
 )
 
 /** ToolCall is a gateway message that asks the client to execute a tool. */

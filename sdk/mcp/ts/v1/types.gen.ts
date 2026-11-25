@@ -296,7 +296,7 @@ export interface Annotations {
   /** Audience describes who the data is intended for. */
   audience?: Role[];
   /** Priority describes importance from 0 to 1, with 1 most important. */
-  priority?: number /* int */;
+  priority?: number /* float64 */;
   /** LastModified is an ISO 8601 timestamp for the last modification time. */
   lastModified?: string;
 }

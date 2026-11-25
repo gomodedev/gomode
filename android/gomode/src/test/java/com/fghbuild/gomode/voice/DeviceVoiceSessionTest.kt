@@ -152,12 +152,13 @@ class DeviceVoiceSessionTest {
                     createSession(
                         FakeSpeech(),
                         calls = calls,
-                        setupProvider = {
-                            if (preparations++ > 0) {
-                                VoiceTokenClient().fetch(server.url("/token").toString(), null, bearerToken = null)
-                            }
-                            testSetup()
-                        },
+                        setupSource =
+                            DeviceVoiceSetupSource.SelectedService {
+                                if (preparations++ > 0) {
+                                    VoiceTokenClient().fetch(server.url("/token").toString(), null, bearerToken = null)
+                                }
+                                testSetup()
+                            },
                     ) { _, captured ->
                         listener = captured
                         socket
@@ -708,10 +709,11 @@ class DeviceVoiceSessionTest {
                     createSession(
                         FakeSpeech(),
                         startupTiming = { exposed },
-                        setupProvider = {
-                            if (setups++ == 0) withTimeout(7) { awaitCancellation() }
-                            throw SocketTimeoutException("Private recovery timeout")
-                        },
+                        setupSource =
+                            DeviceVoiceSetupSource.SelectedService {
+                                if (setups++ == 0) withTimeout(7) { awaitCancellation() }
+                                throw SocketTimeoutException("Private recovery timeout")
+                            },
                     )
                 try {
                     session.connect()
@@ -760,7 +762,7 @@ class DeviceVoiceSessionTest {
                 createSession(
                     FakeSpeech(),
                     startupTiming = { timing },
-                    setupProvider = { withTimeout(23) { awaitCancellation() } },
+                    setupSource = DeviceVoiceSetupSource.SelectedService { withTimeout(23) { awaitCancellation() } },
                 )
             try {
                 session.connect()
@@ -802,10 +804,11 @@ class DeviceVoiceSessionTest {
                         createSession(
                             FakeSpeech(),
                             startupTiming = { timing },
-                            setupProvider = {
-                                if (stage == "setup") throw failure
-                                testSetup()
-                            },
+                            setupSource =
+                                DeviceVoiceSetupSource.SelectedService {
+                                    if (stage == "setup") throw failure
+                                    testSetup()
+                                },
                         ) { _, callbacks ->
                             listener = callbacks
                             socket
@@ -1014,11 +1017,10 @@ class DeviceVoiceSessionTest {
                     DeviceVoiceSession(
                         RuntimeEnvironment.getApplication(),
                         repository,
-                        glassesDisplay = { null },
+                        DeviceVoiceSetupSource.Shared(owner),
                         languageTag = "en-US",
                         speech = speech,
                         callController = call,
-                        voiceConversation = owner,
                         switchServer = { id ->
                             repository.switchService(id)
                             repository.settings.first { it.activeServiceId == id }
@@ -1330,7 +1332,7 @@ class DeviceVoiceSessionTest {
                     createSession(
                         speech = speech,
                         settingsRepo = repo,
-                        setupProvider = { toolSetup(server) },
+                        setupSource = DeviceVoiceSetupSource.SelectedService { toolSetup(server) },
                         languageTag = "fr-CA",
                         engineFactory = { engineType ->
                             object : OnDeviceVoiceEngine {
@@ -1409,7 +1411,7 @@ class DeviceVoiceSessionTest {
                 val session =
                     createSession(
                         speech = speech,
-                        setupProvider = { toolSetup(server) },
+                        setupSource = DeviceVoiceSetupSource.SelectedService { toolSetup(server) },
                         factory = { _, captured ->
                             listener = captured
                             socket
@@ -1453,7 +1455,7 @@ class DeviceVoiceSessionTest {
                     createSession(
                         speech = FakeSpeech(),
                         languageTag = "fr-CA",
-                        setupProvider = { toolSetup(server) },
+                        setupSource = DeviceVoiceSetupSource.SelectedService { toolSetup(server) },
                         factory = { _, captured ->
                             listener = captured
                             socket
@@ -1601,7 +1603,7 @@ class DeviceVoiceSessionTest {
                 createSession(
                     FakeSpeech(),
                     settingsRepo = repository,
-                    voiceConversation = localConversation(repository),
+                    setupSource = DeviceVoiceSetupSource.Shared(localConversation(repository)),
                 )
             session.setError("llm: IllegalStateException")
 
@@ -2231,23 +2233,24 @@ class DeviceVoiceSessionTest {
         val session =
             createSession(
                 FakeSpeech(),
-                setupProvider = {
-                    testSetup().let {
-                        it.copy(
-                            voice =
-                                GatewayVoiceSelection(
-                                    it.gatewayEndpointURL,
-                                    "local",
-                                    "",
-                                    SpeechStageLocation.DEVICE,
-                                    SpeechStageLocation.DEVICE,
-                                    recognitionModelID = null,
-                                    synthesisModelID = null,
-                                ),
-                            gatewayHeaders = mapOf("Authorization" to "Bearer scoped"),
-                        )
-                    }
-                },
+                setupSource =
+                    DeviceVoiceSetupSource.SelectedService {
+                        testSetup().let {
+                            it.copy(
+                                voice =
+                                    GatewayVoiceSelection(
+                                        it.gatewayEndpointURL,
+                                        "local",
+                                        "",
+                                        SpeechStageLocation.DEVICE,
+                                        SpeechStageLocation.DEVICE,
+                                        recognitionModelID = null,
+                                        synthesisModelID = null,
+                                    ),
+                                gatewayHeaders = mapOf("Authorization" to "Bearer scoped"),
+                            )
+                        }
+                    },
             ) { captured, _ ->
                 request = captured
                 FakeWebSocket()
@@ -2339,7 +2342,7 @@ class DeviceVoiceSessionTest {
                     settingsRepo = repo,
                     ioDispatcher = dispatcher,
                     localModelOwner = owner,
-                    voiceConversation = conversation,
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
                 )
             session.connect()
             testScheduler.runCurrent()
@@ -2412,8 +2415,7 @@ class DeviceVoiceSessionTest {
                     ioDispatcher = dispatcher,
                     calls = calls,
                     localModelOwner = owner,
-                    voiceConversation = conversation,
-                    setupProvider = { error("Connect must reuse startup discovery") },
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
                     engineFactory = { error("Connect must reuse startup allocation") },
                 )
 
@@ -2532,7 +2534,7 @@ class DeviceVoiceSessionTest {
                     settingsRepo = repo,
                     ioDispatcher = dispatcher,
                     localModelOwner = owner,
-                    voiceConversation = conversation,
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
                 )
             session.connect()
             testScheduler.runCurrent()
@@ -2624,7 +2626,7 @@ class DeviceVoiceSessionTest {
                     settingsRepo = repo,
                     ioDispatcher = dispatcher,
                     localModelOwner = owner,
-                    voiceConversation = conversation,
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
                 )
             session.connect()
             testScheduler.runCurrent()
@@ -2717,7 +2719,7 @@ class DeviceVoiceSessionTest {
                     settingsRepo = repo,
                     ioDispatcher = dispatcher,
                     localModelOwner = owner,
-                    voiceConversation = conversation,
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
                 )
             session.connect()
             testScheduler.runCurrent()
@@ -2807,7 +2809,7 @@ class DeviceVoiceSessionTest {
                     settingsRepo = repo,
                     ioDispatcher = dispatcher,
                     localModelOwner = owner,
-                    voiceConversation = conversation,
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
                 )
             session.connect()
             testScheduler.runCurrent()
@@ -2925,7 +2927,7 @@ class DeviceVoiceSessionTest {
                     settingsRepo = repo,
                     ioDispatcher = dispatcher,
                     localModelOwner = owner,
-                    voiceConversation = conversation,
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
                 )
             try {
                 session.connect()
@@ -2942,14 +2944,13 @@ class DeviceVoiceSessionTest {
         }
 
     @Test
-    fun `keyword startup adopts saved caller identity without beginning a shared conversation`() =
+    fun `keyword startup adopts saved caller identity`() =
         runTest {
             for (offline in listOf(false, true)) {
                 val repo = SettingsRepository(MemoryPreferences())
                 selectEngine(repo, VoiceLanguageModel.NEEDLE_WHISTLE)
                 val savedID = repo.addService("Saved caller", "https://saved.example")
                 repo.settings.first { it.activeServiceId == savedID }
-                val conversation = localConversation(repo)
                 val calls = FakeVoiceCallController()
                 var initialized = false
                 val session =
@@ -2957,11 +2958,11 @@ class DeviceVoiceSessionTest {
                         speech = FakeSpeech(),
                         settingsRepo = repo,
                         calls = calls,
-                        voiceConversation = conversation,
-                        setupProvider = {
-                            if (offline) throw VoiceSetupException("Offline")
-                            testSetup().copy(serverName = "Saved caller", serverID = savedID)
-                        },
+                        setupSource =
+                            DeviceVoiceSetupSource.SelectedService {
+                                if (offline) throw VoiceSetupException("Offline")
+                                testSetup().copy(serverName = "Saved caller", serverID = savedID)
+                            },
                         engineFactory = { selected ->
                             object : OnDeviceVoiceEngine {
                                 override val engineType = selected
@@ -2993,13 +2994,64 @@ class DeviceVoiceSessionTest {
                     assertTrue(initialized)
                     assertTrue(session.state.value.toString(), session.state.value.connected)
                     assertNull(session.state.value.error)
-                    assertFalse(conversation.isCurrent())
                     assertEquals(1, calls.activated)
                 } finally {
                     session.close()
-                    conversation.finish()
                 }
             }
+        }
+
+    @Test
+    fun `setup source that no longer matches the language model asks to reconnect`() =
+        runTest {
+            for (engine in listOf(VoiceLanguageModel.NEEDLE_WHISTLE, VoiceLanguageModel.LOCAL_LLM)) {
+                val repo = SettingsRepository(MemoryPreferences())
+                selectEngine(repo, engine)
+                // LocalModelOwner may have begun the shared conversation before this session connects.
+                val conversation = localConversation(repo).takeIf { engine == VoiceLanguageModel.NEEDLE_WHISTLE }
+                conversation?.begin(false)
+                val calls = FakeVoiceCallController()
+                val session =
+                    createSession(
+                        speech = FakeSpeech(),
+                        settingsRepo = repo,
+                        calls = calls,
+                        setupSource =
+                            conversation?.let { DeviceVoiceSetupSource.Shared(it) }
+                                ?: DeviceVoiceSetupSource.SelectedService {
+                                    error(
+                                        "Mismatched setup must not prepare",
+                                    )
+                                },
+                        engineFactory = { error("Mismatched setup must not start an engine") },
+                    )
+                try {
+                    session.connect()
+                    assertEquals(VOICE_SETTINGS_CHANGED, session.state.value.error)
+                    if (conversation != null) assertTrue(conversation.isCurrent())
+                    assertEquals(0, calls.started)
+                } finally {
+                    session.close()
+                }
+            }
+        }
+
+    @Test
+    fun `closing a session that never connected leaves the shared conversation current`() =
+        runTest {
+            val repo = SettingsRepository(MemoryPreferences())
+            selectEngine(repo, VoiceLanguageModel.LOCAL_LLM)
+            // LocalModelOwner begins the conversation when it prepares the selected local model.
+            val conversation = localConversation(repo).also { it.begin(false) }
+            val session =
+                createSession(
+                    FakeSpeech(),
+                    settingsRepo = repo,
+                    setupSource = DeviceVoiceSetupSource.Shared(conversation),
+                )
+            session.close()
+            assertTrue(conversation.isCurrent())
+            conversation.finish()
         }
 
     @Test
@@ -3023,9 +3075,10 @@ class DeviceVoiceSessionTest {
                     speech = speech,
                     chime = chime,
                     settingsRepo = repo,
-                    setupProvider = {
-                        throw VoiceSetupException("Gateway unreachable / offline")
-                    },
+                    setupSource =
+                        DeviceVoiceSetupSource.SelectedService {
+                            throw VoiceSetupException("Gateway unreachable / offline")
+                        },
                 )
 
             session.connect()
@@ -3087,38 +3140,18 @@ class DeviceVoiceSessionTest {
         engineFactory: (VoiceLanguageModel) -> OnDeviceVoiceEngine = {
             createOnDeviceEngine(RuntimeEnvironment.getApplication(), it, ioDispatcher)
         },
-        setupProvider: suspend () -> VoiceSetup = { testSetup() },
+        setupSource: DeviceVoiceSetupSource = defaultSetupSource(settingsRepo),
         localModelOwner: LocalModelOwner = (RuntimeEnvironment.getApplication() as GoModeApplication).localModelOwner,
-        voiceConversation: VoiceConversation? = null,
         thinkingEarcon: ThinkingEarcon = RecordingThinkingEarcon(),
         chime: VoiceChimePlayer = NoopChime(),
         startupTiming: () -> VoiceStartupTiming? = { null },
         frontendTools: FrontendVoiceTools = FrontendVoiceTools(),
         factory: (Request, WebSocketListener) -> WebSocket = { _, _ -> FakeWebSocket() },
-    ): DeviceVoiceSession {
-        val localConversation =
-            voiceConversation
-                ?: if (settingsRepo.settings.value.voiceSetup.effectiveLanguageModel == VoiceLanguageModel.LOCAL_LLM) {
-                    VoiceConversation(
-                        settingsRepo,
-                        com.fghbuild.gomode.service
-                            .ServiceSettingsClient(),
-                        com.fghbuild.gomode.service
-                            .ServiceCatalog(
-                                kotlinx.coroutines.CoroutineScope(Dispatchers.Main),
-                                glassesDisplay = { null },
-                            ),
-                    ) {
-                        emptyMap()
-                    }.also { it.begin(false) }
-                } else {
-                    null
-                }
-        return DeviceVoiceSession(
+    ): DeviceVoiceSession =
+        DeviceVoiceSession(
             appContext = RuntimeEnvironment.getApplication(),
             settingsRepository = settingsRepo,
-            glassesDisplay = { null },
-            voiceConversation = localConversation,
+            setupSource = setupSource,
             speech = speech,
             frontendTools = frontendTools,
             languageTag = languageTag,
@@ -3127,12 +3160,18 @@ class DeviceVoiceSessionTest {
             thinkingEarcon = thinkingEarcon,
             startupTiming = startupTiming,
             callController = calls,
-            setupProvider = { setupProvider() },
             webSocketFactory = factory,
             ioDispatcher = ioDispatcher,
             engineFactory = engineFactory,
         )
-    }
+
+    // Local-model sessions need the shared conversation that owners pass them; others prepare a fixed setup.
+    private fun defaultSetupSource(settingsRepo: SettingsRepository): DeviceVoiceSetupSource =
+        if (settingsRepo.settings.value.voiceSetup.effectiveLanguageModel == VoiceLanguageModel.LOCAL_LLM) {
+            DeviceVoiceSetupSource.Shared(localConversation(settingsRepo).also { it.begin(false) })
+        } else {
+            DeviceVoiceSetupSource.SelectedService { testSetup() }
+        }
 
     private class RecordingThinkingEarcon : ThinkingEarcon {
         var playing = false

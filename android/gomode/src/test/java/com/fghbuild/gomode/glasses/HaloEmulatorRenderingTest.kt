@@ -1,14 +1,18 @@
-// Runs Go Mode's Halo app once after a stop in the Brilliant Halo Lua emulator: it draws text and reports presses.
+// Runs Go Mode's Halo app once after a stop in the Brilliant Halo Lua emulator: it draws text and images, and reports presses.
 //
 // The test starts scripts/halo_emulator_bridge.py through uv, so it needs uv on PATH and, on uv's first run, network
 // access to fetch the pinned emulator:
 //   ./gradlew :gomode:testDebugUnitTest --tests '*HaloEmulatorRenderingTest'
 // The bridge's stderr goes to build/halo-emulator/bridge.log, the frame of a two-line page to
-// build/halo-emulator/short.png, and the frame of a transcript fitted to one page to build/halo-emulator/text.png.
+// build/halo-emulator/short.png, the frame of a transcript fitted to one page to build/halo-emulator/text.png, and
+// the frame of a tool's image to build/halo-emulator/image.png.
 package com.fghbuild.gomode.glasses
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import com.fghbuild.gomode.voice.TranscriptEntry
 import com.fghbuild.gomode.voice.TranscriptSpeaker
 import com.fghbuild.gomode.voice.VoiceState
@@ -16,6 +20,7 @@ import com.fghbuild.halo.ble.HaloEmulatorBridgeClient
 import com.fghbuild.halo.ble.HaloEmulatorEvent
 import com.fghbuild.halo.msg.HaloDisplay
 import com.fghbuild.halo.msg.TextPageData
+import com.fghbuild.halo.msg.TxMessage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
@@ -51,6 +56,9 @@ private const val BRIDGE_START_TIMEOUT_MIN = 5L
 // Relative to the module directory, Gradle's working directory for unit tests.
 private const val BRIDGE_SCRIPT = "../../scripts/halo_emulator_bridge.py"
 private val OUTPUT_DIR = File("build/halo-emulator")
+
+// A tool's image, smaller than the display so the app centres it.
+private const val IMAGE_PX = 200
 
 // Wide capitals end the reply, so the fitted page is full and its widest lines matter.
 private val FITTED_TRANSCRIPT =
@@ -122,6 +130,8 @@ class HaloEmulatorRenderingTest {
                 println("fitted: ${lines.size} bands of lit rows for \"$fitted\"")
                 checkCentred("fitted", litPixels(frame))
 
+                checkImage(bridge)
+
                 show(bridge, " ")
                 awaitFrame(bridge) { it.isEmpty() }
                 println("blank: the frame cleared")
@@ -154,6 +164,39 @@ class HaloEmulatorRenderingTest {
         println("press: a single press sent 0B 01; double, long, and IMU tap sent nothing")
     }
 
+    // A tool's image of three bars draws centred in its own colours, and the text page after it in white.
+    private suspend fun checkImage(bridge: HaloEmulatorBridgeClient) {
+        val bars = listOf(Color.rgb(215, 50, 35), Color.rgb(50, 180, 50), Color.WHITE)
+        val image = Bitmap.createBitmap(IMAGE_PX, IMAGE_PX, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(image)
+        canvas.drawColor(Color.BLACK)
+        bars.forEachIndexed { i, color ->
+            val top = 40f + i * 48f
+            canvas.drawRect(40f, top, 160f, top + 24f, Paint().apply { this.color = color })
+        }
+        send(bridge, haloImageMessages(image), "image")
+        val offset = (HaloDisplay.SIZE_PX - IMAGE_PX) / 2
+        val probes = bars.indices.map { offset + 100 to offset + 52 + it * 48 }
+        val png =
+            withTimeout(FRAME_TIMEOUT_MS) {
+                var png = bridge.getFramebufferPng()
+                while (probes.map { (x, y) -> png.pixel(x, y) } != bars) {
+                    delay(100)
+                    png = bridge.getFramebufferPng()
+                }
+                png
+            }
+        OUTPUT_DIR.resolve("image.png").writeBytes(png)
+        assertEquals(Color.BLACK, png.pixel(offset + 20, offset + 20))
+        println("image: bars at $probes show ${bars.map(Integer::toHexString)}")
+
+        show(bridge, "Hello\nGo Mode")
+        val text = awaitFrame(bridge) { rowBands(it.map { (_, y) -> y }) == 2 }
+        val lit = litPixels(text).map { (x, y) -> text.pixel(x, y) }.distinct()
+        assertEquals(listOf(Color.WHITE), lit)
+        println("text after the image: white")
+    }
+
     // Every lit pixel is inside the display circle and the text sits in its middle, both ways.
     private fun checkCentred(
         name: String,
@@ -175,13 +218,19 @@ class HaloEmulatorRenderingTest {
             .bufferedReader()
             .use { it.readText() }
 
-    // Sends each message the way HaloGlasses does, waiting for data.lua's acknowledgement. The app
-    // registers its receiver after it starts, so the first message repeats until acknowledged.
     private suspend fun show(
         bridge: HaloEmulatorBridgeClient,
         text: String,
+    ) = send(bridge, haloTextMessages(text), "\"$text\"")
+
+    // Sends each message the way HaloGlasses does, waiting for data.lua's acknowledgement. The app
+    // registers its receiver after it starts, so the first message repeats until acknowledged.
+    private suspend fun send(
+        bridge: HaloEmulatorBridgeClient,
+        messages: List<Pair<Int, TxMessage>>,
+        what: String,
     ) {
-        haloTextMessages(text).forEachIndexed { index, (code, message) ->
+        messages.forEachIndexed { index, (code, message) ->
             repeat(if (index == 0) 10 else 1) {
                 bridge.sendMessage(code, message.pack())
                 val acknowledged =
@@ -191,7 +240,7 @@ class HaloEmulatorRenderingTest {
                 if (acknowledged != null) return@forEachIndexed
             }
             error(
-                "Halo emulator did not acknowledge message ${index + 1} for \"$text\"; " +
+                "Halo emulator did not acknowledge message ${index + 1} for $what; " +
                     "app running: ${bridge.ping().running}",
             )
         }
@@ -210,6 +259,11 @@ class HaloEmulatorRenderingTest {
             }
             png
         }
+
+    private fun ByteArray.pixel(
+        x: Int,
+        y: Int,
+    ): Int = requireNotNull(BitmapFactory.decodeByteArray(this, 0, size)).getPixel(x, y) or 0xFF000000.toInt()
 
     private fun litPixels(png: ByteArray): List<Pair<Int, Int>> =
         buildList {

@@ -180,7 +180,7 @@ internal class CarDialVoiceOwner(
                     showVoiceTranscript(
                         voice.state,
                         settingsRepository.settings.map { it.showTranscriptOnGlasses },
-                        glasses.screenFit,
+                        glasses.screen,
                         glasses::show,
                     )
                 }
@@ -447,15 +447,18 @@ internal class CarDialVoiceOwner(
                 DeviceVoiceSession(
                     context,
                     settingsRepository,
-                    settingsClient,
-                    bearerTokenFor = bearer,
-                    glassesDisplay = pages.catalog.glassesDisplay,
+                    voiceConversation?.let { DeviceVoiceSetupSource.Shared(it) }
+                        ?: DeviceVoiceSetupSource.SelectedService(
+                            settingsRepository,
+                            settingsClient,
+                            bearer,
+                            pages.catalog.glassesDisplay,
+                        ),
                     languageTag = settings.voiceLanguageTag,
                     localModelOwner = localModelOwner,
                     callController = call,
                     frontendTools = page.frontendTools,
                     isAuthorityCurrent = authorityCurrent,
-                    voiceConversation = voiceConversation,
                     switchServer = { id -> switchServer(voiceConversation, id) },
                     startupTiming = { next.timing },
                 )

@@ -1,5 +1,5 @@
--- Draws TxTextPage pages: a header message (TextPageData.pack) followed by one TxSprite message per
--- line, in order, all under the same message code.
+-- Draws pages of sprites: a header message (TextPageData.pack or TxImagePage.pack) followed by one
+-- TxSprite message per text line or image strip, in order, all under the same message code.
 local sprite = require('sprite.min')
 
 local _M = {}
@@ -26,14 +26,19 @@ function _M.parse_text_page(data, page)
     return page, page.received == page.count
 end
 
--- Replaces the display with a complete page. Each 1, 2, or 4 bpp sprite draws through the default
--- palette, where index 1 is white.
+-- Replaces the display with a complete page. Each 1, 2, or 4 bpp sprite draws through its own
+-- palette, as Brilliant's Halo image view passes it, so the display's palette never changes.
+-- TODO(hardware): Confirm on a Halo that palette_data colours a sprite. Evidence so far: brilliant_sdk
+-- b644147 passes it on Halo in flutter/packages/simple_brilliant_app/example/layout/assets/lua/src/
+-- view/image_view.lua line 39, and its halo_emulator honours it. If Halo ignores it, text draws in
+-- the default palette's index 1 (white) as before, and images need sprite.set_palette instead.
 function _M.draw(page)
     frame.display.clear()
     for i = 1, page.count do
         local line = page.lines[i]
         local s = line.sprite
-        frame.display.bitmap(line.x + 1, line.y + 1, s.width, 1 << s.bpp, 0, s.pixel_data)
+        frame.display.bitmap(line.x + 1, line.y + 1, s.width, 1 << s.bpp, 0, s.pixel_data,
+            { palette_data = s.palette_data })
     end
     frame.display.show()
 end

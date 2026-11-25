@@ -200,6 +200,12 @@ data class Display(
      * 2^BitsPerPixel luminance levels or colours, as ColorSpace defines.
      */
     val bitsPerPixel: Int,
+    /**
+     * ImageTypes lists the MIME types of the glasses image blocks the client
+     * draws on this display, such as "image/png". It is empty when the client
+     * draws glasses text alone, as on Even Realities G2.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val imageTypes: List<String>? = null,
 )
 
 /**

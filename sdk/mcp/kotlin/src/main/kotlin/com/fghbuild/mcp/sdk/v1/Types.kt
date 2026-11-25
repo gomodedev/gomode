@@ -501,7 +501,7 @@ data class Annotations(
     /** Audience describes who the data is intended for. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val audience: List<Role>? = null,
     /** Priority describes importance from 0 to 1, with 1 most important. */
-    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val priority: Int? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val priority: Double? = null,
     /** LastModified is an ISO 8601 timestamp for the last modification time. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val lastModified: String? = null,
 )

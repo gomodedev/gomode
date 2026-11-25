@@ -124,6 +124,7 @@ public struct MessageKind: Codable, Equatable, Hashable {
     public static let ReasoningDelta = MessageKind("reasoning.delta")
     public static let SpeechStarted = MessageKind("speech.started")
     public static let SpeechEnded = MessageKind("speech.ended")
+    public static let UserSpeechStarted = MessageKind("user.speech.started")
     public static let ToolCall = MessageKind("tool.call")
     public static let TurnStatus = MessageKind("turn.status")
     public static let Interrupted = MessageKind("interrupted")
@@ -1293,6 +1294,26 @@ public struct SpeechEnded: Codable {
     public init(kind: MessageKind, speaker: Speaker) {
         self.kind = kind
         self.speaker = speaker
+    }
+}
+
+/// UserSpeechStarted is a gateway message that reports the start of user speech
+/// that the gateway's voice activity detection, or its realtime provider's,
+/// detected: the start of a new user turn.
+///
+/// The gateway sends it in order with its other messages, before anything it
+/// sends in reply to that speech. A user transcript.delta gives no such order:
+/// a realtime provider transcribes user audio apart from its responses, so the
+/// transcript of the speech that caused a tool call can arrive after the tool
+/// call or the reply. Noise that the detection takes for speech also starts a
+/// turn, and the gateway sends none for user.message text or for sessions in
+/// which the client recognizes speech.
+public struct UserSpeechStarted: Codable {
+    /// Kind is "user.speech.started".
+    public let kind: MessageKind
+
+    public init(kind: MessageKind) {
+        self.kind = kind
     }
 }
 

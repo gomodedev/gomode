@@ -72,6 +72,16 @@ describe("configureMcpClient", () => {
     }
   });
 
+  it("never gives the model content for the user alone", async () => {
+    configureMcpClient("/mcp", "host");
+    const glasses = { type: "text", text: "Glasses card", annotations: { audience: ["user"] } };
+    for (const content of [[glasses], [glasses, { type: "text", text: "Model text" }]]) {
+      globalThis.fetch = async () => Response.json({ result: { resultType: "complete", content } });
+      const result = await mcpClient.callTool("read_item", {});
+      expect(result.structuredContent).toEqual(content.length === 1 ? {} : { error: "Model text" });
+    }
+  });
+
   it("sends device hints and caller-owned conversation IDs without changing arguments", async (t) => {
     configureMcpClient("/mcp", "host");
     let timezone = "America/Toronto";

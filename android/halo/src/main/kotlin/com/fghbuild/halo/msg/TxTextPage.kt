@@ -196,10 +196,9 @@ class TxTextPage(
 }
 
 /**
- * One page of lines. [pack] is the header: 0xFF, the layout's width and height, the line count,
- * then each line's x and y on the display, all 16-bit big-endian except the 1-byte marker and
- * count. Send it, then each of [rasterizedSprites] in order, under one message code; the device
- * library text_page.lua draws the page once its last sprite arrives.
+ * One page of lines. [pack] is the page header of [packPageHeader], with one sprite per line. Send
+ * it, then each of [rasterizedSprites] in order, under one message code; the device library
+ * text_page.lua draws the page once its last sprite arrives.
  */
 class TextPageData internal constructor(
     private val layout: TextLayout,
@@ -246,24 +245,44 @@ class TextPageData internal constructor(
 
     override fun pack(): ByteArray {
         require(isRasterized) { "Page must be rasterized before packing" }
-        val header = ByteArray(6 + lines.size * 4)
-        header[0] = 0xFF.toByte()
-        header[1] = (layout.width shr 8).toByte()
-        header[2] = (layout.width and 0xFF).toByte()
-        header[3] = (layout.height shr 8).toByte()
-        header[4] = (layout.height and 0xFF).toByte()
-        header[5] = sprites.size.toByte()
-        lines.forEachIndexed { index, line ->
-            val offset = 6 + index * 4
-            val x = spriteX(line, sprites[index])
-            header[offset] = (x shr 8).toByte()
-            header[offset + 1] = (x and 0xFF).toByte()
-            header[offset + 2] = (line.yOffset shr 8).toByte()
-            header[offset + 3] = (line.yOffset and 0xFF).toByte()
-        }
-        return header
+        return packPageHeader(
+            layout.width,
+            layout.height,
+            lines.mapIndexed { index, line -> spriteX(line, sprites[index]) to line.yOffset },
+        )
     }
 }
+
+/**
+ * The header of a page of sprites, which text_page.lua draws: 0xFF, the page's [width] and
+ * [height], the sprite count, then each sprite's x and y from [positions], all 16-bit big-endian
+ * except the 1-byte marker and count.
+ */
+internal fun packPageHeader(
+    width: Int,
+    height: Int,
+    positions: List<Pair<Int, Int>>,
+): ByteArray {
+    require(positions.size <= MAX_PAGE_SPRITES) { "A page holds at most $MAX_PAGE_SPRITES sprites" }
+    val header = ByteArray(6 + positions.size * 4)
+    header[0] = 0xFF.toByte()
+    header[1] = (width shr 8).toByte()
+    header[2] = (width and 0xFF).toByte()
+    header[3] = (height shr 8).toByte()
+    header[4] = (height and 0xFF).toByte()
+    header[5] = positions.size.toByte()
+    positions.forEachIndexed { index, (x, y) ->
+        val offset = 6 + index * 4
+        header[offset] = (x shr 8).toByte()
+        header[offset + 1] = (x and 0xFF).toByte()
+        header[offset + 2] = (y shr 8).toByte()
+        header[offset + 3] = (y and 0xFF).toByte()
+    }
+    return header
+}
+
+// The header counts sprites in one byte.
+private const val MAX_PAGE_SPRITES = 255
 
 internal data class TextLineData(
     val text: String,

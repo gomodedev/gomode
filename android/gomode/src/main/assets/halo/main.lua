@@ -1,9 +1,9 @@
--- Go Mode's Halo app: shows the text pages and clears that HaloGlasses sends, and reports button presses.
+-- Go Mode's Halo app: shows the text and image pages and clears that HaloGlasses sends, and reports button presses.
 local data = require('data.min')
 local text_page = require('text_page')
 
 -- Message codes; HaloGlasses.kt defines the same values.
-local TEXT_PAGE = 0x20
+local PAGE = 0x20
 local CLEAR = 0x21
 
 -- A single press of the button is sent as [CLICK, SINGLE], as halo-sdk's RxClick reads it. Double
@@ -29,7 +29,7 @@ local page = nil
 while true do
     for _, item in ipairs(data.process_raw_items()) do
         local code, payload = item[1], item[2]
-        if code == TEXT_PAGE then
+        if code == PAGE then
             local complete
             page, complete = text_page.parse_text_page(payload, page)
             if complete then

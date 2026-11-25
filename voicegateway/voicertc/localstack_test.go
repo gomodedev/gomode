@@ -627,6 +627,10 @@ func TestLocalStackSession(t *testing.T) {
 			if slices.Contains(kinds, voicev2.MessageKindSpeechEnded) {
 				t.Fatalf("kinds = %v, barge-in must cancel before speech.ended", kinds)
 			}
+			// Each utterance reports its start before the turn it starts reports anything.
+			if kindCount(kinds, voicev2.MessageKindUserSpeechStarted) != 2 || slices.Index(kinds, voicev2.MessageKindUserSpeechStarted) > slices.Index(kinds, voicev2.MessageKindTranscriptDelta) {
+				t.Fatalf("kinds = %v, want user.speech.started before each utterance's turn", kinds)
+			}
 			if sink.wasCanceled() {
 				t.Fatal("barge-in must not cancel the whole session")
 			}
@@ -738,6 +742,18 @@ func TestLocalStackResponseCorrelation(t *testing.T) {
 		}
 		if reports[1].Totals.InputTokens == nil || *reports[1].Totals.InputTokens != 20 {
 			t.Fatalf("continuation totals=%+v", reports[1])
+		}
+	})
+	t.Run("staged audio reports each speech onset once", func(t *testing.T) {
+		t.Parallel()
+		sink := &captureSink{}
+		s := (&localStackRuntime{log: testlog.New(t), stagedAudio: true}).newSession(t.Context(), "onset", sink, true)
+		t.Cleanup(func() { _ = s.close() })
+		mustAcceptMic(t, s, loudPCM(200))
+		mustAcceptMic(t, s, loudPCM(200))
+		// Speech while client-owned output may play is also a barge-in.
+		if got := sink.kinds(); kindCount(got, voicev2.MessageKindUserSpeechStarted) != 1 || got[0] != voicev2.MessageKindUserSpeechStarted {
+			t.Fatalf("kinds = %v, want one user.speech.started, first, for one utterance", got)
 		}
 	})
 	t.Run("staged audio", func(t *testing.T) {

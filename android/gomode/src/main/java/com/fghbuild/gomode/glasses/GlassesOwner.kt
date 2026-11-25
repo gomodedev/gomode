@@ -1,4 +1,4 @@
-// Owns the one pair of glasses across Activities: scanning, the saved device, auto-connect, reconnection, text, and presses.
+// Owns the one pair of glasses across Activities: scanning, the saved device, auto-connect, reconnection, frames, and presses.
 package com.fghbuild.gomode.glasses
 
 import android.Manifest
@@ -117,7 +117,7 @@ internal data class GlassesState(
  * connection to the saved glasses lasts until [disconnect], [forget], the end of [parentScope], or
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
- * settings. Every connection shows the latest [show] text, or a [notify] notice over it, and reports
+ * settings. Every connection shows the latest [show] frame, or a [notify] notice over it, and reports
  * its [presses]. Callers hold BLUETOOTH_SCAN before
  * [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
  * connecting on its own.
@@ -156,7 +156,7 @@ internal class GlassesOwner(
 
     // Halo devices a scan found by address; connecting prefers them to a device made from the address.
     private val scanned = mutableMapOf<String, BluetoothDevice>()
-    private val text = MutableStateFlow("")
+    private val frame = MutableStateFlow<GlassesFrame>(GlassesFrame.Text(""))
     private val notice = MutableStateFlow<String?>(null)
     private var noticeJob: Job? = null
     private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
@@ -194,9 +194,9 @@ internal class GlassesOwner(
     val connectedDisplay: Display?
         get() = (state.value.link as? GlassesLink.Connected)?.display
 
-    /** The connected glasses' [GlassesDisplay.screenFit], or null without a connection. */
-    val screenFit: Flow<ScreenFit?> =
-        state.map { (it.link as? GlassesLink.Connected)?.screenFit }.distinctUntilChanged()
+    /** The connected glasses' display and [GlassesDisplay.screenFit], or null without a connection. */
+    val screen: Flow<GlassesLink.Connected?> =
+        state.map { it.link as? GlassesLink.Connected }.distinctUntilChanged()
 
     fun start() {
         if (started) return
@@ -234,17 +234,18 @@ internal class GlassesOwner(
     }
 
     /**
-     * Shows [text] on the glasses now and after every reconnection, as [GlassesDisplay.showText].
-     * Text that is not blank ends a [notify] notice.
+     * Shows [frame] on the glasses now and after every reconnection, as [GlassesDisplay.showText] or
+     * [GlassesImageDisplay.showImage]. An image or text that is not blank ends a [notify] notice.
      */
-    fun show(text: String) {
-        this.text.value = text
-        if (text.isNotBlank()) endNotice()
+    fun show(frame: GlassesFrame) {
+        this.frame.value = frame
+        if (frame !is GlassesFrame.Text || frame.text.isNotBlank()) endNotice()
     }
 
     /**
-     * Shows [message] over the [show] text for [GLASSES_NOTICE_MS], until [show] sends text that is not
-     * blank, or until the next notice: feedback on the glasses for a press the phone cannot act on.
+     * Shows [message] over the [show] frame for [GLASSES_NOTICE_MS], until [show] sends an image or text
+     * that is not blank, or until the next notice: feedback on the glasses for a press the phone cannot
+     * act on.
      */
     fun notify(message: String) {
         endNotice()
@@ -443,7 +444,7 @@ internal class GlassesOwner(
         }
     }
 
-    // Shows each text and reports each press until the connection ends, and returns why it ended: the
+    // Shows each frame and reports each press until the connection ends, and returns why it ended: the
     // glasses' close cause once they report one. Cancellation clears the display, best effort, and
     // every exit closes the glasses.
     private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
@@ -451,9 +452,26 @@ internal class GlassesOwner(
             coroutineScope {
                 val drawing =
                     launch {
-                        combine(text, notice) { text, notice -> notice ?: text }
+                        combine(frame, notice) { frame, notice -> notice?.let(GlassesFrame::Text) ?: frame }
                             .distinctUntilChanged()
-                            .collect(glasses::showText)
+                            .collect { shown ->
+                                when (shown) {
+                                    is GlassesFrame.Text -> {
+                                        glasses.showText(shown.text)
+                                    }
+
+                                    is GlassesFrame.Image -> {
+                                        // An image shown before the switch to glasses without images clears them.
+                                        if (glasses is GlassesImageDisplay) {
+                                            glasses.showImage(
+                                                shown.image,
+                                            )
+                                        } else {
+                                            glasses.showText("")
+                                        }
+                                    }
+                                }
+                            }
                     }
                 val pressing = launch { glasses.presses.collect { press() } }
                 val cause = glasses.closeCause.filterNotNull().first()

@@ -43,6 +43,7 @@ export type MessageKind =
   | "reasoning.delta"
   | "speech.started"
   | "speech.ended"
+  | "user.speech.started"
   | "tool.call"
   | "turn.status"
   | "interrupted"
@@ -67,6 +68,7 @@ export const MessageKindAssistantTextDelta = "assistant.text.delta";
 export const MessageKindReasoningDelta = "reasoning.delta";
 export const MessageKindSpeechStarted = "speech.started";
 export const MessageKindSpeechEnded = "speech.ended";
+export const MessageKindUserSpeechStarted = "user.speech.started";
 export const MessageKindToolCall = "tool.call";
 export const MessageKindTurnStatus = "turn.status";
 export const MessageKindInterrupted = "interrupted";
@@ -799,6 +801,24 @@ export interface SpeechEnded {
   kind: MessageKind;
   /** Speaker identifies whose speech output ended. */
   speaker: Speaker;
+}
+
+/**
+ * UserSpeechStarted is a gateway message that reports the start of user speech
+ * that the gateway's voice activity detection, or its realtime provider's,
+ * detected: the start of a new user turn.
+ *
+ * The gateway sends it in order with its other messages, before anything it
+ * sends in reply to that speech. A user transcript.delta gives no such order:
+ * a realtime provider transcribes user audio apart from its responses, so the
+ * transcript of the speech that caused a tool call can arrive after the tool
+ * call or the reply. Noise that the detection takes for speech also starts a
+ * turn, and the gateway sends none for user.message text or for sessions in
+ * which the client recognizes speech.
+ */
+export interface UserSpeechStarted {
+  /** Kind is "user.speech.started". */
+  kind: MessageKind;
 }
 
 /** ToolCall is a gateway message that asks the client to execute a tool. */

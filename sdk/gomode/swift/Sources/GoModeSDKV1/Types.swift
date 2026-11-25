@@ -218,13 +218,18 @@ public struct Display: Codable {
     /// BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of
     /// 2^BitsPerPixel luminance levels or colours, as ColorSpace defines.
     public let bitsPerPixel: Int
+    /// ImageTypes lists the MIME types of the glasses image blocks the client
+    /// draws on this display, such as "image/png". It is empty when the client
+    /// draws glasses text alone, as on Even Realities G2.
+    public let imageTypes: [String]?
 
-    public init(width: Int, height: Int, shape: DisplayShape, colorSpace: DisplayColorSpace, bitsPerPixel: Int) {
+    public init(width: Int, height: Int, shape: DisplayShape, colorSpace: DisplayColorSpace, bitsPerPixel: Int, imageTypes: [String]? = nil) {
         self.width = width
         self.height = height
         self.shape = shape
         self.colorSpace = colorSpace
         self.bitsPerPixel = bitsPerPixel
+        self.imageTypes = imageTypes
     }
 }
 

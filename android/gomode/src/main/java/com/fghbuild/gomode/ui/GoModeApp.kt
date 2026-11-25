@@ -98,6 +98,7 @@ import com.fghbuild.gomode.ui.web.isTrustedPermissionOrigin
 import com.fghbuild.gomode.voice.AudioDevice
 import com.fghbuild.gomode.voice.CarDialStatus
 import com.fghbuild.gomode.voice.DeviceVoiceSession
+import com.fghbuild.gomode.voice.DeviceVoiceSetupSource
 import com.fghbuild.gomode.voice.LocalModelOwner
 import com.fghbuild.gomode.voice.LocalModelSelection
 import com.fghbuild.gomode.voice.LocalModelState
@@ -354,11 +355,17 @@ internal fun GoModeApp(
                 DeviceVoiceSession(
                     context.applicationContext,
                     settingsRepository,
-                    settingsClient,
-                    bearerTokenFor = if (sharedConversation) voiceConversation::tokenFor else bearerStore::tokenFor,
-                    glassesDisplay = serviceCatalog.glassesDisplay,
+                    if (sharedConversation) {
+                        DeviceVoiceSetupSource.Shared(voiceConversation)
+                    } else {
+                        DeviceVoiceSetupSource.SelectedService(
+                            settingsRepository,
+                            settingsClient,
+                            bearerStore::tokenFor,
+                            serviceCatalog.glassesDisplay,
+                        )
+                    },
                     frontendTools = if (sharedConversation) FrontendVoiceTools() else serviceSession.frontendTools,
-                    voiceConversation = voiceConversation.takeIf { sharedConversation },
                     languageTag = settings.voiceLanguageTag,
                     localModelOwner = localModelOwner,
                     callController = voiceCallController,
@@ -382,7 +389,7 @@ internal fun GoModeApp(
         showVoiceTranscript(
             manualVoiceSession.state,
             settingsRepository.settings.map { it.showTranscriptOnGlasses },
-            glassesOwner.screenFit,
+            glassesOwner.screen,
             glassesOwner::show,
         )
     }
