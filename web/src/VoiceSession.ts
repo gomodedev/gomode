@@ -345,7 +345,7 @@ export function voiceToolDeclarations(
     {
       name: MUTE_TOOL_NAME,
       description:
-        "Mute the user's microphone until your reply ends. Call it when the user asks to mute themselves, then answer the rest of their request in that same reply.",
+        "Mute the microphone during your reply and ignore the user's next spoken turn. Call it when asked to mute, then answer the rest of the request in your current reply.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
     ...mcpTools.map((tool) => ({
@@ -858,6 +858,7 @@ function newConversationID(): string {
 
 // One transport attempt owns resources until replacement, disconnect, or failure.
 class VoiceConnection {
+  ignoreNextRecognizedUtterance = false;
   readonly lifetime = new AbortController();
   pc: RTCPeerConnection | null = null;
   channel: VoiceChannel | null = null;
@@ -2210,12 +2211,19 @@ export class VoiceSession {
       interim: (text) => {
         if (!this._ownsChannel(attempt, channel)) return;
         if (text !== "") this._browserUserSpeechActive = true;
+        if (attempt.ignoreNextRecognizedUtterance) return;
         if (text !== "" && this._speakerActive) this._interruptBrowserTurn();
         this._browserUserText(text, false);
       },
       final: (text) => {
         if (!this._ownsChannel(attempt, channel)) return;
         this._browserUserSpeechActive = false;
+        if (attempt.ignoreNextRecognizedUtterance) {
+          attempt.ignoreNextRecognizedUtterance = false;
+          this._flushPendingNotifications(true);
+          this._startBrowserListening();
+          return;
+        }
         this._flushPendingNotifications(false);
         this._browserTurnIdle = false;
         this._speakerActive = true;
@@ -3057,12 +3065,18 @@ export class VoiceSession {
       const toolArgs = (rawArgs ?? {}) as Record<string, unknown>;
       if (msg.name === MUTE_TOOL_NAME) {
         if (Object.keys(toolArgs).length !== 0) throw new Error("mute takes no arguments");
+        const clientRecognition = this.state.speechInput === "client";
+        attempt.ignoreNextRecognizedUtterance = clientRecognition;
         this.setMicrophoneMode("muteOnce");
         if (!this._ownsChannel(attempt, channel)) return;
         this._update((s) => {
           s.activeTool = null;
         });
-        if (this._ownsChannel(attempt, channel)) this._sendToolResult(channel, msg.id, msg.name, {});
+        if (this._ownsChannel(attempt, channel)) {
+          const result = gatewayToolResult(msg.id, msg.name, {});
+          if (!clientRecognition) result.ignoreNextMicrophoneTurn = true;
+          this._sendToolResult(channel, result);
+        }
         return;
       }
       const result = frontend
@@ -3099,7 +3113,7 @@ export class VoiceSession {
       }
 
       if (!this._ownsChannel(attempt, channel)) return;
-      this._sendToolResult(channel, msg.id, msg.name, result.structuredContent);
+      this._sendToolResult(channel, gatewayToolResult(msg.id, msg.name, result.structuredContent));
     } catch (e: unknown) {
       if (!this._ownsChannel(attempt, channel)) return;
       this._update((s) => {
@@ -3119,12 +3133,12 @@ export class VoiceSession {
         ];
       });
       if (!this._ownsChannel(attempt, channel)) return;
-      this._sendToolResult(channel, msg.id, msg.name, { error: errMsg });
+      this._sendToolResult(channel, gatewayToolResult(msg.id, msg.name, { error: errMsg }));
     }
   }
 
-  private _sendToolResult(channel: VoiceChannel, id: string, name: string, result: Record<string, unknown>): void {
-    this._sendOn(channel, JSON.stringify(gatewayToolResult(id, name, result)), VOICE_TOOL_RESULT_DELIVERY_ERROR);
+  private _sendToolResult(channel: VoiceChannel, result: ToolResult): void {
+    this._sendOn(channel, JSON.stringify(result), VOICE_TOOL_RESULT_DELIVERY_ERROR);
   }
 }
 

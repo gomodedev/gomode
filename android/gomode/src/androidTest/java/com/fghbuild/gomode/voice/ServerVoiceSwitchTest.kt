@@ -604,6 +604,8 @@ class ServerVoiceSwitchTest {
                             val muteID = "mute-$index"
                             conversation.send("""{"kind":"tool.call","id":"$muteID","name":"mute","args":{}}""")
                             composeRule.waitUntil(30_000) { cookie.toolResults.any { it.optString("id") == muteID } }
+                            val result = cookie.toolResults.single { it.optString("id") == muteID }
+                            assertEquals(mode == SpeechOwner.GATEWAY, result.optBoolean("ignoreNextMicrophoneTurn"))
                             composeRule
                                 .onNodeWithTag("gomode-microphone-mode")
                                 .assert(

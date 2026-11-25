@@ -540,6 +540,8 @@ func (s *fakeBackendSession) inputSampleRate() int {
 	return defaultInputSampleRate
 }
 
+func (*fakeBackendSession) microphoneAudioMode() realtimeAudioMode { return realtimeAudioManual }
+
 func (s *fakeBackendSession) acceptMicPCM(_ context.Context, pcm []byte) error {
 	s.sink.addAssistantPCM(pcm)
 	return nil

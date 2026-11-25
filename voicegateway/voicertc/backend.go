@@ -19,6 +19,8 @@ type backendSession interface {
 	// It is 0 when the session takes no microphone audio, before the backend
 	// reports ready, and after close.
 	inputSampleRate() int
+	// microphoneAudioMode describes the backend's voice activity policy after setup.
+	microphoneAudioMode() realtimeAudioMode
 	close() error
 }
 

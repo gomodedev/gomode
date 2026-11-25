@@ -316,6 +316,12 @@ func (s *negotiatedStackSession) inputSampleRate() int {
 	return s.session.inputSampleRate()
 }
 
+func (s *negotiatedStackSession) microphoneAudioMode() realtimeAudioMode {
+	s.op.Lock()
+	defer s.op.Unlock()
+	return s.session.microphoneAudioMode()
+}
+
 func (s *negotiatedStackSession) acceptMicPCM(_ context.Context, pcm []byte) error {
 	s.op.Lock()
 	defer s.op.Unlock()

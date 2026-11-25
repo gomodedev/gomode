@@ -507,6 +507,7 @@ ToolResult is a client message that returns a tool execution result.
 | `id` | `string` | ID matches the tool.call ID being answered. | yes |
 | `name` | `string` | Name is the tool name that produced the result. | yes |
 | `result` | `JSONValue \| null` | Result is the JSON result returned to the assistant. | yes |
+| `ignoreNextMicrophoneTurn` | `boolean` | IgnoreNextMicrophoneTurn asks the RTC gateway to discard one detected microphone utterance before sending audio to the backend. The client keeps its microphone off while the assistant finishes the current reply. |  |
 
 ### TurnCancel
 

@@ -639,6 +639,35 @@ describe("browser voice sessions", () => {
     expect(session.state.listening).toBe(true);
   });
 
+  it("ignores the first utterance after the mute tool acknowledgment and submits the following one", async () => {
+    vi.useFakeTimers();
+    const socket = await readySocket();
+    await startTurn(socket);
+    for (const id of ["mute-1", "mute-2"]) socket.message({ kind: "tool.call", id, name: "mute", args: {} });
+    finishTurn(socket, "Okay.");
+    expect(session.state.listening).toBe(false);
+    fakeSynthesis.complete();
+    expect(session.state.listening).toBe(true);
+
+    const before = socket.sent.length;
+    const transcript = [...session.state.transcript];
+    const ignored = FakeRecognition.instances.at(-1);
+    ok(ignored);
+    ignored.result([["Ignore", false]]);
+    ignored.result([["Ignore this", true]]);
+    ignored.end();
+    expect(socket.sent).toHaveLength(before);
+    expect(session.state.transcript).toEqual(transcript);
+
+    await vi.advanceTimersByTimeAsync(250);
+    const next = FakeRecognition.instances.at(-1);
+    ok(next);
+    expect(next).not.toBe(ignored);
+    next.result([["Continue", true]]);
+    next.end();
+    expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toEqual({ kind: "user.message", text: "Continue" });
+  });
+
   it("delivers an alert right after ready because no greeting turn is in flight", async () => {
     const socket = await readySocket();
     session.injectText("Build is waiting", true);

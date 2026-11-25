@@ -313,6 +313,10 @@ type ToolResult struct {
 	Name string `json:"name"`
 	// Result is the JSON result returned to the assistant.
 	Result json.RawMessage `json:"result"`
+	// IgnoreNextMicrophoneTurn asks the RTC gateway to discard one detected
+	// microphone utterance before sending audio to the backend. The client
+	// keeps its microphone off while the assistant finishes the current reply.
+	IgnoreNextMicrophoneTurn bool `json:"ignoreNextMicrophoneTurn,omitempty"`
 }
 
 // TurnCancel is a client message that cancels the current turn.

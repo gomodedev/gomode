@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	configdata "github.com/gomodedev/gomode/voicegateway/data/v1"
@@ -943,6 +944,8 @@ type session struct {
 	audioBufStartedAt   time.Time
 	audioFirstRTPLogged bool
 	audioSpeech         *assistantSpeechPlayback
+
+	ignoreNextMicrophoneTurn atomic.Bool
 }
 
 func (s *session) waitCleanup(ctx context.Context) bool {
@@ -1103,6 +1106,16 @@ func (s *session) acceptClientMessage(ctx context.Context, backend backendSessio
 		s.mu.Lock()
 		s.renegotiation = setup.Renegotiation
 		s.mu.Unlock()
+	case voicev2.MessageKindToolResult:
+		if s.protocol.Version == voiceapi.ProtocolV2 {
+			var result voicev2.ToolResult
+			if err := json.Unmarshal(data, &result); err != nil {
+				return err
+			}
+			if result.IgnoreNextMicrophoneTurn {
+				s.ignoreNextMicrophoneTurn.Store(true)
+			}
+		}
 	}
 	return backend.acceptClientMessage(ctx, data)
 }

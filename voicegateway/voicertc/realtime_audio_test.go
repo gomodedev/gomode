@@ -3,6 +3,7 @@
 package voicertc
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 )
@@ -10,6 +11,36 @@ import (
 const realtimeFrameBytes = defaultInputSampleRate * 2 / 50
 
 func TestRealtimeAudioGate(t *testing.T) {
+	t.Run("silenceTurn", func(t *testing.T) {
+		t.Run("manual turn ends inside a packet", func(t *testing.T) {
+			g := newRealtimeAudioGate(defaultInputSampleRate, (&localStackSession{}).microphoneAudioMode())
+			pcm := testPCM(240, 2000)
+			if g.silenceTurn(testPCM(1500, 0)) || g.silenceTurn(pcm[:17]) || g.silenceTurn(pcm[17:]) {
+				t.Fatal("mute ended before the first utterance finished")
+			}
+			if !bytes.Equal(pcm, testPCM(240, 0)) {
+				t.Fatal("ignored speech reached the backend")
+			}
+			if g.silenceTurn(testPCM(180, 0)) {
+				t.Fatal("mute ended within the quiet tail")
+			}
+			next := append(testPCM(20, 0), testPCM(40, 1500)...)
+			if !g.silenceTurn(next) || !bytes.Equal(next, append(testPCM(20, 0), testPCM(40, 1500)...)) {
+				t.Fatal("mute did not release at the boundary before the next utterance")
+			}
+		})
+		t.Run("realtime provider quiet speech and mid-turn pause", func(t *testing.T) {
+			g := newRealtimeAudioGate(defaultInputSampleRate, (&realtimeBridgeSession{}).microphoneAudioMode())
+			pcm := append(testPCM(60, 200), testPCM(400, 0)...)
+			pcm = append(pcm, testPCM(60, 200)...)
+			if g.silenceTurn(pcm) || !bytes.Equal(pcm, testPCM(520, 0)) {
+				t.Fatal("mute released during a pause in a quiet utterance")
+			}
+			if !g.silenceTurn(testPCM(1000, 0)) {
+				t.Fatal("quiet utterance did not consume the pending mute")
+			}
+		})
+	})
 	t.Run("activity policies", func(t *testing.T) {
 		sparse := testPCM(100, 0)
 		for i := 0; i < len(sparse); i += 40 {

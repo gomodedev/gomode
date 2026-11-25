@@ -1008,19 +1008,25 @@ public struct ToolResult: Codable {
     public let name: String
     /// Result is the JSON result returned to the assistant.
     public let result: JSONValue?
+    /// IgnoreNextMicrophoneTurn asks the RTC gateway to discard one detected
+    /// microphone utterance before sending audio to the backend. The client
+    /// keeps its microphone off while the assistant finishes the current reply.
+    public let ignoreNextMicrophoneTurn: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case id
         case name
         case result
+        case ignoreNextMicrophoneTurn
     }
 
-    public init(kind: MessageKind, id: String, name: String, result: JSONValue?) {
+    public init(kind: MessageKind, id: String, name: String, result: JSONValue?, ignoreNextMicrophoneTurn: Bool? = nil) {
         self.kind = kind
         self.id = id
         self.name = name
         self.result = result
+        self.ignoreNextMicrophoneTurn = ignoreNextMicrophoneTurn
     }
 
     public init(from decoder: Decoder) throws {
@@ -1029,6 +1035,7 @@ public struct ToolResult: Codable {
         self.id = try c.decode(String.self, forKey: .id)
         self.name = try c.decode(String.self, forKey: .name)
         self.result = try c.decode(JSONValue?.self, forKey: .result)
+        self.ignoreNextMicrophoneTurn = try c.decodeIfPresent(Bool.self, forKey: .ignoreNextMicrophoneTurn)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1037,6 +1044,7 @@ public struct ToolResult: Codable {
         try c.encode(self.id, forKey: .id)
         try c.encode(self.name, forKey: .name)
         try c.encode(self.result, forKey: .result)
+        try c.encodeIfPresent(self.ignoreNextMicrophoneTurn, forKey: .ignoreNextMicrophoneTurn)
     }
 }
 

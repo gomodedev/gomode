@@ -19,6 +19,7 @@ import com.fghbuild.gomode.ui.web.completeFrontendPreparation
 import com.fghbuild.voicegateway.sdk.v2.ApiClient
 import com.fghbuild.voicegateway.sdk.v2.MessageKind
 import com.fghbuild.voicegateway.sdk.v2.ToolCall
+import com.fghbuild.voicegateway.sdk.v2.UserMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -820,6 +821,67 @@ class VoiceSessionLifecycleTest {
                 releaseNew.countDown()
                 oldServer.shutdown()
                 newServer.shutdown()
+            }
+        }
+
+    @Test
+    fun muteToolSkipsOneDeviceRecognizedTurnOverWebRTC() =
+        runTest {
+            val settings = SettingsRepository(MemoryPreferences())
+            val id = settings.addService("Home", "https://home.example")
+            settings.settings.first { it.activeServiceId == id }
+            val session = createCloudSession(settings)
+            val channel = RecordingDataChannel()
+            val speech = DeviceVoiceSessionTest.FakeSpeech()
+            attachAuthorizedChannel(session, channel)
+            VoiceSession::class.java.getDeclaredField("deviceSpeech").apply {
+                isAccessible = true
+                set(session, speech)
+            }
+            VoiceSession::class.java.getDeclaredField("pinnedVoice").apply {
+                isAccessible = true
+                set(
+                    session,
+                    GatewayVoiceSelection(
+                        "https://home.example",
+                        "remote",
+                        "",
+                        SpeechStageLocation.DEVICE,
+                        SpeechStageLocation.GATEWAY,
+                        recognitionModelID = null,
+                        synthesisModelID = null,
+                    ),
+                )
+            }
+
+            try {
+                invokeHandleServerMessage(session, """{"kind":"session.ready"}""", channel)
+                invokeHandleServerMessage(session, """{"kind":"turn.status","state":"thinking"}""", channel)
+                invokeHandleServerMessage(
+                    session,
+                    """{"kind":"tool.call","id":"mute-call","name":"mute","args":{}}""",
+                    channel,
+                )
+                invokeHandleServerMessage(session, """{"kind":"speech.started"}""", channel)
+                invokeHandleServerMessage(session, """{"kind":"turn.status","state":"idle"}""", channel)
+                assertFalse(session.state.value.listening)
+                invokeHandleServerMessage(session, """{"kind":"speech.ended"}""", channel)
+                assertTrue(session.state.value.listening)
+
+                val before = channel.sent.toList()
+                requireNotNull(speech.partialCallback)("Ignore")
+                requireNotNull(speech.resultCallback)("Ignore this")
+                assertEquals(before, channel.sent)
+                assertTrue(
+                    session.state.value.transcript
+                        .isEmpty(),
+                )
+
+                requireNotNull(speech.resultCallback)("Continue")
+                val user = Json.decodeFromString<UserMessage>(channel.sent.last())
+                assertEquals("Continue", user.text)
+            } finally {
+                session.close()
             }
         }
 

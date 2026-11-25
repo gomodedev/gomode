@@ -275,7 +275,7 @@ func (b *localStackRuntime) newSession(ctx context.Context, sessionID string, si
 	}
 	switch {
 	case s.liveASR != nil:
-		s.liveGate = newRealtimeAudioGate(s.liveASR.rate, realtimeAudioManual)
+		s.liveGate = newRealtimeAudioGate(s.liveASR.rate, s.microphoneAudioMode())
 	case s.stagedAudio:
 		s.vad = newEnergyVAD(defaultInputSampleRate)
 	}
@@ -479,6 +479,8 @@ func (s *localStackSession) inputSampleRate() int {
 		return 0
 	}
 }
+
+func (*localStackSession) microphoneAudioMode() realtimeAudioMode { return realtimeAudioManual }
 
 func (s *localStackSession) acceptMicPCM(ctx context.Context, pcm []byte) error {
 	if s.clientInput {

@@ -257,7 +257,7 @@ func (s *llamaRealtimeSession) setup(msg *voicev2.SessionSetup) error {
 	}
 	s.rt = rt
 	// genai's Audio takes PCM at the rate llama.cpp reports for the model.
-	s.gate = newRealtimeAudioGate(rt.Info().InputFormat.SampleRate, realtimeAudioManual)
+	s.gate = newRealtimeAudioGate(rt.Info().InputFormat.SampleRate, s.microphoneAudioMode())
 	s.sink.backendReady(s.ctx)
 	s.workers.Go(s.receive)
 	return nil
@@ -345,6 +345,8 @@ func (s *llamaRealtimeSession) acceptClientMessage(ctx context.Context, data []b
 	}
 	return s.flushLocked(ctx)
 }
+
+func (*llamaRealtimeSession) microphoneAudioMode() realtimeAudioMode { return realtimeAudioManual }
 
 func (s *llamaRealtimeSession) inputSampleRate() int {
 	s.mu.Lock()

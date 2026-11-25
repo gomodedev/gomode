@@ -22,6 +22,7 @@ import com.fghbuild.gomode.ui.web.ServiceShellKey
 import com.fghbuild.gomode.ui.web.ServiceShellSession
 import com.fghbuild.gomode.ui.web.WebShellLoadState
 import com.fghbuild.gomode.ui.web.completeFrontendPreparation
+import com.fghbuild.voicegateway.sdk.v2.UserMessage
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Message
 import kotlinx.coroutines.CompletableDeferred
@@ -2060,6 +2061,44 @@ class DeviceVoiceSessionTest {
     }
 
     @Test
+    fun `mute tool ignores one utterance after acknowledgment playback`() {
+        val speech = FakeSpeech(completeSpeechImmediately = false)
+        val socket = FakeWebSocket()
+        var listener: WebSocketListener? = null
+        val session =
+            createSession(speech) { _, captured ->
+                listener = captured
+                socket
+            }
+        try {
+            session.connect()
+            val connected = requireNotNull(listener)
+            connected.onOpen(socket, upgradeResponse())
+            connected.onMessage(socket, """{"kind":"session.ready"}""")
+            connected.onMessage(socket, """{"kind":"turn.status","state":"thinking"}""")
+            connected.onMessage(socket, """{"kind":"tool.call","id":"mute-1","name":"mute","args":{}}""")
+            connected.onMessage(socket, """{"kind":"assistant.text.delta","text":"Okay."}""")
+            connected.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
+            assertFalse(speech.listening)
+            speech.speechCompletions.single().invoke()
+            assertTrue(speech.listening)
+
+            val before = socket.sent.toList()
+            val transcript = session.state.value.transcript
+            requireNotNull(speech.partialCallback)("Ignore")
+            requireNotNull(speech.resultCallback)("Ignore this")
+            assertEquals(before, socket.sent)
+            assertEquals(transcript, session.state.value.transcript)
+
+            requireNotNull(speech.resultCallback)("Continue")
+            val user = Json.decodeFromString<UserMessage>(socket.sent.last())
+            assertEquals("Continue", user.text)
+        } finally {
+            session.close()
+        }
+    }
+
+    @Test
     fun `restarts listening after an empty recognition result`() {
         val speech = FakeSpeech()
         val socket = FakeWebSocket()
@@ -3409,7 +3448,7 @@ class DeviceVoiceSessionTest {
             .message("Switching Protocols")
             .build()
 
-    private class FakeSpeech(
+    internal class FakeSpeech(
         private val completeSpeechImmediately: Boolean = true,
     ) : DeviceSpeech {
         override val microphoneRms = kotlinx.coroutines.flow.MutableStateFlow(0f)

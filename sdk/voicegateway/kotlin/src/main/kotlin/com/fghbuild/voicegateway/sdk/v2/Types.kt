@@ -1085,6 +1085,12 @@ data class ToolResult(
     val name: String,
     /** Result is the JSON result returned to the assistant. */
     val result: JsonElement?,
+    /**
+     * IgnoreNextMicrophoneTurn asks the RTC gateway to discard one detected
+     * microphone utterance before sending audio to the backend. The client
+     * keeps its microphone off while the assistant finishes the current reply.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val ignoreNextMicrophoneTurn: Boolean? = null,
 )
 
 /** TurnCancel is a client message that cancels the current turn. */

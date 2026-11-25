@@ -601,6 +601,12 @@ export interface ToolResult {
   name: string;
   /** Result is the JSON result returned to the assistant. */
   result: any /* json.RawMessage */ | null;
+  /**
+   * IgnoreNextMicrophoneTurn asks the RTC gateway to discard one detected
+   * microphone utterance before sending audio to the backend. The client
+   * keeps its microphone off while the assistant finishes the current reply.
+   */
+  ignoreNextMicrophoneTurn?: boolean;
 }
 
 /** TurnCancel is a client message that cancels the current turn. */

@@ -90,6 +90,13 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		s.sendGatewayError(ctx, "microphone: codec failed to initialise")
 		return
 	}
+	gate := newRealtimeAudioGate(rate, backend.microphoneAudioMode())
+	forward := func(pcm []byte) error {
+		if s.ignoreNextMicrophoneTurn.Load() && gate.silenceTurn(pcm) {
+			s.ignoreNextMicrophoneTurn.Store(false)
+		}
+		return backend.acceptMicPCM(ctx, pcm)
+	}
 	clock := micAudioClock{rate: rate}
 	silence := make([]byte, rate*2/50)
 	// pcmBytes holds the S16LE form of one decoded packet.
@@ -128,7 +135,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		}
 		for gap > 0 {
 			n := min(gap*2, len(silence))
-			if err := backend.acceptMicPCM(ctx, silence[:n]); err != nil {
+			if err := forward(silence[:n]); err != nil {
 				s.log.WarnContext(ctx, "voicertc: silence→backend write failed", "session", s.id, "err", err)
 				return
 			}
@@ -141,7 +148,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		for i, sample := range pcm {
 			binary.LittleEndian.PutUint16(data[i*2:], uint16(sample)) //nolint:gosec // PCM int16→uint16 reinterpret.
 		}
-		if err := backend.acceptMicPCM(ctx, data); err != nil {
+		if err := forward(data); err != nil {
 			s.log.WarnContext(ctx, "voicertc: audio→backend write failed", "session", s.id, "err", err)
 			return
 		}

@@ -345,6 +345,7 @@ internal class VoiceSession(
     private var remoteAudioTrack: org.webrtc.AudioTrack? = null
     private var clientTurnIdle = false
     private var userSpeechActive = false
+    private var ignoreNextRecognizedUtterance = false
     private var clientCancellation = ClientCancellation.NONE
     private var listeningGeneration = 0L
     private val clientRecognition: Boolean get() = pinnedVoice?.recognition == SpeechStageLocation.DEVICE
@@ -425,6 +426,7 @@ internal class VoiceSession(
 
     private fun invalidateAttempt(): Long {
         val attempt = attemptGeneration.incrementAndGet()
+        ignoreNextRecognizedUtterance = false
         toolWork.cancel()
         toolWork = SupervisorJob()
         connectJob?.cancel()
@@ -1725,9 +1727,9 @@ internal class VoiceSession(
     private fun reviseUserUtterance(text: String) {
         if (text.isNotBlank()) {
             userSpeechActive = true
-            if (speakerActive) interruptClientTurn()
+            if (speakerActive && !ignoreNextRecognizedUtterance) interruptClientTurn()
         }
-        _state.update { it.withDeviceUserText(text, final = false) }
+        if (!ignoreNextRecognizedUtterance) _state.update { it.withDeviceUserText(text, final = false) }
     }
 
     private fun finishListening() {
@@ -1738,6 +1740,11 @@ internal class VoiceSession(
     }
 
     private fun submitUserUtterance(text: String) {
+        if (ignoreNextRecognizedUtterance) {
+            ignoreNextRecognizedUtterance = false
+            finishListening()
+            return
+        }
         if (speakerActive) interruptClientTurn()
         userSpeechActive = false
         _state.update { it.copy(listening = false).withDeviceUserText(text, final = true) }
@@ -1886,13 +1893,23 @@ internal class VoiceSession(
                     msg.args,
                     settingsRepository,
                     switchServer = switchServer,
-                    onMute = { setMicrophoneMode(MicrophoneMode.MUTE_ONCE) },
+                    onMute = {
+                        ignoreNextRecognizedUtterance = clientRecognition
+                        setMicrophoneMode(MicrophoneMode.MUTE_ONCE)
+                    },
                     onDisconnect = { disconnect("assistant hang_up tool") },
                 )
             if (serverResult != null) {
                 if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
                 _state.update { it.copy(activeTool = null) }
-                sendToolResult(id, name, serverResult, attempt, originChannel)
+                val result =
+                    gatewayToolResult(
+                        id,
+                        name,
+                        serverResult,
+                        ignoreNextMicrophoneTurn = true.takeIf { name == MUTE_TOOL_NAME && !clientRecognition },
+                    )
+                sendToolResult(result, attempt, originChannel)
                 return
             }
             val result =
@@ -1907,9 +1924,7 @@ internal class VoiceSession(
             if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
             _state.update { it.copy(activeTool = null).withUserContent(result?.userContent) }
             sendToolResult(
-                id,
-                name,
-                result?.structuredContent ?: errorJson("Unknown catalog tool"),
+                gatewayToolResult(id, name, result?.structuredContent ?: errorJson("Unknown catalog tool")),
                 attempt,
                 originChannel,
             )
@@ -1936,21 +1951,19 @@ internal class VoiceSession(
                             ),
                 )
             }
-            sendToolResult(id, name, errorJson(errMsg), attempt, originChannel)
+            sendToolResult(gatewayToolResult(id, name, errorJson(errMsg)), attempt, originChannel)
         }
     }
 
     private fun sendToolResult(
-        id: String,
-        name: String,
-        result: JsonElement,
+        result: ToolResult,
         attempt: Long,
         originChannel: DataChannel,
     ) {
         if (!ownsAttempt(attempt) || dataChannel !== originChannel) return
         sendOnChannel(
             originChannel,
-            json.encodeToString(ToolResult.serializer(), gatewayToolResult(id, name, result)),
+            json.encodeToString(ToolResult.serializer(), result),
             VOICE_TOOL_RESULT_DELIVERY_ERROR,
         )
     }
@@ -2346,11 +2359,13 @@ internal fun gatewayToolResult(
     id: String,
     name: String,
     result: JsonElement,
+    ignoreNextMicrophoneTurn: Boolean? = null,
 ) = ToolResult(
     kind = MessageKind.ToolResult,
     id = id,
     name = name,
     result = result,
+    ignoreNextMicrophoneTurn = ignoreNextMicrophoneTurn,
 )
 
 /**

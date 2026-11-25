@@ -241,6 +241,7 @@ internal class DeviceVoiceSession(
 
     // Track reply completion across gaps between streamed speech fragments.
     private var turnIdle = false
+    private var ignoreNextRecognizedUtterance = false
     private val output =
         DeviceSpeechOutput(
             speech,
@@ -895,9 +896,9 @@ internal class DeviceVoiceSession(
                 if (currentRecognition()) {
                     if (text.isNotBlank()) {
                         userSpeechActive = true
-                        interruptReply()
+                        if (!ignoreNextRecognizedUtterance) interruptReply()
                     }
-                    if (currentRecognition()) {
+                    if (!ignoreNextRecognizedUtterance && currentRecognition()) {
                         _state.update { it.withDeviceUserText(text, final = false) }
                     }
                 }
@@ -932,6 +933,11 @@ internal class DeviceVoiceSession(
         text: String,
     ) {
         if (attempt != attemptGeneration.get()) return
+        if (ignoreNextRecognizedUtterance) {
+            ignoreNextRecognizedUtterance = false
+            handleListeningIdle(attempt)
+            return
+        }
         userSpeechActive = true
         interruptReply()
         userSpeechActive = false
@@ -1139,7 +1145,7 @@ internal class DeviceVoiceSession(
                     msg.args,
                     settingsRepository,
                     switchServer = switchServer,
-                    onMute = { setMicrophoneMode(MicrophoneMode.MUTE_ONCE) },
+                    onMute = ::muteNextUtterance,
                     onDisconnect = { disconnect("assistant hang_up tool") },
                 )
             if (serverResult != null) {
@@ -1243,7 +1249,7 @@ internal class DeviceVoiceSession(
                     msg.args,
                     settingsRepository,
                     switchServer = switchServer,
-                    onMute = { setMicrophoneMode(MicrophoneMode.MUTE_ONCE) },
+                    onMute = ::muteNextUtterance,
                     onDisconnect = { disconnect("assistant hang_up tool") },
                 )
             if (serverResult != null) {
@@ -1412,6 +1418,11 @@ internal class DeviceVoiceSession(
     override fun setMicrophoneMode(mode: MicrophoneMode) {
         _state.update { it.copy(microphoneMode = mode) }
         applyMicrophoneMode()
+    }
+
+    private fun muteNextUtterance() {
+        ignoreNextRecognizedUtterance = true
+        setMicrophoneMode(MicrophoneMode.MUTE_ONCE)
     }
 
     private fun applyMicrophoneMode() {
@@ -1604,6 +1615,7 @@ internal class DeviceVoiceSession(
 
     private fun invalidateAttempt(): Long {
         val attempt = attemptGeneration.incrementAndGet()
+        ignoreNextRecognizedUtterance = false
         toolWork.cancel()
         toolWork = SupervisorJob()
         pendingUserUtterance = null

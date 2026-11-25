@@ -214,6 +214,8 @@ func (s *realtimeBridgeSession) inputSampleRate() int {
 	return rt.Info().InputFormat.SampleRate
 }
 
+func (*realtimeBridgeSession) microphoneAudioMode() realtimeAudioMode { return realtimeAudioServer }
+
 // TODO: A send can still reach a connection the provider has closed before the
 // receive worker observes the closure and starts resume; the send fails and the
 // bridge ends the session. Fixing it needs a way to tell connection termination
@@ -373,7 +375,7 @@ func (s *realtimeBridgeSession) setup(msg *voicev2.SessionSetup) error {
 		return errors.Join(errSessionClosed, rt.Close())
 	}
 	s.realtime = rt
-	s.audioGate = newRealtimeAudioGate(rt.Info().InputFormat.SampleRate, realtimeAudioServer)
+	s.audioGate = newRealtimeAudioGate(rt.Info().InputFormat.SampleRate, s.microphoneAudioMode())
 	// Ready precedes receive delivery and cannot be emitted after close wins.
 	s.sink.backendReady(s.ctx)
 	s.workers.Go(func() { s.rxLoop(rt) })

@@ -23,8 +23,8 @@ type realtimeAudioChunk struct {
 // preroll plus one partial frame. Native manual turns require 100ms of speech
 // and end after 200ms of quiet. Server VAD receives even brief quiet speech and
 // a 1s tail before pausing, so the provider owns turns and interruptions.
-// The session's microphone mutex owns the gate. Yielded audio is borrowed until
-// advancing the iterator; streaming never waits for a complete utterance.
+// Its owner serializes pushes. Yielded audio is borrowed until advancing the
+// iterator; streaming never waits for a complete utterance.
 type realtimeAudioGate struct {
 	frameBytes int
 	mode       realtimeAudioMode
@@ -104,6 +104,24 @@ func (g *realtimeAudioGate) push(pcm []byte) iter.Seq[realtimeAudioChunk] {
 			}
 		}
 	}
+}
+
+// silenceTurn replaces audio through the end of an utterance with silence.
+// Stop at that boundary even when one packet contains several frames.
+func (g *realtimeAudioGate) silenceTurn(pcm []byte) bool {
+	for len(pcm) > 0 {
+		n := min(g.frameBytes-len(g.partial), len(pcm))
+		var ended bool
+		for chunk := range g.push(pcm[:n]) {
+			ended = chunk.end
+		}
+		clear(pcm[:n])
+		if ended {
+			return true
+		}
+		pcm = pcm[n:]
+	}
+	return false
 }
 
 func (g *realtimeAudioGate) voiced(frame []byte) bool {

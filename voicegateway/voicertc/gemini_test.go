@@ -19,10 +19,11 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/gomodedev/gomode/internal/testlog"
-	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers/gemini"
+
+	"github.com/gomodedev/gomode/internal/testlog"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 // geminiTestTransport routes the configured HTTP transport to a local peer.
@@ -41,7 +42,22 @@ func (t *geminiTestTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return t.base.RoundTrip(clone)
 }
 
-func newGeminiGateway(t *testing.T, script func(context.Context, *websocket.Conn)) (*realtimeBridgeSession, *realtimeEventSink) {
+type geminiFixtureBackend struct {
+	realtimeBridgeBackend
+	endpoint *url.URL
+}
+
+func (b *geminiFixtureBackend) connect(ctx context.Context, id string, sink backendSink) (backendSession, error) {
+	s, err := b.realtimeBridgeBackend.connect(ctx, id, sink)
+	if err != nil {
+		return nil, err
+	}
+	hc := s.(*realtimeBridgeSession).provider.HTTPClient()
+	hc.Transport = &geminiTestTransport{base: hc.Transport, endpoint: b.endpoint}
+	return s, nil
+}
+
+func newGeminiFixtureBackend(t *testing.T, script func(context.Context, *websocket.Conn)) *geminiFixtureBackend {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-goog-api-key") != "test-key" || r.URL.RawQuery != "" {
 			t.Error("provider authentication did not use the HTTP header")
@@ -57,19 +73,24 @@ func newGeminiGateway(t *testing.T, script func(context.Context, *websocket.Conn
 		script(ctx, conn)
 	}))
 	t.Cleanup(srv.Close)
+	endpoint, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &geminiFixtureBackend{
+		realtimeBridgeBackend: realtimeBridgeBackend{log: testlog.New(t), provider: "gemini", apiKey: "test-key", model: "gemini-3.8-live"},
+		endpoint:              endpoint,
+	}
+}
+
+func newGeminiGateway(t *testing.T, script func(context.Context, *websocket.Conn)) (*realtimeBridgeSession, *realtimeEventSink) {
 	sink := &realtimeEventSink{events: make(chan struct{}, 1)}
-	backend := &realtimeBridgeBackend{log: testlog.New(t), provider: "gemini", apiKey: "test-key", model: "gemini-3.8-live"}
+	backend := newGeminiFixtureBackend(t, script)
 	session, err := backend.connect(t.Context(), "gateway-fixture", sink)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := session.(*realtimeBridgeSession)
-	endpoint, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hc := s.provider.HTTPClient()
-	hc.Transport = &geminiTestTransport{base: hc.Transport, endpoint: endpoint}
 	t.Cleanup(func() {
 		if err := s.close(); err != nil {
 			t.Error(err)

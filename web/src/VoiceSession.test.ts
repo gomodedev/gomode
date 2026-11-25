@@ -2252,7 +2252,7 @@ describe("VoiceSession", () => {
         dispatchToolCall(channel, id, "mute");
         await vi.waitFor(() =>
           expect(channel?.send).toHaveBeenCalledWith(
-            JSON.stringify({ kind: "tool.result", id, name: "mute", result: {} }),
+            JSON.stringify({ kind: "tool.result", id, name: "mute", result: {}, ignoreNextMicrophoneTurn: true }),
           ),
         );
       }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/pion/webrtc/v4"
 
 	"github.com/gomodedev/gomode/internal/testlog"
@@ -90,6 +91,105 @@ func TestIntegrationVoiceRTCLocalStackPlaceholders(t *testing.T) {
 		s.writeMicAudio(ctx, t, 10)
 		s.waitMessage(ctx, t, voicev2.MessageKindTranscriptDelta)
 	})
+	t.Run("mute tool skips one microphone turn", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		t.Cleanup(cancel)
+		conv := &fakeConversation{
+			userStep: fakeLLMStep{reply: llmReply{toolCalls: []llmToolCall{{
+				id: "mute-call", name: "mute", args: json.RawMessage(`{}`),
+			}}}},
+			toolResultStep: fakeLLMStep{reply: llmReply{text: "Okay."}},
+		}
+		b := newTestLocalStackBackend(t, newFixedLiveASR("speech"), fixedConversationLLM{conv: conv}, placeholderTTS{})
+		s := newVoiceRTCTestSession(ctx, t, b)
+		s.writeMicAudio(ctx, t, 24)
+		s.waitMessage(ctx, t, voicev2.MessageKindToolCall)
+		s.send(ctx, t, &voicev2.ToolResult{
+			Kind: voicev2.MessageKindToolResult, ID: "mute-call", Name: "mute", Result: json.RawMessage(`{}`),
+			IgnoreNextMicrophoneTurn: true,
+		})
+		s.waitMessage(ctx, t, voicev2.MessageKindSpeechEnded)
+
+		s.writeMicAudio(ctx, t, 40)
+		if got := conv.userCalls(); got != 1 {
+			t.Fatalf("model received %d user turns after the skipped audio, want only the initial turn", got)
+		}
+		s.writeMicAudio(ctx, t, 24)
+		s.waitMessage(ctx, t, voicev2.MessageKindToolCall)
+		if got := conv.userCalls(); got != 2 {
+			t.Fatalf("model received %d user turns, want the initial and following turns", got)
+		}
+	})
+}
+
+func TestIntegrationVoiceRTCGeminiMute(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	t.Cleanup(cancel)
+	before := make(chan int, 1)
+	after := make(chan struct{}, 1)
+	b := newGeminiFixtureBackend(t, func(ctx context.Context, ws *websocket.Conn) {
+		readGeminiFixture(t, ctx, ws)
+		writeGeminiFixture(t, ctx, ws, `{"setupComplete":{}}`)
+		writeGeminiFixture(t, ctx, ws, `{"toolCall":{"functionCalls":[{"id":"mute-call","name":"mute","args":{}}]}}`)
+		if msg := readGeminiFixture(t, ctx, ws); msg["toolResponse"] == nil {
+			t.Errorf("missing tool response: %v", msg)
+			return
+		}
+		writeGeminiFixture(t, ctx, ws, `{"serverContent":{"turnComplete":true}}`)
+		var audio int
+		for {
+			msg := readGeminiFixture(t, ctx, ws)
+			if msg == nil {
+				return
+			}
+			if msg["clientContent"] != nil {
+				before <- audio
+				break
+			}
+			if msg["realtimeInput"] != nil {
+				audio++
+			}
+		}
+		if msg := readGeminiFixture(t, ctx, ws); msg["realtimeInput"] == nil {
+			t.Errorf("missing audio after mute: %v", msg)
+			return
+		}
+		after <- struct{}{}
+		<-ctx.Done()
+	})
+	br := newTestBridge(ctx, t, b)
+	s := connectVoiceRTCClient(ctx, t, br.HandleOffer, &voicev2.SessionSetup{
+		Kind:  voicev2.MessageKindSessionSetup,
+		Voice: voicev2.VoiceConfig{Language: "en"},
+		Tools: []voicev2.ToolDeclaration{{Name: "mute", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	s.waitMessage(ctx, t, voicev2.MessageKindToolCall)
+	s.send(ctx, t, &voicev2.ToolResult{
+		Kind: voicev2.MessageKindToolResult, ID: "mute-call", Name: "mute", Result: json.RawMessage(`{}`),
+		IgnoreNextMicrophoneTurn: true,
+	})
+	s.waitMessage(ctx, t, voicev2.MessageKindSpeechEnded)
+	// The first burst is followed by a mid-utterance pause. The second ends
+	// with enough silence to close the server-mode microphone gate.
+	s.writeMicAudio(ctx, t, 28)
+	s.writeMicAudio(ctx, t, 65)
+	s.send(ctx, t, &voicev2.ContextUpdate{Kind: voicev2.MessageKindContextUpdate, Context: voicev2.Context{Text: "barrier"}})
+	select {
+	case n := <-before:
+		if n != 0 {
+			t.Fatalf("provider received %d microphone messages during the muted utterance", n)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	s.writeMicAudio(ctx, t, 12)
+	select {
+	case <-after:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
 }
 
 func TestIntegrationVoiceRTCClientClose(t *testing.T) {
