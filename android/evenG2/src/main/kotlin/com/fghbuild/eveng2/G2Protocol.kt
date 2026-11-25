@@ -39,8 +39,14 @@ object G2Protocol {
     /** Service ID of device configuration, which carries AUTH. */
     const val SID_DEVICE_CONFIG = 0x80
 
+    /** Service ID of device settings, whose read reports the firmware; see [G2Settings]. */
+    const val SID_SETTINGS = 0x09
+
     /** Service ID of Even Hub pages, heartbeat, and page events. */
     const val SID_EVEN_HUB = 0xE0
+
+    /** Service ID of Faceclaw custom firmware's private message stream; see [G2CfwStream]. */
+    const val SID_CFW = 0xF0
 
     /** Header address byte of phone-to-glasses frames. */
     const val ADDRESS_TO_GLASSES = 0x21

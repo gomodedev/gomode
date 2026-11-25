@@ -2,7 +2,8 @@
 
 Kotlin/Android client for consumer Even Realities G2 glasses over Bluetooth LE, with no
 Even app and no enterprise license. Wire contracts live in the header comments of
-`G2Frame`, `G2Auth`, `G2Prelude`, `G2EvenHub`, `G2Arm`, and `G2Session`.
+`G2Frame`, `G2Auth`, `G2Prelude`, `G2EvenHub`, `G2Settings`, `G2CfwStream`, `G2Panel`,
+`G2Arm`, and `G2Session`.
 
 ## Module
 
@@ -10,30 +11,41 @@ Gradle module `:even-g2-sdk` at `android/evenG2/`, package `com.fghbuild.eveng2`
 free of Go Mode app types: hosts depend on it, not the reverse.
 
 ```
-G2Glasses (host API: state, show(text), one session per connect, typed close cause)
-  └── G2Session (one connection: AUTH both arms, prelude, page, heartbeat, updates)
-      ├── G2Auth, G2Prelude, G2EvenHub (protobuf messages)  └── G2Frame (packets, CRC)
+G2Glasses (host API: state, show(text or image), one session per connect, typed close cause)
+  └── G2Session (one connection: AUTH both arms, prelude, firmware, page, heartbeat, updates)
+      ├── G2Auth, G2Prelude, G2Settings, G2EvenHub (protobuf messages)  └── G2Frame (packets, CRC)
+      ├── Faceclaw firmware: G2Draw (draw calls) → G2CfwStream (zlib records on SID 0xF0)
       └── G2ArmLink per arm ← G2ArmConnector (G2GattConnector on Android, fakes in tests)
 G2Scanner → G2Advertising → G2PairCollector → G2Pair
 ```
 
 ## Sources and licensing
 
-Port code only from Apache-2.0 or MIT sources and record each in [NOTICE](NOTICE) and in
-the header of the file that carries it. The enterprise SDK (Apache-2.0) is the source of
-framing, CRC, AUTH, and Even Hub codecs; its NOTICE text and
-[licence](LICENSE-APACHE-2.0) stay beside ours. The even-g2-protocol Python library (MIT)
-supplies golden bytes and the order after AUTH. Even Realities' `@evenrealities/pretext` npm
-package (MIT) supplies the firmware font's metrics. The AUTH order (right, then left), waiting
-for both arms, and keeping spaces where lines wrap follow faceclaw's behaviour.
-`jimrandomh/faceclaw` is GPL-3.0 and `i-soxi/even-g2-protocol` has no license: read them
-for behaviour only and never copy their code. Clone sources into a fresh directory and
-run Python against them only with `python3 -I`.
+Port code only from Apache-2.0, MIT, or GPL-3.0 sources, which Go Mode's AGPL-3.0 can
+carry, and record each in [NOTICE](NOTICE) and in the header of the file that carries it.
+The enterprise SDK (Apache-2.0) is the source of framing, CRC, AUTH, and Even Hub codecs;
+its NOTICE text and [licence](LICENSE-APACHE-2.0) stay beside ours. The even-g2-protocol
+Python library (MIT) supplies golden bytes and the order after AUTH. Even Realities'
+`@evenrealities/pretext` npm package (MIT) supplies the firmware font's metrics.
+`jimrandomh/faceclaw` (GPL-3.0) supplies the custom firmware's settings, stream, draw, and
+ring code and golden bytes; `jimrandomh/g2flash` (GPL-3.0), the firmware, is their receiver.
+The [GPL-3.0 text](LICENSE-GPL-3.0) stays beside ours. Port from the commits that NOTICE
+names, or move NOTICE to the new commit. The AUTH order (right, then left), waiting for both
+arms, and keeping spaces where lines wrap follow faceclaw's behaviour.
+`i-soxi/even-g2-protocol` has no license: read it for behaviour only and never copy its code.
+Clone sources into a fresh directory and run Python against them only with `python3 -I`.
 
 ## Custom firmware
 
 `scripts/g2_cfw.py` builds and flashes the custom firmware of the pinned
-[g2flash](https://github.com/jimrandomh/g2flash). This SDK targets stock firmware and is untested on it.
+[g2flash](https://github.com/jimrandomh/g2flash), which reports `Faceclaw/45`. Each session
+reads the settings of the right arm; a `Faceclaw/<n>` revision of 45 or more makes it
+`G2Firmware.Faceclaw`, and anything else, or no answer, keeps the stock page. On Faceclaw
+firmware the session draws text and images on the whole 640×480 panel through the private
+stream; the stock page stays open only to capture input. No pair on custom firmware has run
+it yet: its `TODO(hardware)` notes in `G2Session`, `G2Panel`, and `G2EvenHub` list what to
+check. Bump `G2Firmware.MIN_FACECLAW_REVISION` when a needed contract arrives in a later
+revision, and the g2flash pin in `scripts/g2_cfw.py` with it.
 
 ## Hardware questions
 
@@ -46,14 +58,16 @@ during the G2 hardware acceptance and delete each TODO with its answer.
 | Layer | Approach |
 |-------|----------|
 | Framing, AUTH, Even Hub codecs | JVM tests against `contract.json` vectors and Python golden bytes |
+| Settings, private stream, draw calls, ring reports | JVM tests against faceclaw's golden bytes and replies built from g2flash's source |
 | Session lifecycle | JVM tests with `FakeG2Firmware` and virtual time |
 | `G2GattConnector` callback routing | Robolectric with a GATT shadow whose operations wait for the test's callbacks |
 | `G2Scanner` | The app's `GlassesOwnerTest`, through Robolectric's LE scanner |
 | Radio behaviour of either | Real pair only; the emulator has no G2 peripheral |
 
 Module `:even-g2-testing` at `testing/` holds `FakeG2Firmware`, fake glasses behind fake arm
-links, for the SDK's tests and its hosts' unit and instrumented tests. It uses only the SDK's
-public API and its own protobuf reader. `testing/build.gradle.kts` states why it is a module
+links, for the SDK's tests and its hosts' unit and instrumented tests. Its `revision` makes
+it Faceclaw firmware, which decodes and draws the private stream into presented frames. It
+uses only the SDK's public API and its own protobuf, record, and draw-call readers. `testing/build.gradle.kts` states why it is a module
 and not Gradle test fixtures.
 
 <!-- BEGIN FILE INDEX -->
@@ -64,23 +78,28 @@ Autogenerated from first-line comments. Run scripts/update_agents_file_index.py 
 - `src/main/kotlin/com/fghbuild/eveng2/G2Arm.kt`: G2Arm: Even G2 arms and pairs, advertisement parsing, and grouping of scanned arms into pairs.
 - `src/main/kotlin/com/fghbuild/eveng2/G2ArmLink.kt`: G2ArmLink: transport contract of one connected Even G2 arm, its connector, and transport errors.
 - `src/main/kotlin/com/fghbuild/eveng2/G2Auth.kt`: G2Auth: the per-arm AUTH request on SID 0x80 and classification of its replies.
+- `src/main/kotlin/com/fghbuild/eveng2/G2CfwStream.kt`: G2CfwStream: Faceclaw custom firmware's private message stream on SID 0xF0: records, zlib, packets, and ACKs.
 - `src/main/kotlin/com/fghbuild/eveng2/G2EvenHub.kt`: G2EvenHub: Even Hub (SID 0xE0) text page, in-place text update, heartbeat, shutdown, replies, presses, and exits.
 - `src/main/kotlin/com/fghbuild/eveng2/G2Frame.kt`: G2Frame: Even G2 packet framing, CRC-16/CCITT, multi-packet split, and reassembly of glasses replies.
 - `src/main/kotlin/com/fghbuild/eveng2/G2GattConnector.kt`: G2GattConnector: Android BluetoothGatt transport for one Even G2 arm: connect, bond, MTU, notifications, writes.
-- `src/main/kotlin/com/fghbuild/eveng2/G2Glasses.kt`: G2Glasses: runs one Even G2 session per connect() with a text page, ending with a typed close cause.
+- `src/main/kotlin/com/fghbuild/eveng2/G2Glasses.kt`: G2Glasses: one Even G2 session per connect() showing text, or images on custom firmware, until a typed close cause.
+- `src/main/kotlin/com/fghbuild/eveng2/G2Panel.kt`: G2Panel: what a session shows, and how Faceclaw custom firmware draws text and 4-bit images on its 640×480 panel.
 - `src/main/kotlin/com/fghbuild/eveng2/G2Prelude.kt`: G2Prelude: the session prelude on SID 0x01 that precedes Even Hub pages, and its ACK.
 - `src/main/kotlin/com/fghbuild/eveng2/G2Protobuf.kt`: G2Protobuf: minimal protobuf writer and strict reader for Even G2 messages.
 - `src/main/kotlin/com/fghbuild/eveng2/G2Protocol.kt`: G2Protocol: Even G2 GATT UUIDs, service IDs, header flags, MTU, and session timing.
 - `src/main/kotlin/com/fghbuild/eveng2/G2Scanner.kt`: G2Scanner: Android BLE scan that reports complete Even G2 pairs as both arms are heard.
 - `src/main/kotlin/com/fghbuild/eveng2/G2Session.kt`: G2Session: one Even G2 connection from both arms' links to a closed page, ending with a typed close cause.
+- `src/main/kotlin/com/fghbuild/eveng2/G2Settings.kt`: G2Settings: the settings read (SID 0x09) that tells stock from Faceclaw custom firmware, and its framebuffer lease.
 - `src/main/kotlin/com/fghbuild/eveng2/G2State.kt`: G2State: Even G2 connection states and the typed causes that end a session.
 - `src/main/kotlin/com/fghbuild/eveng2/G2TextLayout.kt`: G2TextLayout: how stock Even G2 firmware wraps text in a text container, measured with its font's metrics.
 - `src/test/kotlin/com/fghbuild/eveng2/G2ArmTest.kt`: Advertisement parsing and grouping of scanned Even G2 arms into pairs.
 - `src/test/kotlin/com/fghbuild/eveng2/G2ContractVectorsTest.kt`: Wire vectors of the Even Realities enterprise SDK's native/protocol/contract.json against the G2 codecs.
+- `src/test/kotlin/com/fghbuild/eveng2/G2FaceclawSessionTest.kt`: G2Glasses sessions against fake glasses on Faceclaw custom firmware: detection, lease, drawing, gestures, failures.
+- `src/test/kotlin/com/fghbuild/eveng2/G2FaceclawWireTest.kt`: Faceclaw custom firmware's settings read, lease, private stream, draw calls, and ring reports against golden bytes.
 - `src/test/kotlin/com/fghbuild/eveng2/G2FrameTest.kt`: Packet split limits and reassembly of glasses-to-phone messages, including malformed and interleaved packets.
 - `src/test/kotlin/com/fghbuild/eveng2/G2GattConnectorTest.kt`: G2GattConnector against Robolectric's Bluetooth: callback matching, a disconnect during an operation, close after failure.
 - `src/test/kotlin/com/fghbuild/eveng2/G2GlassesTest.kt`: G2Glasses sessions against fake arm links: both arms, heartbeat, each close cause and its retryability, races.
 - `src/test/kotlin/com/fghbuild/eveng2/G2PythonGoldenTest.kt`: Golden bytes of the even-g2-protocol Python library's live-confirmed builders against the G2 codecs.
 - `src/test/kotlin/com/fghbuild/eveng2/G2TextLayoutTest.kt`: Line wrapping of G2TextLayout against @evenrealities/pretext's measurements, and which texts a text container fits.
-- `testing/src/main/kotlin/com/fghbuild/eveng2/testing/FakeG2Firmware.kt`: Fake Even G2 glasses behind fake arm links that answer AUTH, the prelude, and Even Hub, and a fake scan, for SDK and app tests.
+- `testing/src/main/kotlin/com/fghbuild/eveng2/testing/FakeG2Firmware.kt`: Fake Even G2 glasses behind fake arm links that answer AUTH, prelude, settings, Even Hub, and Faceclaw drawing.
 <!-- END FILE INDEX -->

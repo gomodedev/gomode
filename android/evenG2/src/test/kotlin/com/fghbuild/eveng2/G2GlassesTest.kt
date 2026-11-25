@@ -32,6 +32,11 @@ class G2GlassesTest {
 
     private val pair = pair("1")
 
+    private fun ready(
+        pair: G2Pair,
+        text: String,
+    ) = G2State.Ready(pair, G2Firmware.EvenHub(null), G2Content.Text(text))
+
     private suspend fun G2Glasses.await(predicate: (G2State) -> Boolean): G2State = state.first(predicate)
 
     private suspend fun G2Glasses.closeCause(): G2CloseCause = (await { it is G2State.Closed } as G2State.Closed).cause
@@ -49,9 +54,9 @@ class G2GlassesTest {
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.show("Hello")
             glasses.connect(pair)
-            assertEquals(G2State.Ready(pair, "Hello"), glasses.await { it is G2State.Ready })
+            assertEquals(ready(pair, "Hello"), glasses.await { it is G2State.Ready })
             assertEquals(
-                listOf("RIGHT auth", "LEFT auth", "RIGHT prelude", "RIGHT create Hello"),
+                listOf("RIGHT auth", "LEFT auth", "RIGHT prelude", "RIGHT settings", "RIGHT create Hello"),
                 firmware.requests.map { it.toString() },
             )
 
@@ -61,7 +66,7 @@ class G2GlassesTest {
 
             firmware.requests.clear()
             glasses.show("Updated")
-            assertEquals(G2State.Ready(pair, "Updated"), glasses.await { it == G2State.Ready(pair, "Updated") })
+            assertEquals(ready(pair, "Updated"), glasses.await { it == ready(pair, "Updated") })
             assertEquals(listOf("RIGHT update Updated"), firmware.requests.map { it.toString() })
             assertTrue(firmware.links.none { it.closed })
         }
@@ -111,8 +116,8 @@ class G2GlassesTest {
             val long = "é".repeat(600) // 1,200 UTF-8 bytes.
             glasses.show(long)
             glasses.connect(pair)
-            glasses.await { it == G2State.Ready(pair, long) }
-            assertEquals(listOf("RIGHT create ", "RIGHT update $long"), firmware.requests.drop(3).map { it.toString() })
+            glasses.await { it == ready(pair, long) }
+            assertEquals(listOf("RIGHT create ", "RIGHT update $long"), firmware.requests.drop(4).map { it.toString() })
         }
 
     @Test
@@ -156,7 +161,7 @@ class G2GlassesTest {
             glasses.show("Second")
             glasses.connect(pair)
             assertEquals(G2State.Connecting(pair), glasses.state.value)
-            assertEquals(G2State.Ready(pair, "Second"), glasses.await { it is G2State.Ready })
+            assertEquals(ready(pair, "Second"), glasses.await { it is G2State.Ready })
             assertEquals("RIGHT create Second", firmware.requests.last().toString())
             assertTrue(firmware.pageSession != firstPage)
         }
@@ -350,7 +355,7 @@ class G2GlassesTest {
             glasses.connect(pair)
             assertEquals(G2CloseCause.CommandTimedOut(G2HubCommand.CREATE_PAGE), glasses.closeCause())
             // The create request may have opened the page although its ACK never came.
-            assertEquals(listOf("RIGHT create ", "RIGHT shutdown"), firmware.requests.drop(3).map { it.toString() })
+            assertEquals(listOf("RIGHT create ", "RIGHT shutdown"), firmware.requests.drop(4).map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
         }
 
@@ -364,7 +369,7 @@ class G2GlassesTest {
             val cause = glasses.closeCause()
             assertEquals(G2CloseCause.CommandRejected(G2HubCommand.CREATE_PAGE, 1), cause)
             assertTrue(cause.retryable)
-            assertEquals(listOf("RIGHT create ", "RIGHT shutdown"), firmware.requests.drop(3).map { it.toString() })
+            assertEquals(listOf("RIGHT create ", "RIGHT shutdown"), firmware.requests.drop(4).map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
         }
 
@@ -416,7 +421,7 @@ class G2GlassesTest {
             val replacedAt = states.size
 
             glasses.connect(other)
-            assertEquals(G2State.Ready(other, ""), glasses.await { it is G2State.Ready && it.pair == other })
+            assertEquals(ready(other, ""), glasses.await { it is G2State.Ready && it.pair == other })
             val after = states.drop(replacedAt)
             val pairs = after.map { (it as? G2State.Connecting)?.pair ?: (it as? G2State.Ready)?.pair }
             assertEquals(after.toString(), List(after.size) { other }, pairs)

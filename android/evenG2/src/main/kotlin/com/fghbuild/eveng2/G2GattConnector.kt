@@ -95,7 +95,8 @@ private class G2GattLink(
 
     @Volatile private var gatt: BluetoothGatt? = null
 
-    @Volatile private var mtu = 0
+    @Volatile override var mtu = 0
+        private set
 
     @Volatile private var writeCharacteristic: BluetoothGattCharacteristic? = null
 

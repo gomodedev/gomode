@@ -1,4 +1,4 @@
-// Tests EvenG2Glasses against fake G2 firmware: the GlassesException each session close cause becomes.
+// Tests EvenG2Glasses against fake G2 firmware: the display each firmware gets, and the GlassesException each close cause becomes.
 package com.fghbuild.gomode.glasses
 
 import com.fghbuild.eveng2.G2Arm
@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +48,30 @@ class EvenG2GlassesTest {
         }
 
     @Test
+    fun faceclawFirmwareGetsTheWholePanelWithImages() =
+        runTest {
+            val firmware = FakeG2Firmware().apply { revision = "Faceclaw/45" }
+            val glasses = connect(firmware)
+            assertTrue(glasses is GlassesImageDisplay)
+            assertEquals(G2_FACECLAW_DISPLAY, glasses.description)
+            assertEquals(G2PanelFit, glasses.screenFit)
+            glasses.showText("Hello")
+            assertEquals(listOf("Hello"), firmware.presented.last().lines)
+
+            glasses.close()
+            assertEquals(emptySet<G2Side>(), firmware.leased)
+            assertEquals("shutdown", firmware.requests.last().kind)
+        }
+
+    @Test
+    fun stockFirmwareGetsOneTextContainerWithoutImages() =
+        runTest {
+            val glasses = connect(FakeG2Firmware())
+            assertFalse(glasses is GlassesImageDisplay)
+            assertEquals(G2_DISPLAY, glasses.description)
+        }
+
+    @Test
     fun aSessionThatEndsBeforeItIsReadyFailsTheConnection() {
         val cases =
             listOf(
@@ -56,6 +81,10 @@ class EvenG2GlassesTest {
                 Ending("unanswered prelude", Outcome.RETRY_UNRESPONSIVE) { answersPrelude = false },
                 Ending("unanswered create", Outcome.RETRY_UNRESPONSIVE) { answersCreate = false },
                 Ending("refused create", Outcome.RETRY_UNRESPONSIVE) { createResult = 1 },
+                Ending("unacknowledged frame", Outcome.RETRY_UNRESPONSIVE) {
+                    revision = "Faceclaw/45"
+                    answersStream = false
+                },
             )
         for (case in cases) {
             runTest {

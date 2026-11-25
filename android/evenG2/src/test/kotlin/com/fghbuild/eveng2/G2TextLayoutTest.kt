@@ -16,31 +16,32 @@ class G2TextLayoutTest {
         // Latin, kerned capitals, Cyrillic, and CJK, each from a different font of the fallback chain.
         val widths = mapOf("Hello, world!" to 103, "AVATAR WAVE" to 122, "Привет, мир" to 118, "日本語のテキスト" to 160)
         for ((text, width) in widths) {
-            assertEquals(text, 1, G2TextLayout.lineCount(text, width))
-            assertEquals(text, 2, G2TextLayout.lineCount(text, width - 1))
+            assertEquals(text, width, G2TextLayout.widthPx(text))
+            assertEquals(text, 1, G2TextLayout.lines(text, width).size)
+            assertEquals(text, 2, G2TextLayout.lines(text, width - 1).size)
         }
     }
 
     @Test
     fun linesWrapAtSpacesOrInsideAWordWithout() {
-        assertEquals(3, G2TextLayout.lineCount("The quick brown fox jumps over the lazy dog", 200))
-        assertEquals(3, G2TextLayout.lineCount("W".repeat(84), G2Display.WIDTH_PX))
-        assertEquals(2, G2TextLayout.lineCount("i".repeat(131), G2Display.WIDTH_PX))
+        assertEquals(3, G2TextLayout.lines("The quick brown fox jumps over the lazy dog", 200).size)
+        assertEquals(3, G2TextLayout.lines("W".repeat(84), G2Display.WIDTH_PX).size)
+        assertEquals(2, G2TextLayout.lines("i".repeat(131), G2Display.WIDTH_PX).size)
     }
 
     @Test
     fun aSpaceThatOverflowsStartsTheNextLine() {
-        // "HHHH" is 49 px before a space, the space 5 px, and the second "HHHH" 48 px. At 49 px the
-        // space starts line 2 and the word, which no longer fits beside it, line 3; pretext drops the
-        // space and counts 2 lines.
-        assertEquals(3, G2TextLayout.lineCount("HHHH HHHH", 49))
-        assertEquals(2, G2TextLayout.lineCount("HHHH HHHH", 54))
+        // "HHHH" is 49 px before a space, the space 6 px before an "H", and the second "HHHH" 48 px. At
+        // 49 px the space starts line 2 and the word, which no longer fits beside it, line 3; pretext
+        // drops the space and counts 2 lines. At 54 px the space still overflows and starts line 2.
+        assertEquals(listOf("HHHH", " ", "HHHH"), G2TextLayout.lines("HHHH HHHH", 49))
+        assertEquals(listOf("HHHH", " HHHH"), G2TextLayout.lines("HHHH HHHH", 54))
     }
 
     @Test
     fun aLineFeedEndsALine() {
-        assertEquals(0, G2TextLayout.lineCount("", G2Display.WIDTH_PX))
-        assertEquals(3, G2TextLayout.lineCount("one\ntwo\n", G2Display.WIDTH_PX))
+        assertEquals(emptyList<String>(), G2TextLayout.lines("", G2Display.WIDTH_PX))
+        assertEquals(listOf("one", "two", ""), G2TextLayout.lines("one\ntwo\n", G2Display.WIDTH_PX))
     }
 
     @Test
@@ -52,6 +53,15 @@ class G2TextLayoutTest {
         assertFalse(G2TextPage(padding = 14).fits(List(10) { "Hg" }.joinToString("\n")))
         assertTrue(page.fits("W".repeat(36 * 10)))
         assertFalse(page.fits("W".repeat(36 * 10 + 1)))
+    }
+
+    @Test
+    fun theFaceclawPanelFitsSeventeenLines() {
+        assertTrue(G2Panel.fits(List(17) { "Hg" }.joinToString("\n")))
+        assertFalse(G2Panel.fits(List(18) { "Hg" }.joinToString("\n")))
+        // A line of 640 px holds 40 "W" of 16 px; the stock container's 576 px hold 36.
+        assertTrue(G2Panel.fits("W".repeat(40 * 17)))
+        assertFalse(G2Panel.fits("W".repeat(40 * 17 + 1)))
     }
 
     @Test

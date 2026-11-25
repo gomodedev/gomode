@@ -1,5 +1,8 @@
-// Even G2's GlassesDisplay: one firmware text container, created on connect and updated in place; no images.
+// Even G2's GlassesDisplay: a stock firmware text container, or the whole panel with images on Faceclaw firmware.
 //
+// The session's first G2State.Ready names the firmware, and connect() returns the display it
+// draws: on stock firmware, one text container, created on connect and updated in place; on
+// Faceclaw firmware (G2Firmware.Faceclaw), text and images that the SDK draws on the whole panel.
 // The page's text container captures the touchpads and an R1 ring, whose clicks are presses.
 //
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
@@ -12,16 +15,22 @@
 // connect() and the watcher read belongs to this attempt.
 package com.fghbuild.gomode.glasses
 
+import android.graphics.Bitmap
 import com.fghbuild.eveng2.G2CloseCause
+import com.fghbuild.eveng2.G2Content
 import com.fghbuild.eveng2.G2Display
+import com.fghbuild.eveng2.G2Firmware
 import com.fghbuild.eveng2.G2Glasses
+import com.fghbuild.eveng2.G2Image
 import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2Panel
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.G2State
 import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.sdk.v1.DisplayColorSpace
 import com.fghbuild.gomode.sdk.v1.DisplayShape
+import com.fghbuild.gomode.voice.PNG_MIME_TYPE
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -35,8 +44,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Even G2's display of one eye as MCP requests declare it: 16 grey levels, which the glasses show in
- * green, and no image types, since Go Mode draws only text on stock firmware.
+ * Even G2's display of one eye on stock firmware as MCP requests declare it: 16 grey levels, which the
+ * glasses show in green, and no image types, since Go Mode draws only text there.
  *
  * Stock firmware draws an image only in an Even Hub image container of at most 288 by 144 pixels, four
  * to a page: the image container rows of the page schema in the enterprise SDK's
@@ -49,7 +58,8 @@ import kotlinx.coroutines.withContext
  * TODO(hardware): On a pair on stock firmware, rebuild the page with four 288 by 144 image containers
  * over the event-capturing text container and send each, one at a time, an uncompressed 4-bit BMP
  * (compressMode 0, 4 KiB fragments) through updateImage, whose wire format G2EvenHubCodec.kt of the
- * enterprise SDK holds. If all four draw, add image/png to imageTypes here and make EvenG2Glasses a GlassesImageDisplay.
+ * enterprise SDK holds. If all four draw, add image/png to imageTypes here and make EvenG2Glasses.Stock a
+ * GlassesImageDisplay.
  */
 internal val G2_DISPLAY =
     Display(
@@ -58,6 +68,20 @@ internal val G2_DISPLAY =
         shape = DisplayShape.Rectangle,
         colorSpace = DisplayColorSpace.Luminance,
         bitsPerPixel = bitsPerPixel(G2Display.GREY_LEVELS),
+    )
+
+/**
+ * Even G2's display of one eye on Faceclaw custom firmware: the whole [G2Panel] of 16 grey levels,
+ * on which Go Mode draws text and PNG images.
+ */
+internal val G2_FACECLAW_DISPLAY =
+    Display(
+        width = G2Panel.WIDTH_PX,
+        height = G2Panel.HEIGHT_PX,
+        shape = DisplayShape.Rectangle,
+        colorSpace = DisplayColorSpace.Luminance,
+        bitsPerPixel = bitsPerPixel(G2Panel.GREY_LEVELS),
+        imageTypes = listOf(PNG_MIME_TYPE),
     )
 
 /**
@@ -70,14 +94,17 @@ internal data class G2ScreenFit(
     override fun fits(text: String): Boolean = page.fits(utf8(text))
 }
 
-internal class EvenG2Glasses private constructor(
-    private val glasses: G2Glasses,
+/** The Faceclaw panel: it shows a text whole when [G2Panel.fits] it as [g2Text] sends it. */
+internal data object G2PanelFit : ScreenFit {
+    override fun fits(text: String): Boolean = G2Panel.fits(utf8(text))
+}
+
+internal sealed class EvenG2Glasses(
+    protected val glasses: G2Glasses,
 ) : GlassesDisplay {
     private val ended = MutableStateFlow<GlassesException?>(null)
     private var watcher: Job? = null
 
-    override val description = G2_DISPLAY
-    override val screenFit = G2ScreenFit(glasses.page)
     override val closeCause: StateFlow<Exception?> = ended.asStateFlow()
     override val presses: Flow<Unit> = glasses.presses
 
@@ -85,7 +112,11 @@ internal class EvenG2Glasses private constructor(
     override suspend fun showText(text: String) {
         val shown = g2Text(text)
         glasses.show(shown)
-        val state = glasses.state.first { (it is G2State.Ready && it.text == shown) || it is G2State.Closed }
+        awaitShown(G2Content.Text(shown))
+    }
+
+    protected suspend fun awaitShown(content: G2Content) {
+        val state = glasses.state.first { (it is G2State.Ready && it.shown == content) || it is G2State.Closed }
         if (state is G2State.Closed) throw end(state.cause)
     }
 
@@ -101,12 +132,36 @@ internal class EvenG2Glasses private constructor(
         return checkNotNull(ended.value)
     }
 
+    /** Stock firmware: one text container. */
+    private class Stock(
+        glasses: G2Glasses,
+    ) : EvenG2Glasses(glasses) {
+        override val description = G2_DISPLAY
+        override val screenFit = G2ScreenFit(glasses.page)
+    }
+
+    /** Faceclaw firmware: text and images drawn on the whole panel. */
+    private class Faceclaw(
+        glasses: G2Glasses,
+    ) : EvenG2Glasses(glasses),
+        GlassesImageDisplay {
+        override val description = G2_FACECLAW_DISPLAY
+        override val screenFit = G2PanelFit
+
+        /** Shows [image], fitted to the panel in its grey levels, and waits until both lenses draw it. */
+        override suspend fun showImage(image: Bitmap) {
+            val shown = g2Image(fitImage(image, G2Panel.WIDTH_PX, G2Panel.HEIGHT_PX))
+            glasses.show(shown)
+            awaitShown(G2Content.Image(shown))
+        }
+    }
+
     companion object {
         /**
-         * Opens a session of [glasses] with [pair], which shows the text [G2Glasses.show] last set.
-         * A [background] session waits for the arms to advertise; see [G2Glasses.connect]. [scope]
-         * watches the connection until [close]. The caller holds BLUETOOTH_CONNECT. A failure or
-         * cancellation disconnects.
+         * Opens a session of [glasses] with [pair], which shows what [G2Glasses.show] last set, and
+         * returns the display of the firmware it finds. A [background] session waits for the arms to
+         * advertise; see [G2Glasses.connect]. [scope] watches the connection until [close]. The
+         * caller holds BLUETOOTH_CONNECT. A failure or cancellation disconnects.
          */
         suspend fun connect(
             glasses: G2Glasses,
@@ -121,19 +176,40 @@ internal class EvenG2Glasses private constructor(
                 glasses.connect(pair, background)
                 val first = glasses.state.first { it is G2State.Ready || it is G2State.Closed }
                 if (first is G2State.Closed) throw first.cause.toGlassesException()
-                return EvenG2Glasses(glasses).also { display ->
-                    display.watcher =
-                        scope.launch {
-                            val closed = glasses.state.filterIsInstance<G2State.Closed>().first()
-                            display.end(closed.cause)
-                        }
-                    connected = display
-                }
+                val firmware = (first as G2State.Ready).firmware
+                val display = if (firmware is G2Firmware.Faceclaw) Faceclaw(glasses) else Stock(glasses)
+                display.watcher =
+                    scope.launch {
+                        val closed = glasses.state.filterIsInstance<G2State.Closed>().first()
+                        display.end(closed.cause)
+                    }
+                connected = display
+                return display
             } finally {
                 if (connected == null) withContext(NonCancellable) { glasses.disconnect() }
             }
         }
     }
+}
+
+/**
+ * [image] in the panel's grey levels: each pixel's BT.601 luma over black, at its opacity, rounded to
+ * the nearest of [G2Panel.GREY_LEVELS] levels.
+ */
+private fun g2Image(image: Bitmap): G2Image {
+    val pixels = IntArray(image.width * image.height)
+    image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
+    val top = G2Panel.GREY_LEVELS - 1
+    val levels =
+        ByteArray(pixels.size) { i ->
+            val argb = pixels[i]
+            // 0.299 R + 0.587 G + 0.114 B in thousandths, scaled by alpha.
+            val luma = 299 * (argb ushr 16 and 0xFF) + 587 * (argb ushr 8 and 0xFF) + 114 * (argb and 0xFF)
+            val shaded = luma.toLong() * (argb ushr 24) * top
+            val scale = 1000L * 255 * 255
+            ((shaded + scale / 2) / scale).toInt().toByte()
+        }
+    return G2Image(image.width, image.height, levels)
 }
 
 /**
@@ -191,6 +267,10 @@ private fun G2CloseCause.toGlassesException(): GlassesException {
 
             is G2CloseCause.CommandRejected -> {
                 "Even G2 refused ${command.name} (result=$result)"
+            }
+
+            is G2CloseCause.DrawFailed -> {
+                if (rejected) "Even G2 refused to draw Go Mode's screen" else "Even G2 did not draw Go Mode's screen"
             }
 
             is G2CloseCause.PageExited -> {

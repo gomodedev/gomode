@@ -1,14 +1,15 @@
-// G2Glasses: runs one Even G2 session per connect() with a text page, ending with a typed close cause.
+// G2Glasses: one Even G2 session per connect() showing text, or images on custom firmware, until a typed close cause.
 //
 // Entry point of the SDK. connect() publishes G2State.Connecting before it returns and runs one
-// G2Session in the owner's scope: the state becomes G2State.Ready each time the glasses
-// acknowledge a text, and G2State.Closed with the session's G2CloseCause when it ends. The SDK
-// never reconnects; the host decides whether and when to call connect() again, for example
-// after a retryable cause. Request and page session IDs stay unique across the sessions of one
-// G2Glasses, and each page starts with the latest text from show(). A superseded session never
-// publishes state. A replaced or stopped session stays in `job` until it has finished, so a
-// later connect() joins it and never runs two sessions at once. An exception that escapes a
-// session ends it with G2CloseCause.Failed. presses reports the current session's presses only.
+// G2Session in the owner's scope: the state becomes G2State.Ready, naming the firmware the
+// session found, each time the glasses acknowledge what they show, and G2State.Closed with the
+// session's G2CloseCause when it ends. The SDK never reconnects; the host decides whether and
+// when to call connect() again, for example after a retryable cause. Request and page session
+// IDs stay unique across the sessions of one G2Glasses, and each page starts with the latest
+// content from show(). A superseded session never publishes state. A replaced or stopped session
+// stays in `job` until it has finished, so a later connect() joins it and never runs two
+// sessions at once. An exception that escapes a session ends it with G2CloseCause.Failed.
+// presses reports the current session's presses only.
 
 package com.fghbuild.eveng2
 
@@ -32,7 +33,7 @@ class G2Glasses(
 ) {
     private val lock = Any()
     private val mutableState = MutableStateFlow<G2State>(G2State.Idle)
-    private val desired = MutableStateFlow("")
+    private val desired = MutableStateFlow<G2Content>(G2Content.Text(""))
     private val ids = G2Ids()
     private var job: Job? = null
     private var generation = 0L
@@ -72,11 +73,21 @@ class G2Glasses(
 
     /**
      * Show [text], at most [G2Display.MAX_TEXT_BYTES] UTF-8 bytes. It is updated in place while
-     * a page is open and used by every page a later session creates.
+     * a page is open and used by every page a later session creates. Stock firmware lays it out in
+     * the [page]'s text container; [G2Firmware.Faceclaw] draws it on the whole [G2Panel], wrapped
+     * as a container of the panel's width would wrap it, and drops the lines below its height.
      */
     fun show(text: String) {
         G2EvenHub.requireText(text)
-        desired.value = text
+        desired.value = G2Content.Text(text)
+    }
+
+    /**
+     * Show [image], centred on the [G2Panel], while a session runs on [G2Firmware.Faceclaw] and in
+     * every later session. Stock firmware draws no images, so a session on it shows empty text.
+     */
+    fun show(image: G2Image) {
+        desired.value = G2Content.Image(image)
     }
 
     /** Close the page and both links; the state becomes [G2State.Closed] with [G2CloseCause.Stopped]. */
@@ -107,7 +118,7 @@ class G2Glasses(
                 page,
                 ids,
                 desired,
-                onReady = { publish(current, G2State.Ready(pair, it)) },
+                onReady = { firmware, shown -> publish(current, G2State.Ready(pair, firmware, shown)) },
                 onPress = { press(current) },
             )
         val cause =

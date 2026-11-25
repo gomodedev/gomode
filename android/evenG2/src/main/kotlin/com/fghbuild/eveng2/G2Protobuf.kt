@@ -6,7 +6,8 @@
 //
 // The reader fails closed: a repeated field number, an unsupported wire type, an overlong
 // varint, a truncated field, or a scalar above uint32 rejects the whole message, so a reply
-// cannot pass as another by protobuf default values.
+// cannot pass as another by protobuf default values. Its lenient form reads the settings reply,
+// whose many fields only the firmware's schema knows, and still rejects a malformed encoding.
 
 package com.fghbuild.eveng2
 
@@ -51,7 +52,7 @@ internal class G2ProtoWriter {
 
 internal fun protobuf(block: G2ProtoWriter.() -> Unit): ByteArray = G2ProtoWriter().apply(block).toByteArray()
 
-/** One decoded field: a varint [scalar], length-delimited [bytes], or a skipped fixed32 (wire 5). */
+/** One decoded field: a varint [scalar], length-delimited [bytes], or a skipped fixed64 or fixed32 (wire 1 or 5). */
 internal class G2ProtoField(
     val wire: Int,
     val scalar: Long? = null,
@@ -62,6 +63,26 @@ internal object G2ProtoReader {
     /** Decode one message level; null when it is malformed. */
     fun fields(data: ByteArray): Map<Int, G2ProtoField>? {
         val result = LinkedHashMap<Int, G2ProtoField>()
+        for ((number, field) in decode(data, lenient = false) ?: return null) {
+            if (number in result) return null
+            result[number] = field
+        }
+        return result
+    }
+
+    /**
+     * Every field of one message level in order, for a message this SDK reads one or two fields of:
+     * repeated numbers, scalars above uint32, and skipped fixed64 values (wire 1) are allowed. Null
+     * when the encoding itself is malformed.
+     */
+    fun all(data: ByteArray): List<Pair<Int, G2ProtoField>>? = decode(data, lenient = true)
+
+    @Suppress("CyclomaticComplexMethod", "ReturnCount") // One linear walk over the wire types.
+    private fun decode(
+        data: ByteArray,
+        lenient: Boolean,
+    ): List<Pair<Int, G2ProtoField>>? {
+        val result = mutableListOf<Pair<Int, G2ProtoField>>()
         var offset = 0
 
         fun varint(): Long? {
@@ -78,13 +99,20 @@ internal object G2ProtoReader {
         while (offset < data.size) {
             val key = varint() ?: return null
             val number = key ushr 3
-            if (key < 0 || number <= 0 || number > Int.MAX_VALUE || number.toInt() in result) return null
-            result[number.toInt()] =
+            if (key < 0 || number <= 0 || number > Int.MAX_VALUE) return null
+            result +=
+                number.toInt() to
                 when (val wire = (key and 7).toInt()) {
                     0 -> {
                         val scalar = varint() ?: return null
-                        if (scalar !in 0..UINT32_MAX) return null
+                        if (!lenient && scalar !in 0..UINT32_MAX) return null
                         G2ProtoField(wire, scalar = scalar)
+                    }
+
+                    1 -> {
+                        if (!lenient || data.size - offset < 8) return null
+                        offset += 8
+                        G2ProtoField(wire)
                     }
 
                     2 -> {

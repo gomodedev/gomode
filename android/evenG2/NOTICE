@@ -97,3 +97,44 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+------------------------------------------------------------------------------
+faceclaw (jimrandomh/faceclaw)
+https://github.com/jimrandomh/faceclaw
+Commit 2e416b53679baf3c9e312c77f53a2b41f9b62d93.
+
+G2Settings.kt ports and modifies buildSettingsQuery,
+parseSettingsFirmwareInfo, and buildFaceclawWakeControl of
+native/kotlin/shared/src/commonMain/kotlin/com/faceclaw/app/g2protocol/
+BleProtocol.kt, and the revision check of app/g2/firmware-compat.ts.
+G2CfwStream.kt ports and modifies g2protocol/CfwTransport.kt. G2Panel.kt
+ports and modifies the stockText, bbox, clear, and message builders of
+g2protocol/DrawProtocol.kt and the message and call IDs of CfwMessageType.kt,
+DrawCallType.kt, and DrawFlags.kt. G2RingFilter in G2EvenHub.kt ports
+app/ui/input-monitor.ts. The golden bytes in G2FaceclawWireTest.kt come from
+tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
+DrawWireTest.kt.
+
+------------------------------------------------------------------------------
+g2flash (jimrandomh/g2flash)
+https://github.com/jimrandomh/g2flash
+Commit c8fd8e85c77e8f378cce52029dd1225e4ab11caa, the commit that
+scripts/g2_cfw.py pins.
+
+The wire formats in G2Settings.kt, G2CfwStream.kt, G2Panel.kt, G2EvenHub.kt,
+and the fake glasses in testing/ follow patches/settings_ext.c,
+message_transport.c, transport_compression.c, zlib_glue.c, display_list.c,
+rle.h, texture_draw.c, and gesture_fwd.c, the receivers of the messages above.
+
+Both projects are free software: you can redistribute and/or modify them under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License. The files above that port their code are
+covered by that license as well as by the GNU Affero General Public License,
+version 3, of Go Mode, as section 13 of each license permits. The full text of
+the GNU General Public License is in LICENSE-GPL-3.0 beside this file, and at
+
+    https://www.gnu.org/licenses/gpl-3.0.html
+
+They are distributed in the hope that they will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU General Public License for more details.

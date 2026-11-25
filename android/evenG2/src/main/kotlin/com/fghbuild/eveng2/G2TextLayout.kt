@@ -33,34 +33,41 @@ internal object G2TextLayout {
     // The table also names each font.
     private val tableJson = Json { ignoreUnknownKeys = true }
 
-    private val table: FontTable by lazy {
-        val stream =
-            checkNotNull(G2TextLayout::class.java.getResourceAsStream("evenhub-font.json")) {
-                "evenhub-font.json is missing from the Even G2 SDK"
-            }
-        stream.bufferedReader().use { tableJson.decodeFromString<FontTable>(it.readText()) }
-    }
+    private val tableLoader =
+        lazy {
+            val stream =
+                checkNotNull(G2TextLayout::class.java.getResourceAsStream("evenhub-font.json")) {
+                    "evenhub-font.json is missing from the Even G2 SDK"
+                }
+            stream.bufferedReader().use { tableJson.decodeFromString<FontTable>(it.readText()) }
+        }
+    private val table: FontTable by tableLoader
 
-    /** Reads the font table on an IO thread, so that measuring later does not. */
+    /**
+     * Reads the font table on an IO thread, so that measuring later does not. Once it is read, returns
+     * at once without leaving the caller's dispatcher.
+     */
     suspend fun load() {
-        withContext(Dispatchers.IO) { table }
+        if (!tableLoader.isInitialized()) withContext(Dispatchers.IO) { table }
     }
 
-    /** How many lines the firmware wraps [text] into at [width] pixels; 0 for empty text. */
-    fun lineCount(
+    /** The lines the firmware wraps [text] into at [width] pixels, without their line feeds; none for empty text. */
+    fun lines(
         text: String,
         width: Int,
-    ): Int {
+    ): List<String> {
         val cps = text.codePoints().toArray()
-        if (cps.isEmpty()) return 0
-        var lines = 1
+        if (cps.isEmpty()) return emptyList()
+        val lines = mutableListOf<String>()
         var lineStart = 0
         var lineWidth = 0
         var lastBreak = -1
         var i = 0
         while (i < cps.size) {
             val cp = cps[i]
+            val lineEnd: Int
             if (cp == LINE_FEED) {
+                lineEnd = i
                 i++
             } else {
                 val advance = advancePx(cp, cps.getOrElse(i + 1) { 0 })
@@ -72,13 +79,21 @@ internal object G2TextLayout {
                 }
                 // The line continues after its last break, or at the overflowing character.
                 if (cp != SPACE && lastBreak >= 0) i = lastBreak + 1
+                lineEnd = i
             }
-            lines++
+            lines += String(cps, lineStart, lineEnd - lineStart)
             lineStart = i
             lineWidth = 0
             lastBreak = -1
         }
+        lines += String(cps, lineStart, cps.size - lineStart)
         return lines
+    }
+
+    /** The width of [text] on one line, in pixels. */
+    fun widthPx(text: String): Int {
+        val cps = text.codePoints().toArray()
+        return cps.indices.sumOf { advancePx(cps[it], cps.getOrElse(it + 1) { 0 }) }
     }
 
     private fun advancePx(

@@ -2,8 +2,8 @@
 //
 // Ported and modified from G2EvenHubCodec.kt of the Even Realities enterprise SDK
 // 0.1.0-beta.14 (Apache-2.0, Copyright 2026 Hong Kong Even Realities Limited), narrowed to one
-// text container; defaults follow the even-g2-protocol Python library (MIT); see NOTICE in
-// this module.
+// text container; defaults follow the even-g2-protocol Python library (MIT). G2RingFilter is
+// ported from jimrandomh/faceclaw (GPL-3.0). See NOTICE in this module.
 //
 // Every request is one protobuf envelope, framed with header flag 0x20 and sent to the right
 // arm: {1: command, 2: magic (1..255), <request branch>: body}. A reply echoes the magic as
@@ -36,6 +36,15 @@
 // both. The enterprise contract vector g2_evenhub_click_hex is a text event click; the README of
 // Even Realities' @evenrealities/even_hub_sdk 0.0.16 npm package (MIT) says source-aware input,
 // whose sources include the ring, arrives as system events.
+//
+// Under Faceclaw's framebuffer lease (G2Settings), g2flash's patches/gesture_fwd.c (GPL-3.0) changes
+// the input: touchpad and ring long presses arrive as system events 9 and 10 instead of opening the
+// stock menu that offers to quit, a tap then hold as 11, head up and down as 12 and 15, and a ring
+// touch-down as 14. Every R1 report then arrives raw as a system event from the ring whose field 100
+// holds it: 'R' 'I' 1 1 <report type> <aux> <speed> 0 <ring tick u32 LE>, without the stock firmware's
+// suppression of a report within 100 ring ticks of the last; G2RingFilter, ported from faceclaw's
+// app/ui/input-monitor.ts (GPL-3.0), suppresses them as faceclaw does. None of the new events is a
+// click, so a press stays one click of a touchpad or the ring.
 //
 // TODO(hardware): Confirm on a real pair, on stock firmware, which event one touchpad click and one
 // R1 ring click send, from which arm, and that a double click sends only type 3, not a click
@@ -96,7 +105,7 @@ data class G2TextPage(
         // show 10 and then 11 lines of "Hg" in the default 576×288 container: 10 should show whole
         // and 11 scroll. If not, correct this.
         val inner = 2 * padding
-        return G2TextLayout.lineCount(text, width - inner) * G2TextLayout.lineHeightPx <= height - inner
+        return G2TextLayout.lines(text, width - inner).size * G2TextLayout.lineHeightPx <= height - inner
     }
 
     companion object {
@@ -139,6 +148,12 @@ object G2EvenHub {
 
     // Input sources of a system event: right temple touchpad, R1 ring, left temple touchpad.
     private val PRESS_SOURCES = 1L..3L
+    private const val RING_SOURCE = 2L
+    private const val RING_REPORT_FIELD = 100
+    private const val RING_REPORT_SIZE = 12
+
+    // 'R' 'I', version 1, flags 1.
+    private val RING_REPORT_HEADER = byteArrayOf('R'.code.toByte(), 'I'.code.toByte(), 1, 1)
     private const val ABNORMAL_EXIT = 6L
     private const val EXIT = 7L
     private val BRANCHES = 3..26
@@ -295,7 +310,7 @@ object G2EvenHub {
             }
 
             SYSTEM_EVENT -> {
-                event.keys.all { it in 1..6 } &&
+                event.keys.all { it in 1..6 || (it == RING_REPORT_FIELD && ringReport(event) != null) } &&
                     event.enum(1) == CLICK &&
                     event.scalar(2) in PRESS_SOURCES &&
                     (5 !in event || event.scalar(5) == page.widgetId) &&
@@ -306,6 +321,22 @@ object G2EvenHub {
                 false
             }
         }
+    }
+
+    /** The raw R1 report that Faceclaw firmware attaches to a ring system event in [message], or null. */
+    fun ringReport(message: G2Message): G2RingReport? {
+        val (branch, event) = deviceEvent(message) ?: return null
+        return if (branch == SYSTEM_EVENT) ringReport(event) else null
+    }
+
+    private fun ringReport(event: Map<Int, G2ProtoField>): G2RingReport? {
+        val raw = event.bytes(RING_REPORT_FIELD) ?: return null
+        if (event.scalar(2) != RING_SOURCE || raw.size != RING_REPORT_SIZE) return null
+        if (!raw.copyOfRange(0, RING_REPORT_HEADER.size).contentEquals(RING_REPORT_HEADER) || raw[7] != 0.toByte()) {
+            return null
+        }
+        val tick = (0 until Int.SIZE_BYTES).sumOf { (raw[8 + it].toLong() and 0xFF) shl (8 * it) }
+        return G2RingReport(raw[4].toInt() and 0xFF, tick)
     }
 
     // The single event of a device event message, as its branch and fields; null when [message] is not one.
@@ -324,4 +355,37 @@ object G2EvenHub {
 
     // An enum [field]: proto3 omits its zero value; null when it has another wire type.
     private fun Map<Int, G2ProtoField>.enum(field: Int): Long? = if (field in this) scalar(field) else 0L
+}
+
+/** One R1 report as Faceclaw firmware forwards it: its [type] and the ring's own [tick] counter. */
+data class G2RingReport(
+    val type: Int,
+    val tick: Long,
+)
+
+/**
+ * Drops an R1 report within 100 ring ticks of the last one it passed, as stock firmware does before it
+ * reports ring input. A release (type 8) and a touch-down (type 10) always pass, and a touch-down does
+ * not start a new interval. One filter serves one session.
+ */
+internal class G2RingFilter {
+    private var lastTick = 0L
+
+    fun accept(report: G2RingReport): Boolean {
+        if (report.type != RELEASE &&
+            report.type != TOUCH_DOWN &&
+            lastTick != 0L &&
+            (report.tick - lastTick) and UINT32_MAX < INTERVAL_TICKS
+        ) {
+            return false
+        }
+        if (report.type != TOUCH_DOWN) lastTick = report.tick
+        return true
+    }
+
+    private companion object {
+        const val RELEASE = 8
+        const val TOUCH_DOWN = 10
+        const val INTERVAL_TICKS = 100L
+    }
 }

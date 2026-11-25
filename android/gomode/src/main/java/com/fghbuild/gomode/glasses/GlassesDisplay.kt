@@ -10,10 +10,10 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * A connected pair of glasses that shows text and reports its one deliberate press; a
- * [GlassesImageDisplay] also draws images. Each
- * glasses model implements it: [HaloGlasses] rasterizes text on the phone; [EvenG2Glasses] hands it
- * to firmware that lays it out. [GlassesOwner] holds at most one and replaces it after the connection
- * ends.
+ * [GlassesImageDisplay] also draws images. Each glasses model implements it: [HaloGlasses]
+ * rasterizes text on the phone; [EvenG2Glasses] hands it to stock firmware that lays it out, or
+ * draws it on custom firmware. [GlassesOwner] holds at most one and replaces it after the
+ * connection ends.
  */
 internal interface GlassesDisplay {
     /** The display as MCP requests declare it while these glasses are connected. */

@@ -105,7 +105,7 @@ export interface Display {
   /**
    * ImageTypes lists the MIME types of the glasses image blocks the client
    * draws on this display, such as "image/png". It is empty when the client
-   * draws glasses text alone, as on Even Realities G2.
+   * draws glasses text alone, as on Even Realities G2 with stock firmware.
    */
   imageTypes?: string[];
 }

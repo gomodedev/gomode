@@ -4,9 +4,20 @@
 // the left, waiting for each arm's success (the behaviour of the GPL faceclaw client; the
 // Python library also AUTHs the right arm first but listens on the right arm only and never
 // waits for the left). Then, as the even-g2-protocol Python library (MIT)
-// does: send the prelude to the right arm and wait for its ACK; create the text page; send a
-// heartbeat every G2Protocol.HEARTBEAT_INTERVAL_MS. The text is updated in place whenever the
-// host's text differs from the acknowledged one. Every Even Hub command goes to the right arm.
+// does: send the prelude to the right arm and wait for its ACK. Then read the settings of the
+// right arm, as faceclaw does, to learn the firmware (G2Settings); an unanswered read counts as
+// stock firmware. Create the text page and send a heartbeat every G2Protocol.HEARTBEAT_INTERVAL_MS.
+// On stock firmware the text is updated in place whenever the host's text differs from the
+// acknowledged one, and an image shows as empty text. Every Even Hub command goes to the right arm.
+//
+// On Faceclaw firmware, as faceclaw does: take the framebuffer lease on both arms before the page,
+// renew it every G2Settings.LEASE_RENEW_MS, and release it on every exit while a link remains, so
+// stock widgets repaint at once. The page is created with empty text: its container only captures
+// input. Each frame goes through the private stream (G2CfwStream) to the left arm, which hands it
+// to the right lens; every message waits for both lenses' ACK, and a missing or refused ACK ends
+// the session. Its packets go out back to back, which the stream allows, and carry up to 252
+// bytes, zlib-compressed, where the Even Hub messages carry 139 bytes 50 ms apart.
+//
 // Once the page may be open, a press from either arm is reported and leaves the page open.
 // A dropped link, a missing or refused reply, or a page exit event ends the session with a
 // G2CloseCause. From the moment the create request is written, the page may be open: unless
@@ -43,6 +54,7 @@ import java.util.concurrent.ConcurrentHashMap
 internal class G2Ids {
     private var magic = 0
     private var sync = 0
+    private var stream = 0
     private var session = 0L
 
     /** Next request magic; the range fits both AUTH and Even Hub. */
@@ -56,6 +68,13 @@ internal class G2Ids {
     fun sync(): Int {
         sync = (sync + 1) and 0xFF
         return sync
+    }
+
+    /** Next first sequence of a private-stream message, whose ACKs name it. */
+    @Synchronized
+    fun stream(): Int {
+        stream = (stream + 1) and 0xFF
+        return stream
     }
 
     @Synchronized
@@ -88,16 +107,21 @@ internal class G2Session(
     private val background: Boolean,
     private val page: G2TextPage,
     private val ids: G2Ids,
-    private val desired: StateFlow<String>,
-    private val onReady: (String) -> Unit,
+    private val desired: StateFlow<G2Content>,
+    private val onReady: (G2Firmware, G2Content) -> Unit,
     private val onPress: () -> Unit,
 ) {
     private val links = ConcurrentHashMap<G2Side, G2ArmLink>()
     private val inbox = Channel<Inbound>(INBOX_CAPACITY)
     private val writeLock = Mutex()
+    private val ringFilter = G2RingFilter()
+    private val stream = G2CfwStream()
 
     // The session ID of the page that may be open; null until its create request is written.
     private var pageSession: Long? = null
+
+    // Whether the framebuffer lease may be held; set before its first request is written.
+    private var leased = false
 
     /** Run until the session ends; returns why. Cancellation closes the page and both links. */
     suspend fun run(): G2CloseCause {
@@ -108,22 +132,31 @@ internal class G2Session(
                 authenticate(G2Side.RIGHT)
                 authenticate(G2Side.LEFT)
                 prelude()
-                val text = createPage()
+                val firmware = firmware()
+                if (firmware is G2Firmware.Faceclaw) {
+                    leased = true
+                    lease(G2Settings.LEASE_ACQUIRE)
+                    launch { renewLease() }
+                }
+                val shown = createPage(firmware)
                 launch { heartbeat() }
                 val wake = Channel<Unit>(Channel.CONFLATED)
                 launch { desired.collect { wake.send(Unit) } }
-                serve(text, wake)
+                serve(firmware, shown, wake)
             }
         } catch (e: G2Closed) {
             val reason = e.reason
             val rightLost = reason is G2CloseCause.Disconnected && reason.side == G2Side.RIGHT
+            releaseLease()
             if (reason !is G2CloseCause.PageExited && !rightLost) shutdownPage()
             return reason
         } catch (e: CancellationException) {
+            releaseLease()
             shutdownPage()
             throw e
         } finally {
             links.values.forEach { it.close() }
+            stream.close()
         }
     }
 
@@ -194,7 +227,12 @@ internal class G2Session(
                 if (inbound.side == G2Side.RIGHT) {
                     G2EvenHub.pageExit(inbound.message, page, session)?.let { throw G2Closed(it) }
                 }
-                if (G2EvenHub.press(inbound.message, page, session)) onPress()
+                val ring = G2EvenHub.ringReport(inbound.message)
+                if ((ring == null || ringFilter.accept(ring)) &&
+                    G2EvenHub.press(inbound.message, page, session)
+                ) {
+                    onPress()
+                }
                 return inbound
             }
         }
@@ -217,12 +255,13 @@ internal class G2Session(
     private suspend fun write(
         side: G2Side,
         packets: List<ByteArray>,
+        gapMs: Long = PACKET_GAP_MS,
     ) {
         val link = links.getValue(side)
         writeLock.withLock {
             try {
                 packets.forEachIndexed { index, packet ->
-                    if (index > 0) delay(PACKET_GAP_MS)
+                    if (index > 0 && gapMs > 0) delay(gapMs)
                     link.write(packet)
                 }
             } catch (e: G2LinkLostException) {
@@ -255,6 +294,77 @@ internal class G2Session(
         } ?: throw G2Closed(G2CloseCause.PreludeTimedOut)
     }
 
+    // TODO(hardware): faceclaw reads the settings on stock firmware too, but reports that a right arm
+    // on stock 2.2.9 sometimes stays silent after AUTH and then asks the left arm. On a pair on stock
+    // firmware and on Faceclaw/45, log this read's reply on each connection. If the right arm misses
+    // it, ask the left arm too before taking the firmware as stock, since a missed reply on Faceclaw
+    // firmware draws only the stock text container until the next connection.
+    private suspend fun firmware(): G2Firmware {
+        val magic = ids.magic()
+        write(G2Side.RIGHT, G2Settings.read(magic, ids.sync()))
+        return await(G2Protocol.COMMAND_TIMEOUT_MS) { from, message ->
+            if (from == G2Side.RIGHT) G2Settings.firmware(message, magic) else null
+        } ?: G2Firmware.EvenHub(null)
+    }
+
+    private suspend fun lease(op: Int) {
+        write(G2Side.RIGHT, G2Settings.lease(op, ids.sync()))
+        write(G2Side.LEFT, G2Settings.lease(op, ids.sync()))
+    }
+
+    private suspend fun renewLease() {
+        while (true) {
+            delay(G2Settings.LEASE_RENEW_MS)
+            lease(G2Settings.LEASE_ACQUIRE)
+        }
+    }
+
+    /** Best effort, after the pumps stop: release the lease on every arm whose link remains. */
+    private suspend fun releaseLease() {
+        if (!leased) return
+        withContext(NonCancellable) {
+            withTimeoutOrNull(G2Protocol.COMMAND_TIMEOUT_MS) {
+                for (link in listOfNotNull(links[G2Side.RIGHT], links[G2Side.LEFT])) {
+                    try {
+                        G2Settings.lease(G2Settings.LEASE_RELEASE, ids.sync()).forEach { link.write(it) }
+                    } catch (_: G2Exception) {
+                        // The link is gone; the firmware drops the lease on its own.
+                    }
+                }
+            }
+        }
+    }
+
+    /** Send [message] on the private stream and wait until both lenses acknowledge it. */
+    private suspend fun cfw(message: ByteArray) {
+        // TODO(hardware): Every drawing message waits for its ACK before the next one goes out; faceclaw
+        // keeps three in flight. g2flash says a PRESENT fails when the display task does not answer within
+        // a second, which would end the session here. On a pair on Faceclaw/45, time a text frame and a
+        // 640×480 photo, and count NACKs over an hour of transcripts. If a frame takes over a second,
+        // pipeline the messages as CfwMessageWindow.kt of faceclaw does; if NACKs occur, resend a refused
+        // message once with a reset record before ending the session. faceclaw also requests
+        // CONNECTION_PRIORITY_HIGH on each arm, which G2GattConnector does not; g2flash's firmware asks
+        // for a 7.5 ms interval on its own (patches/ble_link.c). If frames are slow, request it too.
+        val link = links.getValue(G2Side.LEFT)
+        val id = ids.stream()
+        write(G2Side.LEFT, stream.packets(message, id, link.mtu), gapMs = 0)
+        val checksum = G2Frame.crc16(message)
+        val acked = mutableSetOf<Int>()
+        val outcome =
+            await(G2Protocol.COMMAND_TIMEOUT_MS) { from, inbound ->
+                val ack = if (from == G2Side.LEFT) G2CfwStream.ack(inbound) else null
+                when {
+                    ack == null || ack.stream != id || ack.message != 0 -> null
+                    ack.nack -> false
+                    ack.size != message.size || ack.checksum != checksum -> null
+                    else -> true.takeIf { acked.add(ack.lens) && acked.size == 2 }
+                }
+            }
+        if (outcome != true) throw G2Closed(G2CloseCause.DrawFailed(rejected = outcome == false))
+    }
+
+    private suspend fun draw(content: G2Content) = G2Draw.frame(content).forEach { cfw(it) }
+
     private suspend fun command(
         command: G2HubCommand,
         build: (magic: Int, sync: Int) -> List<ByteArray>,
@@ -273,16 +383,39 @@ internal class G2Session(
         }
     }
 
-    /** Open the page with the host's text, or empty when it exceeds the creation limit; returns the text shown. */
-    private suspend fun createPage(): String {
-        val text = desired.value.takeIf { it.toByteArray().size <= G2Display.MAX_CREATE_TEXT_BYTES }.orEmpty()
+    /**
+     * Open the page and show the host's content on it: on stock firmware its text, or empty text when
+     * it exceeds the creation limit; on Faceclaw firmware a frame drawn over an empty container.
+     * Returns what is shown.
+     */
+    private suspend fun createPage(firmware: G2Firmware): G2Content {
+        val target = shown(firmware, desired.value)
+        val text =
+            (target as? G2Content.Text)
+                ?.text
+                ?.takeIf { firmware is G2Firmware.EvenHub && it.toByteArray().size <= G2Display.MAX_CREATE_TEXT_BYTES }
+                .orEmpty()
         val session = ids.session()
         // Set before the request is written: the page may open even when its ACK never arrives.
         pageSession = session
         command(G2HubCommand.CREATE_PAGE) { magic, sync -> G2EvenHub.createPage(page, text, session, magic, sync) }
-        onReady(text)
-        return text
+        val shown =
+            if (firmware is G2Firmware.Faceclaw) {
+                cfw(G2Draw.clearRoot)
+                draw(target)
+                target
+            } else {
+                G2Content.Text(text)
+            }
+        onReady(firmware, shown)
+        return shown
     }
+
+    // What [firmware] shows of [content]: stock firmware shows an image as empty text.
+    private fun shown(
+        firmware: G2Firmware,
+        content: G2Content,
+    ): G2Content = if (firmware is G2Firmware.EvenHub && content is G2Content.Image) G2Content.Text("") else content
 
     // TODO(hardware): Heartbeats are not awaited because both consumer-firmware sources send
     // them fire-and-forget; the enterprise SDK expects an ACK (command 13, or 12 on enterprise
@@ -296,23 +429,35 @@ internal class G2Session(
         }
     }
 
-    /** Apply the host's text in place, forever; unsolicited messages only matter as page exits. */
+    /** Show the host's content, forever; unsolicited messages only matter as page exits and presses. */
     private suspend fun serve(
-        initial: String,
+        firmware: G2Firmware,
+        initial: G2Content,
         wake: Channel<Unit>,
     ): Nothing {
         var shown = initial
         while (true) {
-            val target = desired.value
+            val target = shown(firmware, desired.value)
             if (target == shown) {
                 select<Unit> {
                     wake.onReceive { }
                     inbox.onReceive { accept(it) }
                 }
             } else {
-                command(G2HubCommand.UPDATE_TEXT) { magic, sync -> G2EvenHub.updateText(page, target, magic, sync) }
+                when (firmware) {
+                    is G2Firmware.Faceclaw -> {
+                        draw(target)
+                    }
+
+                    is G2Firmware.EvenHub -> {
+                        val text = (target as G2Content.Text).text
+                        command(
+                            G2HubCommand.UPDATE_TEXT,
+                        ) { magic, sync -> G2EvenHub.updateText(page, text, magic, sync) }
+                    }
+                }
                 shown = target
-                onReady(target)
+                onReady(firmware, target)
             }
         }
     }

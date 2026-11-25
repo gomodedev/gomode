@@ -26,8 +26,12 @@
 # Go Mode and the Even app, or turn off the phone's Bluetooth, before running. On macOS bleak
 # reports per-host UUIDs instead of MACs, which g2flash takes as addressType=random.
 #
-# Go Mode's G2 client (android/evenG2) uses the stock Even Hub page API. g2flash's firmware
-# keeps that API but changes much of Even Hub, and Go Mode is untested on it.
+# The firmware of the pinned commit reports "Faceclaw/45" in its settings reply. Go Mode's G2
+# client (android/evenG2, G2Settings) detects it and draws text and images on the whole panel
+# through the firmware's private stream; on any other firmware it keeps the stock Even Hub page.
+# No pair has run Go Mode on this firmware yet; the TODO(hardware) notes in android/evenG2 list
+# what to check. A new pin whose revision changes the drawing contract needs a matching
+# G2Firmware.MIN_FACECLAW_REVISION.
 
 import argparse
 import asyncio

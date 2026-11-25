@@ -22,6 +22,9 @@ class G2LinkLostException(
 interface G2ArmLink {
     val side: G2Side
 
+    /** The ATT MTU of the link, at least [G2Protocol.MIN_MTU]. */
+    val mtu: Int
+
     /**
      * Notification values of the notify characteristic in arrival order. The channel closes
      * with [G2LinkLostException] when the link drops.

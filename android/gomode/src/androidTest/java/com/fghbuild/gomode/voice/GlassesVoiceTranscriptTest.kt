@@ -33,8 +33,10 @@ import com.fghbuild.gomode.LocalEmulatorOnly
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceSetupMode
+import com.fghbuild.gomode.glasses.G2PanelFit
 import com.fghbuild.gomode.glasses.G2ScreenFit
 import com.fghbuild.gomode.glasses.G2_DISPLAY
+import com.fghbuild.gomode.glasses.G2_FACECLAW_DISPLAY
 import com.fghbuild.gomode.glasses.GlassesLink
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.HALO_DISPLAY
@@ -255,6 +257,97 @@ class GlassesVoiceTranscriptTest {
 
                     composeRule.onNodeWithContentDescription("End voice").performClick()
                     composeRule.waitUntil(TIMEOUT_MS) { halo.lastSent(haloTextMessages("")) }
+                } finally {
+                    composeRule.runOnUiThread {
+                        glassesScope.cancel()
+                        shellOwner.close()
+                    }
+                    models.close()
+                    fixture.close()
+                }
+            }
+        }
+
+    // On Faceclaw custom firmware an Even G2 declares its whole panel with PNG images, and a tool's
+    // image block for the user is drawn there, centred, in the panel's grey levels.
+    @Test
+    fun aToolsImageDrawsOnAnEvenG2WithCustomFirmwareThatDeclaresImages() =
+        runBlocking {
+            MockWebServer().use { server ->
+                val fixture = ServerVoiceSwitchTest.HostedVoiceFixture(bearer = false)
+                server.dispatcher = fixture
+                server.start()
+                val repository = SettingsRepository(MemoryPreferences())
+                repository.addService("Local stack", server.url("/").toString())
+                repository.updateSavedVoiceSetup(null) {
+                    it.copy(preference = it.preference.copy(mode = VoiceSetupMode.FOLLOW_GATEWAY))
+                }
+                repository.settings.first { it.services.isNotEmpty() && !it.voiceSetup.deviceSpeech }
+                val context = InstrumentationRegistry.getInstrumentation().targetContext
+                val firmware = FakeG2Firmware().apply { revision = "Faceclaw/45" }
+                val glassesScope = MainScope()
+                val glasses =
+                    GlassesOwner(
+                        glassesScope,
+                        context,
+                        repository,
+                        FakeHaloTransport(context),
+                        fakeG2Scanner(),
+                        firmware.connector,
+                    )
+                val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
+                val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
+                try {
+                    composeRule.runOnUiThread { glasses.connect(GlassesDevice.EvenG2(G2_PAIR)) }
+                    withTimeout(TIMEOUT_MS) { glasses.state.first { it.link is GlassesLink.Connected } }
+                    assertEquals(
+                        GlassesLink.Connected(G2_FACECLAW_DISPLAY, G2PanelFit),
+                        glasses.state.value.link,
+                    )
+                    composeRule.setContent { GoModeTheme { GoModeApp(shellOwner, models, glasses) } }
+                    composeRule.waitUntil(TIMEOUT_MS) {
+                        composeRule
+                            .onAllNodes(hasTestTag("gomode-voice-connect") and isEnabled())
+                            .fetchSemanticsNodes()
+                            .isNotEmpty()
+                    }
+                    composeRule.onNodeWithTag("gomode-voice-connect").performClick()
+                    composeRule.waitUntil(TIMEOUT_MS) { fixture.sessions.size == 1 }
+                    val gateway = fixture.sessions.single()
+                    gateway.send("""{"kind":"user.speech.started"}""")
+
+                    val png = twoColourPng()
+                    fixture.toolContent =
+                        """[{"type":"image","data":"${Base64.encodeToString(png, Base64.NO_WRAP)}",""" +
+                        """"mimeType":"image/png","annotations":{"audience":["user"]}}]"""
+                    gateway.send(serviceToolCall("card-image"))
+                    // The 120 × 60 image sits at 260, 210: red (luma 76) is level 4, green (150) level 9.
+                    composeRule.waitUntil(TIMEOUT_MS) {
+                        val frame = firmware.presented.lastOrNull()
+                        frame != null && frame.level(260, 210) == 4 && frame.level(379, 269) == 9
+                    }
+                    val frame = firmware.presented.last()
+                    val edges = listOf(259 to 210, 260 to 239, 379 to 239, 380 to 239)
+                    assertEquals(listOf(0, 4, 4, 0), edges.map { (x, y) -> frame.level(x, y) })
+
+                    // Every MCP request since the G2 connected declared the panel with PNG images.
+                    val displays =
+                        fixture.requestMetadata.mapNotNull {
+                            it
+                                .optJSONObject("io.modelcontextprotocol/clientCapabilities")
+                                ?.optJSONObject("extensions")
+                                ?.optJSONObject("com.fghbuild.gomode/display")
+                        }
+                    assertTrue(fixture.requestMetadata.toString(), displays.size == fixture.requestMetadata.size)
+                    for (display in displays) {
+                        assertEquals(640 to 480, display.getInt("width") to display.getInt("height"))
+                        assertEquals("image/png", display.getJSONArray("imageTypes").getString(0))
+                    }
+
+                    composeRule.onNodeWithContentDescription("End voice").performClick()
+                    composeRule.waitUntil(TIMEOUT_MS) {
+                        firmware.presented.last().let { it.lines.isEmpty() && it.level(260, 210) == 0 }
+                    }
                 } finally {
                     composeRule.runOnUiThread {
                         glassesScope.cancel()

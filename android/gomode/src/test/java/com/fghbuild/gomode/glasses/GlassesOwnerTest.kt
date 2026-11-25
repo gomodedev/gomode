@@ -378,12 +378,43 @@ class GlassesOwnerTest {
                     "RIGHT auth",
                     "LEFT auth",
                     "RIGHT prelude",
+                    "RIGHT settings",
                     "RIGHT create ",
                     "RIGHT update one\ntwo",
                     "RIGHT update three",
                 ),
                 firmware.requests.filter { it.kind != "heartbeat" }.map { it.toString() },
             )
+        }
+
+    @Test
+    fun anEvenG2OnFaceclawFirmwareDrawsTextAndImagesOnItsWholePanel() =
+        runOwnerTest {
+            firmware.revision = "Faceclaw/45"
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            assertEquals(GlassesLink.Connected(G2_FACECLAW_DISPLAY, G2PanelFit), owner.state.value.link)
+            // MCP requests declare a 640×480 rectangle of 16 grey levels that takes PNG images.
+            assertEquals(G2_FACECLAW_DISPLAY, owner.connectedDisplay)
+
+            owner.show(GlassesFrame.Text("one\ntwo"))
+            runCurrent()
+            assertEquals(listOf("one", "two"), firmware.presented.last().lines)
+
+            // White, black, green, and white at 40 % opacity, centred on the panel.
+            val image =
+                Bitmap.createBitmap(4, 1, Bitmap.Config.ARGB_8888).apply {
+                    setPixel(0, 0, Color.WHITE)
+                    setPixel(1, 0, Color.BLACK)
+                    setPixel(2, 0, Color.GREEN)
+                    setPixel(3, 0, Color.argb(102, 255, 255, 255))
+                }
+            owner.show(GlassesFrame.Image(image))
+            runCurrent()
+            val frame = firmware.presented.last()
+            assertEquals(listOf(0, 15, 0, 9, 6, 0), (317..322).map { frame.level(it, 239) })
+            assertEquals(emptyList<String>(), frame.lines)
         }
 
     @Test

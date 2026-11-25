@@ -61,6 +61,16 @@ sealed interface G2CloseCause {
     }
 
     /**
+     * Faceclaw firmware did not acknowledge a drawing message on both lenses within
+     * [G2Protocol.COMMAND_TIMEOUT_MS], or a lens refused it ([rejected]).
+     */
+    data class DrawFailed(
+        val rejected: Boolean,
+    ) : G2CloseCause {
+        override val retryable: Boolean get() = true
+    }
+
+    /**
      * The glasses closed the page. An exit (event 7) follows the wearer's action and is not
      * retryable; an abnormal exit (event 6) is.
      */
@@ -91,10 +101,11 @@ sealed interface G2State {
         val pair: G2Pair,
     ) : G2State
 
-    /** The page is open and shows [text], acknowledged by the glasses. */
+    /** The page is open on [firmware] and shows [shown], acknowledged by the glasses. */
     data class Ready(
         val pair: G2Pair,
-        val text: String,
+        val firmware: G2Firmware,
+        val shown: G2Content,
     ) : G2State
 
     /** The session ended with [cause]; only [G2Glasses.connect] starts another. */
