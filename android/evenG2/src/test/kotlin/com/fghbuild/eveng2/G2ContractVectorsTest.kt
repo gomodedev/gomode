@@ -104,7 +104,7 @@ class G2ContractVectorsTest {
         assertFalse(G2EvenHub.press(click, demoPage.copy(containerId = 2), 123))
         assertFalse(G2EvenHub.press(click, demoPage.copy(containerName = "other"), 123))
         assertNull(G2EvenHub.reply(click, G2HubCommand.CREATE_PAGE, 42, 7))
-        assertNull(G2EvenHub.pageExit(click, demoPage, 123))
+        assertFalse(G2EvenHub.pageExit(click, demoPage, 123))
     }
 
     @Test

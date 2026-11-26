@@ -501,21 +501,61 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun closingGoModeOnTheEvenG2StopsTheLinkWithoutRetrying() =
+    fun anEvenG2PageThatTheGlassesCloseReturnsWithTheLatestFrame() =
         runOwnerTest {
             owner.start()
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected }
-            firmware.exitPage(type = 7, session = firmware.pageSession)
-            owner.state.first { it.link == GlassesLink.Disconnected }
-            assertEquals("Go Mode was closed on the glasses", owner.state.value.error)
-
-            advanceTimeBy(RECONNECT_MAX_DELAY_MS)
+            owner.show(GlassesFrame.Text("hello"))
             runCurrent()
+            val page = firmware.pageSession
+
+            // The page closed before it settled, so the next one follows a pause.
+            firmware.exitPage(type = G2InputEvent.EXIT, session = page)
+            advanceTimeBy(G2Protocol.PAGE_RETURN_DELAY_MS)
+            runCurrent()
+            assertTrue(firmware.pageSession != page)
+            assertEquals("hello", firmware.shownText())
+            assertTrue(owner.state.value.link is GlassesLink.Connected)
+            assertEquals(null, owner.state.value.error)
             assertEquals(2, firmware.attempts.size)
-            assertTrue(firmware.links.all { it.closed })
-            // The pair stays saved, so Connect opens Go Mode again.
-            assertEquals(G2, owner.state.value.saved)
+            assertTrue(firmware.links.none { it.closed })
+        }
+
+    @Test
+    fun turningAutoConnectOnConnectsToTheSavedGlassesUnlessAConnectionRuns() =
+        runOwnerTest {
+            repository.updateGlasses(HALO)
+            repository.settings.first { it.glasses == HALO }
+            owner.start()
+            runCurrent()
+            assertEquals(GlassesLink.Disconnected, owner.state.value.link)
+
+            owner.updateAutoConnect(true)
+            owner.state.first { it.link is GlassesLink.Connected }
+            repository.settings.first { it.glassesAutoConnect }
+            owner.updateAutoConnect(false)
+            owner.updateAutoConnect(true)
+            runCurrent()
+            assertEquals(1, transport.connects)
+            assertTrue(owner.state.value.link is GlassesLink.Connected)
+        }
+
+    @Test
+    fun turningAutoConnectOnWithoutNearbyDevicesSavesItAndReportsThePermission() =
+        runOwnerTest {
+            shadowOf(context).denyPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+            repository.updateGlasses(HALO)
+            repository.settings.first { it.glasses == HALO }
+            owner.start()
+            runCurrent()
+            assertEquals(null, owner.state.value.error)
+
+            owner.updateAutoConnect(true)
+            repository.settings.first { it.glassesAutoConnect }
+            assertEquals("Allow Nearby devices to connect to glasses", owner.state.value.error)
+            assertEquals(GlassesLink.Disconnected, owner.state.value.link)
+            assertEquals(0, transport.connects)
         }
 
     @Test

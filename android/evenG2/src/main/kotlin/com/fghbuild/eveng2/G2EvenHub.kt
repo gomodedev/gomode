@@ -27,36 +27,35 @@
 // event: a text event (branch 2) {1: container ID, 2: container name, 3: event type}, or a system
 // event (branch 3) {1: event type, 2: source (0 unspecified, 1 right temple, 2 R1 ring, 3 left
 // temple), 3: IMU sample, 4: exit reason, 5: widget ID, 6: page session ID}; a list event (branch
-// 1) cannot name this page's text container. Event types: 0 click, 1 scroll up, 2 scroll down,
-// 3 double click, 4 and 5 foreground enter and exit, 6 abnormal exit, 7 exit, 8 IMU data, 9 long
+// 1) cannot name this page's text container. Event types: 0 click, 1 scroll up, 2 scroll down, 3
+// double click, 4 and 5 foreground enter and exit, 6 abnormal exit, 7 exit, 8 IMU data, 9 long
 // press, 10 its release. Proto3 omits type 0, so a click carries no type. Only an exit that names
-// this page's widget and session closes it. A press is a click: a text event that names this
-// page's container, which captures input, or a system event from a touchpad or the ring whose
-// widget and session, when present, are this page's. Either arm may report input, as the enterprise SDK accepts it from
-// both. The enterprise contract vector g2_evenhub_click_hex is a text event click; the README of
-// Even Realities' @evenrealities/even_hub_sdk 0.0.16 npm package (MIT) says source-aware input,
-// whose sources include the ring, arrives as system events.
+// this page's widget and session closes it. The Python library's live-confirmed create page omits
+// the page session ID (field 7), which the enterprise SDK sends; on a pair, the glasses took a page
+// created with it and named it in an exit while the wearer took them off and put them on. A press
+// is a click: a text event that names this page's container, which captures input, or a system
+// event from a touchpad or the ring whose widget and session, when present, are this page's. Either
+// arm may report input, as the enterprise SDK accepts it from both. The enterprise contract vector
+// g2_evenhub_click_hex is a text event click; the README of Even Realities'
+// @evenrealities/even_hub_sdk 0.0.16 npm package (MIT) says source-aware input, whose sources
+// include the ring, arrives as system events.
 //
-// Under Faceclaw's framebuffer lease (G2Settings), g2flash's patches/gesture_fwd.c (GPL-3.0) changes
-// the input: touchpad and ring long presses arrive as system events 9 and 10 instead of opening the
-// stock menu that offers to quit, a tap then hold as 11, head up and down as 12 and 15, and a ring
-// touch-down as 14. On a pair, 10 came at the end of every touchpad touch, a tap or a swipe included,
-// and a tap's click came for 4 of 13 single taps. Every R1 report then arrives raw as a system event from the ring whose field 100
-// holds it: 'R' 'I' 1 1 <report type> <aux> <speed> 0 <ring tick u32 LE>, without the stock firmware's
-// suppression of a report within 100 ring ticks of the last; G2RingFilter, ported from faceclaw's
-// app/ui/input-monitor.ts (GPL-3.0), suppresses them as faceclaw does. None of the new events is a
-// click, so a press stays one click of a touchpad or the ring.
+// Under Faceclaw's framebuffer lease (G2Settings), g2flash's patches/gesture_fwd.c (GPL-3.0)
+// changes the input: touchpad and ring long presses arrive as system events 9 and 10 instead of
+// opening the stock menu that offers to quit, a tap then hold as 11, head up and down as 12 and 15,
+// and a ring touch-down as 14. On a pair, 10 came at the end of every touchpad touch, a tap or a
+// swipe included, and a tap's click came for 4 of 13 single taps. Every R1 report then arrives raw
+// as a system event from the ring whose field 100 holds it: 'R' 'I' 1 1 <report type> <aux> <speed>
+// 0 <ring tick u32 LE>, without the stock firmware's suppression of a report within 100 ring ticks
+// of the last; G2RingFilter, ported from faceclaw's app/ui/input-monitor.ts (GPL-3.0), suppresses
+// them as faceclaw does. None of the new events is a click, so a press stays one click of a
+// touchpad or the ring.
 //
 // TODO(hardware): Confirm on a real pair, on stock firmware, which event one touchpad click and one
 // R1 ring click send, from which arm, and that a double click sends only type 3, not a click
 // first. Log every event command 2 message while tapping each temple and the ring once. If one
 // press arrives twice (from both arms, or as both a text and a system event), accept only one arm
 // or one form in press(); otherwise every press would start and at once end voice.
-//
-// TODO(hardware): The Python library's live-confirmed create page omits the page session ID
-// (field 7); the enterprise SDK sends it and matches exit events against it. Confirm on a real
-// pair that consumer firmware accepts field 7 and echoes it in exit events. If exits arrive
-// without it, match on the widget ID alone.
 
 package com.fghbuild.eveng2
 
@@ -273,18 +272,18 @@ object G2EvenHub {
         return if (result == command.success) G2HubReply.Success else G2HubReply.Rejected(result)
     }
 
-    /** The exit of the page identified by [page] and [session], or null when [message] is not one. */
+    /** Whether [message] is an exit, abnormal or not, of the page identified by [page] and [session]. */
     fun pageExit(
         message: G2Message,
         page: G2TextPage,
         session: Long,
-    ): G2CloseCause.PageExited? {
-        val (branch, system) = deviceEvent(message) ?: return null
-        if (branch != SYSTEM_EVENT) return null
+    ): Boolean {
+        val (branch, system) = deviceEvent(message) ?: return false
+        if (branch != SYSTEM_EVENT) return false
         val type = system.scalar(1) ?: 0L
-        if (type != G2InputEvent.ABNORMAL_EXIT && type != G2InputEvent.EXIT) return null
-        if (system.scalar(5) != page.widgetId || system.scalar(6) != session) return null
-        return G2CloseCause.PageExited(abnormal = type == G2InputEvent.ABNORMAL_EXIT)
+        return (type == G2InputEvent.ABNORMAL_EXIT || type == G2InputEvent.EXIT) &&
+            system.scalar(5) == page.widgetId &&
+            system.scalar(6) == session
     }
 
     /**

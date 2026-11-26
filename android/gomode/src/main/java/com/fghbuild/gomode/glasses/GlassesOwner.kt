@@ -125,10 +125,11 @@ internal data class GlassesState(
  * connection to the saved glasses lasts until [disconnect], [forget], the end of [parentScope], or
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
- * settings. Every connection shows the latest [show] frame, or a [notify] notice over it, and reports
- * its [presses]. While that frame is blank, a connection first plays a short greeting that confirms
- * it on the glasses; content that is not blank, or a notice, ends it. Callers hold BLUETOOTH_SCAN before
- * [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
+ * settings, and when [updateAutoConnect] turns it on while no connection runs. Every connection
+ * shows the latest [show] frame, or a [notify] notice over it, and reports its [presses]. While
+ * that frame is blank, a connection first plays a short greeting that confirms it on the glasses;
+ * content that is not blank, or a notice, ends it. Callers hold BLUETOOTH_SCAN before [startScan]
+ * and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
  * connecting on its own.
  *
  * The first attempt of a [connect] is direct, so a pair just scanned or chosen connects at once or
@@ -237,9 +238,7 @@ internal class GlassesOwner(
         scope.launch {
             val settings = settingsRepository.settings.first { it.loadState == SettingsLoadState.Ready }
             val saved = settings.glasses
-            if (settings.glassesAutoConnect && saved != null && hasConnectPermission() && linkJob == null) {
-                connect(saved)
-            }
+            if (settings.glassesAutoConnect && saved != null && hasConnectPermission() && !linkRuns) connect(saved)
         }
     }
 
@@ -439,9 +438,18 @@ internal class GlassesOwner(
         scope.launch { settingsRepository.updateGlasses(null) }
     }
 
+    /**
+     * Saves [enabled]. Turning auto-connect on also connects to the saved glasses unless a connection
+     * runs; like [connect], it reports a missing BLUETOOTH_CONNECT as the error.
+     */
     fun updateAutoConnect(enabled: Boolean) {
         scope.launch { settingsRepository.updateGlassesAutoConnect(enabled) }
+        val saved = settingsRepository.settings.value.glasses
+        if (enabled && saved != null && !linkRuns) connect(saved)
     }
+
+    // Whether a connection to glasses is connecting, connected, or waiting to reconnect.
+    private val linkRuns: Boolean get() = linkJob?.isActive == true
 
     // The previous link finishes clearing and closing its glasses before the next one connects.
     // A pinned logo survives automatic reconnection, not a deliberate new link or disconnection.

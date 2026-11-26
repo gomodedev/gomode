@@ -1,4 +1,4 @@
-// G2Session: one Even G2 connection from both arms' links to a closed page, ending with a typed close cause.
+// G2Session: one Even G2 connection from both arms' links to a typed close cause, reopening pages the glasses close.
 //
 // Order: bond each arm that has no bond, the right then the left, one at a time and without a
 // deadline, since the wearer may have to consent. Connect both arms in parallel with
@@ -7,7 +7,8 @@
 // listens on the right arm only and never waits for the left). Then, as the even-g2-protocol Python library (MIT)
 // does: send the prelude to the right arm and wait for its ACK. Then read the settings of the
 // right arm, as faceclaw does, to learn the firmware (G2Settings); an unanswered read counts as
-// stock firmware. Create the text page and send a heartbeat every G2Protocol.HEARTBEAT_INTERVAL_MS.
+// stock firmware. Create the text page and, while it is open, send a heartbeat every
+// G2Protocol.HEARTBEAT_INTERVAL_MS.
 // On stock firmware the text is updated in place whenever the host's text differs from the
 // acknowledged one, and an image shows as empty text. Every Even Hub command goes to the right arm.
 //
@@ -20,10 +21,22 @@
 // bytes, zlib-compressed, where the Even Hub messages carry 139 bytes 50 ms apart.
 //
 // Once the page may be open, a press from either arm is reported and leaves the page open.
-// A dropped link, a missing or refused reply, or a page exit event ends the session with a
-// G2CloseCause. From the moment the create request is written, the page may be open: unless
-// the right link is gone or the glasses closed the page, every exit shuts it down before both
-// links close, so a quick reconnect over a link Android keeps alive does not meet an open page.
+// A dropped link or a missing or refused reply ends the session with a G2CloseCause. From the
+// moment the create request is written, the page may be open: unless the right link is gone or
+// the glasses closed the page, every exit shuts it down before both links close, so a quick
+// reconnect over a link Android keeps alive does not meet an open page.
+//
+// An exit event (6 abnormal, 7 exit) of the open page ends that page, not the session, as faceclaw
+// treats it: the session creates a new page, with a new page session ID, that shows the latest
+// content. On Faceclaw firmware the framebuffer lease outlives the page: g2flash's settings_ext.c
+// and zlib_glue.c end it only at its deadline, on a release, or at CFW cleanup. The session keeps
+// renewing it and draws the frame again over the new page. The next page follows at once when the
+// closed page stayed open G2Protocol.PAGE_SETTLED_MS from its create request. Otherwise the session
+// waits G2Protocol.PAGE_RETURN_DELAY_MS, doubled for each further page in a row that closes before
+// it settles, up to G2Protocol.PAGE_RETURN_MAX_DELAY_MS: a page that keeps closing at once costs
+// one create request every few seconds, and the page returns at most that long after the glasses
+// keep it again. During the pause the session sends no heartbeat and still reads both arms, so a
+// dropped link ends it.
 //
 // A direct session gives each arm G2Protocol.CONNECT_TIMEOUT_MS to connect. A background session
 // waits for the arms without a deadline, as Android's background connection does, until the first
@@ -90,6 +103,9 @@ private class G2Closed(
     cause: Throwable? = null,
 ) : Exception(reason.toString(), cause)
 
+// The glasses closed the open page; the session goes on with the next one.
+private class G2PageClosed : Exception("page closed")
+
 private sealed interface Inbound {
     class Message(
         val side: G2Side,
@@ -119,7 +135,8 @@ internal class G2Session(
     private val ringFilter = G2RingFilter()
     private val stream = G2CfwStream()
 
-    // The session ID of the page that may be open; null until its create request is written.
+    // The session ID of the page that may be open; null before its create request is written and
+    // once the glasses close it.
     private var pageSession: Long? = null
 
     // Whether the framebuffer lease may be held; set before its first request is written.
@@ -140,17 +157,15 @@ internal class G2Session(
                     lease(G2Settings.LEASE_ACQUIRE)
                     launch { renewLease() }
                 }
-                val shown = createPage(firmware)
-                launch { heartbeat() }
                 val wake = Channel<Unit>(Channel.CONFLATED)
                 launch { desired.collect { wake.send(Unit) } }
-                serve(firmware, shown, wake)
+                servePages(this, firmware, wake)
             }
         } catch (e: G2Closed) {
             val reason = e.reason
             val rightLost = reason is G2CloseCause.Disconnected && reason.side == G2Side.RIGHT
             releaseLease()
-            if (reason !is G2CloseCause.PageExited && !rightLost) shutdownPage()
+            if (!rightLost) shutdownPage()
             return reason
         } catch (e: CancellationException) {
             releaseLease()
@@ -224,7 +239,7 @@ internal class G2Session(
         }
     }
 
-    /** Accept one inbound item: throws on a lost link or an exit of this session's page, and reports presses. */
+    /** Accept one inbound item: throws on a lost link or an exit of the open page, and reports presses. */
     private fun accept(inbound: Inbound): Inbound.Message {
         when (inbound) {
             is Inbound.Lost -> {
@@ -234,8 +249,9 @@ internal class G2Session(
             is Inbound.Message -> {
                 G2EvenHub.inputEvent(inbound.message, inbound.side)?.let(onEvent)
                 val session = pageSession ?: return inbound
-                if (inbound.side == G2Side.RIGHT) {
-                    G2EvenHub.pageExit(inbound.message, page, session)?.let { throw G2Closed(it) }
+                if (inbound.side == G2Side.RIGHT && G2EvenHub.pageExit(inbound.message, page, session)) {
+                    pageSession = null
+                    throw G2PageClosed()
                 }
                 val ring = G2EvenHub.ringReport(inbound.message)
                 if ((ring == null || ringFilter.accept(ring)) &&
@@ -439,7 +455,49 @@ internal class G2Session(
         }
     }
 
-    /** Show the host's content, forever; unsolicited messages only matter as page exits and presses. */
+    // TODO(hardware): Why the glasses close the page is not established. On a pair, taking the
+    // glasses off and putting them back on brought an exit (7) from an unspecified source naming
+    // this page's widget and session from the right arm; hypotheses are the stock heartbeat
+    // timeout and the stock quit dialog. On a pair, log each exit's reason (field 4) and whether the
+    // create that follows it is acknowledged while the glasses are off. If the firmware refuses or
+    // closes pages until they are worn again, create the next page on the wear event instead of
+    // after these pauses; if it never answers that create, the session ends with CommandTimedOut.
+
+    /** Keep a page open, forever: create one with the latest content and, each time it closes, the next. */
+    private suspend fun servePages(
+        scope: CoroutineScope,
+        firmware: G2Firmware,
+        wake: Channel<Unit>,
+    ): Nothing {
+        // The pause before the next page: none after a page that settled.
+        var pause = 0L
+        while (true) {
+            // Completes once the page has stayed open long enough to settle.
+            val settling = scope.launch { delay(G2Protocol.PAGE_SETTLED_MS) }
+            // From the create request on, since the page may open even when its ACK never arrives.
+            val beating = scope.launch { heartbeat() }
+            try {
+                serve(firmware, createPage(firmware), wake)
+            } catch (_: G2PageClosed) {
+                pause =
+                    if (settling.isCompleted) {
+                        0
+                    } else {
+                        (pause * 2).coerceIn(G2Protocol.PAGE_RETURN_DELAY_MS, G2Protocol.PAGE_RETURN_MAX_DELAY_MS)
+                    }
+            } finally {
+                settling.cancel()
+                beating.cancel()
+            }
+            if (pause > 0) {
+                withTimeoutOrNull(pause) {
+                    while (true) accept(inbox.receive())
+                }
+            }
+        }
+    }
+
+    /** Show the host's content until the page closes; unsolicited messages only matter as page exits and presses. */
     private suspend fun serve(
         firmware: G2Firmware,
         initial: G2Content,

@@ -4,12 +4,13 @@
 // G2Session in the owner's scope: the state becomes G2State.Ready, naming the firmware the
 // session found, each time the glasses acknowledge what they show, and G2State.Closed with the
 // session's G2CloseCause when it ends. The SDK never reconnects; the host decides whether and
-// when to call connect() again, for example after a retryable cause. Request and page session
-// IDs stay unique across the sessions of one G2Glasses, and each page starts with the latest
-// content from show(). A superseded session never publishes state. A replaced or stopped session
-// stays in `job` until it has finished, so a later connect() joins it and never runs two
-// sessions at once. An exception that escapes a session ends it with G2CloseCause.Failed.
-// presses and events report the current session's only.
+// when to call connect() again, for example after a retryable cause. A session creates its page
+// again each time the glasses close it; see G2Session. Request and page session IDs stay unique
+// across the sessions of one G2Glasses, and each page starts with the latest content from show().
+// A superseded session never publishes state. A replaced or stopped session stays in `job` until
+// it has finished, so a later connect() joins it and never runs two sessions at once. An exception
+// that escapes a session ends it with G2CloseCause.Failed. presses and events report the current
+// session's only.
 
 package com.fghbuild.eveng2
 

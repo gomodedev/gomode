@@ -8,7 +8,8 @@
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
 // another. connect() returns at the session's first G2State.Ready and fails if it reaches
 // G2State.Closed first; once connected, Closed sets closeCause. A retryable G2CloseCause is a
-// retryable GlassesException; the others, such as the wearer closing the page, are permanent.
+// retryable GlassesException; the others, such as a refused pairing, are permanent. The session
+// itself creates its page again when the glasses close it, so that ends no connection.
 //
 // GlassesOwner keeps one G2Glasses across attempts, so request and page session IDs never repeat
 // on the glasses. G2Glasses.connect() publishes Connecting before it returns, so every state
@@ -282,10 +283,6 @@ private fun G2CloseCause.toGlassesException(): GlassesException {
 
             is G2CloseCause.DrawFailed -> {
                 if (rejected) "Even G2 refused to draw Go Mode's screen" else "Even G2 did not draw Go Mode's screen"
-            }
-
-            is G2CloseCause.PageExited -> {
-                if (abnormal) "Even G2 closed Go Mode's page" else "Go Mode was closed on the glasses"
             }
 
             is G2CloseCause.Failed -> {

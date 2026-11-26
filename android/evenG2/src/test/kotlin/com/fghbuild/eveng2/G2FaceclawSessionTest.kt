@@ -1,4 +1,4 @@
-// G2Glasses sessions against fake glasses on Faceclaw custom firmware: detection, lease, drawing, gestures, failures.
+// G2Glasses sessions on fake Faceclaw custom firmware: detection, lease, drawing, page return, gestures, failures.
 
 package com.fghbuild.eveng2
 
@@ -124,6 +124,34 @@ class G2FaceclawSessionTest {
             glasses.disconnect()
             assertEquals(listOf("RIGHT lease release", "LEFT lease release", "RIGHT shutdown"), firmware.requestList())
             assertEquals(emptySet<G2Side>(), firmware.leased)
+        }
+
+    @Test
+    fun aClosedPageReturnsWithTheFrameDrawnAgainUnderTheHeldLease() =
+        runTest {
+            val firmware = firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            // A 200 × 100 image whose level is its column modulo 16, on the panel at 220, 190.
+            val image = G2Image(200, 100, ByteArray(200 * 100) { (it % 200 % 16).toByte() })
+            glasses.show(image)
+            glasses.connect(pair)
+            glasses.ready(G2Content.Image(image))
+            advanceTimeBy(G2Protocol.PAGE_SETTLED_MS)
+            val first = firmware.pageSession
+            val presented = firmware.presented.size
+            firmware.requests.clear()
+
+            firmware.exitPage(type = G2InputEvent.EXIT, session = first)
+            runCurrent()
+            assertEquals(
+                listOf("RIGHT create ", "LEFT root", "LEFT draw", "LEFT draw", "LEFT present"),
+                firmware.requestList().filter { !it.contains("heartbeat") },
+            )
+            assertTrue(firmware.pageSession != first)
+            assertEquals(setOf(G2Side.LEFT, G2Side.RIGHT), firmware.leased)
+            assertEquals(presented + 1, firmware.presented.size)
+            assertEquals(17 % 16, firmware.presented.last().level(220 + 17, 190 + 50))
+            assertEquals(G2State.Ready(pair, faceclaw, G2Content.Image(image)), glasses.state.value)
         }
 
     @Test

@@ -80,4 +80,13 @@ object G2Protocol {
 
     /** Interval between Even Hub heartbeats while a page is open. */
     const val HEARTBEAT_INTERVAL_MS = 4_000L
+
+    /** How long from its create request a page must stay open for the next page to follow its exit at once. */
+    const val PAGE_SETTLED_MS = 10_000L
+
+    /** Pause before the page that follows one that closed before it settled; it doubles with each such page. */
+    const val PAGE_RETURN_DELAY_MS = 1_000L
+
+    /** Longest pause before a page that follows one that closed before it settled. */
+    const val PAGE_RETURN_MAX_DELAY_MS = 8_000L
 }

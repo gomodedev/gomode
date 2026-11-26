@@ -138,7 +138,7 @@ internal fun GlassesScreen(
 
             ListItem(
                 headlineContent = { Text("Auto-connect") },
-                supportingContent = { Text("Connect to the saved glasses when Go Mode opens.") },
+                supportingContent = { Text("Connect to the saved glasses now and whenever Go Mode opens.") },
                 trailingContent = {
                     Switch(
                         checked = state.autoConnect,

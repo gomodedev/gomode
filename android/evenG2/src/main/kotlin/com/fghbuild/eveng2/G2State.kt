@@ -81,16 +81,6 @@ sealed interface G2CloseCause {
         override val retryable: Boolean get() = true
     }
 
-    /**
-     * The glasses closed the page. An exit (event 7) follows the wearer's action and is not
-     * retryable; an abnormal exit (event 6) is.
-     */
-    data class PageExited(
-        val abnormal: Boolean,
-    ) : G2CloseCause {
-        override val retryable: Boolean get() = abnormal
-    }
-
     /** An unexpected exception, for example from a host [G2ArmConnector], ended the session. */
     data class Failed(
         val error: Exception,
@@ -112,7 +102,10 @@ sealed interface G2State {
         val pair: G2Pair,
     ) : G2State
 
-    /** The page is open on [firmware] and shows [shown], acknowledged by the glasses. */
+    /**
+     * The page is open on [firmware] and shows [shown], acknowledged by the glasses. The state stays
+     * while the session creates a page again after the glasses close one; see G2Session.
+     */
     data class Ready(
         val pair: G2Pair,
         val firmware: G2Firmware,

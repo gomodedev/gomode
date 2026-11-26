@@ -1,4 +1,4 @@
-// G2Glasses sessions against fake arm links: both arms, heartbeat, each close cause and its retryability, races.
+// G2Glasses sessions against fake arm links: both arms, heartbeat, page return, close causes, retryability, races.
 
 package com.fghbuild.eveng2
 
@@ -200,24 +200,99 @@ class G2GlassesTest {
         }
 
     @Test
-    fun wearerExitEndsTheSessionForGood() =
+    fun eachExitOfThePageOpensANewPageWithTheLatestText() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            val states = record(glasses)
+            val sent = { firmware.requests.filter { it.kind != "heartbeat" }.map { it.toString() } }
+            glasses.show("First")
+            glasses.connect(pair)
+            glasses.await { it is G2State.Ready }
+            advanceTimeBy(G2Protocol.PAGE_SETTLED_MS)
+            val first = firmware.pageSession
+            firmware.requests.clear()
+
+            // An exit of another page session is not this page's.
+            firmware.exitPage(type = G2InputEvent.EXIT, session = first + 1)
+            runCurrent()
+            assertEquals(emptyList<String>(), sent())
+
+            // The glasses closed the page, so none is shut down; a page that settled returns at once.
+            firmware.exitPage(type = G2InputEvent.EXIT, session = first)
+            runCurrent()
+            assertEquals(listOf("RIGHT create First"), sent())
+            val second = firmware.pageSession
+            assertTrue(second != first)
+
+            // An abnormal exit too; text shown while no page is open goes on the next one.
+            firmware.exitPage(type = G2InputEvent.ABNORMAL_EXIT, session = second)
+            runCurrent()
+            glasses.show("Second")
+            advanceTimeBy(G2Protocol.PAGE_RETURN_DELAY_MS)
+            assertEquals(listOf("RIGHT create First"), sent())
+            assertEquals(ready(pair, "Second"), glasses.await { it == ready(pair, "Second") })
+            assertEquals("RIGHT create Second", sent().last())
+            assertTrue(firmware.pageSession != second)
+            assertTrue(states.none { it is G2State.Closed })
+            assertEquals(2, firmware.links.size)
+            assertTrue(firmware.links.none { it.closed })
+        }
+
+    @Test
+    fun aPageThatKeepsClosingReturnsAfterDoublingPauses() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            val presses = mutableListOf<Unit>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.presses.toList(presses) }
+            glasses.connect(pair)
+            glasses.await { it is G2State.Ready }
+            val creates = { firmware.requests.count { it.kind == "create" } }
+
+            for (pause in listOf(1_000L, 2_000L, 4_000L, 8_000L, 8_000L)) {
+                firmware.exitPage(type = G2InputEvent.EXIT, session = firmware.pageSession)
+                runCurrent()
+                firmware.requests.clear()
+                // No page is open during the pause, so a click there is no press.
+                firmware.touch(G2Side.RIGHT, type = 0)
+                advanceTimeBy(pause - 1)
+                runCurrent()
+                assertEquals(0, creates())
+                // Nor does a heartbeat go out, though a pause of 8 s spans two intervals.
+                assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
+                advanceTimeBy(1)
+                runCurrent()
+                assertEquals(listOf("RIGHT create "), firmware.requests.map { it.toString() })
+            }
+            assertEquals(emptyList<Unit>(), presses)
+
+            // A page that stays open long enough to settle has heartbeats and resets the pause.
+            firmware.requests.clear()
+            advanceTimeBy(G2Protocol.PAGE_SETTLED_MS)
+            assertEquals(2, firmware.requests.count { it.kind == "heartbeat" })
+            firmware.exitPage(type = G2InputEvent.EXIT, session = firmware.pageSession)
+            runCurrent()
+            assertEquals(1, creates())
+            assertTrue(glasses.state.value is G2State.Ready)
+        }
+
+    @Test
+    fun aLinkDropDuringThePauseEndsTheSession() =
         runTest {
             val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.connect(pair)
             glasses.await { it is G2State.Ready }
+            firmware.exitPage(type = G2InputEvent.EXIT, session = firmware.pageSession)
+            runCurrent()
+            val paused = currentTime
             firmware.requests.clear()
 
-            // An exit of another page session is not this page's.
-            firmware.exitPage(type = 7, session = firmware.pageSession + 1)
-            runCurrent()
-            assertTrue(glasses.state.value is G2State.Ready)
-
-            firmware.exitPage(type = 7, session = firmware.pageSession)
-            val cause = glasses.closeCause()
-            assertEquals(G2CloseCause.PageExited(abnormal = false), cause)
-            assertFalse(cause.retryable)
-            // The glasses closed the page, so no shutdown is sent.
+            firmware.link(G2Side.LEFT).drop(status = 19)
+            assertEquals(G2CloseCause.Disconnected(G2Side.LEFT, 19), glasses.closeCause())
+            assertEquals(paused, currentTime)
+            // No page is open, so none is shut down.
             assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
             assertTrue(firmware.links.all { it.closed })
         }
@@ -269,7 +344,7 @@ class G2GlassesTest {
             firmware.systemInput(G2Side.RIGHT, type = G2InputEvent.IMU_DATA, source = 0)
             firmware.systemInput(G2Side.LEFT, type = 0, source = 0)
             firmware.exitPage(type = G2InputEvent.EXIT, session = firmware.pageSession)
-            glasses.closeCause()
+            runCurrent()
             // Each arm's events keep their order; the two arms' links deliver independently.
             assertEquals(
                 mapOf(
@@ -286,23 +361,6 @@ class G2GlassesTest {
                 ),
                 events.groupBy { it.arm },
             )
-        }
-
-    @Test
-    fun abnormalPageExitIsRetryable() =
-        runTest {
-            val firmware = FakeG2Firmware()
-            val glasses = G2Glasses(firmware.connector, backgroundScope)
-            glasses.connect(pair)
-            glasses.await { it is G2State.Ready }
-            firmware.requests.clear()
-
-            firmware.exitPage(type = 6, session = firmware.pageSession)
-            val cause = glasses.closeCause()
-            assertEquals(G2CloseCause.PageExited(abnormal = true), cause)
-            assertTrue(cause.retryable)
-            assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
-            assertTrue(firmware.links.all { it.closed })
         }
 
     @Test

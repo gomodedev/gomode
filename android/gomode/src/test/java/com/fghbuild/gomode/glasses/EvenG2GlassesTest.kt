@@ -113,8 +113,6 @@ class EvenG2GlassesTest {
                 Ending("dropped left arm", Outcome.RETRY_UNREACHABLE) { link(G2Side.LEFT).drop(status = 19) },
                 Ending("refused write", Outcome.RETRY_UNREACHABLE) { link(G2Side.RIGHT).writeFailure = "busy" },
                 Ending("unanswered update", Outcome.RETRY_UNRESPONSIVE) { answersUpdates = false },
-                Ending("abnormal page exit", Outcome.RETRY_UNRESPONSIVE) { exitPage(type = 6, session = pageSession) },
-                Ending("wearer page exit", Outcome.PERMANENT) { exitPage(type = 7, session = pageSession) },
             )
         for (case in cases) {
             runTest {
