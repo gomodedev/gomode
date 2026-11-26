@@ -416,6 +416,22 @@ class GlassesTranscriptTest {
             assertEquals(listOf("Build green"), frames)
         }
 
+    @Test
+    fun eachVoiceErrorIsShownOnceAndItsDismissalShowsNothing() =
+        runTest {
+            val voice = MutableStateFlow(VoiceState(error = "Gateway unavailable", errorId = 1))
+            val shown = mutableListOf<String>()
+            backgroundScope.launch { showVoiceErrors(voice) { shown += it } }
+            runCurrent()
+            voice.value = voice.value.copy(micLevel = 0.5f)
+            runCurrent()
+            voice.value = voice.value.copy(error = null)
+            runCurrent()
+            voice.value = voice.value.copy(error = "Gateway unavailable", errorId = 2)
+            runCurrent()
+            assertEquals(listOf("Gateway unavailable", "Gateway unavailable"), shown)
+        }
+
     // Records the text a fake display is told to show until the test ends.
     private fun TestScope.follow(
         voice: MutableStateFlow<VoiceState>,

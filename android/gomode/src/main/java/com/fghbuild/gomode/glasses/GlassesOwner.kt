@@ -67,9 +67,6 @@ internal const val RECONNECT_MAX_DELAY_MS = 60_000L
 // Bounds the best-effort clear when the user disconnects; the glasses may already be out of range.
 private const val CLEAR_ON_DISCONNECT_TIMEOUT_MS = 3_000L
 
-/** How long a [GlassesOwner.notify] notice stays, long enough to read at a glance. */
-internal const val GLASSES_NOTICE_MS = 4_000L
-
 // Actions a slow collector may lag behind; a person gestures far slower than one is handled.
 private const val ACTION_BUFFER = 8
 
@@ -174,7 +171,9 @@ internal class GlassesOwner(
     // Halo devices a scan found by address; connecting prefers them to a device made from the address.
     private val scanned = mutableMapOf<String, BluetoothDevice>()
     private val frame = MutableStateFlow<GlassesFrame>(GlassesFrame.Text(""))
-    private val notice = MutableStateFlow<String?>(null)
+    private val notice = MutableStateFlow<Notice?>(null)
+
+    // Takes [notice] down its reading time after the glasses first draw it.
     private var noticeJob: Job? = null
 
     // The greeting frame over [frame], set by the connection that plays it.
@@ -366,17 +365,27 @@ internal class GlassesOwner(
     }
 
     /**
-     * Shows [message] over the [show] frame for [GLASSES_NOTICE_MS], until [show] sends an image or text
-     * that is not blank, or until the next notice: feedback on the glasses for a gesture's action.
+     * Shows [message] over the [show] frame on the connected glasses: feedback for a gesture's action, or
+     * a voice error. It stays for its reading time, [glassesPageMillis], counted from when the glasses
+     * draw it, since a busy link can delay the drawing by seconds; it ends sooner when [show] sends an
+     * image or text that is not blank, at the next notice, or when the connection ends. Without a
+     * connection it shows nothing.
      */
     fun notify(message: String) {
+        Log.i(TAG, "Glasses notice: $message")
         endNotice()
+        if (state.value.link !is GlassesLink.Connected) return
         endGreeting()
-        notice.value = message
+        notice.value = Notice(message)
+    }
+
+    // Starts [drawn]'s reading time once, if it is still the notice.
+    private fun noticeDrawn(drawn: Notice) {
+        if (notice.value !== drawn || noticeJob != null) return
         noticeJob =
             scope.launch {
-                delay(GLASSES_NOTICE_MS)
-                notice.value = null
+                delay(glassesPageMillis(drawn.message))
+                if (notice.value === drawn) notice.value = null
             }
     }
 
@@ -632,12 +641,13 @@ internal class GlassesOwner(
                         val inspected =
                             combine(inspections, mutableInputs) { count, inputs -> inputs.takeIf { count > 0 } }
                         combine(frame, greeting, notice, inspected) { frame, greeting, notice, inputs ->
-                            inputs?.let { GlassesFrame.Text(inspectionText(it, glasses.screenFit)) }
-                                ?: notice?.let(GlassesFrame::Text)
-                                ?: greeting
-                                ?: frame
+                            when {
+                                inputs != null -> Drawn(GlassesFrame.Text(inspectionText(inputs, glasses.screenFit)))
+                                notice != null -> Drawn(GlassesFrame.Text(notice.message), notice)
+                                else -> Drawn(greeting ?: frame)
+                            }
                         }.distinctUntilChanged()
-                            .collect { shown ->
+                            .collect { (shown, drawnNotice) ->
                                 when (shown) {
                                     is GlassesFrame.Text -> {
                                         glasses.showText(shown.text)
@@ -654,6 +664,7 @@ internal class GlassesOwner(
                                         }
                                     }
                                 }
+                                drawnNotice?.let(::noticeDrawn)
                             }
                     }
                 val acting =
@@ -681,6 +692,7 @@ internal class GlassesOwner(
             Log.w(TAG, "Glasses stopped responding: ${e.message}")
             glasses.closeCause.value?.asGlassesException() ?: e
         } finally {
+            endNotice()
             mutableState.update { it.copy(batteries = emptyList()) }
             mutableMicrophone.value = null
             mutableSensing.value = null
@@ -724,6 +736,17 @@ internal class GlassesOwner(
 }
 
 private const val TAG = "GoModeGlasses"
+
+// One [GlassesOwner.notify] call; identity tells a repeated message apart, so each one restarts its time.
+private class Notice(
+    val message: String,
+)
+
+// A frame the connection draws, and the notice it shows, if any.
+private data class Drawn(
+    val frame: GlassesFrame,
+    val notice: Notice? = null,
+)
 
 // A transport's own close cause, such as a dropped Halo link, is a retryable loss of reach.
 private fun Exception.asGlassesException(): GlassesException =

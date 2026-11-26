@@ -41,6 +41,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -53,6 +54,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -887,7 +889,7 @@ class GlassesOwnerTest {
             runCurrent()
             assertTrue(halo.lastSent(haloTextMessages(context.getString(R.string.glasses_notice_open_app))))
 
-            advanceTimeBy(GLASSES_NOTICE_MS + 1)
+            advanceTimeBy(GLASSES_PAGE_MIN_MS + 1)
             assertTrue(halo.lastSent(haloTextMessages("")))
         }
 
@@ -1012,9 +1014,56 @@ class GlassesOwnerTest {
             owner.notify("Notice")
             runCurrent()
             assertEquals("Notice", firmware.shownText())
-            advanceTimeBy(GLASSES_NOTICE_MS + 1)
+            advanceTimeBy(GLASSES_PAGE_MIN_MS + 1)
             runCurrent()
             assertEquals("", firmware.shownText())
+        }
+
+    @Test
+    fun aLongNoticeStaysForItsReadingTime() =
+        runOwnerTest {
+            connectSavedGlasses()
+            val halo = transport.halos.single()
+            val error = "Voice gateway rejected the call: the service is restarting, try again in a minute"
+            owner.notify(error)
+            runCurrent()
+            assertTrue(glassesPageMillis(error) > GLASSES_PAGE_MIN_MS)
+            advanceTimeBy(GLASSES_PAGE_MIN_MS + 1)
+            assertTrue(halo.lastSent(haloTextMessages(error)))
+            advanceTimeBy(glassesPageMillis(error) - GLASSES_PAGE_MIN_MS)
+            assertTrue(halo.lastSent(haloTextMessages("")))
+        }
+
+    @Test
+    fun aNoticeStaysItsReadingTimeAfterABusyLinkDrawsIt() =
+        runOwnerTest {
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            advanceTimeBy(GLASSES_PAGE_MIN_MS)
+            // The stock firmware does not answer the motion sensor's start, so the link waits for it.
+            backgroundScope.launch { owner.detectHeadGestures(flowOf(true)) }
+            runCurrent()
+            owner.notify("Voice gateway unavailable")
+            runCurrent()
+            assertNotEquals("Voice gateway unavailable", firmware.shownText())
+            advanceTimeBy(GLASSES_PAGE_MIN_MS)
+            runCurrent()
+            assertEquals("Voice gateway unavailable", firmware.shownText())
+            advanceTimeBy(GLASSES_PAGE_MIN_MS + 1)
+            runCurrent()
+            assertEquals("", firmware.shownText())
+        }
+
+    @Test
+    fun aNoticeWithoutGlassesIsNotShownWhenTheyConnect() =
+        runOwnerTest {
+            owner.start()
+            owner.notify("Notice")
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            runCurrent()
+            assertTrue(firmware.requests.none { it.text == "Notice" })
         }
 
     @Test
@@ -1027,13 +1076,13 @@ class GlassesOwnerTest {
             assertTrue(halo.lastSent(haloTextMessages("Notice")))
             // A transcript that clears as voice fails to start must not erase the notice that says why.
             owner.show(GlassesFrame.Text(""))
-            advanceTimeBy(GLASSES_NOTICE_MS / 2)
+            advanceTimeBy(GLASSES_PAGE_MIN_MS / 2)
             assertTrue(halo.lastSent(haloTextMessages("Notice")))
 
             owner.show(GlassesFrame.Text("You: hello"))
             runCurrent()
             assertTrue(halo.lastSent(haloTextMessages("You: hello")))
-            advanceTimeBy(GLASSES_NOTICE_MS + 1)
+            advanceTimeBy(GLASSES_PAGE_MIN_MS + 1)
             assertTrue(halo.lastSent(haloTextMessages("You: hello")))
         }
 

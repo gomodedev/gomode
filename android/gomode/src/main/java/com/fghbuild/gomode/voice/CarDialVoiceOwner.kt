@@ -62,6 +62,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -203,6 +205,13 @@ internal class CarDialVoiceOwner(
             session.collectLatest { voice ->
                 if (voice != null) glasses.detectHeadGestures(voice.state.map { it.started })
             }
+        }
+        // The glasses show the fixed failure that the call screen shows, never the provider's error.
+        scope.launch {
+            mutableState
+                .filter { it.status == CarDialStatus.FAILED }
+                .distinctUntilChangedBy { it.identity }
+                .collect { glasses.notify(context.getString(it.failure.message)) }
         }
     }
 

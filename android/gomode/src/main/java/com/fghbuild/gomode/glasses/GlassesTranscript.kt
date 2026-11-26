@@ -21,7 +21,8 @@
 //
 // A voice owner calls showVoiceTranscript for the session it owns; the shell and car-dial owners never
 // run active sessions at once. An idle session sends nothing, so it cannot clear the glasses while the
-// other owner's session runs.
+// other owner's session runs. The shell also calls showVoiceErrors, so the wearer reads each voice error
+// that the phone shows; every such error ends the session, so the transcript leaves the display to it.
 package com.fghbuild.gomode.glasses
 
 import com.fghbuild.gomode.voice.TranscriptKind
@@ -37,8 +38,10 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 
 // A Halo page costs one 1-bpp image per line over BLE; recognition drafts change several times a second.
@@ -304,4 +307,18 @@ internal suspend fun showVoiceTranscript(
     } finally {
         if (showing) show(GlassesFrame.Text(""))
     }
+}
+
+/**
+ * Passes each new [VoiceState.error] of [voice] to [notify] once, the current one included, so the glasses
+ * show the error the phone shows. Dismissing it on the phone sends nothing. Returns only when cancelled.
+ */
+internal suspend fun showVoiceErrors(
+    voice: Flow<VoiceState>,
+    notify: (String) -> Unit,
+) {
+    voice
+        .mapNotNull { state -> state.error?.let { state.errorId to it } }
+        .distinctUntilChangedBy { (id, _) -> id }
+        .collect { (_, error) -> notify(error) }
 }

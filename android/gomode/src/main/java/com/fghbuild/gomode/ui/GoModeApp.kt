@@ -69,6 +69,7 @@ import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.glasses.GlassesAction
 import com.fghbuild.gomode.glasses.GlassesMicrophoneStream
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.showVoiceErrors
 import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.glasses.toggleMute
 import com.fghbuild.gomode.service.CatalogNotification
@@ -400,6 +401,9 @@ internal fun GoModeApp(
         )
     }
     LaunchedEffect(manualVoiceSession, glassesOwner) {
+        showVoiceErrors(manualVoiceSession.state, glassesOwner::notify)
+    }
+    LaunchedEffect(manualVoiceSession, glassesOwner) {
         glassesOwner.detectHeadGestures(manualVoiceSession.state.map { it.started })
     }
     DisposableEffect(manualVoiceSession) {
@@ -671,11 +675,7 @@ internal fun GoModeApp(
 
             else -> {
                 connectVoice()
-                if (connectAfterMicPermission != null) {
-                    glassesOwner.notify(allowMicrophoneNotice)
-                } else {
-                    notifyVoiceStartFailure(scope, manualVoiceSession, glassesOwner)
-                }
+                if (connectAfterMicPermission != null) glassesOwner.notify(allowMicrophoneNotice)
             }
         }
     }
@@ -869,18 +869,6 @@ internal fun GoModeApp(
                 )
             }
         }
-    }
-}
-
-// The wearer started voice without looking at the phone, so a failure to start is shown on the glasses.
-private fun notifyVoiceStartFailure(
-    scope: CoroutineScope,
-    session: VoiceSessionController,
-    glassesOwner: GlassesOwner,
-) {
-    scope.launch {
-        val result = session.state.first { it.connected || it.error != null || it.connectStatus == null }
-        result.error?.let(glassesOwner::notify)
     }
 }
 

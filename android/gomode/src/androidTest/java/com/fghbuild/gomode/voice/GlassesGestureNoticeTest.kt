@@ -1,12 +1,15 @@
-// Checks the notice that fake Even G2 glasses show when a gesture's action cannot act, one per reason.
+// Checks the notices fake Even G2 glasses show: why a gesture's action cannot act, and voice errors.
 package com.fghbuild.gomode.voice
 
 import android.Manifest
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.platform.app.InstrumentationRegistry
@@ -125,17 +128,19 @@ class GlassesGestureNoticeTest {
         )
         withGoMode(failOffer = true) { firmware, _ ->
             firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
-            val notices =
-                listOf(
-                    R.string.glasses_notice_open_app,
-                    R.string.glasses_notice_add_service,
-                    R.string.glasses_notice_voice_unavailable,
-                    R.string.glasses_notice_allow_microphone,
-                ).map(context::getString)
-            composeRule.waitUntil(TIMEOUT_MS) {
-                val shown = firmware.shownText()
-                !shown.isNullOrBlank() && shown !in notices
-            }
+            awaitPhoneErrorOnGlasses(firmware)
+        }
+    }
+
+    @Test
+    fun aVoiceErrorFromThePhoneShowsOnTheGlasses() {
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(
+            context.packageName,
+            Manifest.permission.RECORD_AUDIO,
+        )
+        withGoMode(failOffer = true) { firmware, _ ->
+            composeRule.onNode(hasTestTag("gomode-voice-connect") and isEnabled()).performClick()
+            awaitPhoneErrorOnGlasses(firmware)
         }
     }
 
@@ -147,6 +152,20 @@ class GlassesGestureNoticeTest {
             composeRule.waitUntil(TIMEOUT_MS) { firmware.presented.lastOrNull()?.lines == listOf(notice) }
             assertEquals(0, fixture.sessions.size)
         }
+
+    // Waits for the voice error on the phone, then for the glasses to show the same text.
+    private fun awaitPhoneErrorOnGlasses(firmware: FakeG2Firmware) {
+        composeRule.waitUntil(TIMEOUT_MS) {
+            composeRule.onAllNodesWithTag("gomode-voice-error-message").fetchSemanticsNodes().isNotEmpty()
+        }
+        val error =
+            composeRule
+                .onNodeWithTag("gomode-voice-error-message")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.Text]
+                .joinToString("")
+        awaitShown(firmware, error)
+    }
 
     private fun awaitShown(
         firmware: FakeG2Firmware,
