@@ -9,12 +9,11 @@ import android.content.pm.PackageManager
 import android.os.Process
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -22,7 +21,6 @@ import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.voice.CarDialRedirectionService
-import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -37,8 +35,7 @@ import org.robolectric.shadows.ShadowRoleManager
 @RunWith(RobolectricTestRunner::class)
 class CarDialSettingTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val composeRule = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher())
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
 
     private val activity get() = composeRule.activity
     private val component get() = ComponentName(activity, CarDialRedirectionService::class.java)

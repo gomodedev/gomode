@@ -8,7 +8,10 @@ android {
     namespace = "com.fghbuild.eveng2"
 
     compileSdk {
-        version = release(36)
+        version =
+            release(37) {
+                minorApiLevel = 2
+            }
     }
 
     defaultConfig {
@@ -27,8 +30,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // Robolectric reads the merged manifest, so the GATT test runs on the module's compileSdk.
+    // Robolectric reads the merged manifest; match the app's targetSdk so all test modules share one SDK jar.
     testOptions {
+        targetSdk = 36
         unitTests.isIncludeAndroidResources = true
     }
 

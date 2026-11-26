@@ -31,7 +31,10 @@ class VoiceTokenClient {
                 if (!response.isSuccessful) {
                     throw VoiceTokenException("Voice token request failed: HTTP ${response.code}")
                 }
-                val body = response.body?.string() ?: throw VoiceTokenException("Voice token response is empty")
+                val body =
+                    response.body.string().ifEmpty {
+                        throw VoiceTokenException("Voice token response is empty")
+                    }
                 json.decodeFromString(ServiceAuthorization.serializer(), body)
             }
         }

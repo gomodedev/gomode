@@ -7,7 +7,10 @@ android {
     namespace = "com.fghbuild.halo.ble"
 
     compileSdk {
-        version = release(36)
+        version =
+            release(37) {
+                minorApiLevel = 2
+            }
     }
 
     defaultConfig {
@@ -33,7 +36,9 @@ android {
         disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion", "OldTargetApi")
     }
 
+    // Robolectric reads the merged manifest; match the app's targetSdk so all test modules share one SDK jar.
     testOptions {
+        targetSdk = 36
         unitTests.isIncludeAndroidResources = true
     }
 
@@ -79,6 +84,7 @@ dependencies {
 
     // WebSocket client for the development-only Halo emulator bridge.
     implementation(libs.kotlinx.serialization.json)
+    implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp)
 
     // Unit tests (JVM with Robolectric shadows)

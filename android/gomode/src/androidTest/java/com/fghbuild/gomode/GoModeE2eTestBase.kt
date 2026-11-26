@@ -7,8 +7,7 @@ import android.util.AtomicFile
 import android.util.Log
 import android.webkit.WebView
 import androidx.compose.ui.test.ComposeTimeoutException
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -21,7 +20,6 @@ import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Rule
 import org.junit.rules.TestRule
 import org.junit.rules.TestWatcher
@@ -135,10 +133,10 @@ abstract class GoModeE2eTestBase {
     val notificationPermissionRule: GrantPermissionRule =
         GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS)
 
-    // Queue recomposition for the test clock; DataStore completions can resume unconfined work on IO threads.
+    // Rely on the v2 rule's StandardTestDispatcher default so DataStore completions
+    // do not resume unconfined recomposition on IO threads.
     @get:Rule(order = 2)
-    @OptIn(ExperimentalTestApi::class)
-    val composeRule = createAndroidComposeRule<MainActivity>(effectContext = StandardTestDispatcher())
+    val composeRule = createAndroidComposeRule<MainActivity>()
 
     @get:Rule(order = 3)
     val failureDiagnosticsRule: TestRule = FailureDiagnosticsRule()

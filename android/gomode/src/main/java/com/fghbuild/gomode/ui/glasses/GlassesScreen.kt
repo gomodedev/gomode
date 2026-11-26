@@ -147,7 +147,6 @@ internal fun GlassesScreen(
             }
 
             ListItem(
-                headlineContent = { Text("Auto-connect") },
                 supportingContent = { Text("Connect to the saved glasses now and whenever Go Mode opens.") },
                 trailingContent = {
                     Switch(
@@ -156,7 +155,9 @@ internal fun GlassesScreen(
                         modifier = Modifier.testTag("gomode-glasses-auto-connect"),
                     )
                 },
-            )
+            ) {
+                Text("Auto-connect")
+            }
 
             state.error?.let { error ->
                 Text(
@@ -233,7 +234,6 @@ private fun SavedGlassesRow(
 ) {
     Column {
         ListItem(
-            headlineContent = { Text(saved.model()) },
             leadingContent = { LinkDot(state.link) },
             trailingContent = {
                 Row {
@@ -257,7 +257,9 @@ private fun SavedGlassesRow(
                     LabeledIconButton(R.drawable.ic_delete_filled, "Forget", "gomode-glasses-forget", owner::forget)
                 }
             },
-        )
+        ) {
+            Text(saved.model())
+        }
         val status = state.link.status()
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -419,14 +421,15 @@ private fun GlassesRow(
         }
     ListItem(
         modifier = Modifier.testTag("gomode-glasses-found"),
-        headlineContent = { Text(scanned.name, fontWeight = FontWeight.Medium) },
         supportingContent = { Text(detail) },
         trailingContent = {
             Button(onClick = onConnect, enabled = !linked) {
                 Text("Connect")
             }
         },
-    )
+    ) {
+        Text(scanned.name, fontWeight = FontWeight.Medium)
+    }
 }
 
 /** The model and identity of [this], as the glasses screen and settings name saved glasses. */

@@ -7,9 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -19,7 +18,6 @@ import com.fghbuild.gomode.voice.VoiceErrorLog
 import com.fghbuild.gomode.voice.VoiceErrorPhase
 import com.fghbuild.gomode.voice.VoiceErrorRecord
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -31,8 +29,7 @@ import java.util.UUID
 @RunWith(RobolectricTestRunner::class)
 class VoiceErrorsSettingsTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher())
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun disclosedFailuresNameTheEngineAndPhase() {

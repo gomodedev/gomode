@@ -14,8 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -41,7 +40,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -70,8 +68,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 class ConcurrentServiceCatalogTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val composeRule = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher())
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
 
     @get:Rule
     val notificationPermissionRule: GrantPermissionRule =

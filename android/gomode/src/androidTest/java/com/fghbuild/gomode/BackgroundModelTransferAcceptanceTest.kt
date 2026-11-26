@@ -5,8 +5,7 @@ import android.Manifest
 import android.app.NotificationManager
 import android.content.Intent
 import android.os.Build
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -19,7 +18,6 @@ import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.voice.LocalModelDownloads
 import com.fghbuild.gomode.voice.ModelDownloadState
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,8 +34,7 @@ class BackgroundModelTransferAcceptanceTest {
     internal val systemUi = SystemUiRule()
 
     @get:Rule(order = 1)
-    @OptIn(ExperimentalTestApi::class)
-    val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher())
+    val compose = createEmptyComposeRule()
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val app get() = instrumentation.targetContext.applicationContext as GoModeApplication
     private val downloads get() = app.modelDownloads

@@ -6,7 +6,12 @@ plugins {
 
 android {
     namespace = "com.fghbuild.gomode.cardialfixture"
-    compileSdk = 36
+    compileSdk {
+        version =
+            release(37) {
+                minorApiLevel = 2
+            }
+    }
     defaultConfig {
         applicationId = "com.fghbuild.gomode.cardialfixture"
         minSdk = 33

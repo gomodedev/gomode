@@ -905,7 +905,7 @@ internal fun openNewWindowInExternalBrowser(
         WebView(parentView.context).apply {
             webViewClient =
                 object : WebViewClient() {
-                    private var openedExternalWindow = false
+                    private var closed = false
 
                     override fun shouldOverrideUrlLoading(
                         view: WebView,
@@ -923,12 +923,24 @@ internal fun openNewWindowInExternalBrowser(
                         url?.toUri()?.let { openOnce(view, it) }
                     }
 
+                    override fun onRenderProcessGone(
+                        view: WebView,
+                        detail: RenderProcessGoneDetail,
+                    ): Boolean {
+                        Log.w(TAG, "New window WebView render process gone (didCrash=${detail.didCrash()}).")
+                        if (!closed) {
+                            closed = true
+                            view.destroy()
+                        }
+                        return true
+                    }
+
                     private fun openOnce(
                         view: WebView,
                         uri: Uri,
                     ) {
-                        if (openedExternalWindow) return
-                        openedExternalWindow = true
+                        if (closed) return
+                        closed = true
                         openExternalUri(uri)
                         view.destroy()
                     }

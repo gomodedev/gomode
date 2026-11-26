@@ -9,7 +9,10 @@ plugins {
 android {
     namespace = "com.fghbuild.gomode"
     compileSdk {
-        version = release(36)
+        version =
+            release(37) {
+                minorApiLevel = 2
+            }
     }
 
     defaultConfig {
@@ -164,8 +167,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.json.schema.validator) {
         // MCP tool schemas and arguments are JSON, never YAML.
-        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+        exclude(group = "tools.jackson.dataformat", module = "jackson-dataformat-yaml")
     }
+    implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp)
     implementation(libs.stream.webrtc)
     // LiteRT's asynchronous JNI callbacks require its declared Kotlin/coroutine runtime ABI.

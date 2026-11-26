@@ -210,7 +210,7 @@ private fun validateResponse(
         } else {
             artifact.size
         }
-    val length = response.body?.contentLength() ?: -1
+    val length = response.body.contentLength()
     if (length >= 0 && length != expected) {
         throw ModelInstallException("The download server returned an incorrect file size.")
     }

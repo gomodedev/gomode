@@ -18,7 +18,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
@@ -40,7 +39,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.isNotEnabled
 import androidx.compose.ui.test.isSelected
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -65,7 +64,6 @@ import com.fghbuild.gomode.ui.theme.GoModeTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -84,8 +82,7 @@ import java.util.Locale
 @Config(qualifiers = "w411dp-h914dp-280dpi")
 class VoiceSettingsTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val composeRule = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher())
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)

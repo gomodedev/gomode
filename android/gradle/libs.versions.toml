@@ -1,48 +1,38 @@
 # Android dependency and plugin versions.
 
 [versions]
-agp = "9.5.1"
-kotlin = "2.4.0"
+agp = "9.5.3"
+kotlin = "2.4.21"
 ktlint = "14.2.0"
-versions = "0.51.0"
-coreKtx = "1.18.0"
+versions = "0.67.0"
+coreKtx = "1.19.1"
 junit = "4.13.2"
 junitVersion = "1.3.0"
 espressoCore = "3.7.0"
 androidxTest = "1.7.0"
-uiautomator = "2.3.0"
-appcompat = "1.7.1"
-material = "1.12.0"
-activity = "1.9.3"
-constraintlayout = "2.1.4"
-composeBom = "2026.03.00"
+uiautomator = "2.4.1"
+composeBom = "2026.11.01"
 activityCompose = "1.13.0"
-lifecycleViewmodelCompose = "2.10.0"
-navigationCompose = "2.9.0"
-navigation3 = "1.0.0"
-hilt = "2.59.2"
-ksp = "2.2.10-2.0.2"
-hiltAndroidX = "1.3.0"
-datastorePreferences = "1.2.1"
+lifecycle = "2.11.1"
+datastorePreferences = "1.3.0"
 graphicsPath = "1.1.0"
-composeCompiler = "1.5.15"
-okhttp = "4.12.0"
-kotlinxSerialization = "1.7.3"
-jsonSchemaValidator = "2.0.8"
-# LiteRT-LM 0.18.1 requires this runtime; keep core and test artifacts aligned.
+okhttp = "5.5.1"
+kotlinxSerialization = "1.13.0"
+jsonSchemaValidator = "3.0.9"
+# LiteRT-LM 0.19.1 requires this runtime; keep core and test artifacts aligned.
 kotlinxCoroutines = "1.11.0"
-robolectric = "4.16.1"
-# Robolectric maps a test's compileSdk to this Android runtime jar. The Robolectric test modules
+robolectric = "4.18.1"
+# Robolectric maps a test's targetSdk to this Android runtime jar. The Robolectric test modules
 # resolve the jar through Gradle and hand it to Robolectric's offline resolver, so the entry must
-# match both the Robolectric version above and the modules' compileSdk (API 36).
-robolectricAndroidAll = "16-robolectric-13921718-i7"
-multiplatformMarkdownRenderer = "0.39.2"
+# match both the Robolectric version above and the modules' targetSdk (API 36).
+robolectricAndroidAll = "16-robolectric-13921718-2-i7"
 streamWebrtc = "1.3.10"
-androidsvg = "1.4"
-webkit = "1.16.0"
+webkit = "1.18.0"
 credentials = "1.6.0"
-coreTelecom = "1.0.1"
+coreTelecom = "1.1.0"
 work = "2.12.0"
+# 0.20.0 ships Java 25 (class file version 69) bytecode; local and CI builds run JDK 21 (version 65).
+litertlm = "0.19.1"
 
 [libraries]
 androidx-work-testing = { group = "androidx.work", name = "work-testing", version.ref = "work" }
@@ -52,13 +42,9 @@ androidx-core-telecom = { group = "androidx.core", name = "core-telecom", versio
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
-androidx-espresso-accessibility = { group = "androidx.test.espresso", name = "espresso-accessibility", version.ref = "espressoCore" }
-androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
-androidx-activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
-androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
-okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
-okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+okhttp-bom = { group = "com.squareup.okhttp3", name = "okhttp-bom", version.ref = "okhttp" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp" }
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 json-schema-validator = { group = "com.networknt", name = "json-schema-validator", version.ref = "jsonSchemaValidator" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
@@ -79,37 +65,20 @@ androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
-androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycleViewmodelCompose" }
-androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycleViewmodelCompose" }
-androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
-androidx-navigation3-runtime = { group = "androidx.navigation3", name = "navigation3-runtime", version.ref = "navigation3" }
-androidx-navigation3-ui = { group = "androidx.navigation3", name = "navigation3-ui", version.ref = "navigation3" }
-androidx-lifecycle-viewmodel-navigation3 = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-navigation3", version.ref = "lifecycleViewmodelCompose" }
-hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
-hilt-android-testing = { group = "com.google.dagger", name = "hilt-android-testing", version.ref = "hilt" }
-hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltAndroidX" }
-hilt-lifecycle-viewmodel-compose = { group = "androidx.hilt", name = "hilt-lifecycle-viewmodel-compose", version.ref = "hiltAndroidX" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastorePreferences" }
 androidx-graphics-path = { group = "androidx.graphics", name = "graphics-path", version.ref = "graphicsPath" }
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
-
-multiplatform-markdown-renderer-m3 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-m3", version.ref = "multiplatformMarkdownRenderer" }
-multiplatform-markdown-renderer-coil3 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-coil3", version.ref = "multiplatformMarkdownRenderer" }
 stream-webrtc = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "streamWebrtc" }
-androidsvg = { group = "com.caverock", name = "androidsvg", version.ref = "androidsvg" }
-litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version = "0.18.1" }
+litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertlm" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
-versions = { id = "com.github.ben-manes.versions", version.ref = "versions" }
+versions = { id = "io.github.ben-manes.versions", version.ref = "versions" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
-hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-

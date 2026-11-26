@@ -5,9 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -28,7 +27,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.StandardTestDispatcher
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -42,8 +40,7 @@ import java.util.UUID
 @ModelAcceptance
 class PublicModelDownloadAcceptanceTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher())
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun publicLfm3DownloadSurvivesRecreationAndInstallsVerifiedWeights() {

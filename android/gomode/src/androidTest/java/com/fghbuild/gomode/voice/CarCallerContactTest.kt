@@ -10,10 +10,9 @@ import android.provider.ContactsContract.Data
 import android.telephony.PhoneNumberUtils
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -25,7 +24,6 @@ import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.findFreshObject
 import com.fghbuild.gomode.ui.settings.CarCallerIDSetting
-import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -33,8 +31,7 @@ import java.util.UUID
 
 class CarCallerContactTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val composeRule = createComposeRule(effectContext = StandardTestDispatcher())
+    val composeRule = createComposeRule()
 
     @Test
     fun oneButtonImportsGenericAndEverySavedServerContact() {

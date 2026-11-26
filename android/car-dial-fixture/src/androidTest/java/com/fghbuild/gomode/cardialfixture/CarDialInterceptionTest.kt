@@ -149,10 +149,14 @@ class CarDialInterceptionTest {
                 .setSupportedUriSchemes(listOf(PhoneAccount.SCHEME_TEL))
                 .build(),
         )
+        // CAPABILITY_SELF_MANAGED is deprecated in API 37 in favor of transactional calls,
+        // but this fixture verifies that a ConnectionService self-managed call bypasses redirection.
+        @Suppress("DEPRECATION")
+        val selfManagedCapability = PhoneAccount.CAPABILITY_SELF_MANAGED
         telecom.registerPhoneAccount(
             PhoneAccount
                 .builder(selfManagedAccount, "Controlled self-managed calls")
-                .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
+                .setCapabilities(selfManagedCapability)
                 .setSupportedUriSchemes(listOf("gomode"))
                 .build(),
         )

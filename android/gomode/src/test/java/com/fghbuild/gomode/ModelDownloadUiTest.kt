@@ -11,11 +11,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -30,7 +29,6 @@ import com.fghbuild.gomode.voice.ModelTransferProgress
 import com.fghbuild.gomode.voice.ModelTransferStage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -42,8 +40,7 @@ import java.util.UUID
 @RunWith(RobolectricTestRunner::class)
 class ModelDownloadUiTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher())
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun downloadStatesOfferRecoveryAndRespectActiveVoice() {

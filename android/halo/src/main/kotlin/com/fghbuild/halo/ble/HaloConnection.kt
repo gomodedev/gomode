@@ -115,6 +115,8 @@ open class HaloConnection(
         autoConnect: Boolean,
     ): BluetoothGatt =
         suspendCancellableCoroutine { cont ->
+            // BluetoothGattConnectionSettings requires API 37; minSdk is 33.
+            @Suppress("DEPRECATION")
             val gatt: BluetoothGatt? =
                 device.connectGatt(
                     context,

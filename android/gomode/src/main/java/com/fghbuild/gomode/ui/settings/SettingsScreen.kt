@@ -194,7 +194,6 @@ internal fun SettingsScreen(
                         role = Role.Switch,
                         onValueChange = { value -> scope.launch { edits.setShowServiceOnLockScreen(value) } },
                     ),
-                headlineContent = { Text("Show service on lock screen") },
                 supportingContent = {
                     Text("During car calls. Anyone can view and use your services without unlocking.")
                 },
@@ -205,12 +204,13 @@ internal fun SettingsScreen(
                         enabled = !voiceSessionActive && settings.loadState == SettingsLoadState.Ready,
                     )
                 },
-            )
+            ) {
+                Text("Show service on lock screen")
+            }
             CarCallerIDSetting(settings, enabled = !voiceSessionActive)
             HorizontalDivider()
             Text("Glasses", style = MaterialTheme.typography.titleMedium)
             ListItem(
-                headlineContent = { Text("Device") },
                 supportingContent = { Text(settings.glasses?.label() ?: "No device selected") },
                 leadingContent = { Icon(painterResource(R.drawable.ic_bluetooth), contentDescription = null) },
                 trailingContent = {
@@ -221,7 +221,9 @@ internal fun SettingsScreen(
                         Icon(painterResource(R.drawable.ic_settings), contentDescription = "Manage glasses")
                     }
                 },
-            )
+            ) {
+                Text("Device")
+            }
             HorizontalDivider()
             CreditsSetting(voiceSessionActive)
         }

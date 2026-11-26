@@ -1,34 +1,20 @@
 // Validates native tool arguments against advertised JSON Schemas without changing values or fetching references.
 package com.fghbuild.gomode.voice
 
-import com.fasterxml.jackson.core.JsonProcessingException
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.node.DecimalNode
-import com.fasterxml.jackson.databind.node.JsonNodeFactory
-import com.fasterxml.jackson.databind.node.ValueNode
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
-import com.networknt.schema.ExecutionContext
 import com.networknt.schema.InputFormat
 import com.networknt.schema.Schema
-import com.networknt.schema.SchemaContext
 import com.networknt.schema.SchemaLocation
 import com.networknt.schema.SchemaRegistry
 import com.networknt.schema.SchemaRegistryConfig
 import com.networknt.schema.SpecificationVersion
-import com.networknt.schema.dialect.DefaultDialectRegistry
-import com.networknt.schema.dialect.Dialect
-import com.networknt.schema.keyword.Keyword
-import com.networknt.schema.keyword.KeywordValidator
-import com.networknt.schema.keyword.UniqueItemsValidator
-import com.networknt.schema.path.NodePath
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import java.math.BigDecimal
-import java.math.BigInteger
+import tools.jackson.core.JacksonException
+import tools.jackson.databind.DeserializationFeature
+import tools.jackson.databind.json.JsonMapper
 import java.util.Locale
 
 // Compile once per tool configuration. Default dialect is 2020-12; $schema can select another supported dialect.
@@ -37,11 +23,12 @@ internal class ToolCallValidator(
 ) {
     private val schemas: Map<String, Schema>
     private val mapper =
-        ObjectMapper()
+        JsonMapper
+            .builder()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .setNodeFactory(ExactNumberNodeFactory)
+            .build()
 
     init {
         require(tools.map { it.name }.distinct().size == tools.size) { "Duplicate local tool names" }
@@ -58,10 +45,6 @@ internal class ToolCallValidator(
                 val registry =
                     SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12) { builder ->
                         builder.nodeReader { it.jsonMapper(mapper) }.schemaRegistryConfig(config)
-                        builder.dialectRegistry { id, schemas ->
-                            val dialect = DefaultDialectRegistry.getInstance().getDialect(id, schemas)
-                            Dialect.builder(dialect).keyword(ArrayUniqueItemsKeyword).build()
-                        }
                     }
                 val schema = registry.getSchema(definition.toString(), InputFormat.JSON)
                 val metaSchema = registry.getSchema(SchemaLocation.of(schema.schemaContext.dialect.id))
@@ -93,7 +76,7 @@ internal class ToolCallValidator(
                     // Use the same strict JSON reader as validation. Kotlin's
                     // tree parser accepts leading-zero numbers such as 00123.
                     mapper.readTree(value)?.let { Json.parseToJsonElement(it.toString()) } ?: JsonPrimitive(value)
-                } catch (_: JsonProcessingException) {
+                } catch (_: JacksonException) {
                     JsonPrimitive(value)
                 }
             }
@@ -137,51 +120,5 @@ internal class ToolCallValidator(
         if (errors.isEmpty()) return null
         val summary = errors.take(3).joinToString("; ") { "${it.instanceLocation}: ${it.message}".take(300) }
         return "Invalid arguments: $summary. Correct the call using its schema."
-    }
-}
-
-// NetworkNT 2.0.8 applies uniqueItems to object values too. Preserve the keyword's array-only applicability.
-private object ArrayUniqueItemsKeyword : Keyword {
-    override fun getValue(): String = "uniqueItems"
-
-    override fun newValidator(
-        location: SchemaLocation,
-        node: JsonNode,
-        parent: Schema,
-        context: SchemaContext,
-    ): KeywordValidator =
-        object : UniqueItemsValidator(location, node, parent, context) {
-            override fun validate(
-                executionContext: ExecutionContext,
-                node: JsonNode,
-                rootNode: JsonNode,
-                instanceLocation: NodePath,
-            ) {
-                if (node.isArray) super.validate(executionContext, node, rootNode, instanceLocation)
-            }
-        }
-}
-
-// Use the library's decimal path for every number in both schemas and validation copies of arguments.
-// Mixed integer/decimal nodes otherwise round multipleOf, overflow bound fast paths, and disagree on equality.
-private object ExactNumberNodeFactory : JsonNodeFactory() {
-    override fun numberNode(value: BigInteger): ValueNode = ExactDecimalNode(value.toBigDecimal())
-
-    override fun numberNode(value: BigDecimal): ValueNode = ExactDecimalNode(value)
-}
-
-private class ExactDecimalNode(
-    value: BigDecimal,
-) : DecimalNode(value) {
-    // The library stores count keywords as Int. Reject unsupported schema counts rather than wrapping them.
-    override fun intValue(): Int = decimalValue().intValueExact()
-
-    // multipleOf checks doubleValue before using exact decimals. Do not silently disable tiny divisors.
-    override fun doubleValue(): Double {
-        val value = super.doubleValue()
-        check(value != 0.0 || decimalValue().signum() == 0) {
-            "Numeric value underflows the validator's floating-point range"
-        }
-        return value
     }
 }

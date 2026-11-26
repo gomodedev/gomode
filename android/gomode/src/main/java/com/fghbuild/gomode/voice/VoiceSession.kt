@@ -2062,7 +2062,10 @@ internal class VoiceSession(
     }
 
     /** Listen for SCO audio link teardown — fired when the car's HFP hang-up disconnects
-     *  the audio channel without removing the BT device from the system. */
+     *  the audio channel without removing the BT device from the system.
+     *  ACTION_SCO_AUDIO_STATE_UPDATED and SCO_AUDIO_STATE_* were deprecated in API 37,
+     *  but remain needed for HFP hang-up detection when Telecom does not own the call. */
+    @Suppress("DEPRECATION")
     private fun registerScoReceiver() {
         var scoWasConnected = false
         val receiver =

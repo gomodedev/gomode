@@ -3,8 +3,7 @@ package com.fghbuild.gomode
 
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
@@ -18,7 +17,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -37,8 +35,7 @@ import java.util.concurrent.TimeUnit
 
 class FrontendToolInvocationBridgeTest {
     @get:Rule
-    @OptIn(ExperimentalTestApi::class)
-    val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher())
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun delayedConcurrentResultsRejectForgedAndDuplicateCompletions() =

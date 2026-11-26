@@ -19,6 +19,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadow.api.Shadow
+import org.robolectric.shadows.ShadowParcelFileDescriptor
 import org.robolectric.shadows.ShadowSpeechRecognizer
 import org.robolectric.shadows.ShadowTextToSpeech
 import org.robolectric.util.ReflectionHelpers
@@ -261,11 +263,12 @@ class DeviceSpeechTest {
             recognizer.triggerOnPartialResults(result("Keep this input"))
             recognizer.triggerOnEndOfSpeech()
             // Robolectric's socket descriptors have no backing file for getFd().
-            assertFalse(ReflectionHelpers.getField(shadowOf(source), "closed"))
+            val sourceShadow = Shadow.extract<ShadowParcelFileDescriptor>(source)
+            assertFalse(ReflectionHelpers.getField(sourceShadow, "closed"))
             assertTrue(finals.isEmpty())
             recognizer.triggerOnResults(result("Keep this input please"))
             assertEquals(listOf("Keep this input please"), finals)
-            assertTrue(ReflectionHelpers.getField(shadowOf(source), "closed"))
+            assertTrue(ReflectionHelpers.getField(sourceShadow, "closed"))
         } finally {
             speech.close()
             shadowOf(Looper.getMainLooper()).idle()

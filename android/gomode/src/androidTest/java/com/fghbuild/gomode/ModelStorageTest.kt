@@ -3,9 +3,8 @@ package com.fghbuild.gomode
 
 import android.content.Intent
 import android.os.Build
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -18,7 +17,6 @@ import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.voice.ModelDownloadState
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -32,8 +30,7 @@ class ModelStorageTest {
     internal val systemUi = SystemUiRule()
 
     @get:Rule(order = 1)
-    @OptIn(ExperimentalTestApi::class)
-    val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher())
+    val compose = createEmptyComposeRule()
 
     @Test
     fun installedModelCanBeDeletedFromSettings() {

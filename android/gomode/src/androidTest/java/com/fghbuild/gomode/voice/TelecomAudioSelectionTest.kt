@@ -4,7 +4,7 @@ package com.fghbuild.gomode.voice
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import androidx.activity.ComponentActivity
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first

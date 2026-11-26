@@ -6,7 +6,7 @@
 sets share live in their owning module's Gradle test fixtures, `src/testFixtures`,
 which ktlint and Android lint check like its other sources.
 
-Use minSdk 33, target/compileSdk 36, Java 17, coroutines and StateFlow,
+Use minSdk 33, targetSdk 36, compileSdk 37.2, Java 17, coroutines and StateFlow,
 `kotlinx.serialization`, and DataStore for persisted settings. Kotlin lines
 are at most 120 characters. The Android modules (`gomode`, `car-dial-fixture`,
 `halo`, `evenG2`) compile Kotlin with `-Wextra` and warnings as errors: fix a
@@ -14,7 +14,7 @@ warning, or suppress its diagnostic at the narrowest scope with a reason; the
 generated SDK clients set neither flag. Keep the generated clients free of
 Android dependencies. Robolectric tests resolve their runtime jar through
 Gradle's offline resolver; update that version alongside Robolectric or
-compileSdk.
+targetSdk.
 
 Read `gomode/AGENTS.md` before editing the app. Keep product task, document,
 and database UI in the hosted frontend. Native code owns WebView bootstrap,

@@ -228,6 +228,8 @@ private class G2GattLink(
     ) {
         val gatt =
             bluetoothCall("connectGatt") {
+                // BluetoothGattConnectionSettings requires API 37; minSdk is 33.
+                @Suppress("DEPRECATION")
                 device.connectGatt(context, background, callback, BluetoothDevice.TRANSPORT_LE)
             } ?: throw G2Exception("connectGatt returned null")
         this.gatt = gatt

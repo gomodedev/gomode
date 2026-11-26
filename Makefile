@@ -141,12 +141,11 @@ benchmark:
 test-smoke:
 	@go test -tags=smoke -run '^TestSmoke' -v -timeout 30m ./voicegateway/voicertc/
 
-# com.github.ben-manes.versions 0.51.0 is not configuration-cache compatible.
 upgrade:
 	@go get -u ./...
 	@go mod tidy
 	@pnpm update --latest
-	@cd ./android && ./gradlew dependencyUpdates -Drevision=release --no-configuration-cache
+	@cd ./android && ./gradlew dependencyUpdates -Drevision=release
 
 android-lint: android-sdk
 	@cd ./android && ./gradlew $(ANDROID_LINT_TASKS) $(GRADLE_LOG_ARGS)

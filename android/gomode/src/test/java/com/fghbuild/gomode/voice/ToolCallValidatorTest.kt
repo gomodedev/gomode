@@ -152,10 +152,19 @@ class ToolCallValidatorTest {
     }
 
     @Test
-    fun countsOutsideTheValidatorIntegerRangeFailClosedInsteadOfWrapping() {
-        for (keyword in listOf("maxItems", "maxLength", "maxProperties", "minItems", "minLength", "minProperties")) {
-            assertTrue(keyword, runCatching { validator("""{"$keyword":4294967296}""") }.isFailure)
-        }
+    fun countsOutsideIntRangeEnforceBoundsWithoutWrapping() {
+        val maxItems = validator("""{"properties":{"v":{"type":"array","maxItems":4294967296}}}""")
+        assertNull(validate(maxItems, """{"v":[1]}"""))
+        val minItems = validator("""{"properties":{"v":{"type":"array","minItems":4294967296}}}""")
+        assertNotNull(validate(minItems, """{"v":[1]}"""))
+        val maxLength = validator("""{"properties":{"v":{"type":"string","maxLength":4294967296}}}""")
+        assertNull(validate(maxLength, """{"v":"a"}"""))
+        val minLength = validator("""{"properties":{"v":{"type":"string","minLength":4294967296}}}""")
+        assertNotNull(validate(minLength, """{"v":"a"}"""))
+        val maxProperties = validator("""{"properties":{"v":{"type":"object","maxProperties":4294967296}}}""")
+        assertNull(validate(maxProperties, """{"v":{"a":1}}"""))
+        val minProperties = validator("""{"properties":{"v":{"type":"object","minProperties":4294967296}}}""")
+        assertNotNull(validate(minProperties, """{"v":{"a":1}}"""))
     }
 
     @Test
@@ -173,10 +182,10 @@ class ToolCallValidatorTest {
     }
 
     @Test
-    fun underflowingMultipleOfCannotBeSilentlyIgnored() {
-        assertTrue(
-            runCatching { validator("""{"properties":{"step":{"multipleOf":1e-400}}}""") }.isFailure,
-        )
+    fun subDoubleMultipleOfIsEnforcedWithExactDecimalArithmetic() {
+        val tiny = validator("""{"properties":{"step":{"multipleOf":1e-400}}}""")
+        assertNull(validate(tiny, """{"step":2e-400}"""))
+        assertNotNull(validate(tiny, """{"step":1.5e-400}"""))
     }
 
     @Test

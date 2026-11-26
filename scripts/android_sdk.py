@@ -328,8 +328,8 @@ def _build_export_block(sdk_root: str) -> str:
 def _check_packages() -> dict[str, str]:
     """Return SDK packages required by non-emulator Android checks."""
     return {
-        "platforms;android-36": "platforms/android-36",
-        "build-tools;36.0.0": "build-tools/36.0.0",
+        "platforms;android-37.2": "platforms/android-37.2",
+        "build-tools;37.0.0": "build-tools/37.0.0",
     }
 
 
