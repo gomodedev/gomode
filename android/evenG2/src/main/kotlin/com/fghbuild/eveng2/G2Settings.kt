@@ -61,9 +61,9 @@ sealed interface G2Firmware {
 }
 
 internal object G2Settings {
-    private const val READ = 2L
+    internal const val READ = 2L
     private const val WRITE = 1L
-    private const val REQUEST_FIELD = 4
+    internal const val REQUEST_FIELD = 4
     private const val REVISION_FIELD = 100
     private const val CONTROL_FIELD = 101
 

@@ -4,6 +4,8 @@ package com.fghbuild.gomode.glasses
 import android.Manifest
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
@@ -126,16 +128,17 @@ class GlassesPairingTest {
                 assertFalse(acted.get())
                 composeRule.runOnUiThread { glasses.takeActionsFirst(null) }
 
-                // Once the session is quiet, the row shows the batteries; a screen reader hears them in words.
+                // The glasses' level comes with the session's first settings read and the case's once
+                // the session is quiet; a screen reader hears them in words.
                 composeRule.waitUntil(TIMEOUT_MS) {
                     composeRule
                         .onAllNodesWithTag("gomode-glasses-battery", useUnmergedTree = true)
                         .fetchSemanticsNodes()
-                        .isNotEmpty()
+                        .any {
+                            it.config.getOrNull(SemanticsProperties.ContentDescription) ==
+                                listOf("Glasses 71%, charging. Case 55%")
+                        }
                 }
-                composeRule
-                    .onNodeWithTag("gomode-glasses-battery", useUnmergedTree = true)
-                    .assertContentDescriptionEquals("Glasses 71%, charging. Case 55%")
 
                 composeRule.onNodeWithTag("gomode-glasses-scan").performClick()
                 waitForTag("gomode-glasses-found")

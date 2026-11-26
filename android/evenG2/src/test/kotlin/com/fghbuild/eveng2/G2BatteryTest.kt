@@ -1,8 +1,9 @@
 // Battery and case readings of G2Glasses: the codec against golden bytes, and polling on fake firmware.
 //
 // The CASE_INFO read's golden bytes come from GlassesSessionCoreTest.kt of jimrandomh/faceclaw commit
-// 2e416b53679baf3c9e312c77f53a2b41f9b62d93, which matches them to the Even app. No capture of real
-// glasses exists: the replies are built by hand from the fields BleProtocol.kt of that commit reads.
+// 2e416b53679baf3c9e312c77f53a2b41f9b62d93, which matches them to the Even app. The right arm's two
+// settings pushes were captured from a pair on 2.3.0.24 with Faceclaw/45 on 2026-11-26; the other
+// replies are built by hand from the fields BleProtocol.kt of that commit reads.
 
 package com.fghbuild.eveng2
 
@@ -44,23 +45,30 @@ class G2BatteryTest {
         // {1: 2, 2: 42, 4: {5: "2.2.9", 6: "2.2.9", 12: 80}}.
         assertEquals(
             G2Charge(80, false),
-            G2BatteryCodec.glasses(settings("0802102a22102a05322e322e393205322e322e396050"), 42),
+            G2BatteryCodec.glasses(settings("0802102a22102a05322e322e393205322e322e396050")),
         )
         // The same with 13: 1, then 14: 1 (silent mode), which does not matter.
         val charging = "0802102a22142a05322e322e393205322e322e3960506801" + "7001"
-        assertEquals(G2Charge(80, true), G2BatteryCodec.glasses(settings(charging), 42))
+        assertEquals(G2Charge(80, true), G2BatteryCodec.glasses(settings(charging)))
+        // The right arm's own pushes on a pair on 2.3.0.24 with Faceclaw/45, magics 447 and 449: docked, then
+        // out of the case.
+        val docked = "080210bf03222708011037180620012a08322e332e302e32343208322e332e302e32343801401e60646801900101"
+        assertEquals(G2Charge(100, true), G2BatteryCodec.glasses(settings(docked)))
+        val worn = "080210c10322250801103c180620012a08322e332e302e32343208322e332e302e32343801401e6064900101"
+        assertEquals(G2Charge(100, false), G2BatteryCodec.glasses(settings(worn)))
     }
 
     @Test
-    fun aSettingsReplyWithoutItsReadOrLevelIsNoReading() {
+    fun aSettingsMessageOtherThanAReadReplyOrWithoutALevelIsNoReading() {
         val reply = "0802102a22102a05322e322e393205322e322e396050"
-        assertNull(G2BatteryCodec.glasses(settings(reply), magic = 43))
-        assertNull(G2BatteryCodec.glasses(G2Message(7, G2Protocol.SID_EVEN_HUB, 0, hex(reply)), 42))
-        assertNull(G2BatteryCodec.glasses(G2Message(7, G2Protocol.SID_SETTINGS, 2, hex(reply)), 42))
+        // Another command than a read's reply: {1: 3, 2: 42, 4: …}.
+        assertNull(G2BatteryCodec.glasses(settings("0803" + reply.drop(4))))
+        assertNull(G2BatteryCodec.glasses(G2Message(7, G2Protocol.SID_EVEN_HUB, 0, hex(reply))))
+        assertNull(G2BatteryCodec.glasses(G2Message(7, G2Protocol.SID_SETTINGS, 2, hex(reply))))
         // No level (proto3 drops 0 %), no field 4, and a level above 100.
-        assertNull(G2BatteryCodec.glasses(settings("0802102a220c2a05322e322e393205322e322e39"), 42))
-        assertNull(G2BatteryCodec.glasses(settings("0802102a"), 42))
-        assertNull(G2BatteryCodec.glasses(settings("0802102a2202606f"), 42))
+        assertNull(G2BatteryCodec.glasses(settings("0802102a220c2a05322e322e393205322e322e39")))
+        assertNull(G2BatteryCodec.glasses(settings("0802102a")))
+        assertNull(G2BatteryCodec.glasses(settings("0802102a2202606f")))
     }
 
     @Test
@@ -111,7 +119,9 @@ class G2BatteryTest {
             val firmware = FakeG2Firmware()
             firmware.charge = G2Charge(64, charging = false)
             val glasses = firmware.connected(this)
-            assertEquals(G2Battery(), glasses.battery.value)
+            // The session's first settings read, which tells the firmware, already holds the level.
+            assertEquals(G2Battery(glasses = G2Charge(64, false)), glasses.battery.value)
+            firmware.charge = G2Charge(63, charging = false)
             firmware.requests.clear()
 
             settle()
@@ -120,7 +130,7 @@ class G2BatteryTest {
                 firmware.requests.filter { it.kind != "heartbeat" }.map { it.toString() },
             )
             // Out of the case, the right arm answers with an empty caseInfo.
-            assertEquals(G2Battery(glasses = G2Charge(64, false)), glasses.battery.value)
+            assertEquals(G2Battery(glasses = G2Charge(63, false)), glasses.battery.value)
         }
 
     @Test
@@ -219,6 +229,26 @@ class G2BatteryTest {
         }
 
     @Test
+    fun leavingTheCaseStopsChargingAtTheArmsPushWithoutWaitingForARound() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.case = G2Charge(81, charging = false)
+            firmware.charge = G2Charge(100, charging = true)
+            val glasses = firmware.connected(this)
+            settle()
+            assertEquals(G2Battery(glasses = G2Charge(100, true), case = G2Charge(81, false)), glasses.battery.value)
+            val rounds = firmware.rounds
+
+            firmware.case = null
+            firmware.charge = G2Charge(100, charging = false)
+            firmware.pushCase()
+            firmware.pushSettings()
+            runCurrent()
+            assertEquals(G2Battery(glasses = G2Charge(100, false)), glasses.battery.value)
+            assertEquals(rounds, firmware.rounds)
+        }
+
+    @Test
     fun dockingReadsTheArmsSoon() =
         runTest {
             val firmware = FakeG2Firmware()
@@ -253,10 +283,12 @@ class G2BatteryTest {
             glasses.disconnect()
             assertEquals(G2Battery(), glasses.battery.value)
 
+            firmware.charge = null
             glasses.connect(pair)
             glasses.state.first { it is G2State.Ready }
             assertEquals(G2Battery(), glasses.battery.value)
+            firmware.charge = G2Charge(79, charging = false)
             settle()
-            assertEquals(G2Charge(80, false), glasses.battery.value.glasses)
+            assertEquals(G2Charge(79, false), glasses.battery.value.glasses)
         }
 }

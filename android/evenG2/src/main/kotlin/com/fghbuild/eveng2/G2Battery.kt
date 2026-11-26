@@ -15,7 +15,10 @@
 //   reports no level of the left arm. The reply echoes the magic in field 2, and its field 4 holds
 //   the level in percent in field 12, charging (1) in field 13, and silent mode in field 14, which
 //   this SDK does not read. Proto3 drops zero fields, so a reply without field 12 carries no level
-//   (or 0 %) and is no reading; one without field 13 is not charging.
+//   (or 0 %) and is no reading; one without field 13 is not charging. That pair's right arm also
+//   pushes the same message, {1: 2} with a magic of its own, when the glasses leave the case: its
+//   charging field cleared about 1.5 s after the case's own push, so replies and pushes count alike,
+//   whatever their magic.
 // - Case: {1: 1 (CASE_INFO), 2: magic, 3: {}} to the right arm. A reply, and a push that the right
 //   arm sends with flag 0x01 and a magic of its own, are {1: 1, 2: magic, 3: GlassesCaseInfo}:
 //   {1: level 1..100, 2: case charging on USB (1), 3: lid closed (1), 4: glasses in the case (1),
@@ -23,7 +26,8 @@
 //   arm pushes one on every change (docking, the lid, USB, each percent); docking pushes {4: 1}
 //   first and the level about 0.7 s later; out of the case it answers a read with an empty field 3,
 //   since it cannot see the case. On a pair on 2.3.0.24 with Faceclaw/45 out of the case, it
-//   answered {1: 95} without field 4, which reads as out of the case. Replies and pushes are read
+//   answered {1: 95} without field 4, which reads as out of the case; in the case it answered
+//   {1: 81, 4: 1}, and taking the glasses out pushed {1: 81} at once. Replies and pushes are read
 //   alike, whatever their magic.
 //
 // G2Session polls both; see its header.
@@ -57,7 +61,6 @@ internal sealed interface G2CaseInfo {
 }
 
 internal object G2BatteryCodec {
-    private const val SETTINGS_REQUEST_FIELD = 4
     private const val LEVEL_FIELD = 12
     private const val CHARGING_FIELD = 13
     private const val CASE_INFO = 1L
@@ -82,15 +85,12 @@ internal object G2BatteryCodec {
         return G2Frame.packets(payload, G2Protocol.SID_CASE, G2Protocol.FLAG_SYNC_BOTH, sync)
     }
 
-    /** The glasses' battery in [message] when it answers the settings read sent with [magic]; null otherwise. */
-    fun glasses(
-        message: G2Message,
-        magic: Int,
-    ): G2Charge? {
+    /** The glasses' battery in [message] when it is a settings reply or push with a level; null otherwise. */
+    fun glasses(message: G2Message): G2Charge? {
         if (message.sid != G2Protocol.SID_SETTINGS || message.result != 0) return null
         val root = G2ProtoReader.all(message.payload) ?: return null
-        if (root.first(2)?.scalar != magic.toLong()) return null
-        val request = root.first(SETTINGS_REQUEST_FIELD)?.bytes ?: return null
+        if (root.first(1)?.scalar != G2Settings.READ) return null
+        val request = root.first(G2Settings.REQUEST_FIELD)?.bytes ?: return null
         val fields = G2ProtoReader.all(request) ?: return null
         val level = fields.first(LEVEL_FIELD)?.scalar?.takeIf { it in 1..100 } ?: return null
         return G2Charge(level.toInt(), charging = fields.first(CHARGING_FIELD)?.scalar == 1L)

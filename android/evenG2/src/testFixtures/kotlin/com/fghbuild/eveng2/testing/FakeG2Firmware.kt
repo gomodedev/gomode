@@ -244,6 +244,30 @@ class FakeG2Firmware {
     fun pushCase(level: Boolean = true) =
         link(G2Side.RIGHT).notify(G2Protocol.SID_CASE, 0, G2Protocol.FLAG_NOTIFY, caseInfo(PUSH_MAGIC, level))
 
+    /** The right arm pushes its settings, with [charge], as it does when the glasses leave the case. */
+    fun pushSettings() =
+        link(G2Side.RIGHT).notify(G2Protocol.SID_SETTINGS, 0, G2Protocol.FLAG_NOTIFY, settingsReply(PUSH_MAGIC))
+
+    // A settings read's reply, or the arm's own push, with [magic].
+    private fun settingsReply(magic: Long): ByteArray {
+        val revision = revision
+        val charge = charge
+        val versions =
+            proto {
+                bytes(5, "2.2.9".toByteArray())
+                bytes(6, "2.2.9".toByteArray())
+                // Proto3 omits zeros.
+                if (charge != null && charge.percent != 0) scalar(12, charge.percent.toLong())
+                if (charge?.charging == true) scalar(13, 1)
+            }
+        return proto {
+            scalar(1, 2)
+            scalar(2, magic)
+            bytes(4, versions)
+            if (revision != null) bytes(100, revision.toByteArray())
+        }
+    }
+
     // A CASE_INFO message with [magic]: empty out of the case, as the glasses cannot see it.
     private fun caseInfo(
         magic: Long,
@@ -354,24 +378,7 @@ class FakeG2Firmware {
             2L -> {
                 record("settings", null)
                 if (!answersSettings) return
-                val revision = revision
-                val charge = charge
-                val versions =
-                    proto {
-                        bytes(5, "2.2.9".toByteArray())
-                        bytes(6, "2.2.9".toByteArray())
-                        // Proto3 omits zeros.
-                        if (charge != null && charge.percent != 0) scalar(12, charge.percent.toLong())
-                        if (charge?.charging == true) scalar(13, 1)
-                    }
-                val reply =
-                    proto {
-                        scalar(1, 2)
-                        scalar(2, magic)
-                        bytes(4, versions)
-                        if (revision != null) bytes(100, revision.toByteArray())
-                    }
-                link(G2Side.RIGHT).notify(G2Protocol.SID_SETTINGS, sync, 0, reply)
+                link(G2Side.RIGHT).notify(G2Protocol.SID_SETTINGS, sync, 0, settingsReply(magic))
             }
 
             1L -> {
