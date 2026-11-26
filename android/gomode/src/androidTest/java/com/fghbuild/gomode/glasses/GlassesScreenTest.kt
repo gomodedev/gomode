@@ -57,7 +57,8 @@ class GlassesScreenTest : GoModeE2eTestBase() {
     @Test
     fun settingsOpenGlassesWhichScansAndPersistsAutoConnect() {
         openGlassesScreen()
-        composeRule.onNodeWithTag("gomode-glasses-link", useUnmergedTree = true).assertTextEquals("Disconnected")
+        // Without saved glasses there is nothing to connect.
+        composeRule.onNodeWithTag("gomode-glasses-saved").assertDoesNotExist()
         composeRule.onNodeWithTag("gomode-glasses-connect").assertDoesNotExist()
 
         composeRule.onNodeWithTag("gomode-glasses-scan").performClick()
@@ -79,26 +80,36 @@ class GlassesScreenTest : GoModeE2eTestBase() {
     fun savedHaloStaysLinkedAcrossActivityReplacementUntilDisconnected() {
         savedGlassesStayLinkedAcrossActivityReplacement(
             GlassesDevice.Halo(UNREACHABLE_ADDRESS),
-            "Halo · $UNREACHABLE_ADDRESS",
+            UNREACHABLE_ADDRESS,
         )
     }
 
     @Test
     fun savedEvenG2StaysLinkedAcrossActivityReplacementUntilDisconnected() {
-        savedGlassesStayLinkedAcrossActivityReplacement(GlassesDevice.EvenG2(UNREACHABLE_G2), "Even G2 7")
+        savedGlassesStayLinkedAcrossActivityReplacement(GlassesDevice.EvenG2(UNREACHABLE_G2), "7")
     }
 
     // Both models connect through the platform's Bluetooth stack, which retries the unreachable glasses.
     private fun savedGlassesStayLinkedAcrossActivityReplacement(
         glasses: GlassesDevice,
-        label: String,
+        identity: String,
     ) {
         runBlocking { app.settingsRepository.updateGlasses(glasses) }
         openGlassesScreen()
-        composeRule.onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true).assertTextEquals(label)
+        composeRule.onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true).assertTextEquals(identity)
         waitForTag("gomode-glasses-connect")
         composeRule.onNodeWithTag("gomode-glasses-connect").performClick()
         waitForTag("gomode-glasses-disconnect")
+
+        // System back leaves the input events screen for the glasses screen, and that for settings.
+        composeRule.onNodeWithTag("gomode-glasses-open-inputs").performClick()
+        waitForTag("gomode-glasses-inputs")
+        pressActivityBack()
+        waitForTag("gomode-glasses-screen")
+        pressActivityBack()
+        waitForTag("gomode-settings")
+        composeRule.onNodeWithTag("gomode-manage-glasses").performScrollTo().performClick()
+        waitForTag("gomode-glasses-screen")
 
         composeRule.activityRule.scenario.recreate()
         openGlassesScreen()

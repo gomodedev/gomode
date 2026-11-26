@@ -40,7 +40,8 @@
 // Under Faceclaw's framebuffer lease (G2Settings), g2flash's patches/gesture_fwd.c (GPL-3.0) changes
 // the input: touchpad and ring long presses arrive as system events 9 and 10 instead of opening the
 // stock menu that offers to quit, a tap then hold as 11, head up and down as 12 and 15, and a ring
-// touch-down as 14. Every R1 report then arrives raw as a system event from the ring whose field 100
+// touch-down as 14. On a pair, 10 came at the end of every touchpad touch, a tap or a swipe included,
+// and a tap's click came for 4 of 13 single taps. Every R1 report then arrives raw as a system event from the ring whose field 100
 // holds it: 'R' 'I' 1 1 <report type> <aux> <speed> 0 <ring tick u32 LE>, without the stock firmware's
 // suppression of a report within 100 ring ticks of the last; G2RingFilter, ported from faceclaw's
 // app/ui/input-monitor.ts (GPL-3.0), suppresses them as faceclaw does. None of the new events is a
@@ -144,18 +145,14 @@ object G2EvenHub {
     private const val EVENT_BRANCH = 13
     private const val TEXT_EVENT = 2
     private const val SYSTEM_EVENT = 3
-    private const val CLICK = 0L
 
     // Input sources of a system event: right temple touchpad, R1 ring, left temple touchpad.
-    private val PRESS_SOURCES = 1L..3L
-    private const val RING_SOURCE = 2L
+    private val PRESS_SOURCES = G2InputEvent.SOURCE_RIGHT_TEMPLE..G2InputEvent.SOURCE_LEFT_TEMPLE
     private const val RING_REPORT_FIELD = 100
     private const val RING_REPORT_SIZE = 12
 
     // 'R' 'I', version 1, flags 1.
     private val RING_REPORT_HEADER = byteArrayOf('R'.code.toByte(), 'I'.code.toByte(), 1, 1)
-    private const val ABNORMAL_EXIT = 6L
-    private const val EXIT = 7L
     private val BRANCHES = 3..26
 
     /** Magic values of Even Hub requests. */
@@ -285,9 +282,9 @@ object G2EvenHub {
         val (branch, system) = deviceEvent(message) ?: return null
         if (branch != SYSTEM_EVENT) return null
         val type = system.scalar(1) ?: 0L
-        if (type != ABNORMAL_EXIT && type != EXIT) return null
+        if (type != G2InputEvent.ABNORMAL_EXIT && type != G2InputEvent.EXIT) return null
         if (system.scalar(5) != page.widgetId || system.scalar(6) != session) return null
-        return G2CloseCause.PageExited(abnormal = type == ABNORMAL_EXIT)
+        return G2CloseCause.PageExited(abnormal = type == G2InputEvent.ABNORMAL_EXIT)
     }
 
     /**
@@ -306,12 +303,12 @@ object G2EvenHub {
                 event.keys.all { it in 1..3 } &&
                     event.scalar(1) == page.containerId &&
                     (2 !in event || event.bytes(2)?.let(::decodeUtf8) == page.containerName) &&
-                    event.enum(3) == CLICK
+                    event.enum(3) == G2InputEvent.CLICK
             }
 
             SYSTEM_EVENT -> {
                 event.keys.all { it in 1..6 || (it == RING_REPORT_FIELD && ringReport(event) != null) } &&
-                    event.enum(1) == CLICK &&
+                    event.enum(1) == G2InputEvent.CLICK &&
                     event.scalar(2) in PRESS_SOURCES &&
                     (5 !in event || event.scalar(5) == page.widgetId) &&
                     (6 !in event || event.scalar(6) == session)
@@ -319,6 +316,29 @@ object G2EvenHub {
 
             else -> {
                 false
+            }
+        }
+    }
+
+    /** The input or system event that [arm] reported in [message], or null when it is none or an IMU sample. */
+    fun inputEvent(
+        message: G2Message,
+        arm: G2Side,
+    ): G2InputEvent? {
+        val (branch, event) = deviceEvent(message) ?: return null
+        return when (branch) {
+            TEXT_EVENT -> {
+                G2InputEvent(arm, event.enum(3) ?: G2InputEvent.CLICK, source = null)
+            }
+
+            SYSTEM_EVENT -> {
+                val type = event.enum(1) ?: G2InputEvent.CLICK
+                if (type == G2InputEvent.IMU_DATA) return null
+                G2InputEvent(arm, type, event.enum(2) ?: G2InputEvent.SOURCE_UNSPECIFIED)
+            }
+
+            else -> {
+                null
             }
         }
     }
@@ -331,7 +351,7 @@ object G2EvenHub {
 
     private fun ringReport(event: Map<Int, G2ProtoField>): G2RingReport? {
         val raw = event.bytes(RING_REPORT_FIELD) ?: return null
-        if (event.scalar(2) != RING_SOURCE || raw.size != RING_REPORT_SIZE) return null
+        if (event.scalar(2) != G2InputEvent.SOURCE_RING || raw.size != RING_REPORT_SIZE) return null
         if (!raw.copyOfRange(0, RING_REPORT_HEADER.size).contentEquals(RING_REPORT_HEADER) || raw[7] != 0.toByte()) {
             return null
         }

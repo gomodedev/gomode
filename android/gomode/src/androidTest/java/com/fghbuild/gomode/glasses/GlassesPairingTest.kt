@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.testing.FakeG2Firmware
@@ -36,9 +37,11 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
 
 // Documentation-range addresses; the fake transports answer for them.
 private const val HALO_ADDRESS = "00:00:5E:00:53:05"
@@ -79,7 +82,7 @@ class GlassesPairingTest {
                 composeRule.onNodeWithText("Even G2 7").performScrollTo()
                 composeRule.onNodeWithTag("gomode-manage-glasses").performClick()
                 waitForTag("gomode-glasses-screen")
-                composeRule.onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true).assertTextEquals("Even G2 7")
+                composeRule.onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true).assertTextEquals("7")
 
                 composeRule.onNodeWithTag("gomode-glasses-connect").performClick()
                 composeRule.waitUntil(TIMEOUT_MS) { glasses.connectedDisplay == G2_DISPLAY }
@@ -87,6 +90,31 @@ class GlassesPairingTest {
                 // The glasses greet the connection, then show the blank frame.
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == GREETING_TEXT }
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
+
+                // The input events screen lists a tap and its press, the glasses show the same list,
+                // and the press acts on nothing; system back returns to the glasses screen.
+                val pressed = AtomicBoolean(false)
+                composeRule.runOnUiThread {
+                    glasses.takePressesFirst {
+                        pressed.set(true)
+                        true
+                    }
+                }
+                composeRule.onNodeWithTag("gomode-glasses-open-inputs").performClick()
+                waitForTag("gomode-glasses-inputs")
+                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "Input events\nTry a gesture." }
+                firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
+                composeRule.waitUntil(TIMEOUT_MS) {
+                    composeRule.onAllNodesWithTag("gomode-glasses-input").fetchSemanticsNodes().size == 2
+                }
+                composeRule.onNodeWithText("Tap").assertExists()
+                composeRule.onNodeWithText("Press").assertExists()
+                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText()?.lines()?.size == 3 }
+                composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
+                waitForTag("gomode-glasses-screen")
+                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
+                assertFalse(pressed.get())
+                composeRule.runOnUiThread { glasses.takePressesFirst(null) }
 
                 composeRule.onNodeWithTag("gomode-glasses-scan").performClick()
                 waitForTag("gomode-glasses-found")
@@ -102,7 +130,7 @@ class GlassesPairingTest {
                 }
                 composeRule
                     .onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true)
-                    .assertTextEquals("Halo · $HALO_ADDRESS")
+                    .assertTextEquals(HALO_ADDRESS)
                 // The G2 page closed before the Halo connected: one pair at a time.
                 assertEquals("shutdown", firmware.requests.last().kind)
                 assertTrue(firmware.links.all { it.closed })

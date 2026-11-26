@@ -1,4 +1,4 @@
-// Owns the one pair of glasses across Activities: scanning, the saved device, auto-connect, reconnection, frames, and presses.
+// Owns the one pair of glasses across Activities: scanning, the saved device, auto-connect, reconnection, frames, input.
 package com.fghbuild.gomode.glasses
 
 import android.Manifest
@@ -30,6 +30,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -67,6 +69,9 @@ internal const val GLASSES_NOTICE_MS = 4_000L
 
 // Presses a slow collector may lag behind; a person presses far slower than one is handled.
 private const val PRESS_BUFFER = 8
+
+/** How many of the latest [GlassesOwner.inputs] it keeps. */
+internal const val GLASSES_INPUT_HISTORY = 20
 
 /** The glasses connection as the glasses screen shows it. */
 internal sealed interface GlassesLink {
@@ -110,6 +115,8 @@ internal data class GlassesState(
     val autoConnect: Boolean = false,
     // A failure that stopped scanning or prevented a connection attempt.
     val error: String? = null,
+    // Whether GlassesOwner.toggleLogo keeps the Go Mode logo up on the glasses.
+    val logoPinned: Boolean = false,
 )
 
 /**
@@ -165,6 +172,10 @@ internal class GlassesOwner(
     // The greeting frame over [frame], set by the connection that plays it.
     private val greeting = MutableStateFlow<GlassesFrame?>(null)
     private var greetingJob: Job? = null
+
+    // [toggleLogo]'s requests to play the greeting, which only a connection collects.
+    private val logoRequests =
+        MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
     private var scanJob: Job? = null
     private var linkJob: Job? = null
@@ -192,6 +203,17 @@ internal class GlassesOwner(
             trySend(appContext.getSystemService(BluetoothManager::class.java).adapter?.isEnabled == true)
             awaitClose { appContext.unregisterReceiver(receiver) }
         }.distinctUntilChanged()
+
+    private val mutableInputs = MutableStateFlow<List<GlassesInput>>(emptyList())
+
+    /**
+     * The latest [GLASSES_INPUT_HISTORY] inputs of every connection, newest first: each of
+     * [GlassesDisplay.events] and each press, so the wearer sees which gestures act.
+     */
+    val inputs: StateFlow<List<GlassesInput>> = mutableInputs.asStateFlow()
+
+    // Open inspectInputs handles; main thread only.
+    private val inspections = MutableStateFlow(0)
 
     private val mutableState = MutableStateFlow(GlassesState())
     val state: StateFlow<GlassesState> = mutableState.asStateFlow()
@@ -223,13 +245,29 @@ internal class GlassesOwner(
 
     /**
      * Each press of the connected glasses that the [takePressesFirst] handler leaves; see
-     * [GlassesDisplay.presses]. While nothing collects them, as when no Activity is open to start
-     * voice, a press instead shows a notice that says so.
+     * [GlassesDisplay.presses], while nobody [inspectInputs]. While nothing collects them, as when
+     * no Activity is open to start voice, a press instead shows a notice that says so.
      */
     val presses: SharedFlow<Unit> = mutablePresses.asSharedFlow()
 
     // Main thread only, like every press.
     private var firstPressHandler: (() -> Boolean)? = null
+
+    /**
+     * Until the returned handle closes, the wearer tries gestures: each press goes to [inputs] alone,
+     * so no handler, collector, or notice acts on it, and the connected glasses show the latest
+     * [inputs] over everything else. Handles nest; closing one twice releases it once. Main thread only.
+     */
+    fun inspectInputs(): AutoCloseable {
+        inspections.update { it + 1 }
+        var open = true
+        return AutoCloseable {
+            if (open) {
+                open = false
+                inspections.update { it - 1 }
+            }
+        }
+    }
 
     /**
      * Offers each press to [handler] before [presses]; it returns whether it acted on the press. Work
@@ -248,7 +286,7 @@ internal class GlassesOwner(
         this.frame.value = frame
         if (frame !is GlassesFrame.Text || frame.text.isNotBlank()) {
             endNotice()
-            greetingJob?.cancel()
+            endGreeting()
         }
     }
 
@@ -259,7 +297,7 @@ internal class GlassesOwner(
      */
     fun notify(message: String) {
         endNotice()
-        greetingJob?.cancel()
+        endGreeting()
         notice.value = message
         noticeJob =
             scope.launch {
@@ -268,14 +306,43 @@ internal class GlassesOwner(
             }
     }
 
+    /**
+     * On the connected glasses, plays the connection greeting again and keeps its last frame, the logo,
+     * up without a deadline; the next call takes it down. Content from [show] or a [notify] notice also
+     * ends it. Does nothing without a connection.
+     */
+    fun toggleLogo() {
+        if (state.value.logoPinned) {
+            endGreeting()
+        } else if (state.value.link is GlassesLink.Connected) {
+            endNotice()
+            mutableState.update { it.copy(logoPinned = true) }
+            logoRequests.tryEmit(Unit)
+        }
+    }
+
+    private fun endGreeting() {
+        mutableState.update { it.copy(logoPinned = false) }
+        greetingJob?.cancel()
+    }
+
     private fun endNotice() {
         noticeJob?.cancel()
         noticeJob = null
         notice.value = null
     }
 
+    private fun record(event: GlassesEvent) {
+        Log.i(TAG, "Glasses input: ${event.label}")
+        val shown = GlassesInput(System.currentTimeMillis(), event)
+        mutableInputs.update { (listOf(shown) + it).take(GLASSES_INPUT_HISTORY) }
+    }
+
     private fun press() {
+        record(PRESS_EVENT)
         when {
+            inspections.value > 0 -> {}
+
             firstPressHandler?.invoke() == true -> {}
 
             mutablePresses.subscriptionCount.value == 0 -> {
@@ -378,7 +445,9 @@ internal class GlassesOwner(
     }
 
     // The previous link finishes clearing and closing its glasses before the next one connects.
+    // A pinned logo survives automatic reconnection, not a deliberate new link or disconnection.
     private fun replaceLink(connect: (suspend (background: Boolean) -> GlassesDisplay)?) {
+        mutableState.update { it.copy(logoPinned = false) }
         val previous = linkJob
         previous?.cancel()
         linkJob =
@@ -459,11 +528,25 @@ internal class GlassesOwner(
     private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
         try {
             coroutineScope {
-                greetingJob = launch { greet(glasses) }
+                if (state.value.logoPinned || frame.value.let { it is GlassesFrame.Text && it.text.isBlank() }) {
+                    greetingJob = launch { playGreeting(glasses) }
+                }
+                val greetings =
+                    launch {
+                        logoRequests.collect {
+                            greetingJob?.cancel()
+                            greetingJob = launch { playGreeting(glasses) }
+                        }
+                    }
                 val drawing =
                     launch {
-                        combine(frame, greeting, notice) { frame, greeting, notice ->
-                            notice?.let(GlassesFrame::Text) ?: greeting ?: frame
+                        val inspected =
+                            combine(inspections, mutableInputs) { count, inputs -> inputs.takeIf { count > 0 } }
+                        combine(frame, greeting, notice, inspected) { frame, greeting, notice, inputs ->
+                            inputs?.let { GlassesFrame.Text(inspectionText(it, glasses.screenFit)) }
+                                ?: notice?.let(GlassesFrame::Text)
+                                ?: greeting
+                                ?: frame
                         }.distinctUntilChanged()
                             .collect { shown ->
                                 when (shown) {
@@ -485,9 +568,12 @@ internal class GlassesOwner(
                             }
                     }
                 val pressing = launch { glasses.presses.collect { press() } }
+                val listening = launch { glasses.events.collect(::record) }
                 val cause = glasses.closeCause.filterNotNull().first()
                 drawing.cancel()
                 pressing.cancel()
+                listening.cancel()
+                greetings.cancel()
                 Log.w(TAG, "Glasses connection ended: ${cause.message}")
                 cause.asGlassesException()
             }
@@ -509,9 +595,8 @@ internal class GlassesOwner(
             }
         }
 
-    // Plays the greeting over the frame of [glasses], unless content arrives first, then yields to it.
-    private suspend fun greet(glasses: GlassesDisplay) {
-        if (frame.value.let { it !is GlassesFrame.Text || it.text.isNotBlank() }) return
+    // Plays the greeting on [glasses] over the frame, then yields to it, unless the logo is pinned.
+    private suspend fun playGreeting(glasses: GlassesDisplay) {
         val steps =
             greetingSteps(
                 images = glasses is GlassesImageDisplay,
@@ -524,6 +609,8 @@ internal class GlassesOwner(
                 greeting.value = step.frame
                 delay(step.durationMs)
             }
+            // A pinned logo stays until toggleLogo, content, a notice, or the connection's end cancels it.
+            if (state.value.logoPinned) awaitCancellation()
         } finally {
             greeting.value = null
         }

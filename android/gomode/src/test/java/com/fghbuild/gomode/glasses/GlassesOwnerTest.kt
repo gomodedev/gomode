@@ -15,6 +15,7 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Protocol
 import com.fghbuild.eveng2.G2Scanner
@@ -25,6 +26,7 @@ import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.testing.MemoryPreferences
+import com.fghbuild.gomode.ui.glasses.GlassesInputsScreen
 import com.fghbuild.gomode.ui.glasses.GlassesScreen
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloScannedDevice
@@ -134,13 +136,13 @@ class GlassesOwnerTest {
         runOwnerTest {
             connectSavedGlasses()
             val first = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-            first.get().setContent { GlassesScreen(owner, onNavigateBack = {}) }
+            first.get().setContent { GlassesScreen(owner, onNavigateBack = {}, onOpenInputs = {}) }
             owner.show(GlassesFrame.Text("before"))
             runCurrent()
 
             first.pause().stop().destroy()
             val second = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-            second.get().setContent { GlassesScreen(owner, onNavigateBack = {}) }
+            second.get().setContent { GlassesScreen(owner, onNavigateBack = {}, onOpenInputs = {}) }
             owner.show(GlassesFrame.Text("after\nreplacement"))
             runCurrent()
 
@@ -637,6 +639,68 @@ class GlassesOwnerTest {
         }
 
     @Test
+    fun evenG2EventsAndPressesAreListedNewestFirst() =
+        runOwnerTest {
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            finishGreeting()
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.DOUBLE_CLICK)
+            firmware.systemInput(G2Side.RIGHT, type = G2InputEvent.RELEASE, source = G2InputEvent.SOURCE_LEFT_TEMPLE)
+            runCurrent()
+            val older =
+                listOf(
+                    GlassesEvent(GlassesGesture.RELEASE, GlassesInputPlace.LEFT),
+                    // A text event names no temple.
+                    GlassesEvent(GlassesGesture.DOUBLE_TAP),
+                )
+            assertEquals(older, owner.inputs.value.map { it.event })
+
+            // A click is both an event and a press.
+            firmware.touch(G2Side.LEFT, type = G2InputEvent.CLICK)
+            runCurrent()
+            val events = owner.inputs.value.map { it.event }
+            assertEquals(setOf(GlassesEvent(GlassesGesture.TAP), PRESS_EVENT), events.take(2).toSet())
+            assertEquals(older, events.drop(2))
+        }
+
+    @Test
+    fun theInputsScreenMirrorsInputsOnTheGlassesAndKeepsPressesFromActingWhileItIsStarted() =
+        runOwnerTest {
+            val presses = mutableListOf<Unit>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.presses.collect { presses += it } }
+            var offered = 0
+            owner.takePressesFirst {
+                offered++
+                false
+            }
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            finishGreeting()
+            owner.show(GlassesFrame.Text("transcript"))
+            val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+            activity.get().setContent { GlassesInputsScreen(owner, onNavigateBack = {}) }
+            shadowOf(Looper.getMainLooper()).idle()
+            runCurrent()
+            assertEquals("Input events\nTry a gesture.", firmware.shownText())
+
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
+            runCurrent()
+            assertEquals(0 to 0, offered to presses.size)
+            val shown = checkNotNull(firmware.shownText()).lines()
+            assertEquals("Input events", shown.first())
+            assertEquals(setOf("Tap", "Press"), shown.drop(1).toSet())
+
+            // A stopped screen, as when Go Mode goes to the background, gives the glasses and presses back.
+            activity.pause().stop()
+            runCurrent()
+            assertEquals("transcript", firmware.shownText())
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
+            runCurrent()
+            assertEquals(1 to 1, offered to presses.size)
+            activity.destroy()
+        }
+
+    @Test
     fun aPressThatNothingCollectsSaysOnTheGlassesToOpenGoMode() =
         runOwnerTest {
             connectSavedGlasses()
@@ -717,6 +781,34 @@ class GlassesOwnerTest {
             owner.state.first { it.link is GlassesLink.Connected }
             runCurrent()
             assertEquals(listOf(Shown.Page(lines = 1)), transport.halos.last().shown())
+        }
+
+    @Test
+    fun theLogoTogglesOverContentWithoutADeadlineAndContentEndsIt() =
+        runOwnerTest {
+            owner.toggleLogo()
+            connectSavedGlasses()
+            owner.show(GlassesFrame.Text("hello"))
+            runCurrent()
+            val halo = transport.halos.single()
+            assertTrue(halo.lastSent(haloTextMessages("hello")))
+
+            owner.toggleLogo()
+            finishGreeting()
+            advanceTimeBy(GREETING_LIMIT_MS)
+            runCurrent()
+            assertFalse(halo.lastSent(haloTextMessages("hello")))
+            owner.toggleLogo()
+            runCurrent()
+            assertTrue(halo.lastSent(haloTextMessages("hello")))
+
+            owner.toggleLogo()
+            runCurrent()
+            owner.show(GlassesFrame.Text("bye"))
+            runCurrent()
+            assertTrue(halo.lastSent(haloTextMessages("bye")))
+            finishGreeting()
+            assertTrue(halo.lastSent(haloTextMessages("bye")))
         }
 
     @Test

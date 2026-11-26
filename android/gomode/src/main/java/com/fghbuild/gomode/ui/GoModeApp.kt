@@ -82,6 +82,7 @@ import com.fghbuild.gomode.service.ServiceSettingsException
 import com.fghbuild.gomode.service.alertLine
 import com.fghbuild.gomode.service.compatibilityError
 import com.fghbuild.gomode.service.serverSection
+import com.fghbuild.gomode.ui.glasses.GlassesInputsScreen
 import com.fghbuild.gomode.ui.glasses.GlassesScreen
 import com.fghbuild.gomode.ui.settings.ServiceStatus
 import com.fghbuild.gomode.ui.settings.SettingsEdits
@@ -135,6 +136,7 @@ import com.fghbuild.gomode.sdk.v1.Settings as ServiceSettings
 private enum class NativeScreen {
     Settings,
     Glasses,
+    GlassesInputs,
 }
 
 internal class PendingMicrophoneVoiceStart(
@@ -1000,6 +1002,14 @@ private fun GoModeContent(
             GlassesScreen(
                 owner = glassesOwner,
                 onNavigateBack = { onSetNativeScreen(NativeScreen.Settings) },
+                onOpenInputs = { onSetNativeScreen(NativeScreen.GlassesInputs) },
+            )
+        }
+
+        activeNativeScreen == NativeScreen.GlassesInputs -> {
+            GlassesInputsScreen(
+                owner = glassesOwner,
+                onNavigateBack = { onSetNativeScreen(NativeScreen.Glasses) },
             )
         }
 

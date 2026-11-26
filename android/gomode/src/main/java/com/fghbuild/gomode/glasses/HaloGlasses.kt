@@ -24,6 +24,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -99,6 +100,9 @@ internal class HaloGlasses private constructor(
 ) : GlassesImageDisplay {
     override val description = HALO_DISPLAY
     override val screenFit = HaloScreenFit
+
+    // Go Mode's Halo app reports only the button's single press.
+    override val events: Flow<GlassesEvent> = emptyFlow()
 
     override suspend fun showText(text: String) = send(haloTextMessages(text), "text")
 

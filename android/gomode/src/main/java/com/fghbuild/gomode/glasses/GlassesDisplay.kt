@@ -42,6 +42,13 @@ internal interface GlassesDisplay {
      */
     val presses: Flow<Unit>
 
+    /**
+     * Each gesture and system event the glasses report while connected, for the wearer checking
+     * their input; [presses] alone says which ones act. Empty for glasses that report only their
+     * press. The flow may end when the connection ends.
+     */
+    val events: Flow<GlassesEvent>
+
     /** Disconnects; [closeCause] then reports the disconnection. */
     suspend fun close()
 }

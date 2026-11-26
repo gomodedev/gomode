@@ -22,6 +22,7 @@ import com.fghbuild.eveng2.G2Display
 import com.fghbuild.eveng2.G2Firmware
 import com.fghbuild.eveng2.G2Glasses
 import com.fghbuild.eveng2.G2Image
+import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Panel
 import com.fghbuild.eveng2.G2Side
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -107,6 +109,7 @@ internal sealed class EvenG2Glasses(
 
     override val closeCause: StateFlow<Exception?> = ended.asStateFlow()
     override val presses: Flow<Unit> = glasses.presses
+    override val events: Flow<GlassesEvent> = glasses.events.map(::glassesEvent)
 
     /** Shows [text], cut to the firmware's limit, and waits until the glasses acknowledge it. */
     override suspend fun showText(text: String) {
@@ -297,3 +300,35 @@ private fun G2CloseCause.toGlassesException(): GlassesException {
 }
 
 private fun G2Side.label(): String = name.lowercase()
+
+/**
+ * [event] as the input events screen lists it. A click names no temple in a text event, the arm that
+ * reported it aside, and either arm reports either temple, so only a system event names its place.
+ */
+internal fun glassesEvent(event: G2InputEvent): GlassesEvent {
+    val gesture =
+        when (event.type) {
+            G2InputEvent.CLICK -> GlassesGesture.TAP
+            G2InputEvent.SCROLL_UP -> GlassesGesture.SCROLL_UP
+            G2InputEvent.SCROLL_DOWN -> GlassesGesture.SCROLL_DOWN
+            G2InputEvent.DOUBLE_CLICK -> GlassesGesture.DOUBLE_TAP
+            G2InputEvent.FOREGROUND_ENTER -> GlassesGesture.PAGE_SHOWN
+            G2InputEvent.FOREGROUND_EXIT -> GlassesGesture.PAGE_HIDDEN
+            G2InputEvent.ABNORMAL_EXIT, G2InputEvent.EXIT -> GlassesGesture.PAGE_CLOSED
+            G2InputEvent.LONG_PRESS -> GlassesGesture.HOLD
+            G2InputEvent.RELEASE -> GlassesGesture.RELEASE
+            G2InputEvent.TAP_THEN_HOLD -> GlassesGesture.TAP_THEN_HOLD
+            G2InputEvent.HEAD_UP -> GlassesGesture.HEAD_UP
+            G2InputEvent.HEAD_DOWN -> GlassesGesture.HEAD_DOWN
+            G2InputEvent.RING_TOUCH_DOWN -> GlassesGesture.RING_TOUCH
+            else -> GlassesGesture.OTHER
+        }
+    val place =
+        when (event.source) {
+            G2InputEvent.SOURCE_LEFT_TEMPLE -> GlassesInputPlace.LEFT
+            G2InputEvent.SOURCE_RIGHT_TEMPLE -> GlassesInputPlace.RIGHT
+            G2InputEvent.SOURCE_RING -> GlassesInputPlace.RING
+            else -> null
+        }
+    return GlassesEvent(gesture, place, event.type.takeIf { gesture == GlassesGesture.OTHER })
+}

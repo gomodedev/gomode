@@ -9,7 +9,7 @@
 // content from show(). A superseded session never publishes state. A replaced or stopped session
 // stays in `job` until it has finished, so a later connect() joins it and never runs two
 // sessions at once. An exception that escapes a session ends it with G2CloseCause.Failed.
-// presses reports the current session's presses only.
+// presses and events report the current session's only.
 
 package com.fghbuild.eveng2
 
@@ -47,6 +47,15 @@ class G2Glasses(
      * gestures are not reported, and a press that nobody collects is lost.
      */
     val presses: SharedFlow<Unit> = mutablePresses.asSharedFlow()
+
+    private val mutableEvents = MutableSharedFlow<G2InputEvent>(extraBufferCapacity = EVENT_BUFFER)
+
+    /**
+     * Each input and system event while a page is open, IMU samples aside, presses included, for a
+     * host that shows the wearer's gestures; [presses] alone says which ones press. An event that
+     * nobody collects is lost.
+     */
+    val events: SharedFlow<G2InputEvent> = mutableEvents.asSharedFlow()
 
     /**
      * Run one session with [pair], replacing any previous one. The state is [G2State.Connecting]
@@ -120,6 +129,7 @@ class G2Glasses(
                 desired,
                 onReady = { firmware, shown -> publish(current, G2State.Ready(pair, firmware, shown)) },
                 onPress = { press(current) },
+                onEvent = { event(current, it) },
             )
         val cause =
             try {
@@ -147,8 +157,20 @@ class G2Glasses(
         }
     }
 
+    private fun event(
+        current: Long,
+        event: G2InputEvent,
+    ) {
+        synchronized(lock) {
+            if (current == generation) mutableEvents.tryEmit(event)
+        }
+    }
+
     private companion object {
         // Presses a slow collector may lag behind; a person presses far slower than one is handled.
         const val PRESS_BUFFER = 8
+
+        // One gesture sends up to four events, such as a release, a double click, and two scrolls.
+        const val EVENT_BUFFER = 16
     }
 }

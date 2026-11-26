@@ -255,6 +255,40 @@ class G2GlassesTest {
         }
 
     @Test
+    fun eachInputAndSystemEventButImuSamplesIsReportedWithItsArmAndSource() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            val events = mutableListOf<G2InputEvent>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.events.toList(events) }
+            glasses.connect(pair)
+            glasses.await { it is G2State.Ready }
+            // Proto3 omits a zero type and source: a click, of an unspecified source.
+            firmware.touch(G2Side.LEFT, type = 0)
+            firmware.systemInput(G2Side.RIGHT, type = G2InputEvent.RELEASE, source = G2InputEvent.SOURCE_LEFT_TEMPLE)
+            firmware.systemInput(G2Side.RIGHT, type = G2InputEvent.IMU_DATA, source = 0)
+            firmware.systemInput(G2Side.LEFT, type = 0, source = 0)
+            firmware.exitPage(type = G2InputEvent.EXIT, session = firmware.pageSession)
+            glasses.closeCause()
+            // Each arm's events keep their order; the two arms' links deliver independently.
+            assertEquals(
+                mapOf(
+                    G2Side.LEFT to
+                        listOf(
+                            G2InputEvent(G2Side.LEFT, G2InputEvent.CLICK, source = null),
+                            G2InputEvent(G2Side.LEFT, G2InputEvent.CLICK, G2InputEvent.SOURCE_UNSPECIFIED),
+                        ),
+                    G2Side.RIGHT to
+                        listOf(
+                            G2InputEvent(G2Side.RIGHT, G2InputEvent.RELEASE, G2InputEvent.SOURCE_LEFT_TEMPLE),
+                            G2InputEvent(G2Side.RIGHT, G2InputEvent.EXIT, G2InputEvent.SOURCE_UNSPECIFIED),
+                        ),
+                ),
+                events.groupBy { it.arm },
+            )
+        }
+
+    @Test
     fun abnormalPageExitIsRetryable() =
         runTest {
             val firmware = FakeG2Firmware()

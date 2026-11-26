@@ -111,6 +111,7 @@ internal class G2Session(
     private val desired: StateFlow<G2Content>,
     private val onReady: (G2Firmware, G2Content) -> Unit,
     private val onPress: () -> Unit,
+    private val onEvent: (G2InputEvent) -> Unit,
 ) {
     private val links = ConcurrentHashMap<G2Side, G2ArmLink>()
     private val inbox = Channel<Inbound>(INBOX_CAPACITY)
@@ -231,6 +232,7 @@ internal class G2Session(
             }
 
             is Inbound.Message -> {
+                G2EvenHub.inputEvent(inbound.message, inbound.side)?.let(onEvent)
                 val session = pageSession ?: return inbound
                 if (inbound.side == G2Side.RIGHT) {
                     G2EvenHub.pageExit(inbound.message, page, session)?.let { throw G2Closed(it) }
