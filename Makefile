@@ -49,10 +49,6 @@ else
 $(error ANDROID_VERBOSE must be true or false)
 endif
 
-# Keep Java processes scoped to each build, including Gradle launched by Python helpers.
-# Compile Kotlin inside Gradle's single-use JVM so it cannot leave a compiler daemon.
-export GRADLE_OPTS := $(GRADLE_OPTS) -Dorg.gradle.daemon=false -Dorg.gradle.project.kotlin.compiler.execution.strategy=in-process
-
 node_modules/.modules.yaml: package.json pnpm-lock.yaml
 	@pnpm install --frozen-lockfile --silent
 	@touch $@
@@ -149,7 +145,7 @@ upgrade:
 	@go get -u ./...
 	@go mod tidy
 	@pnpm update --latest
-	@cd ./android && ./gradlew --no-daemon dependencyUpdates -Drevision=release
+	@cd ./android && ./gradlew dependencyUpdates -Drevision=release
 
 android-lint: android-sdk
 	@cd ./android && ./gradlew $(ANDROID_LINT_TASKS) $(GRADLE_LOG_ARGS)
