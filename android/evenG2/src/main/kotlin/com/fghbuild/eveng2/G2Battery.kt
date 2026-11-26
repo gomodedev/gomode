@@ -1,20 +1,21 @@
-// G2Battery: each arm's battery from its settings read (SID 0x09), and the charging case's CASE_INFO (SID 0x81).
+// G2Battery: the glasses' battery from the right arm's settings read (SID 0x09), and the case's CASE_INFO (SID 0x81).
 //
 // Ported and modified from BleProtocol.kt (parseSettingsBattery, buildCaseInfoQuery, parseCaseInfo,
 // CaseInfoSnapshot), the case rules of session/GlassesSessionControls.kt (updateCaseInfoLocked), and
-// the per-arm read of FlashPromptFlow.kt (readBatteries) of jimrandomh/faceclaw (GPL-3.0); see
-// NOTICE in this module. The fields are stock firmware's; g2flash does not change them.
+// the battery read of g2protocol/MessageBuilder.kt (batteryQuery) of jimrandomh/faceclaw (GPL-3.0);
+// see NOTICE in this module. The fields are stock firmware's; g2flash does not change them.
 //
 // Every message is framed with header flag 0x20:
 //
-// - Arm: G2Settings' read {1: 2, 2: magic, 4: {1: 1}}, sent to one arm on its own link. faceclaw
-//   reports that each arm answers with its own battery; on a pair on 2.3.0.24 with Faceclaw/45, the
-//   right arm answered the left link's read on its own link with a body identical to its own reply,
-//   so only a reply on the link the read went out on counts. The reply echoes the magic in field 2,
-//   and its field 4
-//   holds the level in percent in field 12, charging (1) in field 13, and silent mode in field 14,
-//   which this SDK does not read. Proto3 drops zero fields, so a reply without field 12 carries no
-//   level (or 0 %) and is no reading; one without field 13 is not charging.
+// - Glasses: G2Settings' read {1: 2, 2: magic, 4: {1: 1}} to the right arm, as faceclaw's session
+//   sends it. faceclaw's flash prompt (FlashPromptFlow.kt, readBatteries) also reads the left arm
+//   on its own link and reports that each arm answers with its own battery. A pair on 2.3.0.24 with
+//   Faceclaw/45 contradicts it: the right arm answered the read sent on the left link, on the right
+//   link, with a body identical to its reply to the right read apart from the magic, so the pair
+//   reports no level of the left arm. The reply echoes the magic in field 2, and its field 4 holds
+//   the level in percent in field 12, charging (1) in field 13, and silent mode in field 14, which
+//   this SDK does not read. Proto3 drops zero fields, so a reply without field 12 carries no level
+//   (or 0 %) and is no reading; one without field 13 is not charging.
 // - Case: {1: 1 (CASE_INFO), 2: magic, 3: {}} to the right arm. A reply, and a push that the right
 //   arm sends with flag 0x01 and a magic of its own, are {1: 1, 2: magic, 3: GlassesCaseInfo}:
 //   {1: level 1..100, 2: case charging on USB (1), 3: lid closed (1), 4: glasses in the case (1),
@@ -36,21 +37,14 @@ data class G2Charge(
 )
 
 /**
- * The batteries of a connected pair: each arm's, and the charging case's while the glasses sit in
- * it. A null part is unknown: not answered yet in this session, or, for the [case], the glasses are
- * out of it.
+ * The batteries of a connected pair: the [glasses]' that the right arm reports, and the charging
+ * [case]'s while the glasses sit in it. A null part is unknown: not answered yet in this session,
+ * or, for the [case], the glasses are out of it.
  */
 data class G2Battery(
-    val left: G2Charge? = null,
-    val right: G2Charge? = null,
+    val glasses: G2Charge? = null,
     val case: G2Charge? = null,
-) {
-    /** This battery with [charge] for the arm on [side]. */
-    internal fun withArm(
-        side: G2Side,
-        charge: G2Charge,
-    ): G2Battery = if (side == G2Side.LEFT) copy(left = charge) else copy(right = charge)
-}
+)
 
 /** Where the glasses are, as a CASE_INFO reply or push reports it. */
 internal sealed interface G2CaseInfo {
@@ -88,8 +82,8 @@ internal object G2BatteryCodec {
         return G2Frame.packets(payload, G2Protocol.SID_CASE, G2Protocol.FLAG_SYNC_BOTH, sync)
     }
 
-    /** The arm's battery in [message] when it answers the settings read sent with [magic]; null otherwise. */
-    fun arm(
+    /** The glasses' battery in [message] when it answers the settings read sent with [magic]; null otherwise. */
+    fun glasses(
         message: G2Message,
         magic: Int,
     ): G2Charge? {

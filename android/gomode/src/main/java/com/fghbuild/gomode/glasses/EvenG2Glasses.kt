@@ -4,7 +4,7 @@
 // draws: on stock firmware, one text container, created on connect and updated in place; on
 // Faceclaw firmware (G2Firmware.Faceclaw), text and images that the SDK draws on the whole panel.
 // The page's text container captures the touchpads and an R1 ring, whose gestures g2Action maps to actions.
-// The session polls each arm's battery and the case's; batteries are G2Glasses.battery.
+// The session polls the glasses' battery and the case's; batteries are G2Glasses.battery.
 //
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
 // another. connect() returns at the session's first G2State.Ready and fails if it reaches
@@ -317,8 +317,7 @@ internal fun glassesBatteries(battery: G2Battery): List<GlassesBattery> {
         charge: G2Charge?,
     ) = charge?.let { GlassesBattery(part, it.percent, it.charging) }
     return listOfNotNull(
-        reading(GlassesBatteryPart.LEFT, battery.left),
-        reading(GlassesBatteryPart.RIGHT, battery.right),
+        reading(GlassesBatteryPart.GLASSES, battery.glasses),
         reading(GlassesBatteryPart.CASE, battery.case),
     )
 }

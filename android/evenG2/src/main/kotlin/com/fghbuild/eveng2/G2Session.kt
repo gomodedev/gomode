@@ -43,16 +43,17 @@
 // arm's link is set up; the other arm then has CONNECT_TIMEOUT_MS, so one arm alone never holds a
 // link that no session uses.
 //
-// Batteries (G2BatteryCodec), as faceclaw polls them: once the page may be open, the session reads
-// the settings of each arm on its own link, the right then the left, and the case's state from the
-// right arm. It does so only after G2Protocol.BATTERY_QUIET_MS without an Even Hub command, a drawing
-// message, or an input event, so its requests never queue behind or between the frames of a
-// transcript and the wearer's gestures. Heartbeats and lease renewals do not count: they never
-// stop. The next round follows G2Protocol.BATTERY_CHARGING_POLL_MS later while an arm charges or the
-// glasses sit in the case, where nobody wears them, and G2Protocol.BATTERY_POLL_MS later otherwise.
-// The case pushes its changes on its own, and docking wakes the next round, so an arm's charging shows
-// a few seconds after the glasses enter the case. Nothing awaits a reply: a missing one keeps the last
-// reading, and a session whose arm or case never answers goes on without it.
+// Batteries (G2BatteryCodec), as faceclaw's session polls them: once the page may be open, the
+// session reads the settings of the right arm, which hold the glasses' battery, and the case's state,
+// also from the right arm. It does so only after G2Protocol.BATTERY_QUIET_MS without an Even Hub
+// command, a drawing message, or an input event, so its requests never queue behind or between the
+// frames of a transcript and the wearer's gestures. Heartbeats and lease renewals do not count:
+// they never stop. The next round follows G2Protocol.BATTERY_CHARGING_POLL_MS later while the
+// glasses charge or sit in the case, where nobody wears them, and G2Protocol.BATTERY_POLL_MS later
+// otherwise. The case pushes its changes on its own, and docking wakes the next round, so the
+// glasses' charging shows a few seconds after they enter the case. Nothing awaits a reply: a
+// missing one keeps the last reading, and a session whose arm or case never answers goes on
+// without it.
 
 package com.fghbuild.eveng2
 
@@ -158,8 +159,8 @@ internal class G2Session(
     // Bumped by each Even Hub command, drawing message, and input event; battery reads wait for it to rest.
     @Volatile private var activity = 0L
 
-    // The magic of each arm's latest battery read; a reply to another read is not this arm's battery.
-    private val batteryReads = ConcurrentHashMap<G2Side, Int>()
+    // The magic of the latest battery read; a reply to another read is no battery reading.
+    @Volatile private var batteryRead: Int? = null
 
     // The readings so far; only accept() changes them.
     @Volatile private var battery = G2Battery()
@@ -304,10 +305,11 @@ internal class G2Session(
             val hex = message.payload.joinToString("") { "%02x".format(it) }
             log("Even G2 $side reply on SID 0x${"%02x".format(message.sid)}, result ${message.result}: $hex")
         }
-        val arm = batteryReads[side]?.let { G2BatteryCodec.arm(message, it) }
+        // The magic ties a reply to this round's read, whichever link carries it.
+        val glasses = batteryRead?.let { G2BatteryCodec.glasses(message, it) }
         val next =
-            if (arm != null) {
-                battery.withArm(side, arm)
+            if (glasses != null) {
+                battery.copy(glasses = glasses)
             } else {
                 when (val case = G2BatteryCodec.case(message)) {
                     null -> return
@@ -323,16 +325,16 @@ internal class G2Session(
     }
 
     // TODO(hardware): The battery fields and the case's pushes come from faceclaw's notes on 2.3.0.24 and
-    // Faceclaw/38. Confirmed on a pair on 2.3.0.24 with Faceclaw/45, from the host log of a round worn
-    // out of the case: the right arm answered both the right and the left link's settings reads on the
-    // right link, with identical bodies (level 32, not charging) apart from the magic, so the left
-    // level stays unknown; the case read returned {1: 95} without field 4, which the codec reads as
-    // out of the case. Open: whether the Even app shows one level or two for the glasses, and the
-    // case's level while they are out of it. If one, read the right arm only, as faceclaw's session
-    // does, and show it as the glasses' level; if the app shows the case's last level, keep a level
-    // without field 4 as the case's. Still to check in the case with this page open: that the case
-    // pushes, and that the arms report charging; if it never pushes, docking shows only at the next
-    // round, up to BATTERY_POLL_MS later: shorten that interval.
+    // Faceclaw/38. A pair on 2.3.0.24 with Faceclaw/45, worn out of the case, settled the glasses'
+    // level: the right arm answered the settings reads of both links on the right link, with bodies
+    // identical apart from the magic (level 32, not charging), so the session reads the right arm
+    // only and reports one level. Open, in the case with this page open, from the reply lines that
+    // readBattery logs: whether the case pushes its changes (if it never does, docking shows only at
+    // the next round, up to BATTERY_POLL_MS later: shorten that interval), and whether the settings
+    // reply sets the charging field 13. Also open: whether the level is the right arm's alone or the
+    // pair's. Nothing on hand reads the left arm to compare with; when the Even app is at hand,
+    // compare its levels with this one, and if this one is the right arm's, say so in G2Battery and on
+    // the host's battery row.
 
     /** Read the batteries in rounds, forever; see the header. */
     private suspend fun pollBattery(): Nothing {
@@ -342,15 +344,13 @@ internal class G2Session(
                 delay(G2Protocol.BATTERY_QUIET_MS)
             } while (activity != seen)
             log("Even G2 battery round")
-            for (side in listOf(G2Side.RIGHT, G2Side.LEFT)) {
-                val magic = ids.magic()
-                batteryReads[side] = magic
-                write(side, G2Settings.read(magic, ids.sync()))
-            }
+            val magic = ids.magic()
+            batteryRead = magic
+            write(G2Side.RIGHT, G2Settings.read(magic, ids.sync()))
             write(G2Side.RIGHT, G2BatteryCodec.caseRead(ids.magic(), ids.sync()))
             // This round's replies arrive well within the shorter wait, which therefore decides.
             val wake = withTimeoutOrNull(G2Protocol.BATTERY_CHARGING_POLL_MS) { docked.receive() }
-            val charging = battery.let { it.case != null || it.left?.charging == true || it.right?.charging == true }
+            val charging = battery.let { it.case != null || it.glasses?.charging == true }
             if (wake == null && !charging) {
                 withTimeoutOrNull(G2Protocol.BATTERY_POLL_MS - G2Protocol.BATTERY_CHARGING_POLL_MS) { docked.receive() }
             }

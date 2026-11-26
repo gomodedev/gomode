@@ -114,8 +114,8 @@ DrawCallType.kt, and DrawFlags.kt. G2RingFilter in G2EvenHub.kt ports
 app/ui/input-monitor.ts. G2Battery.kt ports and modifies parseSettingsBattery,
 buildCaseInfoQuery, parseCaseInfo, and CaseInfoSnapshot of BleProtocol.kt, the
 case rules of updateCaseInfoLocked in session/GlassesSessionControls.kt, and
-the per-arm read of readBatteries in FlashPromptFlow.kt; G2Session.kt follows
-the battery poll cadence of g2protocol/ConnectionOptions.kt and
+the battery read of batteryQuery in g2protocol/MessageBuilder.kt; G2Session.kt
+follows the battery poll cadence of g2protocol/ConnectionOptions.kt and
 session/GlassesSessionSend.kt. The golden bytes in G2FaceclawWireTest.kt come
 from tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
 DrawWireTest.kt, and those in G2BatteryTest.kt from GlassesSessionCoreTest.kt.

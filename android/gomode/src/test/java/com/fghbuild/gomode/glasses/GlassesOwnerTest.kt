@@ -405,7 +405,7 @@ class GlassesOwnerTest {
     @Test
     fun anEvenG2sBatteriesStayInTheStateUntilItsConnectionEnds() =
         runOwnerTest {
-            firmware.charge = { if (it == G2Side.LEFT) G2Charge(71, charging = true) else G2Charge(64, false) }
+            firmware.charge = G2Charge(71, charging = true)
             firmware.case = G2Charge(55, charging = false)
             owner.start()
             owner.connect(G2)
@@ -417,8 +417,7 @@ class GlassesOwnerTest {
             runCurrent()
             assertEquals(
                 listOf(
-                    GlassesBattery(GlassesBatteryPart.LEFT, 71, charging = true),
-                    GlassesBattery(GlassesBatteryPart.RIGHT, 64, charging = false),
+                    GlassesBattery(GlassesBatteryPart.GLASSES, 71, charging = true),
                     GlassesBattery(GlassesBatteryPart.CASE, 55, charging = false),
                 ),
                 owner.state.value.batteries,
@@ -429,7 +428,7 @@ class GlassesOwnerTest {
             firmware.pushCase()
             runCurrent()
             assertEquals(
-                listOf(GlassesBatteryPart.LEFT, GlassesBatteryPart.RIGHT),
+                listOf(GlassesBatteryPart.GLASSES),
                 owner.state.value.batteries
                     .map { it.part },
             )
@@ -447,7 +446,7 @@ class GlassesOwnerTest {
             finishGreeting()
             advanceTimeBy(2 * G2Protocol.BATTERY_QUIET_MS)
             runCurrent()
-            assertEquals(2, owner.state.value.batteries.size)
+            assertEquals(1, owner.state.value.batteries.size)
 
             firmware.link(G2Side.RIGHT).drop(status = 8)
             owner.state.first { it.link is GlassesLink.Reconnecting }

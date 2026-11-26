@@ -258,7 +258,7 @@ class G2FaceclawSessionTest {
     fun anUnansweredSettingsReadCountsAsStockFirmware() =
         runTest {
             val firmware = firmware()
-            firmware.answersSettings = { false }
+            firmware.answersSettings = false
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.show("Hello")
             glasses.connect(pair)

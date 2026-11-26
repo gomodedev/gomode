@@ -101,14 +101,14 @@ object G2Protocol {
 
     /**
      * Interval between battery reads of worn glasses, as faceclaw's ConnectionOptions.kt sets it:
-     * each round is three messages that compete with the wearer's frames.
+     * each round is two messages that compete with the wearer's frames.
      */
     const val BATTERY_POLL_MS = 5 * 60_000L
 
     /**
-     * Interval between battery reads while an arm charges or the glasses sit in the case, as
-     * faceclaw's: nobody wears them there, so the reads disturb nothing, and they show the charge
-     * rising and its end.
+     * Interval between battery reads while the glasses charge or sit in the case, as faceclaw's:
+     * nobody wears them there, so the reads disturb nothing, and they show the charge rising and
+     * its end.
      */
     const val BATTERY_CHARGING_POLL_MS = 30_000L
 }

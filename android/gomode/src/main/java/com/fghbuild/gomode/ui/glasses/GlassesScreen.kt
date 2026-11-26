@@ -61,7 +61,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.gomode.R
@@ -217,10 +219,10 @@ internal fun GlassesScreen(
     }
 }
 
-// The saved glasses: a dot for their link, the model above the identity so the identity stays on one
-// line, and their actions as icon buttons centred beside those two lines. Below, from the headline's
-// start across the row's full width, a link status the user can act on and the batteries, so neither
-// squeezes beside the buttons.
+// The saved glasses: a dot for their link, the model as the headline, and their actions as icon
+// buttons centred on that line. Below, from the headline's start across the row's full width, so
+// nothing squeezes beside the buttons: the identity, such as a 14-character Even G2 serial, on one
+// line that ends with "…" when it cannot fit; a link status the user can act on; and the batteries.
 @Composable
 private fun SavedGlassesRow(
     saved: GlassesDevice,
@@ -231,32 +233,7 @@ private fun SavedGlassesRow(
 ) {
     Column {
         ListItem(
-            overlineContent = { Text(saved.model()) },
-            headlineContent = {
-                val enabled = state.link is GlassesLink.Connected || state.logoPinned
-                val label = saved.identity()
-                // A double tap shows or hides the Go Mode logo on the glasses; accessibility services get
-                // it as the name's click action.
-                Text(
-                    label,
-                    modifier =
-                        Modifier
-                            .testTag("gomode-glasses-saved")
-                            .clearAndSetSemantics {
-                                text = AnnotatedString(label)
-                                if (enabled) {
-                                    onClick(label = if (state.logoPinned) "Hide logo" else "Show logo") {
-                                        owner.toggleLogo()
-                                        true
-                                    }
-                                }
-                            }.combinedClickable(
-                                enabled = enabled,
-                                onClick = {},
-                                onDoubleClick = owner::toggleLogo,
-                            ),
-                )
-            },
+            headlineContent = { Text(saved.model()) },
             leadingContent = { LinkDot(state.link) },
             trailingContent = {
                 Row {
@@ -282,30 +259,57 @@ private fun SavedGlassesRow(
             },
         )
         val status = state.link.status()
-        if (status != null || state.batteries.isNotEmpty()) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier =
+                Modifier
+                    // Into the list item's bottom padding, so the lines read as part of the item.
+                    .layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        val lift = LIST_ITEM_PADDING.roundToPx()
+                        layout(placeable.width, placeable.height - lift) { placeable.place(0, -lift) }
+                    }
+                    // The screen's own padding ends the lines.
+                    .padding(start = HEADLINE_START, bottom = LIST_ITEM_PADDING),
+        ) {
+            val enabled = state.link is GlassesLink.Connected || state.logoPinned
+            val label = saved.identity()
+            // A double tap shows or hides the Go Mode logo on the glasses; accessibility services get
+            // it as the name's click action.
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                // A serial of capitals and digits reads without the body style's letter spacing,
+                // which would cost it the room of more than one character.
+                letterSpacing = 0.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier =
                     Modifier
-                        // Into the list item's bottom padding, so the lines read as part of the item.
-                        .layout { measurable, constraints ->
-                            val placeable = measurable.measure(constraints)
-                            val lift = LIST_ITEM_PADDING.roundToPx()
-                            layout(placeable.width, placeable.height - lift) { placeable.place(0, -lift) }
-                        }
-                        // The screen's own padding ends the lines.
-                        .padding(start = HEADLINE_START, bottom = LIST_ITEM_PADDING),
-            ) {
-                if (status != null) {
-                    Text(
-                        status,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.testTag("gomode-glasses-link"),
-                    )
-                }
-                if (state.batteries.isNotEmpty()) GlassesBatteries(state.batteries)
+                        .testTag("gomode-glasses-saved")
+                        .clearAndSetSemantics {
+                            text = AnnotatedString(label)
+                            if (enabled) {
+                                onClick(label = if (state.logoPinned) "Hide logo" else "Show logo") {
+                                    owner.toggleLogo()
+                                    true
+                                }
+                            }
+                        }.combinedClickable(
+                            enabled = enabled,
+                            onClick = {},
+                            onDoubleClick = owner::toggleLogo,
+                        ),
+            )
+            if (status != null) {
+                Text(
+                    status,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag("gomode-glasses-link"),
+                )
             }
+            if (state.batteries.isNotEmpty()) GlassesBatteries(state.batteries)
         }
     }
 }
@@ -341,8 +345,8 @@ private val LIST_ITEM_PADDING = 8.dp
 // Where a Material list item's headline starts after the status dot: 16 dp padding, the dot, 16 dp.
 private val HEADLINE_START = 16.dp + STATUS_DOT + 16.dp
 
-// Each battery as its part and level, such as "L 80%", after a bolt while it charges. A reading never
-// breaks; the readings wrap between each other. A screen reader hears them all at once in words.
+// Each battery as its part and level, such as "Glasses 80%", after a bolt while it charges. A reading
+// never breaks; the readings wrap between each other. A screen reader hears them all at once in words.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GlassesBatteries(batteries: List<GlassesBattery>) {

@@ -1,9 +1,9 @@
 // Fake Even G2 glasses behind fake arm links that answer AUTH, prelude, settings, case, Even Hub, and Faceclaw drawing.
 //
 // Decodes protobuf, private-stream records, and draw calls with its own minimal readers,
-// independent of the SDK's codecs; only the CRC comes from the SDK. Each arm answers a settings
-// read with its own battery, and the right arm reads and pushes the charging case's state as faceclaw
-// reports stock firmware doing. Stock firmware by default; a
+// independent of the SDK's codecs; only the CRC comes from the SDK. The right arm answers settings
+// reads with the glasses' battery, as a pair on 2.3.0.24 with Faceclaw/45 did, and reads and pushes
+// the charging case's state as faceclaw reports stock firmware doing. Stock firmware by default; a
 // [FakeG2Firmware.revision] adds settings field 100, the framebuffer lease, and the private stream
 // on SID 0xF0 that both lenses acknowledge through the receiving arm, as g2flash's
 // patches/message_transport.c does. Also holds a fake scan.
@@ -65,17 +65,11 @@ class FakeG2Firmware {
     /** The revision the settings read reports in field 100, such as "Faceclaw/45"; null for stock firmware. */
     @Volatile var revision: String? = null
 
-    /** Whether an arm answers settings reads. */
-    @Volatile var answersSettings: (G2Side) -> Boolean = { true }
+    /** Whether the right arm answers settings reads. */
+    @Volatile var answersSettings = true
 
-    /**
-     * The arm whose link carries the reply to a settings read sent on an arm's link, with its own
-     * battery. A pair on 2.3.0.24 with Faceclaw/45 answered the left link's read from the right arm.
-     */
-    @Volatile var settingsAnsweredBy: (G2Side) -> G2Side = { it }
-
-    /** Each arm's battery in its settings replies; null leaves the battery fields out. */
-    @Volatile var charge: (G2Side) -> G2Charge? = { G2Charge(80, charging = false) }
+    /** The glasses' battery in the settings replies; null leaves the battery fields out. */
+    @Volatile var charge: G2Charge? = G2Charge(80, charging = false)
 
     /** The charging case the glasses sit in, or null while they are out of it. */
     @Volatile var case: G2Charge? = null
@@ -359,10 +353,9 @@ class FakeG2Firmware {
         when (root.scalar(1)) {
             2L -> {
                 record("settings", null)
-                if (!answersSettings(link.side)) return
+                if (!answersSettings) return
                 val revision = revision
-                val answering = link(settingsAnsweredBy(link.side))
-                val charge = charge(answering.side)
+                val charge = charge
                 val versions =
                     proto {
                         bytes(5, "2.2.9".toByteArray())
@@ -378,7 +371,7 @@ class FakeG2Firmware {
                         bytes(4, versions)
                         if (revision != null) bytes(100, revision.toByteArray())
                     }
-                answering.notify(G2Protocol.SID_SETTINGS, sync, 0, reply)
+                link(G2Side.RIGHT).notify(G2Protocol.SID_SETTINGS, sync, 0, reply)
             }
 
             1L -> {

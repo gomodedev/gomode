@@ -49,7 +49,7 @@ internal interface GlassesDisplay {
     val events: Flow<GlassesEvent>
 
     /**
-     * The latest readings of the batteries the glasses report, left arm, right arm, then case, while
+     * The latest readings of the batteries the glasses report, the glasses' then the case's, while
      * connected. A battery with no reading is left out, so glasses that report none, such as Halo,
      * give an empty list. The flow may end when the connection ends.
      */

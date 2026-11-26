@@ -30,9 +30,10 @@ import org.junit.runner.RunWith
 
 // Documentation-range addresses that no glasses answer to.
 private const val UNREACHABLE_ADDRESS = "00:00:5E:00:53:01"
+private const val UNREACHABLE_SERIAL = "S200GCBD005303"
 private val UNREACHABLE_G2 =
     G2Pair(
-        "7",
+        UNREACHABLE_SERIAL,
         G2Arm(G2Side.LEFT, "00:00:5E:00:53:03", "Even G2_7_L_005303"),
         G2Arm(G2Side.RIGHT, "00:00:5E:00:53:04", "Even G2_7_R_005304"),
     )
@@ -87,7 +88,7 @@ class GlassesScreenTest : GoModeE2eTestBase() {
 
     @Test
     fun savedEvenG2StaysLinkedAcrossActivityReplacementUntilDisconnected() {
-        savedGlassesStayLinkedAcrossActivityReplacement(GlassesDevice.EvenG2(UNREACHABLE_G2), "7")
+        savedGlassesStayLinkedAcrossActivityReplacement(GlassesDevice.EvenG2(UNREACHABLE_G2), UNREACHABLE_SERIAL)
     }
 
     // Both models connect through the platform's Bluetooth stack, which retries the unreachable glasses.

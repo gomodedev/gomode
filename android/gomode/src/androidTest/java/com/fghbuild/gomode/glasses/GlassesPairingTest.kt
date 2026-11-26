@@ -47,9 +47,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 // Documentation-range addresses; the fake transports answer for them.
 private const val HALO_ADDRESS = "00:00:5E:00:53:05"
+
+// A serial as long as a real pair's, which the saved row shows as its identity.
+private const val SERIAL = "S200GCBD005306"
 private val PAIR =
     G2Pair(
-        "7",
+        SERIAL,
         G2Arm(G2Side.LEFT, "00:00:5E:00:53:06", "Even G2_7_L_005306"),
         G2Arm(G2Side.RIGHT, "00:00:5E:00:53:07", "Even G2_7_R_005307"),
     )
@@ -72,7 +75,7 @@ class GlassesPairingTest {
             repository.updateGlasses(GlassesDevice.EvenG2(PAIR))
             repository.settings.first { it.glasses != null }
             val firmware = FakeG2Firmware()
-            firmware.charge = { if (it == G2Side.LEFT) G2Charge(71, charging = true) else G2Charge(64, false) }
+            firmware.charge = G2Charge(71, charging = true)
             firmware.case = G2Charge(55, charging = false)
             val halo = ScanningFakeHalo(context, HALO_ADDRESS)
             val glassesScope = MainScope()
@@ -83,10 +86,10 @@ class GlassesPairingTest {
                 // Without a service, Go Mode opens on its settings.
                 composeRule.setContent { GoModeTheme { GoModeApp(shellOwner, models, glasses) } }
                 waitForTag("gomode-manage-glasses")
-                composeRule.onNodeWithText("Even G2 7").performScrollTo()
+                composeRule.onNodeWithText("Even G2 $SERIAL").performScrollTo()
                 composeRule.onNodeWithTag("gomode-manage-glasses").performClick()
                 waitForTag("gomode-glasses-screen")
-                composeRule.onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true).assertTextEquals("7")
+                composeRule.onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true).assertTextEquals(SERIAL)
 
                 composeRule.onNodeWithTag("gomode-glasses-connect").performClick()
                 composeRule.waitUntil(TIMEOUT_MS) { glasses.connectedDisplay == G2_DISPLAY }
@@ -123,7 +126,7 @@ class GlassesPairingTest {
                 assertFalse(acted.get())
                 composeRule.runOnUiThread { glasses.takeActionsFirst(null) }
 
-                // Once the session is quiet, the row shows each battery; a screen reader hears them in words.
+                // Once the session is quiet, the row shows the batteries; a screen reader hears them in words.
                 composeRule.waitUntil(TIMEOUT_MS) {
                     composeRule
                         .onAllNodesWithTag("gomode-glasses-battery", useUnmergedTree = true)
@@ -132,7 +135,7 @@ class GlassesPairingTest {
                 }
                 composeRule
                     .onNodeWithTag("gomode-glasses-battery", useUnmergedTree = true)
-                    .assertContentDescriptionEquals("Left arm 71%, charging. Right arm 64%. Case 55%")
+                    .assertContentDescriptionEquals("Glasses 71%, charging. Case 55%")
 
                 composeRule.onNodeWithTag("gomode-glasses-scan").performClick()
                 waitForTag("gomode-glasses-found")

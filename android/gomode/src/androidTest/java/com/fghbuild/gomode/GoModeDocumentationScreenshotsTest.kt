@@ -43,7 +43,7 @@ private const val SETTLE_CHECK_INTERVAL_MS = 100L
 private const val CAPTURE_HALO_ADDRESS = "00:00:5E:00:53:05"
 private val CAPTURE_G2_PAIR =
     G2Pair(
-        "7",
+        "S200GCBD005306",
         G2Arm(G2Side.LEFT, "00:00:5E:00:53:06", "Even G2_7_L_005306"),
         G2Arm(G2Side.RIGHT, "00:00:5E:00:53:07", "Even G2_7_R_005307"),
     )
