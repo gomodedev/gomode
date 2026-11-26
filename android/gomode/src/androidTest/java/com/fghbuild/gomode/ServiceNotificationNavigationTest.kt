@@ -146,6 +146,11 @@ class ServiceNotificationNavigationTest {
                                 .single(),
                         )
                     }
+                } catch (failure: Throwable) {
+                    captureFailureDiagnostics(
+                        "ServiceNotificationNavigationTest_distinctNotificationsSelectStableDestinationsOnColdAndWarmLaunches",
+                    )
+                    throw failure
                 } finally {
                     instrumentation.runOnMainSync {
                         ActivityLifecycleMonitorRegistry

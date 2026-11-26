@@ -2,6 +2,10 @@
 package com.fghbuild.gomode.voice
 
 import android.net.ConnectivityManager
+import android.net.IpPrefix
+import android.net.LinkAddress
+import android.net.LinkProperties
+import android.net.RouteInfo
 import android.net.Uri
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeakingVoiceOwner
@@ -60,6 +64,8 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowLog
 import org.robolectric.shadows.ShadowNetwork
 import org.robolectric.shadows.ShadowSystemClock
+import org.robolectric.util.ReflectionHelpers
+import org.robolectric.util.ReflectionHelpers.ClassParameter
 import org.webrtc.DataChannel
 import org.webrtc.MediaConstraints
 import org.webrtc.NativePeerConnectionFactory
@@ -67,6 +73,7 @@ import org.webrtc.PeerConnection
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import java.lang.reflect.InvocationTargetException
+import java.net.InetAddress
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -706,6 +713,89 @@ class VoiceSessionLifecycleTest {
                 server.shutdown()
             }
         }
+
+    @Test
+    fun linkPropertiesSummaryReportsFamiliesAndDefaultRoutesWithoutRawIps() {
+        fun linkProperties(
+            iface: String,
+            cidrs: List<String>,
+            routes: List<Triple<String, Int, String?>>,
+        ): LinkProperties =
+            LinkProperties().apply {
+                interfaceName = iface
+                cidrs.forEach { cidr ->
+                    val address =
+                        ReflectionHelpers.callConstructor(
+                            LinkAddress::class.java,
+                            ClassParameter.from(String::class.java, cidr),
+                        )
+                    ReflectionHelpers.callInstanceMethod<Boolean>(
+                        this,
+                        "addLinkAddress",
+                        ClassParameter.from(LinkAddress::class.java, address),
+                    )
+                }
+                routes.forEach { (dest, prefix, gateway) ->
+                    val route =
+                        ReflectionHelpers.callConstructor(
+                            RouteInfo::class.java,
+                            ClassParameter.from(IpPrefix::class.java, IpPrefix(InetAddress.getByName(dest), prefix)),
+                            ClassParameter.from(InetAddress::class.java, gateway?.let(InetAddress::getByName)),
+                            ClassParameter.from(String::class.java, iface),
+                        )
+                    addRoute(route)
+                }
+            }
+
+        assertEquals("linkProperties=null", formatLinkPropertiesSummary(null))
+        assertEquals(
+            "iface=wlan0 ipv4Addrs=0 ipv6Addrs=0 defaultV4=false defaultV6=false",
+            formatLinkPropertiesSummary(linkProperties("wlan0", emptyList(), emptyList())),
+        )
+        val ipv4Only =
+            formatLinkPropertiesSummary(
+                linkProperties(
+                    iface = "wlan0",
+                    cidrs = listOf("10.0.2.16/24"),
+                    routes = listOf(Triple("0.0.0.0", 0, "10.0.2.2")),
+                ),
+            )
+        assertEquals(
+            "iface=wlan0 ipv4Addrs=1 ipv6Addrs=0 defaultV4=true defaultV6=false",
+            ipv4Only,
+        )
+        assertFalse(ipv4Only.contains("10.0.2.16"))
+        assertFalse(ipv4Only.contains("10.0.2.2"))
+        // Includes a non-default IPv4 subnet route (10.0.2.0/24) to confirm only default routes count.
+        val ipv6OnlyDefault =
+            formatLinkPropertiesSummary(
+                linkProperties(
+                    iface = "wlan0",
+                    cidrs = listOf("10.0.2.16/24", "fe80::1/64"),
+                    routes = listOf(Triple("10.0.2.0", 24, null), Triple("::", 0, "fe80::2")),
+                ),
+            )
+        assertEquals(
+            "iface=wlan0 ipv4Addrs=1 ipv6Addrs=1 defaultV4=false defaultV6=true",
+            ipv6OnlyDefault,
+        )
+        assertFalse(ipv6OnlyDefault.contains("10.0.2.16"))
+        assertFalse(ipv6OnlyDefault.contains("fe80"))
+        val dualStack =
+            formatLinkPropertiesSummary(
+                linkProperties(
+                    iface = "rmnet0",
+                    cidrs = listOf("192.0.2.10/24", "2001:db8::1/64"),
+                    routes = listOf(Triple("0.0.0.0", 0, "192.0.2.1"), Triple("::", 0, "2001:db8::2")),
+                ),
+            )
+        assertEquals(
+            "iface=rmnet0 ipv4Addrs=1 ipv6Addrs=1 defaultV4=true defaultV6=true",
+            dualStack,
+        )
+        assertFalse(dualStack.contains("192.0.2"))
+        assertFalse(dualStack.contains("2001:db8"))
+    }
 
     @Test
     fun selectingAnUnavailableAudioDeviceReportsFailure() {

@@ -50,7 +50,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -78,6 +77,7 @@ internal class TelecomCallController(
     override val audioState = _audioState.asStateFlow()
     private val endpointIds = mutableMapOf<ParcelUuid, Int>()
     private var endpoints: List<CallEndpointCompat> = emptyList()
+    private var liveCurrentEndpoint: CallEndpointCompat? = null
     private var startingEndpoints: List<CallEndpointCompat> = emptyList()
     private var preferredEndpoint: CallEndpointCompat? = null
 
@@ -107,7 +107,7 @@ internal class TelecomCallController(
                                 // AOSP Telecom can route focus before binding the transactional callback,
                                 // dropping the initial endpoint callbacks for the call. Keep AudioManager's
                                 // starting endpoints visible until live Telecom endpoints arrive.
-                                publishStartingEndpointsForCall()
+                                publishActiveCallAudio()
                             }
                         }
                 }
@@ -182,22 +182,21 @@ internal class TelecomCallController(
                                 controlScope = this
                                 endpointUpdatesJob =
                                     launch {
-                                        combine(availableEndpoints, currentCallEndpoint) { available, current ->
-                                            available to current
-                                        }.collect { (available, current) ->
-                                            if (activeCall != generation) return@collect
-                                            endpoints = available.sortedBy(::endpointId)
-                                            preferredEndpoint = current
-                                            val devices =
-                                                endpoints.map { endpoint ->
-                                                    AudioDevice(
-                                                        endpointId(endpoint),
-                                                        endpoint.audioDeviceType(),
-                                                        endpoint.name.toString(),
-                                                    )
-                                                }
-                                            _audioState.update {
-                                                it.copy(devices = devices, selectedDeviceId = endpointId(current))
+                                        // Collect available and current endpoints independently so a
+                                        // one-sided late callback still updates audioState after an
+                                        // initial drop.
+                                        launch {
+                                            availableEndpoints.collect { available ->
+                                                if (activeCall != generation) return@collect
+                                                endpoints = available.sortedBy(::endpointId)
+                                                publishActiveCallAudio()
+                                            }
+                                        }
+                                        launch {
+                                            currentCallEndpoint.collect { current ->
+                                                if (activeCall != generation) return@collect
+                                                liveCurrentEndpoint = current
+                                                publishActiveCallAudio()
                                             }
                                         }
                                     }
@@ -232,7 +231,7 @@ internal class TelecomCallController(
 
     override fun selectAudioDevice(deviceId: Int) {
         if (_audioState.value.switching) return
-        val available = if (activeCall == 0L || endpoints.isEmpty()) startingEndpoints else endpoints
+        val available = if (activeCall == 0L) startingEndpoints else activeCallEndpoints()
         val endpoint = available.firstOrNull { endpointId(it) == deviceId }
         if (endpoint == null) {
             _audioState.update { it.copy(error = "Audio device is no longer available") }
@@ -251,9 +250,9 @@ internal class TelecomCallController(
             if (activeCall != generation) return@launch
             if (result is CallControlResult.Error) {
                 _audioState.update { it.copy(error = "Could not switch audio device (${result.errorCode})") }
-            } else if (endpoints.isEmpty()) {
+            } else if (liveCurrentEndpoint == null) {
                 preferredEndpoint = endpoint
-                _audioState.update { it.copy(selectedDeviceId = deviceId) }
+                publishActiveCallAudio()
             }
             _audioState.update { it.copy(switching = false) }
             // The currentCallEndpoint flow confirms the actual route when Telecom delivers endpoint updates.
@@ -266,6 +265,8 @@ internal class TelecomCallController(
         val control = controlScope
         activeCall = 0L
         controlScope = null
+        endpoints = emptyList()
+        liveCurrentEndpoint = null
         publishIdleAudio()
         // A Telecom-initiated hang-up already ends the call; a second disconnect fails.
         if (endedByTelecom) {
@@ -297,38 +298,50 @@ internal class TelecomCallController(
         controlScope = null
         endedByTelecom = false
         endpoints = emptyList()
+        liveCurrentEndpoint = null
         publishIdleAudio()
     }
 
     private fun publishIdleAudio() {
-        val selected = selectedStartingEndpoint()
+        val selected = selectedStartingEndpoint(startingEndpoints)
         preferredEndpoint = selected
         _audioState.value =
             CallAudioState(
-                devices = startingAudioDevices(),
+                devices = audioDevices(startingEndpoints),
                 selectedDeviceId = selected?.let(::endpointId),
             )
     }
 
-    private fun publishStartingEndpointsForCall() {
-        val selected = selectedStartingEndpoint()
+    private fun activeCallEndpoints(): List<CallEndpointCompat> {
+        val base = endpoints.ifEmpty { startingEndpoints }
+        val current = liveCurrentEndpoint
+        return if (current != null && base.none { it.identifier == current.identifier }) {
+            (base + current).sortedBy(::endpointId)
+        } else {
+            base
+        }
+    }
+
+    private fun publishActiveCallAudio() {
+        val visible = activeCallEndpoints()
+        val selected = liveCurrentEndpoint ?: selectedStartingEndpoint(visible)
         preferredEndpoint = selected
         _audioState.update {
             it.copy(
-                devices = startingAudioDevices(),
+                devices = audioDevices(visible),
                 selectedDeviceId = selected?.let(::endpointId),
             )
         }
     }
 
-    private fun selectedStartingEndpoint(): CallEndpointCompat? =
-        startingEndpoints.firstOrNull { it.identifier == preferredEndpoint?.identifier }
-            ?: startingEndpoints.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
-            ?: startingEndpoints.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
-            ?: startingEndpoints.firstOrNull()
+    private fun selectedStartingEndpoint(candidates: List<CallEndpointCompat>): CallEndpointCompat? =
+        candidates.firstOrNull { it.identifier == preferredEndpoint?.identifier }
+            ?: candidates.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
+            ?: candidates.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
+            ?: candidates.firstOrNull()
 
-    private fun startingAudioDevices(): List<AudioDevice> =
-        startingEndpoints.map {
+    private fun audioDevices(source: List<CallEndpointCompat>): List<AudioDevice> =
+        source.map {
             AudioDevice(
                 endpointId(it),
                 it.audioDeviceType(),

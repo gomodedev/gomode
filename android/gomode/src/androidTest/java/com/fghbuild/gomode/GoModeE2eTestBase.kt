@@ -4,6 +4,7 @@ package com.fghbuild.gomode
 import android.Manifest
 import android.app.UiAutomation
 import android.util.AtomicFile
+import android.util.Log
 import android.webkit.WebView
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -23,6 +24,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Rule
 import org.junit.rules.TestRule
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import org.junit.runners.model.Statement
 import java.io.File
 import java.util.concurrent.CountDownLatch
@@ -44,6 +47,22 @@ internal fun UiDevice.hasFreshObject(
     return hasObject(selector)
 }
 
+internal fun UiDevice.findFreshObject(
+    uiAutomation: UiAutomation,
+    selector: BySelector,
+): UiObject2? {
+    uiAutomation.clearCache()
+    return findObject(selector)
+}
+
+internal fun UiDevice.findFreshObjects(
+    uiAutomation: UiAutomation,
+    selector: BySelector,
+): List<UiObject2> {
+    uiAutomation.clearCache()
+    return findObjects(selector)
+}
+
 internal fun UiDevice.awaitFreshObject(
     uiAutomation: UiAutomation,
     selector: BySelector,
@@ -56,6 +75,43 @@ internal fun UiDevice.awaitFreshObject(
         },
         timeoutMs,
     )
+
+internal fun UiDevice.awaitFreshGone(
+    uiAutomation: UiAutomation,
+    selector: BySelector,
+    timeoutMs: Long,
+): Boolean =
+    wait(
+        {
+            uiAutomation.clearCache()
+            !hasObject(selector)
+        },
+        timeoutMs,
+    ) == true
+
+internal fun captureFailureDiagnostics(label: String) {
+    runCatching {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val device = UiDevice.getInstance(instrumentation)
+        val dir = File(context.getExternalFilesDir(null), "failure-diagnostics").apply { mkdirs() }
+        val safe = label.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        instrumentation.uiAutomation.clearCache()
+        device.dumpWindowHierarchy(File(dir, "$safe.xml"))
+        device.takeScreenshot(File(dir, "$safe.png"))
+    }.onFailure { error ->
+        Log.w("GoModeTestDiagnostics", "Could not capture failure diagnostics for $label", error)
+    }
+}
+
+internal class FailureDiagnosticsRule : TestWatcher() {
+    override fun failed(
+        e: Throwable,
+        description: Description,
+    ) {
+        captureFailureDiagnostics("${description.testClass.simpleName}_${description.methodName}")
+    }
+}
 
 abstract class GoModeE2eTestBase {
     @get:Rule(order = 0)
@@ -83,6 +139,9 @@ abstract class GoModeE2eTestBase {
     @get:Rule(order = 2)
     @OptIn(ExperimentalTestApi::class)
     val composeRule = createAndroidComposeRule<MainActivity>(effectContext = StandardTestDispatcher())
+
+    @get:Rule(order = 3)
+    val failureDiagnosticsRule: TestRule = FailureDiagnosticsRule()
 
     protected val baseUrl: String by lazy {
         InstrumentationRegistry.getArguments().getString("baseUrl", DEFAULT_BASE_URL)

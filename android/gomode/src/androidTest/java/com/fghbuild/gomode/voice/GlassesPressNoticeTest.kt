@@ -13,7 +13,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
@@ -21,6 +20,7 @@ import com.fghbuild.eveng2.testing.FakeG2Firmware
 import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.DeniedMicrophonePermission
 import com.fghbuild.gomode.R
+import com.fghbuild.gomode.awaitFreshObject
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -104,9 +104,14 @@ class GlassesPressNoticeTest {
         withGoMode { firmware, fixture ->
             firmware.touch(G2Side.RIGHT, 0)
             awaitShown(firmware, context.getString(R.string.glasses_notice_allow_microphone))
-            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val device = UiDevice.getInstance(instrumentation)
             requireNotNull(
-                device.wait(Until.findObject(By.res(Pattern.compile(".*:id/permission_deny.*_button"))), TIMEOUT_MS),
+                device.awaitFreshObject(
+                    instrumentation.uiAutomation,
+                    By.res(Pattern.compile(".*:id/permission_deny.*_button")),
+                    TIMEOUT_MS,
+                ),
             ) { "Microphone permission prompt did not appear" }.click()
             assertEquals(0, fixture.sessions.size)
         }

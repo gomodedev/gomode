@@ -117,7 +117,9 @@ class RetainedWebViewsTest {
             composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
                 evaluate(view, "window.trustedActivation === true") == "true"
             }
-            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val device = UiDevice.getInstance(instrumentation)
+            val uiAutomation = instrumentation.uiAutomation
             try {
                 composeRule.runOnIdle { visible = false }
                 composeRule.waitForIdle()
@@ -125,11 +127,12 @@ class RetainedWebViewsTest {
                 assertEquals("false", evaluate(view, "goModeHost.isPageVisible()"))
                 composeRule.runOnUiThread { view.evaluateJavascript("location.href = '/next'", null) }
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
-                    entry.state.value.attentionRequired || device.hasObject(By.res("android", "button1"))
+                    entry.state.value.attentionRequired ||
+                        device.hasFreshObject(uiAutomation, By.res("android", "button1"))
                 }
                 assertFalse(
                     "Hidden navigation opened a native confirmation",
-                    device.hasObject(By.res("android", "button1")),
+                    device.hasFreshObject(uiAutomation, By.res("android", "button1")),
                 )
                 assertTrue(entry.state.value.attentionRequired)
                 assertEquals("true", evaluate(view, "location.pathname === '/' && window.draft === 'unsaved'"))
@@ -137,11 +140,11 @@ class RetainedWebViewsTest {
                 composeRule.runOnUiThread { view.reload() }
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
                     evaluate(view, "window.beforeUnloadAttempts === 2") == "true" ||
-                        device.hasObject(By.res("android", "button1"))
+                        device.hasFreshObject(uiAutomation, By.res("android", "button1"))
                 }
                 assertFalse(
                     "Hidden reload opened a native confirmation",
-                    device.hasObject(By.res("android", "button1")),
+                    device.hasFreshObject(uiAutomation, By.res("android", "button1")),
                 )
                 assertEquals("true", evaluate(view, "location.pathname === '/' && window.draft === 'unsaved'"))
                 composeRule.runOnIdle { visible = true }
@@ -151,7 +154,7 @@ class RetainedWebViewsTest {
                     evaluate(view, "window.editCount === 2 && window.trustedActivation") == "true"
                 }
             } finally {
-                if (device.hasObject(By.res("android", "button1"))) device.pressBack()
+                if (device.hasFreshObject(uiAutomation, By.res("android", "button1"))) device.pressBack()
             }
         }
     }

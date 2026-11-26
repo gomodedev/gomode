@@ -20,6 +20,7 @@ import androidx.test.uiautomator.UiDevice
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.MainActivity
 import com.fghbuild.gomode.awaitFreshObject
+import com.fghbuild.gomode.captureFailureDiagnostics
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
 import kotlinx.coroutines.flow.first
@@ -258,6 +259,11 @@ class CarDialServerSwitchTest {
                     assertTrue(scopedResources.all { it.getString("openai/session") == conversation })
                     assertEquals(1, cookie.sessions.size)
                     assertEquals(0, bearer.sessions.size)
+                } catch (failure: Throwable) {
+                    captureFailureDiagnostics(
+                        "CarDialServerSwitchTest_carFocusPreservesConversationAndLocaleWithBrowserTools",
+                    )
+                    throw failure
                 } finally {
                     cookie.withdrawServiceResources()
                     instrumentation.runOnMainSync { application.carDialVoiceOwner.cancel() }

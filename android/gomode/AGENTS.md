@@ -61,9 +61,9 @@ prior microphone grant.
 Use `@ModelFreeSpeech` with `ModelFreeSpeechRule` when a case needs the controlled
 platform recognizer. No downloaded speech or language models are required.
 
-CI runs `make android-e2e-ci`, which skips `@LocalEmulatorOnly` cases; each
-instrumentation APK declares its own copy. CI keeps one emulator case per
-mechanism. Mark a new case `@LocalEmulatorOnly` when it repeats a covered
+CI runs `make android-e2e-ci`, which reuses the APKs built by `make android-test`
+and skips `@LocalEmulatorOnly` cases; each instrumentation APK declares its own
+copy. CI keeps one emulator case per mechanism. Mark a new case `@LocalEmulatorOnly` when it repeats a covered
 mechanism in another state, waits on a real production deadline, or measures
 device performance. `make android-e2e` still runs every model-free case.
 Put Compose tests that need no real WebView, audio, Telecom, or system UI under

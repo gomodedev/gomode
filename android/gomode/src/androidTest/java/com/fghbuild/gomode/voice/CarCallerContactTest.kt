@@ -23,6 +23,7 @@ import androidx.test.uiautomator.UiDevice
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.findFreshObject
 import com.fghbuild.gomode.ui.settings.CarCallerIDSetting
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
@@ -82,9 +83,13 @@ class CarCallerContactTest {
             val deadline = System.currentTimeMillis() + 20_000
             while (saved.size < expected.size && System.currentTimeMillis() < deadline) {
                 composeRule.mainClock.advanceTimeByFrame()
-                device.findObject(By.text("Import"))?.click()
-                device.findObject(By.text("Device"))?.click()
-                device.findObject(By.res("com.android.permissioncontroller", "permission_allow_button"))?.click()
+                device.findFreshObject(instrumentation.uiAutomation, By.text("Import"))?.click()
+                device.findFreshObject(instrumentation.uiAutomation, By.text("Device"))?.click()
+                device
+                    .findFreshObject(
+                        instrumentation.uiAutomation,
+                        By.res("com.android.permissioncontroller", "permission_allow_button"),
+                    )?.click()
                 instrumentation.uiAutomation.adoptShellPermissionIdentity(android.Manifest.permission.READ_CONTACTS)
                 try {
                     resolver

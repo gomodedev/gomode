@@ -34,7 +34,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import com.fghbuild.gomode.data.SettingsRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,11 +70,13 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
             })()
             """.trimIndent()
         }
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val device = UiDevice.getInstance(instrumentation)
         val allow =
             requireNotNull(
-                device.wait(
-                    Until.findObject(By.res(Pattern.compile(".*:id/permission_allow_foreground_only_button"))),
+                device.awaitFreshObject(
+                    instrumentation.uiAutomation,
+                    By.res(Pattern.compile(".*:id/permission_allow_foreground_only_button")),
                     GOMODE_DEFAULT_TIMEOUT_MS,
                 ),
             ) { "Microphone permission prompt did not appear" }
@@ -90,7 +91,9 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
     fun microphoneDenialOffersPromptThenSettingsWithoutStartingVoiceOnReenable() {
         openWebShell()
         waitForHostedFrontend()
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val device = UiDevice.getInstance(instrumentation)
+        val uiAutomation = instrumentation.uiAutomation
 
         fun waitForAppFocus() {
             composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
@@ -100,15 +103,18 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
 
         fun denyPermission() {
             val deny =
-                device.wait(
-                    Until.findObject(By.res(Pattern.compile(".*:id/permission_deny.*_button"))),
+                device.awaitFreshObject(
+                    uiAutomation,
+                    By.res(Pattern.compile(".*:id/permission_deny.*_button")),
                     GOMODE_DEFAULT_TIMEOUT_MS,
                 )
             requireNotNull(deny) { "Microphone permission prompt did not appear" }.click()
             waitForAppFocus()
         }
         composeRule.onNodeWithTag("gomode-voice-connect").performClick()
-        requireNotNull(device.wait(Until.findObject(By.textContains("record audio")), GOMODE_DEFAULT_TIMEOUT_MS))
+        requireNotNull(
+            device.awaitFreshObject(uiAutomation, By.textContains("record audio"), GOMODE_DEFAULT_TIMEOUT_MS),
+        )
         device.pressBack()
         waitForAppFocus()
         composeRule.onNodeWithText("Enable microphone").performClick()
@@ -122,9 +128,13 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         }
         composeRule.onNodeWithText("Open app settings").performClick()
         requireNotNull(
-            device.wait(Until.findObject(By.pkg("com.android.settings").text("Go Mode")), GOMODE_DEFAULT_TIMEOUT_MS),
+            device.awaitFreshObject(
+                uiAutomation,
+                By.pkg("com.android.settings").text("Go Mode"),
+                GOMODE_DEFAULT_TIMEOUT_MS,
+            ),
         ) {
-            val shown = device.findObjects(By.text(Pattern.compile(".+"))).mapNotNull { it.text }
+            val shown = device.findFreshObjects(uiAutomation, By.text(Pattern.compile(".+"))).mapNotNull { it.text }
             "System settings did not show Go Mode's app info in ${device.currentPackageName}; visible: $shown"
         }
         // Grant while Settings is in front, as the user would there. Settings' App info
@@ -623,20 +633,22 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
     // DocumentsUI opens on its last root and view mode and animates its roots drawer, so retry each
     // step until the document is listed by name.
     private fun pickDownload(name: String) {
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val device = UiDevice.getInstance(instrumentation)
+        val uiAutomation = instrumentation.uiAutomation
         val deadline = SystemClock.uptimeMillis() + GOMODE_DEFAULT_TIMEOUT_MS
         while (SystemClock.uptimeMillis() < deadline) {
             try {
-                val document = device.findObject(By.text(name))
+                val document = device.findFreshObject(uiAutomation, By.text(name))
                 if (document != null) {
                     document.click()
                     return
                 }
                 // Grid view shows thumbnails without names.
                 (
-                    device.findObject(By.desc("List view"))
-                        ?: device.findObject(By.text("Downloads"))
-                        ?: device.findObject(By.desc("Show roots"))
+                    device.findFreshObject(uiAutomation, By.desc("List view"))
+                        ?: device.findFreshObject(uiAutomation, By.text("Downloads"))
+                        ?: device.findFreshObject(uiAutomation, By.desc("Show roots"))
                 )?.click()
             } catch (_: StaleObjectException) {
                 // The drawer moved between lookup and click.

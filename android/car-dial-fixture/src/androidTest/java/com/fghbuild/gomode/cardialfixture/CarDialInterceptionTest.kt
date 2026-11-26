@@ -14,6 +14,7 @@ import android.os.ParcelFileDescriptor
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -25,24 +26,24 @@ import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestRule
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import org.junit.runner.RunWith
 import org.junit.runners.model.MultipleFailureException
+import org.junit.runners.model.Statement
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
@@ -68,8 +69,9 @@ class CarDialInterceptionTest {
     private var previousCall = ""
     private var snapshotCaptured = false
     private var nativeOnboarding = false
+    private var currentTestName = "unknown"
 
-    // Outside JUnit's Before/After statements: refused devices cannot reach either
+    // Outside fixture setup/teardown: refused devices cannot reach either
     // setup mutations or teardown with snapshots that were never initialized.
     @get:Rule(order = 0)
     val deviceRule: TestRule =
@@ -80,8 +82,43 @@ class CarDialInterceptionTest {
     @get:Rule(order = 1)
     val recognitionPermission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
 
-    @Before
-    fun setUp() {
+    // Order 2 wraps order 3 so failure diagnostics capture the live UI before tearDown kills the app.
+    @get:Rule(order = 2)
+    val fixtureLifecycleRule: TestRule =
+        TestRule { base, description ->
+            object : Statement() {
+                override fun evaluate() {
+                    currentTestName = description.methodName
+                    val failures = mutableListOf<Throwable>()
+                    try {
+                        setUp()
+                        base.evaluate()
+                    } catch (failure: Throwable) {
+                        failures += failure
+                    } finally {
+                        try {
+                            tearDown()
+                        } catch (cleanup: Throwable) {
+                            failures += cleanup
+                        }
+                    }
+                    MultipleFailureException.assertEmpty(failures)
+                }
+            }
+        }
+
+    @get:Rule(order = 3)
+    val failureDiagnosticsRule: TestRule =
+        object : TestWatcher() {
+            override fun failed(
+                e: Throwable,
+                description: Description,
+            ) {
+                captureFailureDiagnostics("${description.testClass.simpleName}_${description.methodName}")
+            }
+        }
+
+    private fun setUp() {
         previousRoleHolders =
             shell("cmd role get-role-holders ${RoleManager.ROLE_CALL_REDIRECTION}")
                 .lines()
@@ -125,8 +162,7 @@ class CarDialInterceptionTest {
         assertEquals(APP, shell("cmd role get-role-holders ${RoleManager.ROLE_CALL_REDIRECTION}").trim())
     }
 
-    @After
-    fun tearDown() {
+    private fun tearDown() {
         if (!snapshotCaptured) return
         if (hasFresh(By.text("Set as default"))) device.pressBack()
         shell("cmd role remove-role-holder ${RoleManager.ROLE_CALL_REDIRECTION} $APP")
@@ -798,15 +834,32 @@ class CarDialInterceptionTest {
         return device.hasObject(selector)
     }
 
+    private fun findFresh(selector: BySelector): androidx.test.uiautomator.UiObject2? {
+        instrumentation.uiAutomation.clearCache()
+        return device.findObject(selector)
+    }
+
+    private fun captureFailureDiagnostics(label: String) {
+        runCatching {
+            val dir = File(context.getExternalFilesDir(null), "failure-diagnostics").apply { mkdirs() }
+            val safe = label.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            instrumentation.uiAutomation.clearCache()
+            device.dumpWindowHierarchy(File(dir, "$safe.xml"))
+            device.takeScreenshot(File(dir, "$safe.png"))
+        }.onFailure { error ->
+            Log.w("CarDialTestDiagnostics", "Could not capture failure diagnostics for $label", error)
+        }
+    }
+
     private fun awaitFreshText(text: String) {
         assertNotNull("$text not shown; visible: ${visibleText()}", awaitFresh(By.text(text)))
     }
 
     private fun unlockFixtureKeyguard() {
         shell("wm dismiss-keyguard")
-        assertTrue(
+        assertNotNull(
             "PIN entry did not appear",
-            device.wait(Until.hasObject(By.res("com.android.systemui", "pinEntry")), 5_000),
+            awaitFresh(By.res("com.android.systemui", "pinEntry")),
         )
         shell("input text $PROBE_PIN")
         shell("input keyevent 66")
@@ -1112,11 +1165,9 @@ class CarDialInterceptionTest {
 
     // Reads a fresh tree; see awaitFresh. On CI the cached voice button kept the "Cancel" description
     // of the connecting phase for 50 s, beside a fresh "Listening…" that only a connected session shows.
-    private fun voiceConnected(): Boolean {
-        instrumentation.uiAutomation.clearCache()
-        return device.hasObject(By.res("car_dial_status").text("Voice connected")) ||
-            device.hasObject(By.desc("End voice"))
-    }
+    private fun voiceConnected(): Boolean =
+        hasFresh(By.res("car_dial_status").text("Voice connected")) ||
+            hasFresh(By.desc("End voice"))
 
     // Names the stage a voice start stopped at: the app's startup records and session
     // log, the fixture counters, and Telecom's record of the latest call.
@@ -1136,10 +1187,7 @@ class CarDialInterceptionTest {
             "windows:\n$windows"
     }
 
-    private fun voiceStatusText(): String {
-        instrumentation.uiAutomation.clearCache()
-        return device.findObject(By.res("car_dial_status"))?.text ?: "no status"
-    }
+    private fun voiceStatusText(): String = findFresh(By.res("car_dial_status"))?.text ?: "no status"
 
     // Tells a missing Go Mode window apart from a session that did not connect, and names the app
     // process's last voice session record. Each test starts a fresh process, so its PID scopes the log.
@@ -1172,11 +1220,10 @@ class CarDialInterceptionTest {
     private fun endNativeVoice() {
         // Telecom can reject a duplicate before redirection and show an informational
         // dialog over the still-live native call surface. Dismiss only its OK button.
-        device.findObject(By.res("android", "button1").text("OK"))?.click()
-        instrumentation.uiAutomation.clearCache()
+        findFresh(By.res("android", "button1").text("OK"))?.click()
         val end =
-            device.findObject(By.res("car_dial_end"))
-                ?: device.findObject(By.desc("Cancel"))
+            findFresh(By.res("car_dial_end"))
+                ?: findFresh(By.desc("Cancel"))
                 ?: awaitFresh(By.desc("End voice"))
         requireNotNull(end) { "Voice End control unavailable" }.click()
     }
@@ -1216,7 +1263,7 @@ class CarDialInterceptionTest {
                 // even consulting redirection. Decline only that new pending managed dial.
                 // The record can outlive its dialog while Telecom resolves the pending
                 // attempt. Re-read the record rather than acting on that stale snapshot.
-                device.findObject(By.res("android", "button2"))?.click()
+                findFresh(By.res("android", "button2"))?.click()
             }
             if (callRecordID(current) != callRecordID(previousCall) && current.contains("SET_DISCONNECTED")) {
                 assertFalse("Duplicate dial created a phone connection", current.contains("START_CONNECTION"))
@@ -1287,6 +1334,9 @@ class CarDialInterceptionTest {
                 assertFalse("Fixture display did not sleep", device.isScreenOn)
                 block()
             }
+        if (scenario.isFailure) {
+            captureFailureDiagnostics("${currentTestName}_locked")
+        }
         val restoration =
             runCatching {
                 shell("locksettings clear --old $PROBE_PIN")
@@ -1448,7 +1498,7 @@ class CarDialInterceptionTest {
         )
         assertTrue(
             "Android microphone permission dialog did not close",
-            device.wait(Until.gone(By.res(resourceID)), 5_000),
+            awaitFreshGone(By.res(resourceID)),
         )
         assertEquals(
             "Android did not grant microphone permission",
@@ -1477,13 +1527,11 @@ class CarDialInterceptionTest {
     }
 
     private fun scrollToText(text: String): androidx.test.uiautomator.UiObject2 {
-        fun visible(): androidx.test.uiautomator.UiObject2? {
-            instrumentation.uiAutomation.clearCache()
-            return device.findObject(By.text(text))?.takeIf {
+        fun visible(): androidx.test.uiautomator.UiObject2? =
+            findFresh(By.text(text))?.takeIf {
                 val bounds = it.visibleBounds
                 bounds.height() > 0
             }
-        }
         // Use the settings margin so a voice-language text field cannot consume the gesture.
         for (forward in listOf(true, false)) {
             repeat(24) {
@@ -1536,11 +1584,11 @@ class CarDialInterceptionTest {
     }
 
     private fun acceptRoleChooser() {
-        val dialog = device.wait(Until.findObject(By.text("Set as default")), 5_000)
+        val dialog = awaitFresh(By.text("Set as default"))
         val rolePackage = requireNotNull(dialog) { "Android role chooser did not open" }.applicationPackage
-        val select = device.wait(Until.findObject(By.text("Go Mode").pkg(rolePackage)), 5_000)
+        val select = awaitFresh(By.text("Go Mode").pkg(rolePackage))
         requireNotNull(select) { "Android role chooser did not list Go Mode" }.click()
-        val accept = device.wait(Until.findObject(By.text("Set as default").enabled(true)), 5_000)
+        val accept = awaitFresh(By.text("Set as default").enabled(true))
         requireNotNull(accept) { "Android role chooser had no confirmation" }.click()
     }
 
@@ -1727,8 +1775,7 @@ class CarDialInterceptionTest {
     }
 
     private fun vacateForeground() {
-        instrumentation.uiAutomation.clearCache()
-        device.findObject(By.res("car_dial_end"))?.click()
+        findFresh(By.res("car_dial_end"))?.click()
         // HOME retains the previous app in LAST_ACTIVITY, where am kill cannot
         // reclaim it. Use the fixture's own UID: system-UID Settings does not
         // reliably replace Android's previous-app slot.
@@ -1737,7 +1784,7 @@ class CarDialInterceptionTest {
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
             ),
         )
-        assertTrue(device.wait(Until.hasObject(By.res("android", "text1").text("Car dial test")), 5_000))
+        assertNotNull(awaitFresh(By.res("android", "text1").text("Car dial test")))
         device.pressHome()
         shell("run-as $APP am stopservice --user 0 -n $APP/.voice.VoiceService")
     }

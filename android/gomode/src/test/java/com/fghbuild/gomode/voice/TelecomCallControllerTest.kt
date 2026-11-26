@@ -126,6 +126,86 @@ class TelecomCallControllerTest {
         }
     }
 
+    @Test
+    fun oneSidedLateTelecomCallbacksUpdateSelectionAndDevicesIndependently() {
+        shadowOf(context.packageManager).setSystemFeature(PackageManager.FEATURE_TELECOM, true)
+        val audio = context.getSystemService(AudioManager::class.java)
+        val shadowAudio = shadowOf(audio)
+        shadowAudio.setAvailableCommunicationDevices(emptyList())
+        val telecom =
+            Shadow.extract<ShadowTransactionalTelecomManager>(context.getSystemService(TelecomManager::class.java))
+        telecom.emitInitialEndpoints = false
+
+        val controller = TelecomCallController(context, onTelecomEnded = {})
+        try {
+            var started: Boolean? = null
+            scope.launch { started = controller.start("Fixture", null) {} }
+            idleUntil(advanceClockMs = 100) { started != null }
+            assertEquals(true, started)
+
+            val speaker = AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER).build()
+            shadowAudio.addAvailableCommunicationDevice(speaker, true)
+            idleUntil { controller.audioState.value.devices.size == 1 }
+
+            // Only currentCallEndpoint arrives (no availableEndpoints): external route change must still apply.
+            val headset = CallEndpoint("Car BT", CallEndpoint.TYPE_BLUETOOTH, ParcelUuid(UUID.randomUUID()))
+            telecom.eventCallbacks.single().onCallEndpointChanged(headset)
+            idleUntil {
+                controller.audioState.value.devices
+                    .any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            }
+            val headsetDevice =
+                controller.audioState.value.devices
+                    .single { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            assertEquals(headsetDevice.id, controller.audioState.value.selectedDeviceId)
+            assertEquals(
+                setOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BLUETOOTH_SCO),
+                controller.audioState.value.devices
+                    .map { it.type }
+                    .toSet(),
+            )
+        } finally {
+            controller.close()
+            idleUntil(advanceClockMs = 50) {
+                controller.audioState.value.devices
+                    .isEmpty()
+            }
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+
+        // Now verify the opposite one-sided callback: only availableEndpoints arrives without currentCallEndpoint.
+        shadowAudio.setAvailableCommunicationDevices(emptyList())
+        val second = TelecomCallController(context, onTelecomEnded = {})
+        try {
+            var started: Boolean? = null
+            scope.launch { started = second.start("Fixture", null) {} }
+            idleUntil(advanceClockMs = 100) { started != null }
+            assertEquals(true, started)
+
+            val wired = CallEndpoint("Wired", CallEndpoint.TYPE_WIRED_HEADSET, ParcelUuid(UUID.randomUUID()))
+            val liveSpeaker = CallEndpoint("Speaker", CallEndpoint.TYPE_SPEAKER, ParcelUuid(UUID.randomUUID()))
+            telecom.eventCallbacks.last().onAvailableCallEndpointsChanged(listOf(wired, liveSpeaker))
+            idleUntil { second.audioState.value.devices.size == 2 }
+            val speakerDevice =
+                second.audioState.value.devices
+                    .single { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            assertEquals(speakerDevice.id, second.audioState.value.selectedDeviceId)
+            assertEquals(
+                setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER),
+                second.audioState.value.devices
+                    .map { it.type }
+                    .toSet(),
+            )
+        } finally {
+            second.close()
+            idleUntil(advanceClockMs = 50) {
+                second.audioState.value.devices
+                    .isEmpty()
+            }
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+    }
+
     // endCall starts a call, lets Telecom end it through request, and returns the session's callbacks.
     private fun endCall(request: (CallControlCallback) -> Unit): List<String?> {
         shadowOf(context.packageManager).setSystemFeature(PackageManager.FEATURE_TELECOM, true)

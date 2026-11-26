@@ -14,7 +14,6 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import androidx.work.WorkManager
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -68,7 +67,9 @@ class BackgroundModelTransferAcceptanceTest {
                         .first { it.notification.channelId == "gomode-model-downloads" }
                 assertTrue(posted.notification.actions.any { it.title == "Cancel download" })
                 assertTrue(device.openNotification())
-                assertTrue(device.wait(Until.hasObject(By.text("Cancel download")), 10_000))
+                assertTrue(
+                    device.awaitFreshObject(instrumentation.uiAutomation, By.text("Cancel download"), 10_000) != null,
+                )
                 capture("notification-progress")
                 posted.notification.actions
                     .first { it.title == "Cancel download" }

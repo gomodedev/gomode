@@ -4,7 +4,6 @@ package com.fghbuild.gomode
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -21,17 +20,19 @@ class SystemUiRuleTest {
 
     @Test
     fun shadeIsRestoredWhenTestFails() {
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val device = UiDevice.getInstance(instrumentation)
+        val uiAutomation = instrumentation.uiAutomation
         val shade = By.res("com.android.systemui", "notification_stack_scroller")
         val failure = AssertionError("simulated test failure")
         assertTrue(device.openNotification())
-        assertTrue(device.wait(Until.hasObject(shade), 5_000))
+        assertTrue(device.awaitFreshObject(uiAutomation, shade, 5_000) != null)
         val test =
             object : Statement() {
                 override fun evaluate() {
-                    assertFalse(device.hasObject(shade))
+                    assertFalse(device.hasFreshObject(uiAutomation, shade))
                     assertTrue(device.openNotification())
-                    assertTrue(device.wait(Until.hasObject(shade), 5_000))
+                    assertTrue(device.awaitFreshObject(uiAutomation, shade, 5_000) != null)
                     throw failure
                 }
             }
@@ -41,6 +42,6 @@ class SystemUiRuleTest {
         } catch (actual: AssertionError) {
             assertSame(failure, actual)
         }
-        assertFalse(device.hasObject(shade))
+        assertFalse(device.hasFreshObject(uiAutomation, shade))
     }
 }

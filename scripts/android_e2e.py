@@ -162,26 +162,34 @@ def require_emulator(adb: str, serial: str) -> None:
         raise RuntimeError("Android tests require an emulator without a secure credential; device was not changed")
 
 
-def prepare_apks(adb: str, serial: str, telecom: bool, verbose: bool) -> None:
-    """Build before mutation; install each APK independently and retain completed installs on failure for retry."""
-    sdk_script = pathlib.Path(__file__).with_name("android_sdk.py")
-    subprocess.run([sys.executable, str(sdk_script), "check"], check=True)
-    sdk = find_sdkmanager()
-    if sdk is None:
-        raise RuntimeError("Android SDK was not available after setup")
-    gradle_env = {**os.environ, "ANDROID_HOME": sdk[1], "ANDROID_SDK_ROOT": sdk[1], "ANDROID_SERIAL": serial}
+def prepare_apks(adb: str, serial: str, telecom: bool, verbose: bool, skip_build: bool) -> None:
+    """Build unless skipped, then install each APK independently so completed installs survive retry."""
     modules = ["gomode", "car-dial-fixture"] if telecom else ["gomode"]
-    tasks = [f":{module}:{task}" for module in modules for task in ("assembleDebug", "assembleDebugAndroidTest")]
-    log = "--console=plain" if verbose else "--quiet"
-    subprocess.run(["./gradlew", *tasks, log], cwd=ROOT / "android", env=gradle_env, check=True)
-    # Release the build heap before WebView/voice/Telecom launch their processes.
-    subprocess.run(["./gradlew", "--stop"], cwd=ROOT / "android", env=gradle_env, check=True)
-    for module in modules:
+    apk_paths = [
+        ROOT / "android" / path
+        for module in modules
         for path in (
             f"{module}/build/outputs/apk/debug/{module}-debug.apk",
             f"{module}/build/outputs/apk/androidTest/debug/{module}-debug-androidTest.apk",
-        ):
-            subprocess.run([adb, "-s", serial, "install", "-r", "-t", str(ROOT / "android" / path)], check=True)
+        )
+    ]
+    if skip_build:
+        missing = [str(path) for path in apk_paths if not path.is_file()]
+        if missing:
+            raise RuntimeError(f"Missing prebuilt APKs for --skip-build: {', '.join(missing)}")
+    else:
+        sdk_script = pathlib.Path(__file__).with_name("android_sdk.py")
+        subprocess.run([sys.executable, str(sdk_script), "check"], check=True)
+        sdk = find_sdkmanager()
+        if sdk is None:
+            raise RuntimeError("Android SDK was not available after setup")
+        gradle_env = {**os.environ, "ANDROID_HOME": sdk[1], "ANDROID_SDK_ROOT": sdk[1], "ANDROID_SERIAL": serial}
+        tasks = [f":{module}:{task}" for module in modules for task in ("assembleDebug", "assembleDebugAndroidTest")]
+        log = "--console=plain" if verbose else "--quiet"
+        # --no-daemon releases the build heap on exit so WebView/voice/Telecom do not share RAM with Gradle.
+        subprocess.run(["./gradlew", "--no-daemon", *tasks, log], cwd=ROOT / "android", env=gradle_env, check=True)
+    for path in apk_paths:
+        subprocess.run([adb, "-s", serial, "install", "-r", "-t", str(path)], check=True)
     if telecom:
         # Telecom's fixed five-second redirection deadline includes cold app startup.
         output = shell(adb, serial, "cmd", "package", "compile", "-m", "speed", "-f", APP_PACKAGE)
@@ -305,6 +313,35 @@ def denied_microphone(adb: str, serial: str) -> Iterator[None]:
             shell(adb, serial, "pm", "set-permission-flags", APP_PACKAGE, "android.permission.RECORD_AUDIO", *flags)
 
 
+def clear_device_external_files(adb: str, serial: str, target: str) -> None:
+    """Remove stale test screenshots and dumps from the target app's external files directory."""
+    external = f"/sdcard/Android/data/{target}/files"
+    subprocess.run([adb, "-s", serial, "shell", "rm", "-rf", f"{external}/*"], capture_output=True, check=False)
+
+
+def pull_device_external_files(adb: str, serial: str, target: str, destination: pathlib.Path) -> None:
+    """Pull test-generated screenshots and hierarchy dumps on failure so CI uploads preserve them."""
+    external = f"/sdcard/Android/data/{target}/files"
+    listing = subprocess.run(
+        [adb, "-s", serial, "shell", "find", external, "-type", "f"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if listing.returncode != 0 or not listing.stdout.strip():
+        return
+    destination.mkdir(parents=True, exist_ok=True)
+    pull = subprocess.run(
+        [adb, "-s", serial, "pull", f"{external}/.", str(destination)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if pull.returncode != 0:
+        detail = (pull.stderr or pull.stdout).strip()
+        print(f"Warning: could not pull device artifacts from {external}: {detail}", file=sys.stderr)
+
+
 def instrument(
     adb: str,
     serial: str,
@@ -349,6 +386,7 @@ def instrument(
     with contextlib.ExitStack() as stack:
         log = stack.enter_context((results / f"{name}.log").open("w"))
         if not discovery:
+            clear_device_external_files(adb, serial, target)
             # The ring buffer holds seconds of a loaded emulator; stream the whole run so a
             # failure in an early test keeps its evidence.
             shell(adb, serial, "logcat", "-c")
@@ -422,6 +460,8 @@ def instrument(
     result = InstrumentationResult(
         status == 0 and summary and completed and not failed, time.monotonic() - started, tests
     )
+    if not discovery and not result.passed:
+        pull_device_external_files(adb, serial, target, results / f"{name}-device-files")
     return result
 
 
@@ -484,7 +524,7 @@ def run_capture_tests(port: int, arguments: dict[str, str], serial: str) -> int:
     """Build and run explicit documentation captures on their hosted fixture."""
     adb = adb_path()
     results = new_results()
-    prepare_apks(adb, serial, False, False)
+    prepare_apks(adb, serial, False, False, False)
     with forward_ports(adb, serial, [port]):
         result = run_suite(
             adb, serial, results, "captures", APP_RUNNER, {"baseUrl": f"http://localhost:{port}", **arguments}, False
@@ -506,6 +546,7 @@ def main() -> int:
         help="focus a class/method (app unless --module telecom)",
     )
     parser.add_argument("--ci", action="store_true", help="skip @LocalEmulatorOnly variants to fit slower CI runners")
+    parser.add_argument("--skip-build", action="store_true", help="install existing APKs without invoking Gradle")
     parser.add_argument("--verbose", action="store_true", help="log every Gradle task and its outcome")
     args = parser.parse_args()
     module = args.module or ("app" if args.test_class else None)
@@ -521,7 +562,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, exit_on_signal)
     results_dir = new_results()
     started = time.monotonic()
-    prepare_apks(adb, serial, module != "app", args.verbose)
+    prepare_apks(adb, serial, module != "app", args.verbose, args.skip_build)
     selection = {"class": args.test_class} if args.test_class else {}
     app_excluded = [*EXCLUDED, APP_LOCAL_ONLY] if args.ci else EXCLUDED
     telecom_excluded = {"notAnnotation": TELECOM_LOCAL_ONLY} if args.ci else {}

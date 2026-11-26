@@ -110,7 +110,7 @@ verify: node_modules/.modules.yaml
 		'pnpm exec node scripts/build_frontend.mjs' \
 		'uv run --locked ruff check --quiet scripts && uv run --locked ruff format --check --quiet scripts && uv run --locked python scripts/android_paths.py >/dev/null && uv run --locked python scripts/generate_thinking_score.py --check' \
 		'files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files' \
-		'uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/update_agents_file_index.py --check && git diff --check' \
+		'uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/lint_android_tests.py && uv run --locked python scripts/update_agents_file_index.py --check && git diff --check' \
 		'./scripts/android-checks.sh $(ANDROID_LINT_TASKS) $(GRADLE_LOG_ARGS)'
 
 git-hooks:
@@ -179,10 +179,10 @@ android-e2e:
 	@uv run --locked python scripts/android_start_emulator.py --auto-reuse
 	@uv run --locked python scripts/android_e2e.py $(E2E_LOG_ARGS)
 
-# Slow: runs the CI subset of model-free emulator tests, one case per mechanism.
+# Slow: runs the CI subset of model-free emulator tests, reusing APKs built by make android-test.
 android-e2e-ci:
 	@uv run --locked python scripts/android_start_emulator.py --auto-reuse
-	@uv run --locked python scripts/android_e2e.py --ci $(E2E_LOG_ARGS)
+	@uv run --locked python scripts/android_e2e.py --ci --skip-build $(E2E_LOG_ARGS)
 
 # Slow: runs the real app on the emulator twice, requires matching passes, and
 # publishes lossless WebP files.

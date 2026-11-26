@@ -4,7 +4,6 @@ package com.fghbuild.gomode
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import org.junit.rules.TestRule
 import org.junit.runner.Description
 import org.junit.runners.model.MultipleFailureException
@@ -38,9 +37,16 @@ internal class SystemUiRule : TestRule {
 
     private fun collapse(device: UiDevice) {
         // Let an in-flight expansion settle before asking System UI to collapse it.
+        val uiAutomation = InstrumentationRegistry.getInstrumentation().uiAutomation
         device.waitForIdle()
         device.executeShellCommand("cmd statusbar collapse")
-        check(device.wait(Until.gone(By.res("com.android.systemui", "notification_stack_scroller")), 5_000)) {
+        check(
+            device.awaitFreshGone(
+                uiAutomation,
+                By.res("com.android.systemui", "notification_stack_scroller"),
+                5_000,
+            ),
+        ) {
             "Notification shade did not collapse"
         }
         device.waitForIdle()

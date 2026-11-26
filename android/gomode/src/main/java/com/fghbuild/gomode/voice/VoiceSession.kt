@@ -24,6 +24,8 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.LinkProperties
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -107,6 +109,8 @@ import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import java.io.IOException
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.util.UUID
@@ -694,7 +698,11 @@ internal class VoiceSession(
                                         } catch (e: TimeoutCancellationException) {
                                             // ICE gathering on a route that is still settling.
                                             if (ownsAttempt(attempt)) {
-                                                Log.w(TAG, "No usable ICE candidate: $lastIceGatheringState", e)
+                                                Log.w(
+                                                    TAG,
+                                                    "No usable ICE candidate: $lastIceGatheringState (${activeNetworkSummary()})",
+                                                    e,
+                                                )
                                                 retryRecovery("Network connection failed")
                                             }
                                             throw e
@@ -718,7 +726,11 @@ internal class VoiceSession(
                                             // hypothesis). Keep this bounded retry and inspect
                                             // libwebrtc candidate/network logs when reproduced.
                                             if (ownsAttempt(attempt)) {
-                                                Log.w(TAG, "No usable ICE candidate after gathering", e)
+                                                Log.w(
+                                                    TAG,
+                                                    "No usable ICE candidate after gathering (${activeNetworkSummary()})",
+                                                    e,
+                                                )
                                                 retryRecovery("Network connection failed")
                                             }
                                         } catch (e: GatewayConnectionException) {
@@ -987,6 +999,12 @@ internal class VoiceSession(
     }
 
     private fun retryRecovery(reason: String) = scheduleReconnect(reason, recoveryPolicy.retryDelayMs())
+
+    private fun activeNetworkSummary(): String {
+        val connectivity = appContext.getSystemService(ConnectivityManager::class.java) ?: return "connectivity=null"
+        val network = connectivity.activeNetwork ?: return "activeNetwork=none"
+        return formatLinkPropertiesSummary(connectivity.getLinkProperties(network))
+    }
 
     private fun startSetupTimeout(
         pc: PeerConnection,
@@ -2505,3 +2523,14 @@ internal fun VoiceState.withToolCall(name: String): VoiceState =
 /** The gateway owns STUN: an empty list gathers host candidates only and contacts no STUN server. */
 internal fun rtcIceServers(stunServers: List<String>): List<PeerConnection.IceServer> =
     if (stunServers.isEmpty()) emptyList() else listOf(PeerConnection.IceServer.builder(stunServers).createIceServer())
+
+/** Summarize active link address families and default-route presence without logging user IPs. */
+internal fun formatLinkPropertiesSummary(link: LinkProperties?): String {
+    if (link == null) return "linkProperties=null"
+    val v4Addrs = link.linkAddresses.count { it.address is Inet4Address }
+    val v6Addrs = link.linkAddresses.count { it.address is Inet6Address }
+    val defaultV4 = link.routes.any { it.isDefaultRoute && it.destination.address is Inet4Address }
+    val defaultV6 = link.routes.any { it.isDefaultRoute && it.destination.address is Inet6Address }
+    return "iface=${link.interfaceName} ipv4Addrs=$v4Addrs ipv6Addrs=$v6Addrs " +
+        "defaultV4=$defaultV4 defaultV6=$defaultV6"
+}
