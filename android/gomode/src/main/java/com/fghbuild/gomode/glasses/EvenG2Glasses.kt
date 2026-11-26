@@ -231,7 +231,11 @@ private fun utf8(text: String): String = text.replace("\u0000", "").toByteArray(
 private fun G2CloseCause.toGlassesException(): GlassesException {
     val problem =
         when (this) {
-            is G2CloseCause.ConnectFailed, is G2CloseCause.Disconnected, is G2CloseCause.WriteFailed -> {
+            is G2CloseCause.PairingFailed,
+            is G2CloseCause.ConnectFailed,
+            is G2CloseCause.Disconnected,
+            is G2CloseCause.WriteFailed,
+            -> {
                 GlassesProblem.UNREACHABLE
             }
 
@@ -241,6 +245,10 @@ private fun G2CloseCause.toGlassesException(): GlassesException {
         }
     val message =
         when (this) {
+            is G2CloseCause.PairingFailed -> {
+                "Even G2 ${side.label()} arm did not pair: $reason. Connect again and accept the pairing request."
+            }
+
             is G2CloseCause.ConnectFailed -> {
                 "Even G2 ${side.label()} arm did not connect: $reason"
             }

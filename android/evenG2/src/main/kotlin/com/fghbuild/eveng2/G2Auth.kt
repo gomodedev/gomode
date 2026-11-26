@@ -24,11 +24,9 @@
 // confirm that the left arm answers, whether a push follows the ACK, and whether an Even Hub
 // page created right after the empty ACK is accepted. If a push always follows, require it.
 //
-// TODO(hardware): Whether the arms require an encrypted (bonded) link is unclear: faceclaw
-// reports that firmware 2.2.9 answers success only after pairing and closes unauthenticated
-// links after about 30 s; i-soxi's captures show no bonding. G2GattConnector requests a bond;
-// check on a real pair whether a system pairing dialog appears and whether AUTH succeeds
-// without it, then drop the bond request if it is unnecessary.
+// The arms require a bond: on a pair flashed with g2flash, an arm without a bond to the phone
+// closed its link about 2 s after connecting (HCI reason 0x13), and Android asked the wearer to
+// consent to pairing. G2ArmConnector.bond bonds both arms before G2Session connects them.
 
 package com.fghbuild.eveng2
 

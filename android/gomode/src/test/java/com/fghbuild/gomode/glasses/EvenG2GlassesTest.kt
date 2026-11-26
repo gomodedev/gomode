@@ -2,6 +2,7 @@
 package com.fghbuild.gomode.glasses
 
 import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Exception
 import com.fghbuild.eveng2.G2Glasses
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
@@ -75,6 +76,7 @@ class EvenG2GlassesTest {
     fun aSessionThatEndsBeforeItIsReadyFailsTheConnection() {
         val cases =
             listOf(
+                Ending("refused pairing", Outcome.PERMANENT) { bondFailure = { G2Exception("refused") } },
                 Ending("unreachable arm", Outcome.RETRY_UNREACHABLE) { reachable = { it == G2Side.LEFT } },
                 Ending("connector exception", Outcome.PERMANENT) { failure = { SecurityException("denied") } },
                 Ending("unauthenticated arm", Outcome.RETRY_UNRESPONSIVE) { authenticates = { it == G2Side.LEFT } },

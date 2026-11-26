@@ -9,6 +9,17 @@ package com.fghbuild.eveng2
 sealed interface G2CloseCause {
     val retryable: Boolean
 
+    /**
+     * The arm did not bond with the host: the wearer refused the pairing request, did not answer it,
+     * or the arm was out of range. Another attempt asks the wearer again, so a host does not retry.
+     */
+    data class PairingFailed(
+        val side: G2Side,
+        val reason: String,
+    ) : G2CloseCause {
+        override val retryable: Boolean get() = false
+    }
+
     /** The arm did not connect, negotiate MTU, expose its characteristics, or enable notifications. */
     data class ConnectFailed(
         val side: G2Side,

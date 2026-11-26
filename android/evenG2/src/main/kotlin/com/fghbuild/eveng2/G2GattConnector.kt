@@ -1,6 +1,11 @@
-// G2GattConnector: Android BluetoothGatt transport for one Even G2 arm: connect, bond, MTU, notifications, writes.
+// G2GattConnector: Android BluetoothGatt transport for one Even G2 arm: bond, connect, MTU, notifications, writes.
 //
-// Sequence per arm: connectGatt over LE, request a bond when none exists, request MTU 512 and
+// bond() calls createBond when the arm has no bond and waits for ACTION_BOND_STATE_CHANGED to
+// report it bonded or unbonded. Android pairs one device at a time and refuses createBond while
+// another pairing runs, so bonds are made one at a time. The arms pair with Just Works, for which
+// Android shows a consent dialog; Android ends a pairing nobody answers.
+//
+// Sequence per bonded arm: connectGatt over LE, request MTU 512 and
 // require at least G2Protocol.MIN_MTU, discover services, enable notifications on 5402 through
 // its CCCD, then write packets to 5401 without response. One GATT operation runs at a time;
 // each waits for its callback. A disconnect fails the pending operation and closes the
@@ -18,11 +23,12 @@
 // first arm's link. close() releases the GATT client, which also removes a pending background
 // connection.
 //
-// TODO(hardware): Unverified on a pair: each arm's advertised address type (public, static random,
-// or resolvable private), whether a background connection matches an arm after the glasses restart,
-// with and without a bond (see the bonding TODO in G2Auth.kt), and how far apart the two arms'
-// background links come up after the glasses wake. Log both arms' address types from a scan, then
-// time the links of several reconnections after power cycles.
+// Both arms of one pair advertised static random addresses (top two bits set; Android reports
+// RANDOM_DEVICE_ADDRESS).
+//
+// TODO(hardware): Unverified on a pair: whether a background connection matches an arm after the
+// glasses restart, and how far apart the two arms' background links come up after the glasses
+// wake. Time the links of several reconnections after power cycles.
 @file:Suppress("MissingPermission") // Library: the consuming app holds BLUETOOTH_CONNECT and BLUETOOTH_SCAN.
 
 package com.fghbuild.eveng2
@@ -35,7 +41,10 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -47,23 +56,74 @@ import kotlinx.coroutines.withTimeoutOrNull
 class G2GattConnector(
     private val context: Context,
 ) : G2ArmConnector {
+    override suspend fun bond(arm: G2Arm) {
+        val device = device(arm)
+        val states = Channel<Int>(Channel.UNLIMITED)
+        val receiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(
+                    context: Context,
+                    intent: Intent,
+                ) {
+                    val changed = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    if (changed?.address == device.address) {
+                        states.trySend(intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE))
+                    }
+                }
+            }
+        // Registered before the state is read, so no change between the two is missed. Exported: the
+        // Bluetooth app, not the system server, sends this protected broadcast, so a non-exported
+        // receiver never gets it; no other app can send it.
+        context.registerReceiver(
+            receiver,
+            IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
+            Context.RECEIVER_EXPORTED,
+        )
+        try {
+            when (bluetoothCall("getBondState") { device.bondState }) {
+                BluetoothDevice.BOND_BONDED -> {
+                    return
+                }
+
+                BluetoothDevice.BOND_NONE -> {
+                    if (!bluetoothCall("createBond") { device.createBond() }) {
+                        throw G2Exception("pairing could not start")
+                    }
+                }
+                // BOND_BONDING: wait for the pairing that runs.
+            }
+            for (state in states) {
+                when (state) {
+                    BluetoothDevice.BOND_BONDED -> return
+                    BluetoothDevice.BOND_NONE -> throw G2Exception("pairing was refused or failed")
+                }
+            }
+        } finally {
+            context.unregisterReceiver(receiver)
+        }
+    }
+
     override suspend fun connect(
         arm: G2Arm,
         background: Boolean,
     ): G2ArmLink {
-        val adapter =
-            context.getSystemService(BluetoothManager::class.java)?.adapter
-                ?: throw G2Exception("Bluetooth is not available")
         val link = G2GattLink(arm.side)
         var opened = false
         try {
-            link.open(context, bluetoothCall("getRemoteDevice") { adapter.getRemoteDevice(arm.address) }, background)
+            link.open(context, device(arm), background)
             opened = true
         } finally {
             // Failure or cancellation part way must not leave a GATT client behind.
             if (!opened) link.close()
         }
         return link
+    }
+
+    private fun device(arm: G2Arm): BluetoothDevice {
+        val adapter =
+            context.getSystemService(BluetoothManager::class.java)?.adapter
+                ?: throw G2Exception("Bluetooth is not available")
+        return bluetoothCall("getRemoteDevice") { adapter.getRemoteDevice(arm.address) }
     }
 }
 
@@ -173,20 +233,15 @@ private class G2GattLink(
         this.gatt = gatt
         connected.await()
         if (background) {
-            withTimeoutOrNull(G2Protocol.CONNECT_TIMEOUT_MS) { setUp(device, gatt) }
+            withTimeoutOrNull(G2Protocol.CONNECT_TIMEOUT_MS) { setUp(gatt) }
                 ?: throw G2Exception("setup timed out")
         } else {
-            setUp(device, gatt)
+            setUp(gatt)
         }
     }
 
-    // Bond, MTU, services, and notifications of a link that is up.
-    private suspend fun setUp(
-        device: BluetoothDevice,
-        gatt: BluetoothGatt,
-    ) {
-        // See the bonding TODO in G2Auth.kt.
-        bluetoothCall("createBond") { if (device.bondState == BluetoothDevice.BOND_NONE) device.createBond() }
+    // MTU, services, and notifications of a link that is up.
+    private suspend fun setUp(gatt: BluetoothGatt) {
         operation(Operation.MTU) { it.requestMtu(G2Protocol.REQUESTED_MTU) }
         if (mtu < G2Protocol.MIN_MTU) throw G2Exception("MTU $mtu is below ${G2Protocol.MIN_MTU}")
         operation(Operation.DISCOVERY) { it.discoverServices() }

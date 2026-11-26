@@ -303,6 +303,33 @@ class G2GlassesTest {
         }
 
     @Test
+    fun bothArmsBondOneAtATimeBeforeEitherConnects() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val bondsAtFirstConnect = mutableListOf<G2Side>()
+            firmware.connected = { if (bondsAtFirstConnect.isEmpty()) bondsAtFirstConnect += firmware.bonds }
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair)
+            glasses.await { it is G2State.Ready }
+            assertEquals(listOf(G2Side.RIGHT, G2Side.LEFT), bondsAtFirstConnect)
+        }
+
+    @Test
+    fun failedPairingEndsTheSessionForGoodBeforeTheOtherArmBonds() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.bondFailure = { if (it == G2Side.RIGHT) G2Exception("refused") else null }
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair)
+            val cause = glasses.closeCause()
+            assertEquals(G2CloseCause.PairingFailed(G2Side.RIGHT, "refused"), cause)
+            assertFalse(cause.retryable)
+            // The left arm is not asked to pair, and neither arm connects.
+            assertEquals(listOf(G2Side.RIGHT), firmware.bonds)
+            assertTrue(firmware.attempts.isEmpty())
+        }
+
+    @Test
     fun unreachableArmEndsTheSessionAsAConnectFailure() =
         runTest {
             val firmware = FakeG2Firmware()

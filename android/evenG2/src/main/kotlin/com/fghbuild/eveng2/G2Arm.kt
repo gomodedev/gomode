@@ -4,12 +4,8 @@
 // bytes of its address, plus manufacturer data under company 0x5245 ("RE"):
 // <serial ASCII> <6-byte address, little-endian> <flag>. Both arms of one pair carry the same
 // serial, so it groups them; the name's pair field is the fallback. Source: the even-g2-protocol
-// Python library (MIT); see NOTICE in this module.
-//
-// TODO(hardware): i-soxi's notes call the name's pair field a model variant, which two nearby
-// pairs could share; the Python library calls it the pair ID. Confirm on a real pair that the
-// serial is present in both arms' advertisements as Android reports them, so the fallback
-// never merges two pairs.
+// Python library (MIT); see NOTICE in this module. On a real pair, Android reported the serial in
+// both arms' advertisements.
 
 package com.fghbuild.eveng2
 

@@ -38,13 +38,21 @@ interface G2ArmLink {
     fun close()
 }
 
-/**
- * Opens a [G2ArmLink] to one arm; throws [G2Exception] on failure and closes partial links on
- * cancellation. A direct connection fails when the arm does not answer within the platform's
- * deadline; [G2Session] also bounds it. A [background] connection waits without a deadline until
- * the arm advertises, then sets the link up within [G2Protocol.CONNECT_TIMEOUT_MS].
- */
-fun interface G2ArmConnector {
+/** Bonds with and opens [G2ArmLink]s to arms; throws [G2Exception] on failure. */
+interface G2ArmConnector {
+    /**
+     * Bond with [arm] unless a bond exists. An arm drops a link without a bond, so a session bonds
+     * both arms, one at a time, before it connects either. The platform may ask the wearer to
+     * consent and bounds the wait itself; there is no other deadline.
+     */
+    suspend fun bond(arm: G2Arm)
+
+    /**
+     * Open a link to a bonded [arm]; closes a partial link on cancellation. A direct connection
+     * fails when the arm does not answer within the platform's deadline; [G2Session] also bounds
+     * it. A [background] connection waits without a deadline until the arm advertises, then sets
+     * the link up within [G2Protocol.CONNECT_TIMEOUT_MS].
+     */
     suspend fun connect(
         arm: G2Arm,
         background: Boolean,

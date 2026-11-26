@@ -79,6 +79,12 @@ class FakeG2Firmware {
     private val screen = FakeG2Screen()
     private val receivers = mutableMapOf<FakeG2Link, FakeG2Receiver>()
 
+    /** Thrown by the connector instead of bonding with an arm. */
+    @Volatile var bondFailure: (G2Side) -> G2Exception? = { null }
+
+    /** The arm of every bond request, in order. */
+    val bonds = CopyOnWriteArrayList<G2Side>()
+
     /** Thrown by the connector instead of connecting; any exception type, as a host connector may. */
     @Volatile var failure: (G2Side) -> Exception? = { null }
 
@@ -107,24 +113,34 @@ class FakeG2Firmware {
     }
 
     val connector =
-        G2ArmConnector { arm, background ->
-            attempts += arm.side
-            if (background) {
-                backgroundSides += arm.side
-                waitingNow.update { it + 1 }
-                try {
-                    reach.first { reachable(arm.side) }
-                } finally {
-                    waitingNow.update { it - 1 }
-                }
-            } else if (!reachable(arm.side)) {
-                throw G2Exception("unreachable")
+        object : G2ArmConnector {
+            override suspend fun bond(arm: G2Arm) {
+                bonds += arm.side
+                bondFailure(arm.side)?.let { throw it }
             }
-            failure(arm.side)?.let { throw it }
-            FakeG2Link(arm, this).also {
-                links += it
-                maxOpen = maxOf(maxOpen, links.count { link -> !link.closed })
-                connected(arm.side)
+
+            override suspend fun connect(
+                arm: G2Arm,
+                background: Boolean,
+            ): G2ArmLink {
+                attempts += arm.side
+                if (background) {
+                    backgroundSides += arm.side
+                    waitingNow.update { it + 1 }
+                    try {
+                        reach.first { reachable(arm.side) }
+                    } finally {
+                        waitingNow.update { it - 1 }
+                    }
+                } else if (!reachable(arm.side)) {
+                    throw G2Exception("unreachable")
+                }
+                failure(arm.side)?.let { throw it }
+                return FakeG2Link(arm, this@FakeG2Firmware).also {
+                    links += it
+                    maxOpen = maxOf(maxOpen, links.count { link -> !link.closed })
+                    connected(arm.side)
+                }
             }
         }
 

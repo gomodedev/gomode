@@ -63,10 +63,7 @@ object G2Protocol {
     /** Connection, MTU, service discovery, and notification setup of one arm. */
     const val CONNECT_TIMEOUT_MS = 20_000L
 
-    /**
-     * How long AUTH may take on one arm. On firmware that requires an encrypted link the success
-     * reply arrives only after pairing, which can wait on a system dialog.
-     */
+    /** How long AUTH may take on one arm. */
     const val AUTH_TIMEOUT_MS = 30_000L
 
     /** AUTH is re-sent at this interval in case the first request preceded link encryption. */

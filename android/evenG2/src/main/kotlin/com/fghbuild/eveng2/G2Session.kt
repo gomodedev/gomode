@@ -1,9 +1,10 @@
 // G2Session: one Even G2 connection from both arms' links to a closed page, ending with a typed close cause.
 //
-// Order: connect both arms in parallel with notifications on each; AUTH the right arm, then
-// the left, waiting for each arm's success (the behaviour of the GPL faceclaw client; the
-// Python library also AUTHs the right arm first but listens on the right arm only and never
-// waits for the left). Then, as the even-g2-protocol Python library (MIT)
+// Order: bond each arm that has no bond, the right then the left, one at a time and without a
+// deadline, since the wearer may have to consent. Connect both arms in parallel with
+// notifications on each. AUTH the right arm, then the left, waiting for each arm's success (the
+// behaviour of the GPL faceclaw client; the Python library also AUTHs the right arm first but
+// listens on the right arm only and never waits for the left). Then, as the even-g2-protocol Python library (MIT)
 // does: send the prelude to the right arm and wait for its ACK. Then read the settings of the
 // right arm, as faceclaw does, to learn the firmware (G2Settings); an unanswered read counts as
 // stock firmware. Create the text page and send a heartbeat every G2Protocol.HEARTBEAT_INTERVAL_MS.
@@ -162,6 +163,13 @@ internal class G2Session(
 
     private suspend fun connectBoth() =
         coroutineScope {
+            for (arm in listOf(pair.right, pair.left)) {
+                try {
+                    connector.bond(arm)
+                } catch (e: G2Exception) {
+                    throw G2Closed(G2CloseCause.PairingFailed(arm.side, e.message.orEmpty()), e)
+                }
+            }
             val firstUp = CompletableDeferred<Unit>()
             val arms =
                 listOf(pair.left, pair.right).map { arm ->

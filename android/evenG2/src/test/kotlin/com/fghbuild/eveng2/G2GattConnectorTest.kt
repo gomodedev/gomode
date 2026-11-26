@@ -1,4 +1,4 @@
-// G2GattConnector against Robolectric's Bluetooth: callback matching, a disconnect during an operation, close after failure.
+// G2GattConnector on Robolectric's Bluetooth: bonding, callback matching, disconnect mid-operation, close after failure.
 
 package com.fghbuild.eveng2
 
@@ -10,8 +10,11 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import android.content.Intent
+import android.os.Looper
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -37,6 +40,7 @@ import org.robolectric.shadows.ShadowBluetoothDevice
 import org.robolectric.shadows.ShadowBluetoothGatt
 
 private val ARM = G2Arm(G2Side.RIGHT, "00:11:22:33:44:55", "Even G2_1_R_334455")
+private const val OTHER_ADDRESS = "00:11:22:33:44:66"
 
 @OptIn(ExperimentalCoroutinesApi::class) // runCurrent drives the connector between callbacks.
 @RunWith(RobolectricTestRunner::class)
@@ -51,6 +55,46 @@ class G2GattConnectorTest {
         ManualGatt.latest = null
         AutoConnectRecorder.autoConnects.clear()
     }
+
+    @Test
+    fun aBondedArmBondsWithoutAPairingRequest() =
+        runTest {
+            device().setBondState(BluetoothDevice.BOND_BONDED)
+            connector.bond(ARM)
+        }
+
+    @Test
+    fun bondingWaitsForTheArmToBeBonded() =
+        runTest {
+            device().setCreatedBond(true)
+            val bonding = async { runCatching { connector.bond(ARM) } }
+            runCurrent()
+            bondStateChanged(OTHER_ADDRESS, BluetoothDevice.BOND_BONDED)
+            bondStateChanged(ARM.address, BluetoothDevice.BOND_BONDING)
+            assertFalse(bonding.isCompleted)
+            bondStateChanged(ARM.address, BluetoothDevice.BOND_BONDED)
+            assertTrue(bonding.await().isSuccess)
+        }
+
+    @Test
+    fun aRefusedPairingFailsTheBond() =
+        runTest {
+            device().setCreatedBond(true)
+            val bonding = async { runCatching { connector.bond(ARM) } }
+            runCurrent()
+            bondStateChanged(ARM.address, BluetoothDevice.BOND_BONDING)
+            bondStateChanged(ARM.address, BluetoothDevice.BOND_NONE)
+            assertEquals("pairing was refused or failed", bonding.await().exceptionOrNull()?.message)
+        }
+
+    @Test
+    fun aPairingThatCannotStartFailsTheBond() =
+        runTest {
+            // Robolectric's createBond() returns false, as Android does while another pairing runs.
+            val failure = runCatching { connector.bond(ARM) }.exceptionOrNull()
+            assertEquals(G2Exception::class, failure?.let { it::class })
+            assertEquals("pairing could not start", failure?.message)
+        }
 
     @Test
     fun eachOperationCompletesOnlyOnItsOwnCallback() =
@@ -238,6 +282,25 @@ class G2GattConnectorTest {
     }
 
     private fun gatt(): ManualGatt = checkNotNull(ManualGatt.latest) { "connectGatt was not called" }
+
+    private fun remote(address: String): BluetoothDevice =
+        context.getSystemService(BluetoothManager::class.java).adapter.getRemoteDevice(address)
+
+    private fun device(): ShadowBluetoothDevice = shadowOf(remote(ARM.address))
+
+    // Android's broadcast of a bond state change, delivered before the test continues.
+    private fun TestScope.bondStateChanged(
+        address: String,
+        state: Int,
+    ) {
+        context.sendBroadcast(
+            Intent(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                .putExtra(BluetoothDevice.EXTRA_DEVICE, remote(address))
+                .putExtra(BluetoothDevice.EXTRA_BOND_STATE, state),
+        )
+        shadowOf(Looper.getMainLooper()).idle()
+        runCurrent()
+    }
 }
 
 /**
