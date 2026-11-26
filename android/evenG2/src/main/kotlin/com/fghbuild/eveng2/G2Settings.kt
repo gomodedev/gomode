@@ -10,7 +10,8 @@
 //   carries both arms' stock versions in field 4 (5 left, 6 right). g2flash's firmware appends
 //   field 100, the revision string "Faceclaw/<n>"; stock firmware never sends it, and older
 //   g2flash builds sent "EVENCFW/<ver> <feature tokens>". The reply has fields only the
-//   firmware's schema names, so it is read leniently and only fields 2 and 100 are used.
+//   firmware's schema names, so it is read leniently: this file uses only fields 2 and 100, and
+//   G2BatteryCodec the battery that field 4 also holds.
 // - Framebuffer lease control, to each arm, fire-and-forget (magic 0, nothing answers):
 //   {1: 1, 2: 0, 101: ['F', 'C', 1, op, 0, 0]}. Op 5 arms or renews a 90-second lease under
 //   which the firmware draws the phone's frames on the whole panel and keeps stock widgets from

@@ -42,6 +42,17 @@
 // waits for the arms without a deadline, as Android's background connection does, until the first
 // arm's link is set up; the other arm then has CONNECT_TIMEOUT_MS, so one arm alone never holds a
 // link that no session uses.
+//
+// Batteries (G2BatteryCodec), as faceclaw polls them: once the page may be open, the session reads
+// the settings of each arm on its own link, the right then the left, and the case's state from the
+// right arm. It does so only after G2Protocol.BATTERY_QUIET_MS without an Even Hub command, a drawing
+// message, or an input event, so its requests never queue behind or between the frames of a
+// transcript and the wearer's gestures. Heartbeats and lease renewals do not count: they never
+// stop. The next round follows G2Protocol.BATTERY_CHARGING_POLL_MS later while an arm charges or the
+// glasses sit in the case, where nobody wears them, and G2Protocol.BATTERY_POLL_MS later otherwise.
+// The case pushes its changes on its own, and docking wakes the next round, so an arm's charging shows
+// a few seconds after the glasses enter the case. Nothing awaits a reply: a missing one keeps the last
+// reading, and a session whose arm or case never answers goes on without it.
 
 package com.fghbuild.eveng2
 
@@ -128,6 +139,8 @@ internal class G2Session(
     private val onReady: (G2Firmware, G2Content) -> Unit,
     private val onPress: () -> Unit,
     private val onEvent: (G2InputEvent) -> Unit,
+    private val onBattery: (G2Battery) -> Unit,
+    private val log: (String) -> Unit,
 ) {
     private val links = ConcurrentHashMap<G2Side, G2ArmLink>()
     private val inbox = Channel<Inbound>(INBOX_CAPACITY)
@@ -141,6 +154,18 @@ internal class G2Session(
 
     // Whether the framebuffer lease may be held; set before its first request is written.
     private var leased = false
+
+    // Bumped by each Even Hub command, drawing message, and input event; battery reads wait for it to rest.
+    @Volatile private var activity = 0L
+
+    // The magic of each arm's latest battery read; a reply to another read is not this arm's battery.
+    private val batteryReads = ConcurrentHashMap<G2Side, Int>()
+
+    // The readings so far; only accept() changes them.
+    @Volatile private var battery = G2Battery()
+
+    // Wakes the battery poll when the glasses enter the case.
+    private val docked = Channel<Unit>(Channel.CONFLATED)
 
     /** Run until the session ends; returns why. Cancellation closes the page and both links. */
     suspend fun run(): G2CloseCause {
@@ -157,6 +182,7 @@ internal class G2Session(
                     lease(G2Settings.LEASE_ACQUIRE)
                     launch { renewLease() }
                 }
+                launch { pollBattery() }
                 val wake = Channel<Unit>(Channel.CONFLATED)
                 launch { desired.collect { wake.send(Unit) } }
                 servePages(this, firmware, wake)
@@ -247,11 +273,18 @@ internal class G2Session(
             }
 
             is Inbound.Message -> {
-                G2EvenHub.inputEvent(inbound.message, inbound.side)?.let(onEvent)
+                G2EvenHub.inputEvent(inbound.message, inbound.side)?.let {
+                    activity++
+                    onEvent(it)
+                }
+                readBattery(inbound.side, inbound.message)
                 val session = pageSession ?: return inbound
-                if (inbound.side == G2Side.RIGHT && G2EvenHub.pageExit(inbound.message, page, session)) {
-                    pageSession = null
-                    throw G2PageClosed()
+                if (inbound.side == G2Side.RIGHT) {
+                    G2EvenHub.pageExit(inbound.message, page, session)?.let { exit ->
+                        log("Even G2 page $session closed: $exit")
+                        pageSession = null
+                        throw G2PageClosed()
+                    }
                 }
                 val ring = G2EvenHub.ringReport(inbound.message)
                 if ((ring == null || ringFilter.accept(ring)) &&
@@ -260,6 +293,68 @@ internal class G2Session(
                     onPress()
                 }
                 return inbound
+            }
+        }
+    }
+
+    /** Takes the battery or case reading that [message] from [side] may hold. */
+    private fun readBattery(
+        side: G2Side,
+        message: G2Message,
+    ) {
+        if (message.sid == G2Protocol.SID_SETTINGS || message.sid == G2Protocol.SID_CASE) {
+            val hex = message.payload.joinToString("") { "%02x".format(it) }
+            log("Even G2 $side reply on SID 0x${"%02x".format(message.sid)}, result ${message.result}: $hex")
+        }
+        val arm = batteryReads[side]?.let { G2BatteryCodec.arm(message, it) }
+        val next =
+            if (arm != null) {
+                battery.withArm(side, arm)
+            } else {
+                when (val case = G2BatteryCodec.case(message)) {
+                    null -> return
+                    is G2CaseInfo.InCase -> battery.copy(case = case.charge)
+                    G2CaseInfo.OutOfCase -> battery.copy(case = null)
+                }
+            }
+        if (battery.case == null && next.case != null) docked.trySend(Unit)
+        if (next != battery) {
+            battery = next
+            onBattery(next)
+        }
+    }
+
+    // TODO(hardware): The battery fields and the case's pushes come from faceclaw's notes on 2.3.0.24 and
+    // Faceclaw/38. Confirmed on a pair on 2.3.0.24 with Faceclaw/45, from the host log of a round worn
+    // out of the case: the right arm answered both the right and the left link's settings reads on the
+    // right link, with identical bodies (level 32, not charging) apart from the magic, so the left
+    // level stays unknown; the case read returned {1: 95} without field 4, which the codec reads as
+    // out of the case. Open: whether the Even app shows one level or two for the glasses, and the
+    // case's level while they are out of it. If one, read the right arm only, as faceclaw's session
+    // does, and show it as the glasses' level; if the app shows the case's last level, keep a level
+    // without field 4 as the case's. Still to check in the case with this page open: that the case
+    // pushes, and that the arms report charging; if it never pushes, docking shows only at the next
+    // round, up to BATTERY_POLL_MS later: shorten that interval.
+
+    /** Read the batteries in rounds, forever; see the header. */
+    private suspend fun pollBattery(): Nothing {
+        while (true) {
+            do {
+                val seen = activity
+                delay(G2Protocol.BATTERY_QUIET_MS)
+            } while (activity != seen)
+            log("Even G2 battery round")
+            for (side in listOf(G2Side.RIGHT, G2Side.LEFT)) {
+                val magic = ids.magic()
+                batteryReads[side] = magic
+                write(side, G2Settings.read(magic, ids.sync()))
+            }
+            write(G2Side.RIGHT, G2BatteryCodec.caseRead(ids.magic(), ids.sync()))
+            // This round's replies arrive well within the shorter wait, which therefore decides.
+            val wake = withTimeoutOrNull(G2Protocol.BATTERY_CHARGING_POLL_MS) { docked.receive() }
+            val charging = battery.let { it.case != null || it.left?.charging == true || it.right?.charging == true }
+            if (wake == null && !charging) {
+                withTimeoutOrNull(G2Protocol.BATTERY_POLL_MS - G2Protocol.BATTERY_CHARGING_POLL_MS) { docked.receive() }
             }
         }
     }
@@ -371,6 +466,7 @@ internal class G2Session(
         // message once with a reset record before ending the session. faceclaw also requests
         // CONNECTION_PRIORITY_HIGH on each arm, which G2GattConnector does not; g2flash's firmware asks
         // for a 7.5 ms interval on its own (patches/ble_link.c). If frames are slow, request it too.
+        activity++
         val link = links.getValue(G2Side.LEFT)
         val id = ids.stream()
         write(G2Side.LEFT, stream.packets(message, id, link.mtu), gapMs = 0)
@@ -395,6 +491,7 @@ internal class G2Session(
         command: G2HubCommand,
         build: (magic: Int, sync: Int) -> List<ByteArray>,
     ) {
+        activity++
         val magic = ids.magic()
         val sync = ids.sync()
         write(G2Side.RIGHT, build(magic, sync))
@@ -424,7 +521,9 @@ internal class G2Session(
         val session = ids.session()
         // Set before the request is written: the page may open even when its ACK never arrives.
         pageSession = session
+        log("Even G2 page $session requested")
         command(G2HubCommand.CREATE_PAGE) { magic, sync -> G2EvenHub.createPage(page, text, session, magic, sync) }
+        log("Even G2 page $session acknowledged")
         val shown =
             if (firmware is G2Firmware.Faceclaw) {
                 cfw(G2Draw.clearRoot)
@@ -458,8 +557,9 @@ internal class G2Session(
     // TODO(hardware): Why the glasses close the page is not established. On a pair, taking the
     // glasses off and putting them back on brought an exit (7) from an unspecified source naming
     // this page's widget and session from the right arm; hypotheses are the stock heartbeat
-    // timeout and the stock quit dialog. On a pair, log each exit's reason (field 4) and whether the
-    // create that follows it is acknowledged while the glasses are off. If the firmware refuses or
+    // timeout and the stock quit dialog. The host log now shows each exit's type, source, and reason
+    // (field 4), and each create's request and acknowledgement: on a pair, take them off and on and
+    // record whether the create is acknowledged while they are off. If the firmware refuses or
     // closes pages until they are worn again, create the next page on the wear event instead of
     // after these pauses; if it never answers that create, the session ends with CommandTimedOut.
 
@@ -490,6 +590,7 @@ internal class G2Session(
                 beating.cancel()
             }
             if (pause > 0) {
+                log("Even G2 page reopens in $pause ms")
                 withTimeoutOrNull(pause) {
                     while (true) accept(inbox.receive())
                 }

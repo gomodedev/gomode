@@ -45,6 +45,9 @@ object G2Protocol {
     /** Service ID of Even Hub pages, heartbeat, and page events. */
     const val SID_EVEN_HUB = 0xE0
 
+    /** Service ID of the charging case's state, which the right arm reports; see [G2BatteryCodec]. */
+    const val SID_CASE = 0x81
+
     /** Service ID of Faceclaw custom firmware's private message stream; see [G2CfwStream]. */
     const val SID_CFW = 0xF0
 
@@ -89,4 +92,23 @@ object G2Protocol {
 
     /** Longest pause before a page that follows one that closed before it settled. */
     const val PAGE_RETURN_MAX_DELAY_MS = 8_000L
+
+    /**
+     * How long the session waits without drawing, Even Hub commands, or input before it reads the
+     * batteries; faceclaw waits 5 s after the last input with nothing queued.
+     */
+    const val BATTERY_QUIET_MS = 5_000L
+
+    /**
+     * Interval between battery reads of worn glasses, as faceclaw's ConnectionOptions.kt sets it:
+     * each round is three messages that compete with the wearer's frames.
+     */
+    const val BATTERY_POLL_MS = 5 * 60_000L
+
+    /**
+     * Interval between battery reads while an arm charges or the glasses sit in the case, as
+     * faceclaw's: nobody wears them there, so the reads disturb nothing, and they show the charge
+     * rising and its end.
+     */
+    const val BATTERY_CHARGING_POLL_MS = 30_000L
 }

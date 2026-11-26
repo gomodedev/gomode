@@ -41,6 +41,10 @@ class G2GlassesTest {
 
     private suspend fun G2Glasses.closeCause(): G2CloseCause = (await { it is G2State.Closed } as G2State.Closed).cause
 
+    // The requests apart from the battery reads, which these tests do not concern.
+    private fun FakeG2Firmware.requestsBesideBattery() =
+        requests.filterNot { it.kind == "settings" || it.kind == "case" }.map { it.toString() }
+
     private fun TestScope.record(glasses: G2Glasses): List<G2State> {
         val states = mutableListOf<G2State>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.state.toList(states) }
@@ -62,7 +66,7 @@ class G2GlassesTest {
 
             firmware.requests.clear()
             advanceTimeBy(3 * G2Protocol.HEARTBEAT_INTERVAL_MS + 1)
-            assertEquals(List(3) { "RIGHT heartbeat" }, firmware.requests.map { it.toString() })
+            assertEquals(List(3) { "RIGHT heartbeat" }, firmware.requestsBesideBattery())
 
             firmware.requests.clear()
             glasses.show("Updated")
@@ -260,10 +264,10 @@ class G2GlassesTest {
                 runCurrent()
                 assertEquals(0, creates())
                 // Nor does a heartbeat go out, though a pause of 8 s spans two intervals.
-                assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
+                assertEquals(emptyList<String>(), firmware.requestsBesideBattery())
                 advanceTimeBy(1)
                 runCurrent()
-                assertEquals(listOf("RIGHT create "), firmware.requests.map { it.toString() })
+                assertEquals(listOf("RIGHT create "), firmware.requestsBesideBattery())
             }
             assertEquals(emptyList<Unit>(), presses)
 

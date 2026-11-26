@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
@@ -103,6 +104,9 @@ internal class HaloGlasses private constructor(
 
     // Go Mode's Halo app reports only the button's single press.
     override val events: Flow<GlassesEvent> = emptyFlow()
+
+    // Go Mode's Halo app reports no battery.
+    override val batteries: Flow<List<GlassesBattery>> = flowOf(emptyList())
 
     override suspend fun showText(text: String) = send(haloTextMessages(text), "text")
 

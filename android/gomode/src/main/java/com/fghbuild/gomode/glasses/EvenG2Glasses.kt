@@ -4,6 +4,7 @@
 // draws: on stock firmware, one text container, created on connect and updated in place; on
 // Faceclaw firmware (G2Firmware.Faceclaw), text and images that the SDK draws on the whole panel.
 // The page's text container captures the touchpads and an R1 ring, whose clicks are presses.
+// The session polls each arm's battery and the case's; batteries are G2Glasses.battery.
 //
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
 // another. connect() returns at the session's first G2State.Ready and fails if it reaches
@@ -17,6 +18,8 @@
 package com.fghbuild.gomode.glasses
 
 import android.graphics.Bitmap
+import com.fghbuild.eveng2.G2Battery
+import com.fghbuild.eveng2.G2Charge
 import com.fghbuild.eveng2.G2CloseCause
 import com.fghbuild.eveng2.G2Content
 import com.fghbuild.eveng2.G2Display
@@ -111,6 +114,7 @@ internal sealed class EvenG2Glasses(
     override val closeCause: StateFlow<Exception?> = ended.asStateFlow()
     override val presses: Flow<Unit> = glasses.presses
     override val events: Flow<GlassesEvent> = glasses.events.map(::glassesEvent)
+    override val batteries: Flow<List<GlassesBattery>> = glasses.battery.map(::glassesBatteries)
 
     /** Shows [text], cut to the firmware's limit, and waits until the glasses acknowledge it. */
     override suspend fun showText(text: String) {
@@ -297,6 +301,19 @@ private fun G2CloseCause.toGlassesException(): GlassesException {
 }
 
 private fun G2Side.label(): String = name.lowercase()
+
+/** The parts of [battery] that have a reading, in the order [GlassesDisplay.batteries] lists them. */
+internal fun glassesBatteries(battery: G2Battery): List<GlassesBattery> {
+    fun reading(
+        part: GlassesBatteryPart,
+        charge: G2Charge?,
+    ) = charge?.let { GlassesBattery(part, it.percent, it.charging) }
+    return listOfNotNull(
+        reading(GlassesBatteryPart.LEFT, battery.left),
+        reading(GlassesBatteryPart.RIGHT, battery.right),
+        reading(GlassesBatteryPart.CASE, battery.case),
+    )
+}
 
 /**
  * [event] as the input events screen lists it. A click names no temple in a text event, the arm that

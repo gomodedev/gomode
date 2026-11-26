@@ -2,6 +2,7 @@
 package com.fghbuild.gomode.glasses
 
 import android.Manifest
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
@@ -118,7 +119,9 @@ class GlassesScreenTest : GoModeE2eTestBase() {
         assertNotEquals(GlassesLink.Disconnected, app.glassesOwner.state.value.link)
 
         composeRule.onNodeWithTag("gomode-glasses-disconnect").performClick()
-        composeRule.onNodeWithTag("gomode-glasses-link", useUnmergedTree = true).assertTextEquals("Disconnected")
+        composeRule
+            .onNodeWithTag("gomode-glasses-link-state", useUnmergedTree = true)
+            .assertContentDescriptionEquals("Not connected")
         waitForTag("gomode-glasses-connect")
     }
 

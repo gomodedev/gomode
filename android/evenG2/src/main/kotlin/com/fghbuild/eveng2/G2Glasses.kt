@@ -9,8 +9,8 @@
 // across the sessions of one G2Glasses, and each page starts with the latest content from show().
 // A superseded session never publishes state. A replaced or stopped session stays in `job` until
 // it has finished, so a later connect() joins it and never runs two sessions at once. An exception
-// that escapes a session ends it with G2CloseCause.Failed. presses and events report the current
-// session's only.
+// that escapes a session ends it with G2CloseCause.Failed. presses, events, and battery report the
+// current session's only; battery is empty again when a session starts or ends.
 
 package com.fghbuild.eveng2
 
@@ -31,6 +31,11 @@ class G2Glasses(
     private val scope: CoroutineScope,
     /** The text container each session's page shows. */
     val page: G2TextPage = G2TextPage(),
+    /**
+     * Diagnostics for the host's log: each page's request, acknowledgement, close, and reopen
+     * delay, and each battery round and reply.
+     */
+    private val log: (String) -> Unit = {},
 ) {
     private val lock = Any()
     private val mutableState = MutableStateFlow<G2State>(G2State.Idle)
@@ -40,6 +45,14 @@ class G2Glasses(
     private var generation = 0L
 
     val state: StateFlow<G2State> = mutableState.asStateFlow()
+
+    private val mutableBattery = MutableStateFlow(G2Battery())
+
+    /**
+     * The current session's battery readings, which it polls while connected; see G2Session. Each
+     * part is null until its first reading, and all are between sessions.
+     */
+    val battery: StateFlow<G2Battery> = mutableBattery.asStateFlow()
 
     private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
 
@@ -73,6 +86,7 @@ class G2Glasses(
             val previous = job
             val current = ++generation
             mutableState.value = G2State.Connecting(pair)
+            mutableBattery.value = G2Battery()
             job =
                 scope.launch {
                     previous?.cancelAndJoin()
@@ -131,6 +145,8 @@ class G2Glasses(
                 onReady = { firmware, shown -> publish(current, G2State.Ready(pair, firmware, shown)) },
                 onPress = { press(current) },
                 onEvent = { event(current, it) },
+                onBattery = { battery(current, it) },
+                log = log,
             )
         val cause =
             try {
@@ -148,7 +164,19 @@ class G2Glasses(
         state: G2State,
     ) {
         synchronized(lock) {
-            if (current == generation) mutableState.value = state
+            if (current == generation) {
+                mutableState.value = state
+                if (state is G2State.Closed) mutableBattery.value = G2Battery()
+            }
+        }
+    }
+
+    private fun battery(
+        current: Long,
+        battery: G2Battery,
+    ) {
+        synchronized(lock) {
+            if (current == generation) mutableBattery.value = battery
         }
     }
 

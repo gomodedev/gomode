@@ -272,18 +272,28 @@ object G2EvenHub {
         return if (result == command.success) G2HubReply.Success else G2HubReply.Rejected(result)
     }
 
-    /** Whether [message] is an exit, abnormal or not, of the page identified by [page] and [session]. */
+    /** The exit, abnormal or not, of the page identified by [page] and [session] that [message] is; null otherwise. */
     fun pageExit(
         message: G2Message,
         page: G2TextPage,
         session: Long,
-    ): Boolean {
-        val (branch, system) = deviceEvent(message) ?: return false
-        if (branch != SYSTEM_EVENT) return false
+    ): G2PageExit? {
+        val (branch, system) = deviceEvent(message) ?: return null
+        if (branch != SYSTEM_EVENT) return null
         val type = system.scalar(1) ?: 0L
-        return (type == G2InputEvent.ABNORMAL_EXIT || type == G2InputEvent.EXIT) &&
-            system.scalar(5) == page.widgetId &&
-            system.scalar(6) == session
+        val closes =
+            (type == G2InputEvent.ABNORMAL_EXIT || type == G2InputEvent.EXIT) &&
+                system.scalar(5) == page.widgetId &&
+                system.scalar(6) == session
+        return if (closes) {
+            G2PageExit(
+                type,
+                system.enum(2) ?: G2InputEvent.SOURCE_UNSPECIFIED,
+                system.scalar(4),
+            )
+        } else {
+            null
+        }
     }
 
     /**
@@ -375,6 +385,13 @@ object G2EvenHub {
     // An enum [field]: proto3 omits its zero value; null when it has another wire type.
     private fun Map<Int, G2ProtoField>.enum(field: Int): Long? = if (field in this) scalar(field) else 0L
 }
+
+/** A page exit: its [type] (6 abnormal, 7 exit), [source] (see [G2InputEvent]), and [reason]; null when absent. */
+data class G2PageExit(
+    val type: Long,
+    val source: Long,
+    val reason: Long?,
+)
 
 /** One R1 report as Faceclaw firmware forwards it: its [type] and the ring's own [tick] counter. */
 data class G2RingReport(

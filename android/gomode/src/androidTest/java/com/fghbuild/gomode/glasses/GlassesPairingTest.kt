@@ -4,6 +4,7 @@ package com.fghbuild.gomode.glasses
 import android.Manifest
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Charge
 import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
@@ -70,6 +72,8 @@ class GlassesPairingTest {
             repository.updateGlasses(GlassesDevice.EvenG2(PAIR))
             repository.settings.first { it.glasses != null }
             val firmware = FakeG2Firmware()
+            firmware.charge = { if (it == G2Side.LEFT) G2Charge(71, charging = true) else G2Charge(64, false) }
+            firmware.case = G2Charge(55, charging = false)
             val halo = ScanningFakeHalo(context, HALO_ADDRESS)
             val glassesScope = MainScope()
             val glasses = GlassesOwner(glassesScope, context, repository, halo, fakeG2Scanner(), firmware.connector)
@@ -86,7 +90,11 @@ class GlassesPairingTest {
 
                 composeRule.onNodeWithTag("gomode-glasses-connect").performClick()
                 composeRule.waitUntil(TIMEOUT_MS) { glasses.connectedDisplay == G2_DISPLAY }
-                composeRule.onNodeWithTag("gomode-glasses-link", useUnmergedTree = true).assertTextEquals("Connected")
+                composeRule
+                    .onNodeWithTag("gomode-glasses-link-state", useUnmergedTree = true)
+                    .assertContentDescriptionEquals("Connected")
+                // The dot says it; no status text stands beside it.
+                composeRule.onNodeWithTag("gomode-glasses-link", useUnmergedTree = true).assertDoesNotExist()
                 // The glasses greet the connection, then show the blank frame.
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == GREETING_TEXT }
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
@@ -115,6 +123,17 @@ class GlassesPairingTest {
                 assertFalse(pressed.get())
                 composeRule.runOnUiThread { glasses.takePressesFirst(null) }
 
+                // Once the session is quiet, the row shows each battery; a screen reader hears them in words.
+                composeRule.waitUntil(TIMEOUT_MS) {
+                    composeRule
+                        .onAllNodesWithTag("gomode-glasses-battery", useUnmergedTree = true)
+                        .fetchSemanticsNodes()
+                        .isNotEmpty()
+                }
+                composeRule
+                    .onNodeWithTag("gomode-glasses-battery", useUnmergedTree = true)
+                    .assertContentDescriptionEquals("Left arm 71%, charging. Right arm 64%. Case 55%")
+
                 composeRule.onNodeWithTag("gomode-glasses-scan").performClick()
                 waitForTag("gomode-glasses-found")
                 // The G2 stopped advertising while connected, so the scan found the Halo alone.
@@ -130,6 +149,8 @@ class GlassesPairingTest {
                 composeRule
                     .onNodeWithTag("gomode-glasses-saved", useUnmergedTree = true)
                     .assertTextEquals(HALO_ADDRESS)
+                // Halo reports no battery.
+                composeRule.onNodeWithTag("gomode-glasses-battery", useUnmergedTree = true).assertDoesNotExist()
                 // The G2 page closed before the Halo connected: one pair at a time.
                 assertEquals("shutdown", firmware.requests.last().kind)
                 assertTrue(firmware.links.all { it.closed })

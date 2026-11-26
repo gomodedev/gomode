@@ -117,6 +117,8 @@ internal data class GlassesState(
     val error: String? = null,
     // Whether GlassesOwner.toggleLogo keeps the Go Mode logo up on the glasses.
     val logoPinned: Boolean = false,
+    // The connected glasses' GlassesDisplay.batteries; empty without a connection.
+    val batteries: List<GlassesBattery> = emptyList(),
 )
 
 /**
@@ -126,9 +128,10 @@ internal data class GlassesState(
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
  * settings, and when [updateAutoConnect] turns it on while no connection runs. Every connection
- * shows the latest [show] frame, or a [notify] notice over it, and reports its [presses]. While
- * that frame is blank, a connection first plays a short greeting that confirms it on the glasses;
- * content that is not blank, or a notice, ends it. Callers hold BLUETOOTH_SCAN before [startScan]
+ * shows the latest [show] frame, or a [notify] notice over it, reports its [presses], and keeps its
+ * battery readings in [state] for every screen that shows them. While that frame is blank, a
+ * connection first plays a short greeting that confirms it on the glasses; content that is not
+ * blank, or a notice, ends it. Callers hold BLUETOOTH_SCAN before [startScan]
  * and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
  * connecting on its own.
  *
@@ -162,7 +165,7 @@ internal class GlassesOwner(
         parentScope.coroutineContext.let { parent ->
             CoroutineScope(parent + SupervisorJob(parent[Job]) + Dispatchers.Main.immediate)
         }
-    private val g2 = G2Glasses(g2Connector, scope)
+    private val g2 = G2Glasses(g2Connector, scope, log = { Log.i(TAG, it) })
 
     // Halo devices a scan found by address; connecting prefers them to a device made from the address.
     private val scanned = mutableMapOf<String, BluetoothDevice>()
@@ -452,9 +455,10 @@ internal class GlassesOwner(
     private val linkRuns: Boolean get() = linkJob?.isActive == true
 
     // The previous link finishes clearing and closing its glasses before the next one connects.
-    // A pinned logo survives automatic reconnection, not a deliberate new link or disconnection.
+    // A pinned logo survives automatic reconnection, not a deliberate new link or disconnection. The
+    // batteries go at once, before the previous link has finished.
     private fun replaceLink(connect: (suspend (background: Boolean) -> GlassesDisplay)?) {
-        mutableState.update { it.copy(logoPinned = false) }
+        mutableState.update { it.copy(logoPinned = false, batteries = emptyList()) }
         val previous = linkJob
         previous?.cancel()
         linkJob =
@@ -529,9 +533,9 @@ internal class GlassesOwner(
         }
     }
 
-    // Shows each frame and reports each press until the connection ends, and returns why it ended: the
-    // glasses' close cause once they report one. Cancellation clears the display, best effort, and
-    // every exit closes the glasses.
+    // Shows each frame, reports each press, and keeps the state's batteries until the connection ends,
+    // and returns why it ended: the glasses' close cause once they report one. Cancellation clears the
+    // display, best effort, and every exit empties the batteries and closes the glasses.
     private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
         try {
             coroutineScope {
@@ -576,10 +580,17 @@ internal class GlassesOwner(
                     }
                 val pressing = launch { glasses.presses.collect { press() } }
                 val listening = launch { glasses.events.collect(::record) }
+                val metering =
+                    launch {
+                        glasses.batteries.collect { batteries ->
+                            mutableState.update { it.copy(batteries = batteries) }
+                        }
+                    }
                 val cause = glasses.closeCause.filterNotNull().first()
                 drawing.cancel()
                 pressing.cancel()
                 listening.cancel()
+                metering.cancel()
                 greetings.cancel()
                 Log.w(TAG, "Glasses connection ended: ${cause.message}")
                 cause.asGlassesException()
@@ -588,6 +599,7 @@ internal class GlassesOwner(
             Log.w(TAG, "Glasses stopped responding: ${e.message}")
             glasses.closeCause.value?.asGlassesException() ?: e
         } finally {
+            mutableState.update { it.copy(batteries = emptyList()) }
             withContext(NonCancellable) {
                 if (glasses.closeCause.value == null) {
                     withTimeoutOrNull(CLEAR_ON_DISCONNECT_TIMEOUT_MS) {

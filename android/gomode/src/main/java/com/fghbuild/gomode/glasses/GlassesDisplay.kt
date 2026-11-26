@@ -49,6 +49,13 @@ internal interface GlassesDisplay {
      */
     val events: Flow<GlassesEvent>
 
+    /**
+     * The latest readings of the batteries the glasses report, left arm, right arm, then case, while
+     * connected. A battery with no reading is left out, so glasses that report none, such as Halo,
+     * give an empty list. The flow may end when the connection ends.
+     */
+    val batteries: Flow<List<GlassesBattery>>
+
     /** Disconnects; [closeCause] then reports the disconnection. */
     suspend fun close()
 }

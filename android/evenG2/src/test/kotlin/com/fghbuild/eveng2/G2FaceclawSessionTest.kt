@@ -145,7 +145,7 @@ class G2FaceclawSessionTest {
             runCurrent()
             assertEquals(
                 listOf("RIGHT create ", "LEFT root", "LEFT draw", "LEFT draw", "LEFT present"),
-                firmware.requestList().filter { !it.contains("heartbeat") },
+                firmware.requests.filterNot { it.kind in setOf("heartbeat", "settings", "case") }.map { it.toString() },
             )
             assertTrue(firmware.pageSession != first)
             assertEquals(setOf(G2Side.LEFT, G2Side.RIGHT), firmware.leased)
@@ -247,7 +247,7 @@ class G2FaceclawSessionTest {
     fun anUnansweredSettingsReadCountsAsStockFirmware() =
         runTest {
             val firmware = firmware()
-            firmware.answersSettings = false
+            firmware.answersSettings = { false }
             val glasses = G2Glasses(firmware.connector, backgroundScope)
             glasses.show("Hello")
             glasses.connect(pair)

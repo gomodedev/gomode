@@ -111,9 +111,14 @@ G2CfwStream.kt ports and modifies g2protocol/CfwTransport.kt. G2Panel.kt
 ports and modifies the stockText, bbox, clear, and message builders of
 g2protocol/DrawProtocol.kt and the message and call IDs of CfwMessageType.kt,
 DrawCallType.kt, and DrawFlags.kt. G2RingFilter in G2EvenHub.kt ports
-app/ui/input-monitor.ts. The golden bytes in G2FaceclawWireTest.kt come from
-tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
-DrawWireTest.kt.
+app/ui/input-monitor.ts. G2Battery.kt ports and modifies parseSettingsBattery,
+buildCaseInfoQuery, parseCaseInfo, and CaseInfoSnapshot of BleProtocol.kt, the
+case rules of updateCaseInfoLocked in session/GlassesSessionControls.kt, and
+the per-arm read of readBatteries in FlashPromptFlow.kt; G2Session.kt follows
+the battery poll cadence of g2protocol/ConnectionOptions.kt and
+session/GlassesSessionSend.kt. The golden bytes in G2FaceclawWireTest.kt come
+from tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
+DrawWireTest.kt, and those in G2BatteryTest.kt from GlassesSessionCoreTest.kt.
 
 ------------------------------------------------------------------------------
 g2flash (jimrandomh/g2flash)

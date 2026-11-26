@@ -7,19 +7,24 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
@@ -30,6 +35,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.PlainTooltip
@@ -46,12 +52,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.gomode.data.GlassesDevice
+import com.fghbuild.gomode.glasses.GlassesBattery
 import com.fghbuild.gomode.glasses.GlassesLink
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.GlassesProblem
@@ -209,9 +222,10 @@ internal fun GlassesScreen(
     }
 }
 
-// The saved glasses, their link, and their actions as icon buttons on the right. The model sits
-// above the identity so the identity stays on one line; the status wraps beside the buttons, so a
-// long retry reason never pushes them off the row.
+// The saved glasses: a dot for their link, the model above the identity so the identity stays on one
+// line, and their actions as icon buttons centred beside those two lines. Below, from the headline's
+// start across the row's full width, a link status the user can act on and the batteries, so neither
+// squeezes beside the buttons.
 @Composable
 private fun SavedGlassesRow(
     saved: GlassesDevice,
@@ -220,56 +234,149 @@ private fun SavedGlassesRow(
     onConnect: () -> Unit,
     onOpenInputs: () -> Unit,
 ) {
-    ListItem(
-        overlineContent = { Text(saved.model()) },
-        headlineContent = {
-            val enabled = state.link is GlassesLink.Connected || state.logoPinned
-            val label = saved.identity()
-            // A double tap shows or hides the Go Mode logo on the glasses; accessibility services get
-            // it as the name's click action.
-            Text(
-                label,
+    Column {
+        ListItem(
+            overlineContent = { Text(saved.model()) },
+            headlineContent = {
+                val enabled = state.link is GlassesLink.Connected || state.logoPinned
+                val label = saved.identity()
+                // A double tap shows or hides the Go Mode logo on the glasses; accessibility services get
+                // it as the name's click action.
+                Text(
+                    label,
+                    modifier =
+                        Modifier
+                            .testTag("gomode-glasses-saved")
+                            .clearAndSetSemantics {
+                                text = AnnotatedString(label)
+                                if (enabled) {
+                                    onClick(label = if (state.logoPinned) "Hide logo" else "Show logo") {
+                                        owner.toggleLogo()
+                                        true
+                                    }
+                                }
+                            }.combinedClickable(
+                                enabled = enabled,
+                                onClick = {},
+                                onDoubleClick = owner::toggleLogo,
+                            ),
+                )
+            },
+            leadingContent = { LinkDot(state.link) },
+            trailingContent = {
+                Row {
+                    LabeledIconButton(Icons.Filled.TouchApp, "Input events", "gomode-glasses-open-inputs", onOpenInputs)
+                    if (state.link == GlassesLink.Disconnected) {
+                        LabeledIconButton(Icons.Filled.Link, "Connect", "gomode-glasses-connect", onConnect)
+                    } else {
+                        LabeledIconButton(
+                            Icons.Filled.LinkOff,
+                            "Disconnect",
+                            "gomode-glasses-disconnect",
+                            owner::disconnect,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    LabeledIconButton(Icons.Filled.Delete, "Forget", "gomode-glasses-forget", owner::forget)
+                }
+            },
+        )
+        val status = state.link.status()
+        if (status != null || state.batteries.isNotEmpty()) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier =
                     Modifier
-                        .testTag("gomode-glasses-saved")
-                        .clearAndSetSemantics {
-                            text = AnnotatedString(label)
-                            if (enabled) {
-                                onClick(label = if (state.logoPinned) "Hide logo" else "Show logo") {
-                                    owner.toggleLogo()
-                                    true
-                                }
-                            }
-                        }.combinedClickable(
-                            enabled = enabled,
-                            onClick = {},
-                            onDoubleClick = owner::toggleLogo,
-                        ),
-            )
-        },
-        supportingContent = {
-            Text(state.link.label(), modifier = Modifier.testTag("gomode-glasses-link"))
-        },
-        leadingContent = {
-            Icon(state.link.icon(), contentDescription = null, tint = state.link.tint())
-        },
-        trailingContent = {
-            Row {
-                LabeledIconButton(Icons.Filled.TouchApp, "Input events", "gomode-glasses-open-inputs", onOpenInputs)
-                if (state.link == GlassesLink.Disconnected) {
-                    LabeledIconButton(Icons.Filled.Link, "Connect", "gomode-glasses-connect", onConnect)
-                } else {
-                    LabeledIconButton(
-                        Icons.Filled.LinkOff,
-                        "Disconnect",
-                        "gomode-glasses-disconnect",
-                        owner::disconnect,
+                        // Into the list item's bottom padding, so the lines read as part of the item.
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            val lift = LIST_ITEM_PADDING.roundToPx()
+                            layout(placeable.width, placeable.height - lift) { placeable.place(0, -lift) }
+                        }
+                        // The screen's own padding ends the lines.
+                        .padding(start = HEADLINE_START, bottom = LIST_ITEM_PADDING),
+            ) {
+                if (status != null) {
+                    Text(
+                        status,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("gomode-glasses-link"),
                     )
                 }
-                LabeledIconButton(Icons.Filled.Delete, "Forget", "gomode-glasses-forget", owner::forget)
+                if (state.batteries.isNotEmpty()) GlassesBatteries(state.batteries)
             }
-        },
+        }
+    }
+}
+
+// Green while connected and red otherwise, with the state in words for screen readers.
+@Composable
+private fun LinkDot(link: GlassesLink) {
+    val color =
+        when {
+            link !is GlassesLink.Connected -> MaterialTheme.colorScheme.error
+            isSystemInDarkTheme() -> DARK_CONNECTED
+            else -> LIGHT_CONNECTED
+        }
+    val description = link.spoken()
+    Box(
+        Modifier
+            .size(STATUS_DOT)
+            .background(color, CircleShape)
+            .testTag("gomode-glasses-link-state")
+            .semantics { contentDescription = description },
     )
+}
+
+// At least 4.5:1 against the light and dark paper.
+private val LIGHT_CONNECTED = Color(0xFF1E7F3C)
+private val DARK_CONNECTED = Color(0xFF6FD48E)
+
+private val STATUS_DOT = 12.dp
+
+// The vertical padding of a Material list item.
+private val LIST_ITEM_PADDING = 8.dp
+
+// Where a Material list item's headline starts after the status dot: 16 dp padding, the dot, 16 dp.
+private val HEADLINE_START = 16.dp + STATUS_DOT + 16.dp
+
+// Each battery as its part and level, such as "L 80%", after a bolt while it charges. A reading never
+// breaks; the readings wrap between each other. A screen reader hears them all at once in words.
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun GlassesBatteries(batteries: List<GlassesBattery>) {
+    val description = batteries.joinToString(". ") { it.description }
+    val style = MaterialTheme.typography.bodyMedium
+    // The bolt is as large as the text beside it.
+    val bolt = with(LocalDensity.current) { style.fontSize.toDp() }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier =
+            Modifier
+                .testTag("gomode-glasses-battery")
+                .clearAndSetSemantics { contentDescription = description },
+    ) {
+        batteries.forEach { battery ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (battery.charging) {
+                    Icon(
+                        Icons.Filled.Bolt,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(bolt),
+                    )
+                }
+                Text(
+                    "${battery.part.label} ${battery.percent}%",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = style,
+                    softWrap = false,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
 }
 
 // An icon button that [label] names for accessibility and, on a long press, in a tooltip.
@@ -280,6 +387,7 @@ private fun LabeledIconButton(
     label: String,
     tag: String,
     onClick: () -> Unit,
+    tint: Color = LocalContentColor.current,
 ) {
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
@@ -287,7 +395,7 @@ private fun LabeledIconButton(
         state = rememberTooltipState(),
     ) {
         IconButton(onClick = onClick, modifier = Modifier.testTag(tag)) {
-            Icon(icon, contentDescription = label)
+            Icon(icon, contentDescription = label, tint = tint)
         }
     }
 }
@@ -337,34 +445,24 @@ private fun GlassesDevice.model(): String =
         is GlassesDevice.EvenG2 -> "Even G2"
     }
 
-private fun GlassesLink.icon(): ImageVector =
+// The link as a screen reader says it.
+private fun GlassesLink.spoken(): String =
     when (this) {
-        is GlassesLink.Connected -> Icons.Filled.BluetoothConnected
-        GlassesLink.Disconnected -> Icons.Filled.Bluetooth
-        else -> Icons.AutoMirrored.Filled.BluetoothSearching
+        GlassesLink.Disconnected -> "Not connected"
+        GlassesLink.Connecting -> "Connecting"
+        is GlassesLink.Connected -> "Connected"
+        is GlassesLink.Reconnecting -> "Reconnecting"
     }
 
-@Composable
-private fun GlassesLink.tint() =
+// What the user can do about the link, or null when the dot and the buttons say it all.
+private fun GlassesLink.status(): String? =
     when (this) {
-        is GlassesLink.Connected -> MaterialTheme.colorScheme.primary
-        is GlassesLink.Reconnecting -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-// The model above it names the glasses the link is for: the owner saves the glasses it connects to.
-private fun GlassesLink.label(): String =
-    when (this) {
-        GlassesLink.Disconnected -> {
-            "Disconnected"
+        GlassesLink.Disconnected, is GlassesLink.Connected -> {
+            null
         }
 
         GlassesLink.Connecting -> {
             "Waiting for pairing or connection"
-        }
-
-        is GlassesLink.Connected -> {
-            "Connected"
         }
 
         is GlassesLink.Reconnecting -> {

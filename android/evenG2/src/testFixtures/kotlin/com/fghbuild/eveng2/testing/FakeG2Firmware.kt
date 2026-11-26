@@ -1,7 +1,9 @@
-// Fake Even G2 glasses behind fake arm links that answer AUTH, prelude, settings, Even Hub, and Faceclaw drawing.
+// Fake Even G2 glasses behind fake arm links that answer AUTH, prelude, settings, case, Even Hub, and Faceclaw drawing.
 //
 // Decodes protobuf, private-stream records, and draw calls with its own minimal readers,
-// independent of the SDK's codecs; only the CRC comes from the SDK. Stock firmware by default; a
+// independent of the SDK's codecs; only the CRC comes from the SDK. Each arm answers a settings
+// read with its own battery, and the right arm reads and pushes the charging case's state as faceclaw
+// reports stock firmware doing. Stock firmware by default; a
 // [FakeG2Firmware.revision] adds settings field 100, the framebuffer lease, and the private stream
 // on SID 0xF0 that both lenses acknowledge through the receiving arm, as g2flash's
 // patches/message_transport.c does. Also holds a fake scan.
@@ -11,6 +13,7 @@ package com.fghbuild.eveng2.testing
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2ArmConnector
 import com.fghbuild.eveng2.G2ArmLink
+import com.fghbuild.eveng2.G2Charge
 import com.fghbuild.eveng2.G2Exception
 import com.fghbuild.eveng2.G2Frame
 import com.fghbuild.eveng2.G2LinkLostException
@@ -62,7 +65,23 @@ class FakeG2Firmware {
     /** The revision the settings read reports in field 100, such as "Faceclaw/45"; null for stock firmware. */
     @Volatile var revision: String? = null
 
-    @Volatile var answersSettings = true
+    /** Whether an arm answers settings reads. */
+    @Volatile var answersSettings: (G2Side) -> Boolean = { true }
+
+    /**
+     * The arm whose link carries the reply to a settings read sent on an arm's link, with its own
+     * battery. A pair on 2.3.0.24 with Faceclaw/45 answered the left link's read from the right arm.
+     */
+    @Volatile var settingsAnsweredBy: (G2Side) -> G2Side = { it }
+
+    /** Each arm's battery in its settings replies; null leaves the battery fields out. */
+    @Volatile var charge: (G2Side) -> G2Charge? = { G2Charge(80, charging = false) }
+
+    /** The charging case the glasses sit in, or null while they are out of it. */
+    @Volatile var case: G2Charge? = null
+
+    /** Whether the right arm answers CASE_INFO reads. */
+    @Volatile var answersCase = true
 
     /** Whether the lenses acknowledge private-stream messages; when false, they draw them but stay silent. */
     @Volatile var answersStream = true
@@ -224,6 +243,36 @@ class FakeG2Firmware {
         deviceEvent(side, proto { bytes(3, system) })
     }
 
+    /**
+     * The right arm pushes the case's state, as it does on each change while the glasses sit in the
+     * case; without [level], the push leaves the level out, as docking's first push does.
+     */
+    fun pushCase(level: Boolean = true) =
+        link(G2Side.RIGHT).notify(G2Protocol.SID_CASE, 0, G2Protocol.FLAG_NOTIFY, caseInfo(PUSH_MAGIC, level))
+
+    // A CASE_INFO message with [magic]: empty out of the case, as the glasses cannot see it.
+    private fun caseInfo(
+        magic: Long,
+        level: Boolean,
+    ): ByteArray {
+        val case = case
+        val info =
+            if (case == null) {
+                byteArrayOf()
+            } else {
+                proto {
+                    if (level) scalar(1, case.percent.toLong())
+                    if (level && case.charging) scalar(2, 1)
+                    scalar(4, 1)
+                }
+            }
+        return proto {
+            scalar(1, 1)
+            scalar(2, magic)
+            bytes(3, info)
+        }
+    }
+
     private fun deviceEvent(
         side: G2Side,
         event: ByteArray,
@@ -290,6 +339,13 @@ class FakeG2Firmware {
             G2Protocol.SID_SETTINGS -> {
                 settings(link, sync, root, magic, ::record)
             }
+
+            G2Protocol.SID_CASE -> {
+                record("case")
+                if (link.side == G2Side.RIGHT && answersCase && root.scalar(1) == 1L) {
+                    link.notify(sid, sync, 0, caseInfo(magic, level = true))
+                }
+            }
         }
     }
 
@@ -303,13 +359,17 @@ class FakeG2Firmware {
         when (root.scalar(1)) {
             2L -> {
                 record("settings", null)
-                if (!answersSettings) return
+                if (!answersSettings(link.side)) return
                 val revision = revision
+                val answering = link(settingsAnsweredBy(link.side))
+                val charge = charge(answering.side)
                 val versions =
                     proto {
                         bytes(5, "2.2.9".toByteArray())
                         bytes(6, "2.2.9".toByteArray())
-                        scalar(12, 80)
+                        // Proto3 omits zeros.
+                        if (charge != null && charge.percent != 0) scalar(12, charge.percent.toLong())
+                        if (charge?.charging == true) scalar(13, 1)
                     }
                 val reply =
                     proto {
@@ -318,7 +378,7 @@ class FakeG2Firmware {
                         bytes(4, versions)
                         if (revision != null) bytes(100, revision.toByteArray())
                     }
-                link.notify(G2Protocol.SID_SETTINGS, sync, 0, reply)
+                answering.notify(G2Protocol.SID_SETTINGS, sync, 0, reply)
             }
 
             1L -> {
@@ -461,6 +521,9 @@ class FakeG2Frame(
                 .values
                 .map { line -> line.joinToString("") { it.text } }
 }
+
+// The magic the glasses choose for their own case pushes, unlike any request's.
+private const val PUSH_MAGIC = 200L
 
 private const val SCREEN_WIDTH = 640
 private const val SCREEN_HEIGHT = 480

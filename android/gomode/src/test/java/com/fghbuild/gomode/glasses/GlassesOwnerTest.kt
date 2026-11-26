@@ -15,6 +15,7 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Charge
 import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Protocol
@@ -399,6 +400,58 @@ class GlassesOwnerTest {
                 ),
                 firmware.requests.filter { it.kind != "heartbeat" }.map { it.toString() },
             )
+        }
+
+    @Test
+    fun anEvenG2sBatteriesStayInTheStateUntilItsConnectionEnds() =
+        runOwnerTest {
+            firmware.charge = { if (it == G2Side.LEFT) G2Charge(71, charging = true) else G2Charge(64, false) }
+            firmware.case = G2Charge(55, charging = false)
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            assertEquals(emptyList<GlassesBattery>(), owner.state.value.batteries)
+
+            finishGreeting()
+            advanceTimeBy(2 * G2Protocol.BATTERY_QUIET_MS)
+            runCurrent()
+            assertEquals(
+                listOf(
+                    GlassesBattery(GlassesBatteryPart.LEFT, 71, charging = true),
+                    GlassesBattery(GlassesBatteryPart.RIGHT, 64, charging = false),
+                    GlassesBattery(GlassesBatteryPart.CASE, 55, charging = false),
+                ),
+                owner.state.value.batteries,
+            )
+
+            // Out of the case, the case's reading goes.
+            firmware.case = null
+            firmware.pushCase()
+            runCurrent()
+            assertEquals(
+                listOf(GlassesBatteryPart.LEFT, GlassesBatteryPart.RIGHT),
+                owner.state.value.batteries
+                    .map { it.part },
+            )
+
+            owner.disconnect()
+            assertEquals(emptyList<GlassesBattery>(), owner.state.value.batteries)
+        }
+
+    @Test
+    fun aDroppedEvenG2LeavesNoBatteriesWhileItReconnects() =
+        runOwnerTest {
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            finishGreeting()
+            advanceTimeBy(2 * G2Protocol.BATTERY_QUIET_MS)
+            runCurrent()
+            assertEquals(2, owner.state.value.batteries.size)
+
+            firmware.link(G2Side.RIGHT).drop(status = 8)
+            owner.state.first { it.link is GlassesLink.Reconnecting }
+            assertEquals(emptyList<GlassesBattery>(), owner.state.value.batteries)
         }
 
     @Test
