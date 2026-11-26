@@ -16,6 +16,7 @@ import com.fghbuild.gomode.voice.CarDialVoiceOwner
 import com.fghbuild.gomode.voice.LocalModelDownloads
 import com.fghbuild.gomode.voice.LocalModelLoadDiagnostics
 import com.fghbuild.gomode.voice.LocalModelOwner
+import com.fghbuild.gomode.voice.VoiceAudioInput
 import com.fghbuild.gomode.voice.VoiceErrorLog
 import com.fghbuild.halo.ble.HaloConnection
 import kotlinx.coroutines.MainScope
@@ -49,6 +50,9 @@ class GoModeApplication :
     internal val modelLoadDiagnostics by modelLoadDiagnosticsDelegate
     private val voiceErrorsDelegate = lazy { VoiceErrorLog(this) }
     internal val voiceErrors by voiceErrorsDelegate
+
+    // The source every voice session hears, across sessions and Activities.
+    internal val voiceAudioInput = VoiceAudioInput()
 
     override fun onCreate() {
         super.onCreate()

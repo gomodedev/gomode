@@ -1,10 +1,13 @@
 // Reduces outgoing microphone amplitude during assistant speech without disabling interruptions.
 package com.fghbuild.gomode.voice
 
+import android.util.Log
 import kotlinx.coroutines.flow.StateFlow
 import org.webrtc.ExternalAudioProcessingFactory
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+
+private const val TAG = "GoModeMicrophone"
 
 internal const val SPEAKING_MICROPHONE_GAIN = 0.1f // -20 dB, shared by RTC and device recognition.
 
@@ -13,9 +16,14 @@ internal const val SPEAKING_MICROPHONE_GAIN = 0.1f // -20 dB, shared by RTC and 
 internal object RtcMicrophoneProcessing {
     @Volatile
     private var owner: StateFlow<VoiceState>? = null
+
+    @Volatile
+    private var stream: RtcStreamCapture? = null
     private val factory by lazy {
         ExternalAudioProcessingFactory().apply {
-            setCapturePostProcessing(MicrophoneDucking { owner?.value?.speaking == true })
+            setCapturePostProcessing(
+                RtcCaptureProcessing({ stream }, MicrophoneDucking { owner?.value?.speaking == true }),
+            )
         }
     }
 
@@ -26,6 +34,17 @@ internal object RtcMicrophoneProcessing {
 
     fun release(state: StateFlow<VoiceState>) {
         if (owner === state) owner = null
+    }
+
+    /** transmit sends [capture] instead of the phone microphone until [finish]; main thread only. */
+    fun transmit(capture: RtcStreamCapture) {
+        stream = capture
+    }
+
+    // A superseded capture's late cleanup leaves its successor in place.
+    fun finish(capture: RtcStreamCapture) {
+        if (stream === capture) stream = null
+        Log.i(TAG, "Transmitted voice audio stream closed: ${capture.describe()}")
     }
 }
 

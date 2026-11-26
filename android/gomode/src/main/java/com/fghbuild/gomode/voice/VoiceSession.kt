@@ -1,17 +1,17 @@
 // Manages Go Mode voice gateway sessions via WebRTC, service MCP tools, and Android audio routing.
 //
 // The pinned setup decides who owns each speech stage, following web/src/VoiceSession.ts. Gateway
-// recognition streams the microphone over RTP; device recognition sends user.message from
-// SpeechRecognizer and offers no microphone track, because the gateway rejects microphone audio
-// for client recognition. Gateway speech plays the remote RTP track; device speech mutes it and
-// speaks assistant.text.delta through DeviceSpeechOutput, with thinking music while the gateway
-// thinks. Gateway recognition below 48 kHz receives one rtc.offer after session.ready; applying
-// it caps the Opus encoder at that rate, and a failure keeps the negotiated media. With either
-// device stage, a client turn is idle once the gateway reports idle and device
-// playback drained; device recognition listens only while the assistant speaks or the turn is idle.
-// A recognized hypothesis during assistant output sends turn.cancel; output of the cancelled turn
-// is dropped until the gateway acknowledges with interrupted and the next user turn starts
-// thinking. Tool calls still receive results. Device speech survives WebRTC recovery.
+// recognition streams the selected voice audio source (VoiceAudioSource.kt) over RTP; device
+// recognition sends user.message from SpeechRecognizer and offers no microphone track, because the
+// gateway rejects microphone audio for client recognition. Gateway speech plays the remote RTP
+// track; device speech mutes it and speaks assistant.text.delta through DeviceSpeechOutput, with
+// thinking music while the gateway thinks. Gateway recognition below 48 kHz receives one rtc.offer
+// after session.ready; applying it caps the Opus encoder at that rate, and a failure keeps the
+// negotiated media. With either device stage, a client turn is idle once the gateway reports idle
+// and device playback drained; device recognition listens only while the assistant speaks or the
+// turn is idle. A recognized hypothesis during assistant output sends turn.cancel; output of the
+// cancelled turn is dropped until the gateway acknowledges with interrupted and the next user turn
+// starts thinking. Tool calls still receive results. Device speech survives WebRTC recovery.
 package com.fghbuild.gomode.voice
 
 import android.content.BroadcastReceiver
@@ -85,6 +85,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -311,6 +312,8 @@ internal class VoiceSession(
     private val recoveryPolicy = VoiceRecoveryPolicy()
     private val voiceModeChime = VoiceModeChime(AndroidVoiceChime())
     private val errorLog = (appContext.applicationContext as GoModeApplication).voiceErrors
+    private val audioInput = (appContext.applicationContext as GoModeApplication).voiceAudioInput
+    private var streamCaptureJob: Job? = null
     private var disconnectAudioAttempt: Long? = null
     private var recoveryContext = ""
 
@@ -809,7 +812,40 @@ internal class VoiceSession(
         micTrack.setEnabled(!_state.value.muted)
         localAudioTrack = micTrack
         pc.addTrack(micTrack)
+        updateStreamCapture()
         startMicLevelMonitoring(attempt)
+    }
+
+    // An enabled microphone track transmits the selected stream, and stops reading it while muted.
+    private fun updateStreamCapture() {
+        val previous = streamCaptureJob
+        if (localAudioTrack == null || _state.value.muted) {
+            previous?.cancel()
+            return
+        }
+        if (previous?.isActive == true) return
+        streamCaptureJob =
+            scope.launch {
+                // The previous reader closes its stream before this one opens it.
+                previous?.join()
+                audioInput.source.collectLatest { source ->
+                    when (source) {
+                        VoiceAudioSource.PhoneMicrophone -> {
+                            // WebRTC's audio device module captures the phone microphone itself.
+                        }
+
+                        is VoiceAudioSource.Stream -> {
+                            val capture = RtcStreamCapture()
+                            RtcMicrophoneProcessing.transmit(capture)
+                            try {
+                                audioInput.read(source, capture)
+                            } finally {
+                                RtcMicrophoneProcessing.finish(capture)
+                            }
+                        }
+                    }
+                }
+            }
     }
 
     private fun createPeerConnectionObserver(
@@ -1241,6 +1277,7 @@ internal class VoiceSession(
     private fun applyMicrophoneMode() {
         val muted = _state.value.muted
         localAudioTrack?.setEnabled(!muted)
+        updateStreamCapture()
         if (muted) _state.update { it.copy(micLevel = 0f) }
         if (!clientRecognition) return
         if (muted) stopClientListening() else startClientListening()
@@ -1264,6 +1301,7 @@ internal class VoiceSession(
         dataChannel = null
         localAudioTrack?.dispose()
         localAudioTrack = null
+        updateStreamCapture()
         rtcAudioSource?.dispose()
         rtcAudioSource = null
     }

@@ -16,6 +16,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
+import com.fghbuild.gomode.GoModeApplication
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -118,7 +119,8 @@ internal class AndroidDeviceSpeech(
     override suspend fun downloadLanguage() = language.download()
 
     private val captureScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val microphone = MicrophoneAudioSource(captureScope)
+    private val microphone =
+        MicrophoneAudioSource(captureScope, (context.applicationContext as GoModeApplication).voiceAudioInput)
     override val microphoneRms = microphone.rms
     private val main = Handler(Looper.getMainLooper())
     private var listening = false

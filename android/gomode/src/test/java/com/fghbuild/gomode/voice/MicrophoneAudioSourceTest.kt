@@ -1,4 +1,4 @@
-// Tests bounded PCM delivery during recognition stalls and utterance restarts.
+// Tests bounded PCM delivery during recognition stalls, utterance restarts, and voice source switches.
 package com.fghbuild.gomode.voice
 
 import android.media.AudioRecord
@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -23,6 +24,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.shadows.ShadowAudioRecord
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
 class MicrophoneAudioSourceTest {
@@ -32,7 +34,7 @@ class MicrophoneAudioSourceTest {
         runTest {
             Dispatchers.setMain(Dispatchers.Unconfined)
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            val source = MicrophoneAudioSource(scope)
+            val source = MicrophoneAudioSource(scope, VoiceAudioInput())
             val started = CompletableDeferred<Unit>()
             val failed = CompletableDeferred<String>()
             val failRead = AtomicBoolean()
@@ -57,6 +59,61 @@ class MicrophoneAudioSourceTest {
                 withContext(Dispatchers.Default) { withTimeout(5_000) { failed.await() } }
                 assertThrows(IllegalStateException::class.java) {
                     source.open { error("Unexpected restarted capture: $it") }
+                }
+            } finally {
+                source.stop()
+                scope.cancel()
+                ShadowAudioRecord.clearSource()
+                Dispatchers.resetMain()
+            }
+        }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `recognizer audio follows the selected stream and returns to the microphone when it ends`() =
+        runTest {
+            Dispatchers.setMain(Dispatchers.Unconfined)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            val input = VoiceAudioInput()
+            val source = MicrophoneAudioSource(scope, input)
+            val opened = CompletableDeferred<Pair<PcmSink, () -> Unit>>()
+            val closed = CompletableDeferred<Unit>()
+            val stream =
+                object : VoiceAudioSource.Stream {
+                    override fun open(
+                        sink: PcmSink,
+                        onEnd: () -> Unit,
+                    ): AutoCloseable {
+                        opened.complete(sink to onEnd)
+                        return AutoCloseable { closed.complete(Unit) }
+                    }
+                }
+            val microphone =
+                object : ShadowAudioRecord.AudioRecordSource {
+                    override fun readInByteArray(
+                        buffer: ByteArray,
+                        offset: Int,
+                        size: Int,
+                        blocking: Boolean,
+                    ): Int {
+                        buffer.fill(7, offset, offset + size)
+                        return size
+                    }
+                }
+            ShadowAudioRecord.setSourceProvider { microphone }
+            input.select(stream)
+            // Robolectric's pipes carry no bytes, so the meter, which sees the delivered PCM, observes each source.
+            try {
+                source.open { error("Unexpected capture failure: $it") }
+                val (sink, end) = withContext(Dispatchers.Default) { withTimeout(5_000) { opened.await() } }
+                val half = ByteArray(1_600) { if (it % 2 == 0) 0 else 0x40 }
+                sink.write(half, half.size)
+                assertEquals(0.5f, source.rms.value, 1e-4f)
+                end()
+                withContext(Dispatchers.Default) { withTimeout(5_000) { closed.await() } }
+                assertEquals(VoiceAudioSource.PhoneMicrophone, input.source.value)
+                withContext(Dispatchers.Default) {
+                    withTimeout(5_000) { source.rms.first { abs(it - 0x0707 / 32_768f) < 1e-4f } }
                 }
             } finally {
                 source.stop()

@@ -67,7 +67,7 @@ class MicrophoneAudioSourceTest {
     fun microphoneDeliversDuringPlaybackAndAfterRecognitionRestart(): Unit =
         runBlocking {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            val source = MicrophoneAudioSource(scope)
+            val source = MicrophoneAudioSource(scope, VoiceAudioInput())
             val errors = mutableListOf<String>()
             val playback =
                 AudioTrack

@@ -1,4 +1,4 @@
-// Owns continuous echo-cancelled microphone PCM and bounded recognizer audio delivery.
+// Owns continuous recognizer PCM from the selected voice source and its bounded delivery.
 package com.fghbuild.gomode.voice
 
 import android.annotation.SuppressLint
@@ -16,19 +16,23 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.FileInputStream
+import kotlin.coroutines.CoroutineContext
 
 private const val RETAINED_AUDIO_BYTES = 16_000
 
-// The microphone never waits for recognition. A slow or restarting recognizer gets
-// at most 500 ms of recent PCM; overflow drops oldest samples, preserving alignment.
+// Capture follows the selected VoiceAudioSource across recognizer restarts: the phone microphone
+// through an echo-cancelled AudioRecord, or a stream. Capture never waits for recognition. A slow or
+// restarting recognizer gets at most 500 ms of recent PCM; overflow drops oldest samples, preserving alignment.
 internal class MicrophoneAudioSource(
     private val scope: CoroutineScope,
+    private val input: VoiceAudioInput,
 ) {
     @Volatile
     var assistantSpeaking = false
@@ -51,8 +55,16 @@ internal class MicrophoneAudioSource(
                 capture =
                     scope.launch(Dispatchers.IO) {
                         try {
-                            // A muted/replaced capture releases AudioRecord before its successor opens it.
-                            captureLock.withLock { record() }
+                            // A muted/replaced capture releases its source before its successor opens it.
+                            captureLock.withLock {
+                                val sink = RecognitionSink(coroutineContext)
+                                input.source.collectLatest { source ->
+                                    when (source) {
+                                        VoiceAudioSource.PhoneMicrophone -> record(sink)
+                                        is VoiceAudioSource.Stream -> input.read(source, sink)
+                                    }
+                                }
+                            }
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -89,9 +101,35 @@ internal class MicrophoneAudioSource(
         }
     }
 
+    // Ducks, meters, and delivers PCM until stop cancels [capture]; later frames from a closing source are dropped.
+    private inner class RecognitionSink(
+        private val capture: CoroutineContext,
+    ) : PcmSink {
+        private val meter = MicrophoneRmsWindow()
+        private val gain = MicrophoneGainRamp(VOICE_AUDIO_RATE_HZ, assistantSpeaking)
+
+        override fun write(
+            pcm: ByteArray,
+            count: Int,
+        ) {
+            synchronized(deliveryLock) {
+                if (!capture.isActive) return
+                gain.setSpeaking(assistantSpeaking)
+                gain.processPcm(pcm, count)
+                delivery.append(pcm, count)
+                meter.append(pcm, count)?.let { mutableRms.value = it }
+            }
+        }
+    }
+
     @SuppressLint("MissingPermission") // The voice-session owner obtains RECORD_AUDIO before starting.
-    private suspend fun record() {
-        val minimum = AudioRecord.getMinBufferSize(16_000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+    private suspend fun record(sink: PcmSink) {
+        val minimum =
+            AudioRecord.getMinBufferSize(
+                VOICE_AUDIO_RATE_HZ,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+            )
         check(minimum > 0) { "16 kHz microphone capture is unavailable" }
         val recorder =
             AudioRecord
@@ -100,7 +138,7 @@ internal class MicrophoneAudioSource(
                 .setAudioFormat(
                     AudioFormat
                         .Builder()
-                        .setSampleRate(16_000)
+                        .setSampleRate(VOICE_AUDIO_RATE_HZ)
                         .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .build(),
@@ -119,20 +157,11 @@ internal class MicrophoneAudioSource(
             recorder.startRecording()
             check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Microphone did not start" }
             val frame = ByteArray(640)
-            val meter = MicrophoneRmsWindow()
-            val gain = MicrophoneGainRamp(16_000, assistantSpeaking)
-            val captureContext = kotlin.coroutines.coroutineContext
-            while (captureContext.isActive) {
+            val recording = kotlin.coroutines.coroutineContext
+            while (recording.isActive) {
                 val count = recorder.read(frame, 0, frame.size, AudioRecord.READ_NON_BLOCKING)
                 check(count >= 0) { "Microphone read failed ($count)" }
-                synchronized(deliveryLock) {
-                    if (captureContext.isActive) {
-                        gain.setSpeaking(assistantSpeaking)
-                        gain.processPcm(frame, count)
-                        delivery.append(frame, count)
-                        meter.append(frame, count)?.let { mutableRms.value = it }
-                    }
-                }
+                sink.write(frame, count)
                 delay(10)
             }
         } finally {

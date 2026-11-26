@@ -54,6 +54,9 @@ type fixtureStats struct {
 	// MicFrameSamples counts decoded microphone packets by samples per packet,
 	// which is the sender's frame size at the 48kHz decode rate.
 	MicFrameSamples map[string]int `json:"micFrameSamples"`
+	// MicTones counts decoded microphone packets that carry a loud tone, by
+	// its frequency in Hz rounded to 100 Hz.
+	MicTones map[string]int `json:"micTones"`
 
 	// ProductionTurns and ProductionSpeech count the production gateway's
 	// language model and synthesis requests.
@@ -99,6 +102,7 @@ func (f *fixture) handleStats(w http.ResponseWriter, _ *http.Request) {
 	stats := f.stats
 	stats.ToolResults = append([]json.RawMessage(nil), f.stats.ToolResults...)
 	stats.MicFrameSamples = maps.Clone(f.stats.MicFrameSamples)
+	stats.MicTones = maps.Clone(f.stats.MicTones)
 	stats.RTCUserMessages = append([]string{}, f.stats.RTCUserMessages...)
 	stats.ProductionCleanups = append([]string{}, f.stats.ProductionCleanups...)
 	f.mu.Unlock()
@@ -427,9 +431,38 @@ func (p *mediaPeer) receiveMic(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver)
 				p.fixture.stats.MicFrameSamples = map[string]int{}
 			}
 			p.fixture.stats.MicFrameSamples[strconv.Itoa(n)]++
+			if hz := toneHz(pcm[:n], 48000); hz > 0 {
+				if p.fixture.stats.MicTones == nil {
+					p.fixture.stats.MicTones = map[string]int{}
+				}
+				p.fixture.stats.MicTones[strconv.Itoa(hz)]++
+			}
 			p.fixture.mu.Unlock()
 		}
 	}
+}
+
+// toneHz estimates the frequency of a tone louder than -20 dBFS from its
+// zero crossings, rounded to 100 Hz; 0 means quieter audio.
+func toneHz(pcm []int16, rate int) int {
+	if len(pcm) < 2 {
+		return 0
+	}
+	var squares float64
+	crossings := 0
+	prev := pcm[0]
+	for _, s := range pcm {
+		squares += float64(s) * float64(s)
+		if (prev < 0) != (s < 0) {
+			crossings++
+		}
+		prev = s
+	}
+	if math.Sqrt(squares/float64(len(pcm))) < 3277 {
+		return 0
+	}
+	hz := float64(crossings) * float64(rate) / float64(2*len(pcm))
+	return int(math.Round(hz/100)) * 100
 }
 
 func (p *mediaPeer) receiveReports(sender *webrtc.RTPSender) {
