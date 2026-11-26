@@ -1,0 +1,10 @@
+<!-- Google Material Icons Filled check; adapted to use Compose tint. Apache-2.0; see NOTICE. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M9,16.17L4.83,12l-1.42,1.41L9,19L21,7l-1.41,-1.41Z" />
+</vector>

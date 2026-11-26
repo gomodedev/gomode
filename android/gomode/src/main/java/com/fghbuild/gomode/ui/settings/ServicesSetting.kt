@@ -9,13 +9,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -36,9 +29,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsState
@@ -73,7 +68,7 @@ internal fun ServicesSetting(
                     enabled = draft == null || draft.id != null,
                     modifier = Modifier.testTag("gomode-add-service"),
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "New service")
+                    Icon(painterResource(R.drawable.ic_add), contentDescription = "New service")
                 }
             }
         }
@@ -89,7 +84,7 @@ internal fun ServicesSetting(
                         IconButton(
                             onClick = { edits.service = null },
                             modifier = Modifier.testTag("gomode-cancel-service"),
-                        ) { Icon(Icons.Default.Close, contentDescription = "Cancel") }
+                        ) { Icon(painterResource(R.drawable.ic_close), contentDescription = "Cancel") }
                     }
                     IconButton(
                         onClick = { finish { if (edits.addService()) onAdded() } },
@@ -99,7 +94,7 @@ internal fun ServicesSetting(
                                 !edits.urlTaken &&
                                 settings.loadState == SettingsLoadState.Ready,
                         modifier = Modifier.testTag("gomode-create-service"),
-                    ) { Icon(Icons.Default.Check, contentDescription = "Add service") }
+                    ) { Icon(painterResource(R.drawable.ic_check), contentDescription = "Add service") }
                 },
             )
         }
@@ -116,7 +111,7 @@ internal fun ServicesSetting(
                             onClick = { finish { edits.service = null } },
                             enabled = !edits.aliasTaken && !edits.urlTaken,
                             modifier = Modifier.testTag("gomode-service-done"),
-                        ) { Icon(Icons.Default.Check, contentDescription = "Done") }
+                        ) { Icon(painterResource(R.drawable.ic_check), contentDescription = "Done") }
                     },
                 )
             } else {
@@ -251,10 +246,10 @@ private fun ServiceCard(
                     }
                 }
                 IconButton(onClick = onEdit, modifier = Modifier.testTag("gomode-edit-service-${service.id}")) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit service")
+                    Icon(painterResource(R.drawable.ic_edit), contentDescription = "Edit service")
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.testTag("gomode-delete-service-${service.id}")) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete service")
+                    Icon(painterResource(R.drawable.ic_delete_filled), contentDescription = "Delete service")
                 }
             }
             Column(Modifier.padding(end = 8.dp)) {
@@ -274,7 +269,7 @@ private fun ServiceCard(
                         }
                         status.retryLabel?.let {
                             IconButton(onClick = onRetry, modifier = Modifier.testTag("gomode-retry-${service.id}")) {
-                                Icon(Icons.Default.Refresh, contentDescription = it)
+                                Icon(painterResource(R.drawable.ic_refresh), contentDescription = it)
                             }
                         }
                     }

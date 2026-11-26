@@ -20,20 +20,24 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        ndk {
-            abiFilters += setOf("arm64-v8a", "x86_64")
-        }
     }
 
     buildTypes {
         debug {
             enableUnitTestCoverage = true
+            ndk {
+                abiFilters += setOf("arm64-v8a", "x86_64")
+            }
         }
         release {
             // Reuse the debug keystore for sideloading so `adb install -r` upgrades in place.
             signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
+            ndk {
+                // Emulators run debug; release targets arm64-v8a phones, not ChromeOS.
+                //noinspection ChromeOsAbiSupport
+                abiFilters += setOf("arm64-v8a")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -144,7 +148,6 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

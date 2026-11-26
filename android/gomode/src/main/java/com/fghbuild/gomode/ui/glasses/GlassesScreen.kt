@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -22,13 +23,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.LinkOff
-import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -55,11 +49,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -70,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.glasses.GlassesBattery
 import com.fghbuild.gomode.glasses.GlassesLink
@@ -122,7 +117,7 @@ internal fun GlassesScreen(
                 title = { Text("Glasses") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Back")
                     }
                 },
             )
@@ -265,19 +260,24 @@ private fun SavedGlassesRow(
             leadingContent = { LinkDot(state.link) },
             trailingContent = {
                 Row {
-                    LabeledIconButton(Icons.Filled.TouchApp, "Input events", "gomode-glasses-open-inputs", onOpenInputs)
+                    LabeledIconButton(
+                        R.drawable.ic_touch_app,
+                        "Input events",
+                        "gomode-glasses-open-inputs",
+                        onOpenInputs,
+                    )
                     if (state.link == GlassesLink.Disconnected) {
-                        LabeledIconButton(Icons.Filled.Link, "Connect", "gomode-glasses-connect", onConnect)
+                        LabeledIconButton(R.drawable.ic_link, "Connect", "gomode-glasses-connect", onConnect)
                     } else {
                         LabeledIconButton(
-                            Icons.Filled.LinkOff,
+                            R.drawable.ic_link_off,
                             "Disconnect",
                             "gomode-glasses-disconnect",
                             owner::disconnect,
                             tint = MaterialTheme.colorScheme.error,
                         )
                     }
-                    LabeledIconButton(Icons.Filled.Delete, "Forget", "gomode-glasses-forget", owner::forget)
+                    LabeledIconButton(R.drawable.ic_delete_filled, "Forget", "gomode-glasses-forget", owner::forget)
                 }
             },
         )
@@ -361,7 +361,7 @@ private fun GlassesBatteries(batteries: List<GlassesBattery>) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (battery.charging) {
                     Icon(
-                        Icons.Filled.Bolt,
+                        painterResource(R.drawable.ic_bolt),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(bolt),
@@ -383,7 +383,7 @@ private fun GlassesBatteries(batteries: List<GlassesBattery>) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LabeledIconButton(
-    icon: ImageVector,
+    @DrawableRes iconRes: Int,
     label: String,
     tag: String,
     onClick: () -> Unit,
@@ -395,7 +395,7 @@ private fun LabeledIconButton(
         state = rememberTooltipState(),
     ) {
         IconButton(onClick = onClick, modifier = Modifier.testTag(tag)) {
-            Icon(icon, contentDescription = label, tint = tint)
+            Icon(painterResource(iconRes), contentDescription = label, tint = tint)
         }
     }
 }

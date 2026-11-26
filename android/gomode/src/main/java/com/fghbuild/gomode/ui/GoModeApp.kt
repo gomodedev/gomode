@@ -23,9 +23,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -752,7 +750,7 @@ internal fun GoModeApp(
                 Column(Modifier.fillMaxWidth().padding(12.dp).testTag("gomode-local-model-error")) {
                     Text(failure.message)
                     FilledTonalIconButton(onClick = localModelOwner::retry) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Retry local model")
+                        Icon(painterResource(R.drawable.ic_refresh), contentDescription = "Retry local model")
                     }
                 }
             }
@@ -1190,11 +1188,11 @@ private fun ShellRecoveryStrip(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 recovery.retryTarget?.let {
                     FilledTonalIconButton(onClick = onRetry, modifier = Modifier.testTag("gomode-shell-retry")) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Retry service")
+                        Icon(painterResource(R.drawable.ic_refresh), contentDescription = "Retry service")
                     }
                 }
                 IconButton(onClick = onOpenSettings, modifier = Modifier.testTag("gomode-shell-open-settings")) {
-                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
                 }
             }
         }

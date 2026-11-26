@@ -2,6 +2,7 @@
 package com.fghbuild.gomode.ui.glasses
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,22 +12,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Adjust
-import androidx.compose.material.icons.filled.AdsClick
-import androidx.compose.material.icons.filled.DoNotTouch
-import androidx.compose.material.icons.filled.Gesture
-import androidx.compose.material.icons.filled.North
-import androidx.compose.material.icons.filled.PanTool
-import androidx.compose.material.icons.filled.QuestionMark
-import androidx.compose.material.icons.filled.South
-import androidx.compose.material.icons.filled.SwipeDown
-import androidx.compose.material.icons.filled.SwipeUp
-import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,12 +23,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.glasses.GlassesGesture
 import com.fghbuild.gomode.glasses.GlassesInput
 import com.fghbuild.gomode.glasses.GlassesOwner
@@ -70,7 +56,7 @@ internal fun GlassesInputsScreen(
                 title = { Text("Input events") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Back")
                     }
                 },
             )
@@ -108,7 +94,7 @@ private fun InputRow(input: GlassesInput) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(input.event.gesture.icon(), contentDescription = null)
+        Icon(painterResource(input.event.gesture.icon()), contentDescription = null)
         Text(
             text = input.event.label,
             style = MaterialTheme.typography.bodyLarge,
@@ -125,22 +111,23 @@ private fun InputRow(input: GlassesInput) {
     }
 }
 
-private fun GlassesGesture.icon(): ImageVector =
+@DrawableRes
+private fun GlassesGesture.icon(): Int =
     when (this) {
-        GlassesGesture.TAP -> Icons.Filled.TouchApp
-        GlassesGesture.DOUBLE_TAP -> Icons.Filled.AdsClick
-        GlassesGesture.HOLD -> Icons.Filled.PanTool
-        GlassesGesture.RELEASE -> Icons.Filled.DoNotTouch
-        GlassesGesture.TAP_THEN_HOLD -> Icons.Filled.Gesture
-        GlassesGesture.SCROLL_UP -> Icons.Filled.SwipeUp
-        GlassesGesture.SCROLL_DOWN -> Icons.Filled.SwipeDown
-        GlassesGesture.HEAD_UP -> Icons.Filled.North
-        GlassesGesture.HEAD_DOWN -> Icons.Filled.South
-        GlassesGesture.RING_TOUCH -> Icons.Filled.Adjust
-        GlassesGesture.PAGE_SHOWN -> Icons.Filled.Visibility
-        GlassesGesture.PAGE_HIDDEN -> Icons.Filled.VisibilityOff
-        GlassesGesture.PAGE_CLOSED -> Icons.AutoMirrored.Filled.Logout
-        GlassesGesture.OTHER -> Icons.Filled.QuestionMark
+        GlassesGesture.TAP -> R.drawable.ic_touch_app
+        GlassesGesture.DOUBLE_TAP -> R.drawable.ic_ads_click
+        GlassesGesture.HOLD -> R.drawable.ic_pan_tool
+        GlassesGesture.RELEASE -> R.drawable.ic_do_not_touch
+        GlassesGesture.TAP_THEN_HOLD -> R.drawable.ic_gesture
+        GlassesGesture.SCROLL_UP -> R.drawable.ic_swipe_up
+        GlassesGesture.SCROLL_DOWN -> R.drawable.ic_swipe_down
+        GlassesGesture.HEAD_UP -> R.drawable.ic_north
+        GlassesGesture.HEAD_DOWN -> R.drawable.ic_south
+        GlassesGesture.RING_TOUCH -> R.drawable.ic_adjust
+        GlassesGesture.PAGE_SHOWN -> R.drawable.ic_visibility
+        GlassesGesture.PAGE_HIDDEN -> R.drawable.ic_visibility_off
+        GlassesGesture.PAGE_CLOSED -> R.drawable.ic_logout
+        GlassesGesture.OTHER -> R.drawable.ic_question_mark
     }
 
 // To the nearest 10 ms: one gesture sends several events within a few hundred milliseconds, and

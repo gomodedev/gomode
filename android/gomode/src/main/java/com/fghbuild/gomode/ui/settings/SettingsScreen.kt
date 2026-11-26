@@ -16,13 +16,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -64,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
@@ -217,13 +212,13 @@ internal fun SettingsScreen(
             ListItem(
                 headlineContent = { Text("Device") },
                 supportingContent = { Text(settings.glasses?.label() ?: "No device selected") },
-                leadingContent = { Icon(Icons.Filled.Bluetooth, contentDescription = null) },
+                leadingContent = { Icon(painterResource(R.drawable.ic_bluetooth), contentDescription = null) },
                 trailingContent = {
                     IconButton(
                         onClick = { finish { onOpenGlasses() } },
                         modifier = Modifier.testTag("gomode-manage-glasses"),
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = "Manage glasses")
+                        Icon(painterResource(R.drawable.ic_settings), contentDescription = "Manage glasses")
                     }
                 },
             )
@@ -250,7 +245,10 @@ private fun CreditsSetting(voiceSessionActive: Boolean) {
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.Start,
             )
-            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
+            Icon(
+                painterResource(if (expanded) R.drawable.ic_expand_less else R.drawable.ic_expand_more),
+                contentDescription = null,
+            )
         }
         if (expanded) {
             ThinkingMusicPreview(enabled = !voiceSessionActive)
@@ -287,7 +285,7 @@ private fun ThinkingMusicPreview(enabled: Boolean) {
             modifier = Modifier.testTag("gomode-thinking-music-preview"),
         ) {
             Icon(
-                if (playing) Icons.Default.Stop else Icons.Default.PlayArrow,
+                painterResource(if (playing) R.drawable.ic_stop else R.drawable.ic_play_arrow),
                 contentDescription = if (playing) "Stop thinking music" else "Play thinking music",
             )
         }

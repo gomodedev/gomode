@@ -3,6 +3,7 @@ package com.fghbuild.gomode.voice
 
 import android.content.res.Configuration
 import android.media.AudioDeviceInfo
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -36,28 +37,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Cached
-import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DataUsage
-import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PhoneInTalk
-import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Speaker
-import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -98,13 +77,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -117,6 +96,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.fghbuild.gomode.R
 import com.fghbuild.voicegateway.sdk.v2.TokenUsage
 import com.fghbuild.voicegateway.sdk.v2.TurnState
 import kotlinx.coroutines.launch
@@ -307,7 +287,7 @@ private fun VoiceError(
             modifier = Modifier.weight(1f).padding(vertical = 8.dp).testTag("gomode-voice-error-message"),
         )
         IconButton(onClick = onDismiss, modifier = Modifier.testTag("gomode-voice-error-dismiss")) {
-            Icon(Icons.Default.Close, contentDescription = "Dismiss error")
+            Icon(painterResource(R.drawable.ic_close), contentDescription = "Dismiss error")
         }
     }
 }
@@ -360,7 +340,7 @@ private fun UsagePanel(usage: VoiceUsage?) {
                         "${formatUsageCount(
                             usage.latest.contextTokens,
                         )} / ${formatUsageCount(usage.latest.contextWindow)}"
-                    UsageMetric("Context tokens: $context", context, Icons.Default.DataUsage)
+                    UsageMetric("Context tokens: $context", context, R.drawable.ic_data_usage)
                 }
             },
         )
@@ -446,7 +426,7 @@ private fun AppControls(
                 onClick = onCycleApp,
                 modifier = Modifier.testTag("gomode-next-app"),
             ) {
-                Icon(Icons.Default.SwapHoriz, contentDescription = "Next server")
+                Icon(painterResource(R.drawable.ic_swap_horiz), contentDescription = "Next server")
             }
         }
     }
@@ -460,7 +440,7 @@ private fun SettingsButton(onOpenSettings: () -> Unit) {
     ) {
         Box(Modifier.fillMaxSize().padding(start = 8.dp), contentAlignment = Alignment.CenterStart) {
             Icon(
-                Icons.Default.Settings,
+                painterResource(R.drawable.ic_settings),
                 contentDescription = "Settings",
                 modifier = Modifier.size(24.dp),
             )
@@ -528,7 +508,7 @@ private fun VoiceToolbar(
                 ),
         ) {
             Icon(
-                if (active) Icons.Default.CallEnd else Icons.Default.Mic,
+                painterResource(if (active) R.drawable.ic_call_end else R.drawable.ic_mic),
                 contentDescription =
                     when {
                         voiceState.connectStatus != null -> "Cancel"
@@ -610,13 +590,13 @@ private fun MicrophoneModeButton(
     ) {
         Box(Modifier.size(32.dp)) {
             Icon(
-                if (mode == MicrophoneMode.LISTENING) Icons.Default.Mic else Icons.Default.MicOff,
+                painterResource(if (mode == MicrophoneMode.LISTENING) R.drawable.ic_mic else R.drawable.ic_mic_off),
                 contentDescription = null,
                 modifier = Modifier.align(Alignment.Center),
             )
             if (mode == MicrophoneMode.MUTE_ONCE) {
                 Icon(
-                    Icons.Default.Schedule,
+                    painterResource(R.drawable.ic_schedule),
                     contentDescription = null,
                     modifier =
                         Modifier
@@ -641,7 +621,7 @@ private fun TranscriptToggle(
         modifier = Modifier.size(48.dp).focusRequester(focusRequester).testTag("gomode-voice-transcript-toggle"),
     ) {
         Icon(
-            if (expanded) Icons.Default.Close else Icons.Default.Subtitles,
+            painterResource(if (expanded) R.drawable.ic_close else R.drawable.ic_subtitles),
             contentDescription = if (expanded) "Hide transcript" else "Show transcript",
             modifier = Modifier.size(24.dp),
         )
@@ -788,7 +768,7 @@ internal fun AudioDevicePicker(
                     ),
             ) {
                 Icon(
-                    audioDeviceIcon(device.type),
+                    painterResource(audioDeviceIcon(device.type)),
                     contentDescription = device.name,
                     modifier = Modifier.size(24.dp).testTag("gomode-voice-audio-icon-${device.id}"),
                 )
@@ -797,31 +777,32 @@ internal fun AudioDevicePicker(
     }
 }
 
-internal fun audioDeviceIcon(type: Int): ImageVector =
+@DrawableRes
+internal fun audioDeviceIcon(type: Int): Int =
     when (type) {
         AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
         AudioDeviceInfo.TYPE_BLE_BROADCAST,
         AudioDeviceInfo.TYPE_BLE_HEADSET,
         AudioDeviceInfo.TYPE_BLE_SPEAKER,
-        -> Icons.Default.Bluetooth
+        -> R.drawable.ic_bluetooth
 
         AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
         AudioDeviceInfo.TYPE_WIRED_HEADSET,
         AudioDeviceInfo.TYPE_USB_HEADSET,
-        -> Icons.Default.Headphones
+        -> R.drawable.ic_headphones
 
-        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> Icons.Default.PhoneInTalk
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> R.drawable.ic_phone_in_talk
 
         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE,
-        -> Icons.Default.Speaker
+        -> R.drawable.ic_speaker
 
         AudioDeviceInfo.TYPE_USB_ACCESSORY,
         AudioDeviceInfo.TYPE_USB_DEVICE,
-        -> Icons.Default.Usb
+        -> R.drawable.ic_usb
 
-        else -> Icons.AutoMirrored.Filled.VolumeUp
+        else -> R.drawable.ic_volume_up
     }
 
 /** Transcript heading for one entry; reasoning is labelled separately from spoken text. */
@@ -935,7 +916,7 @@ private fun ToolHistory(
     }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Icon(
-            if (activeTool != null) Icons.Default.Build else Icons.Default.History,
+            painterResource(if (activeTool != null) R.drawable.ic_build else R.drawable.ic_history),
             contentDescription = activeTool?.let { "Calling tool: $it…" },
             modifier = Modifier.size(rowHeight).semantics { liveRegion = LiveRegionMode.Polite },
             tint =
@@ -1027,15 +1008,15 @@ private fun TranscriptRow(
 
 @Composable
 private fun TokenMetrics(counts: TokenUsage) {
-    ResponseMetric("Input", counts.inputTokens, Icons.Default.ArrowUpward)
-    ResponseMetric("Output", counts.outputTokens, Icons.Default.ArrowDownward)
+    ResponseMetric("Input", counts.inputTokens, R.drawable.ic_arrow_upward)
+    ResponseMetric("Output", counts.outputTokens, R.drawable.ic_arrow_downward)
     if (counts.cachedTokens != null || counts.reasoningTokens != null) {
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            counts.cachedTokens?.let { ResponseMetric("Cached input", it, Icons.Default.Cached) }
-            counts.reasoningTokens?.let { ResponseMetric("Reasoning", it, Icons.Default.Psychology) }
+            counts.cachedTokens?.let { ResponseMetric("Cached input", it, R.drawable.ic_cached) }
+            counts.reasoningTokens?.let { ResponseMetric("Reasoning", it, R.drawable.ic_psychology) }
         }
     }
 }
@@ -1045,9 +1026,9 @@ private fun TokenMetrics(counts: TokenUsage) {
 private fun ResponseMetric(
     label: String,
     value: Long?,
-    icon: ImageVector,
+    @DrawableRes iconRes: Int,
 ) {
-    UsageMetric("$label tokens: ${formatUsageCount(value)}", value?.let { formatUsageCount(it) } ?: "—", icon)
+    UsageMetric("$label tokens: ${formatUsageCount(value)}", value?.let { formatUsageCount(it) } ?: "—", iconRes)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1055,7 +1036,7 @@ private fun ResponseMetric(
 private fun UsageMetric(
     description: String,
     value: String,
-    icon: ImageVector,
+    @DrawableRes iconRes: Int,
 ) {
     val style = MaterialTheme.typography.labelSmall
     val iconSize = with(LocalDensity.current) { style.fontSize.toDp() * 1.25f }
@@ -1069,7 +1050,7 @@ private fun UsageMetric(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                icon,
+                painterResource(iconRes),
                 contentDescription = null,
                 modifier = Modifier.size(iconSize),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,

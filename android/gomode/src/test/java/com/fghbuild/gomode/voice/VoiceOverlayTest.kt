@@ -2,6 +2,7 @@
 package com.fghbuild.gomode.voice
 
 import android.media.AudioDeviceInfo
+import com.fghbuild.gomode.R
 import com.fghbuild.voicegateway.sdk.v2.TurnState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,15 +30,15 @@ class VoiceOverlayTest {
 
     @Test
     fun audioDeviceIconsUsePlatformTypesAndHandleUnknownRoutes() {
-        assertEquals("Filled.Bluetooth", audioDeviceIcon(AudioDeviceInfo.TYPE_BLUETOOTH_SCO).name)
-        assertEquals("Filled.Bluetooth", audioDeviceIcon(AudioDeviceInfo.TYPE_BLE_HEADSET).name)
-        assertEquals("Filled.Bluetooth", audioDeviceIcon(AudioDeviceInfo.TYPE_BLE_SPEAKER).name)
-        assertEquals("Filled.Headphones", audioDeviceIcon(AudioDeviceInfo.TYPE_WIRED_HEADSET).name)
-        assertEquals("Filled.Headphones", audioDeviceIcon(AudioDeviceInfo.TYPE_USB_HEADSET).name)
-        assertEquals("Filled.PhoneInTalk", audioDeviceIcon(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE).name)
-        assertEquals("Filled.Speaker", audioDeviceIcon(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER).name)
-        assertEquals("Filled.Usb", audioDeviceIcon(AudioDeviceInfo.TYPE_USB_DEVICE).name)
-        assertEquals("AutoMirrored.Filled.VolumeUp", audioDeviceIcon(AudioDeviceInfo.TYPE_UNKNOWN).name)
+        assertEquals(R.drawable.ic_bluetooth, audioDeviceIcon(AudioDeviceInfo.TYPE_BLUETOOTH_SCO))
+        assertEquals(R.drawable.ic_bluetooth, audioDeviceIcon(AudioDeviceInfo.TYPE_BLE_HEADSET))
+        assertEquals(R.drawable.ic_bluetooth, audioDeviceIcon(AudioDeviceInfo.TYPE_BLE_SPEAKER))
+        assertEquals(R.drawable.ic_headphones, audioDeviceIcon(AudioDeviceInfo.TYPE_WIRED_HEADSET))
+        assertEquals(R.drawable.ic_headphones, audioDeviceIcon(AudioDeviceInfo.TYPE_USB_HEADSET))
+        assertEquals(R.drawable.ic_phone_in_talk, audioDeviceIcon(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE))
+        assertEquals(R.drawable.ic_speaker, audioDeviceIcon(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER))
+        assertEquals(R.drawable.ic_usb, audioDeviceIcon(AudioDeviceInfo.TYPE_USB_DEVICE))
+        assertEquals(R.drawable.ic_volume_up, audioDeviceIcon(AudioDeviceInfo.TYPE_UNKNOWN))
     }
 
     @Test
