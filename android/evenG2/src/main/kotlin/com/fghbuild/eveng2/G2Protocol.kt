@@ -3,10 +3,11 @@
 // Contract (consumer firmware, no Even app): each arm is its own BLE peripheral. All
 // characteristics share the base 00002760-08c2-11e1-9073-0e8ac72eXXXX: the phone writes
 // commands without response to 5401 and receives replies and events as notifications on
-// 5402. Both arms connect and authenticate; Even Hub commands go to the right arm, which
-// relays to the left. Sources: the even-g2-protocol Python library (MIT) and the Even
-// Realities enterprise SDK (Apache-2.0); see NOTICE in this module. Even documents none of
-// this for consumer firmware, so a firmware update the Even app installs can break it.
+// 5402, and microphone packets as notifications on 6402 (G2Microphone). Both arms connect and
+// authenticate; Even Hub commands go to the right arm, which relays to the left. Sources: the
+// even-g2-protocol Python library (MIT) and the Even Realities enterprise SDK (Apache-2.0); see
+// NOTICE in this module. Even documents none of this for consumer firmware, so a firmware update
+// the Even app installs can break it.
 
 package com.fghbuild.eveng2
 
@@ -20,6 +21,9 @@ object G2Protocol {
 
     /** Glasses to phone, notify. */
     val NOTIFY_CHARACTERISTIC: UUID = uuid(0x5402)
+
+    /** Glasses to phone, notify: microphone packets without framing; see [G2Microphone]. */
+    val AUDIO_CHARACTERISTIC: UUID = uuid(0x6402)
 
     /** Client characteristic configuration descriptor that enables notifications. */
     val CLIENT_CONFIG_DESCRIPTOR: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")

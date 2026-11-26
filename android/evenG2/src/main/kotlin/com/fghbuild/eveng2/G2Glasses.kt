@@ -9,8 +9,9 @@
 // across the sessions of one G2Glasses, and each page starts with the latest content from show().
 // A superseded session never publishes state. A replaced or stopped session stays in `job` until
 // it has finished, so a later connect() joins it and never runs two sessions at once. An exception
-// that escapes a session ends it with G2CloseCause.Failed. gestures, events, and battery report the
-// current session's only; battery is empty again when a session starts or ends.
+// that escapes a session ends it with G2CloseCause.Failed. gestures, events, battery, and microphone
+// report the current session's only; battery is empty again when a session starts or ends. The
+// microphone runs while anything collects it, in whichever session runs then.
 
 package com.fghbuild.eveng2
 
@@ -18,12 +19,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class G2Glasses(
@@ -33,7 +39,7 @@ class G2Glasses(
     val page: G2TextPage = G2TextPage(),
     /**
      * Diagnostics for the host's log: each page's request, acknowledgement, close, and reopen
-     * delay, and each battery round and reply.
+     * delay, each battery round and reply, and each microphone start, with its first packet, and stop.
      */
     private val log: (String) -> Unit = {},
 ) {
@@ -70,6 +76,23 @@ class G2Glasses(
      * event that nobody collects is lost.
      */
     val events: SharedFlow<G2InputEvent> = mutableEvents.asSharedFlow()
+
+    private val listeners = MutableStateFlow(0)
+    private val mutableAudio =
+        MutableSharedFlow<ShortArray>(extraBufferCapacity = AUDIO_BUFFER, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /**
+     * The glasses' microphone as [G2Microphone.SAMPLE_RATE] Hz mono PCM, one array of
+     * [G2Microphone.SAMPLES_PER_PACKET] samples per 50 ms packet; collectors share each array and must
+     * not change it. The microphone runs while a page is open and anything collects this flow; see
+     * [G2Microphone]. A collector that lags more than a second behind loses the oldest packets, and
+     * nothing stands in for a lost packet. The flow never completes on its own: audio pauses while no
+     * page is open and goes on in the next session.
+     */
+    val microphone: Flow<ShortArray> =
+        mutableAudio
+            .onSubscription { listeners.update { it + 1 } }
+            .onCompletion { listeners.update { it - 1 } }
 
     /**
      * Run one session with [pair], replacing any previous one. The state is [G2State.Connecting]
@@ -142,10 +165,12 @@ class G2Glasses(
                 page,
                 ids,
                 desired,
+                listeners,
                 onReady = { firmware, shown -> publish(current, G2State.Ready(pair, firmware, shown)) },
                 onGesture = { gesture(current, it) },
                 onEvent = { event(current, it) },
                 onBattery = { battery(current, it) },
+                onAudio = { audio(current, it) },
                 log = log,
             )
         val cause =
@@ -198,11 +223,23 @@ class G2Glasses(
         }
     }
 
+    private fun audio(
+        current: Long,
+        pcm: ShortArray,
+    ) {
+        synchronized(lock) {
+            if (current == generation) mutableAudio.tryEmit(pcm)
+        }
+    }
+
     private companion object {
         // Gestures a slow collector may lag behind; a person gestures far slower than one is handled.
         const val GESTURE_BUFFER = 8
 
         // One gesture sends up to four events, such as a release, a double click, and two scrolls.
         const val EVENT_BUFFER = 16
+
+        // One second of microphone packets.
+        const val AUDIO_BUFFER = 20
     }
 }

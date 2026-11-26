@@ -1,4 +1,4 @@
-// G2EvenHub: Even Hub (SID 0xE0) text page, in-place text update, heartbeat, shutdown, replies, gestures, and exits.
+// G2EvenHub: Even Hub (SID 0xE0) text page, text update, heartbeat, shutdown, microphone, replies, gestures, exits.
 //
 // Ported and modified from G2EvenHubCodec.kt of the Even Realities enterprise SDK
 // 0.1.0-beta.14 (Apache-2.0, Copyright 2026 Hong Kong Even Realities Limited), narrowed to one
@@ -16,12 +16,17 @@
 // | update text   | 5 (9)            | 6 (10)         | 1            | 8       |
 // | shutdown page | 9 (11)           | 10 (12)        | 1            | 10      |
 // | heartbeat     | 12 (14)          | 13 or 12 (15)  | 2            | 12      |
+// | microphone    | 15 (18)          | 16 (19)        | 1            | 1 or 0  |
 //
 // Create page body: {1: container count, 3: text container, 5: widget ID, 7: page session ID}.
 // Text container: {1: x, 2: y, 3: width, 4: height, 8: padding (omitted when 0), 9: container
 // ID, 10: container name, 11: 1 (captures input), 12: content}. Update text body: {1: container
 // ID, 2: container name, 3: byte offset 0, 4: content byte length, 5: content}; the ID routes
-// the update, the name must match. Heartbeat and shutdown bodies are empty.
+// the update, the name must match. Heartbeat and shutdown bodies are empty. Microphone body: {1: 1
+// to start, 0 to stop}, as faceclaw's BleProtocol.kt (GPL-3.0) and the Python library's
+// live-confirmed build_audio_control write it. The enterprise SDK's tests answer a start with 1 and a
+// stop with 0 on the reply branch above; as faceclaw's resolveAckLocked does, G2MicrophoneReply takes
+// any reply on SID 0xE0 that echoes the magic. Its packets arrive apart from Even Hub; see G2Microphone.
 //
 // The glasses report input and page exits as event command 2, branch 13, whose body holds one
 // event: a text event (branch 2) {1: container ID, 2: container name, 3: event type}, or a system
@@ -135,6 +140,8 @@ enum class G2HubCommand(
     UPDATE_TEXT(5, 9, 6, 10, 1, 8),
     SHUTDOWN_PAGE(9, 11, 10, 12, 1, 10),
     HEARTBEAT(12, 14, 13, 15, 2, 12),
+    MICROPHONE_ON(15, 18, 16, 19, 1, 1),
+    MICROPHONE_OFF(15, 18, 16, 19, 1, 0),
 }
 
 /** Outcome of an Even Hub reply that matches the request's command and magic. */
@@ -145,6 +152,24 @@ sealed interface G2HubReply {
     data class Rejected(
         val result: Long?,
     ) : G2HubReply
+}
+
+/**
+ * A reply to a microphone request: its [command], response [branch], and [result] code, each null when
+ * absent, and the frame header's result code [header].
+ */
+internal data class G2MicrophoneReply(
+    val command: Long?,
+    val branch: Int?,
+    val result: Long?,
+    val header: Int,
+) {
+    /** Whether the reply is the one the enterprise SDK's tests give [request]; proto3 omits a zero result. */
+    fun expected(request: G2HubCommand): Boolean =
+        header == 0 &&
+            command == request.response &&
+            branch == request.responseBranch &&
+            (result ?: 0L) == request.success
 }
 
 object G2EvenHub {
@@ -233,6 +258,24 @@ object G2EvenHub {
         sync: Int,
     ): List<ByteArray> = request(G2HubCommand.SHUTDOWN_PAGE, byteArrayOf(), magic, sync)
 
+    // The reply's command, branch, and result come from the enterprise SDK's tests; a pair on 2.3.0.24
+    // with Faceclaw/45 answered a start and a stop with them. faceclaw matches the reply by SID and
+    // magic alone, which microphoneReply follows, and G2Session logs a reply whose command, branch,
+    // result, or header result differ from MICROPHONE_ON and MICROPHONE_OFF.
+
+    /** Start the microphone when [on], else stop it; the page must be open. */
+    fun microphone(
+        on: Boolean,
+        magic: Int,
+        sync: Int,
+    ): List<ByteArray> =
+        request(
+            if (on) G2HubCommand.MICROPHONE_ON else G2HubCommand.MICROPHONE_OFF,
+            protobuf { scalar(1, if (on) 1 else 0) },
+            magic,
+            sync,
+        )
+
     private fun request(
         command: G2HubCommand,
         body: ByteArray,
@@ -247,6 +290,22 @@ object G2EvenHub {
                 bytes(command.requestBranch, body)
             }
         return G2Frame.packets(payload, G2Protocol.SID_EVEN_HUB, G2Protocol.FLAG_SYNC_BOTH, sync)
+    }
+
+    /**
+     * The reply that [message] is to a microphone request sent with [magic]: a message on SID 0xE0, not
+     * a notification, that echoes the magic, whatever its command and code. Null when it is not one.
+     */
+    internal fun microphoneReply(
+        message: G2Message,
+        magic: Int,
+    ): G2MicrophoneReply? {
+        if (message.sid != G2Protocol.SID_EVEN_HUB || message.notify) return null
+        val root = G2ProtoReader.fields(message.payload) ?: return null
+        if (root.scalar(2) != magic.toLong()) return null
+        val branch = root.keys.firstOrNull { it in BRANCHES }
+        val result = branch?.let(root::bytes)?.let(G2ProtoReader::fields)?.scalar(1)
+        return G2MicrophoneReply(root.scalar(1), branch, result, message.result)
     }
 
     /** Classify [message] as the reply to [command] sent with [magic] and [sync]; null when it is not. */

@@ -1,7 +1,10 @@
 // Fake Even G2 glasses behind fake arm links that answer AUTH, prelude, settings, case, Even Hub, and Faceclaw drawing.
 //
 // Decodes protobuf, private-stream records, and draw calls with its own minimal readers,
-// independent of the SDK's codecs; only the CRC comes from the SDK. The right arm answers settings
+// independent of the SDK's codecs; only the CRC comes from the SDK. The microphone answers its
+// start with 1 and its stop with 0, as the enterprise SDK's tests do, with the command
+// FakeG2Firmware.microphoneReply, and a page's close stops it; the test supplies its packets.
+// The right arm answers settings
 // reads with the glasses' battery, as a pair on 2.3.0.24 with Faceclaw/45 did, and reads and pushes
 // the charging case's state as faceclaw reports stock firmware doing. Stock firmware by default; a
 // [FakeG2Firmware.revision] adds settings field 100, the framebuffer lease, and the private stream
@@ -61,6 +64,13 @@ class FakeG2Firmware {
     @Volatile var createResult = 0L
 
     @Volatile var answersShutdown = true
+
+    /** The command of the microphone's replies: 16, as the enterprise SDK's tests have it; null for none. */
+    @Volatile var microphoneReply: Long? = 16L
+
+    /** Whether the microphone runs: from a start to a stop or the close of the page. */
+    @Volatile var microphone = false
+        private set
 
     /** The revision the settings read reports in field 100, such as "Faceclaw/45"; null for stock firmware. */
     @Volatile var revision: String? = null
@@ -167,6 +177,7 @@ class FakeG2Firmware {
         type: Long,
         session: Long,
     ) {
+        microphone = false
         val system =
             proto {
                 scalar(1, type)
@@ -235,6 +246,18 @@ class FakeG2Firmware {
                 scalar(6, pageSession)
             }
         deviceEvent(side, proto { bytes(3, system) })
+    }
+
+    /**
+     * The arms in [sides] notify one microphone [packet] each on their audio characteristic; the
+     * microphone must run.
+     */
+    fun speak(
+        packet: ByteArray,
+        sides: List<G2Side> = G2Side.entries,
+    ) {
+        check(microphone) { "the microphone is off" }
+        sides.forEach { link(it).hear(packet) }
     }
 
     /**
@@ -484,12 +507,21 @@ class FakeG2Firmware {
 
             9L -> {
                 record("shutdown", null)
+                microphone = false
                 if (answersShutdown) ack(10, 12, proto { scalar(1, 10) })
             }
 
             12L -> {
                 record("heartbeat", null)
                 ack(13, 15, proto { scalar(2, 12) })
+            }
+
+            15L -> {
+                val on = fields(checkNotNull(root.bytes(18))).scalar(1) == 1L
+                record("microphone", if (on) "on" else "off")
+                microphone = on
+                // Proto3 omits a zero result.
+                microphoneReply?.let { ack(it, 19, if (on) proto { scalar(1, 1) } else byteArrayOf()) }
             }
         }
     }
@@ -692,6 +724,7 @@ class FakeG2Link(
     private val firmware: FakeG2Firmware,
 ) : G2ArmLink {
     private val channel = Channel<ByteArray>(Channel.UNLIMITED)
+    private val audioChannel = Channel<ByteArray>(Channel.UNLIMITED)
     private val partial = mutableMapOf<Int, ByteArray>()
 
     @Volatile private var lost: G2LinkLostException? = null
@@ -703,6 +736,7 @@ class FakeG2Link(
 
     override val side: G2Side get() = arm.side
     override val notifications = channel
+    override val audio = audioChannel
 
     // As Android negotiates with the glasses.
     override val mtu = 512
@@ -727,6 +761,12 @@ class FakeG2Link(
     override fun close() {
         closed = true
         channel.close()
+        audioChannel.close()
+    }
+
+    /** The arm notifies [packet] on its audio characteristic. */
+    fun hear(packet: ByteArray) {
+        audioChannel.trySend(packet.copyOf())
     }
 
     fun notify(
@@ -744,7 +784,11 @@ class FakeG2Link(
 
     /** The arm's radio link drops with platform [status]. */
     fun drop(status: Int) {
-        lost = G2LinkLostException(status).also { channel.close(it) }
+        lost =
+            G2LinkLostException(status).also {
+                channel.close(it)
+                audioChannel.close(it)
+            }
     }
 }
 

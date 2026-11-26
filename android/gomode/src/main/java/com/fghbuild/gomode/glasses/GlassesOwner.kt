@@ -128,8 +128,9 @@ internal data class GlassesState(
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
  * settings, and when [updateAutoConnect] turns it on while no connection runs. Every connection
- * shows the latest [show] frame, or a [notify] notice over it, reports its [actions], and keeps its
- * battery readings in [state] for every screen that shows them. While that frame is blank, a
+ * shows the latest [show] frame, or a [notify] notice over it, reports its [actions], keeps its
+ * battery readings in [state] for every screen that shows them, and offers its [microphone], if it
+ * has one. While that frame is blank, a
  * connection first plays a short greeting that confirms it on the glasses; content that is not
  * blank, or a notice, ends it. Callers hold BLUETOOTH_SCAN before [startScan]
  * and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
@@ -221,6 +222,11 @@ internal class GlassesOwner(
 
     private val mutableState = MutableStateFlow(GlassesState())
     val state: StateFlow<GlassesState> = mutableState.asStateFlow()
+
+    private val mutableMicrophone = MutableStateFlow<GlassesMicrophone?>(null)
+
+    /** The connected glasses' microphone, or null while no connected glasses have one. */
+    val microphone: StateFlow<GlassesMicrophone?> = mutableMicrophone.asStateFlow()
 
     /** The connected glasses' display, or null without a connection; any thread may read it. */
     val connectedDisplay: Display?
@@ -535,11 +541,13 @@ internal class GlassesOwner(
         }
     }
 
-    // Shows each frame, reports each action, and keeps the state's batteries until the connection ends,
-    // and returns why it ended: the glasses' close cause once they report one. Cancellation clears the
-    // display, best effort, and every exit empties the batteries and closes the glasses.
+    // Shows each frame, reports each action, and keeps the state's batteries and the microphone until the
+    // connection ends, and returns why it ended: the glasses' close cause once they report one.
+    // Cancellation clears the display, best effort, and every exit empties the batteries, drops the
+    // microphone, and closes the glasses.
     private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
         try {
+            mutableMicrophone.value = glasses as? GlassesMicrophone
             coroutineScope {
                 if (state.value.logoPinned || frame.value.let { it is GlassesFrame.Text && it.text.isBlank() }) {
                     greetingJob = launch { playGreeting(glasses) }
@@ -602,6 +610,7 @@ internal class GlassesOwner(
             glasses.closeCause.value?.asGlassesException() ?: e
         } finally {
             mutableState.update { it.copy(batteries = emptyList()) }
+            mutableMicrophone.value = null
             withContext(NonCancellable) {
                 if (glasses.closeCause.value == null) {
                     withTimeoutOrNull(CLEAR_ON_DISCONNECT_TIMEOUT_MS) {

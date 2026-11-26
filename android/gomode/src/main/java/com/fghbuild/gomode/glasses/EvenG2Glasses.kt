@@ -4,7 +4,9 @@
 // draws: on stock firmware, one text container, created on connect and updated in place; on
 // Faceclaw firmware (G2Firmware.Faceclaw), text and images that the SDK draws on the whole panel.
 // The page's text container captures the touchpads and an R1 ring, whose gestures g2Action maps to actions.
-// The session polls the glasses' battery and the case's; batteries are G2Glasses.battery.
+// The session polls the glasses' battery and the case's; batteries are G2Glasses.battery. The
+// microphone is G2Glasses.microphone, which runs while collected; it outlives the connection, so a
+// connection's microphone completes when that connection ends.
 //
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
 // another. connect() returns at the session's first G2State.Ready and fails if it reaches
@@ -39,10 +41,13 @@ import com.fghbuild.gomode.voice.PNG_MIME_TYPE
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -109,7 +114,7 @@ internal data object G2PanelFit : ScreenFit {
 internal sealed class EvenG2Glasses(
     protected val glasses: G2Glasses,
     firmware: G2Firmware,
-) : GlassesDisplay {
+) : GlassesMicrophone {
     private val ended = MutableStateFlow<GlassesException?>(null)
     private var watcher: Job? = null
 
@@ -117,6 +122,12 @@ internal sealed class EvenG2Glasses(
     override val actions: Flow<GlassesAction> = glasses.gestures.mapNotNull { g2Action(it, firmware) }
     override val events: Flow<GlassesEvent> = glasses.events.map(::glassesEvent)
     override val batteries: Flow<List<GlassesBattery>> = glasses.battery.map(::glassesBatteries)
+    override val microphone: Flow<ShortArray> =
+        channelFlow {
+            val audio = launch { glasses.microphone.collect(::send) }
+            ended.first { it != null }
+            audio.cancel()
+        }.buffer(Channel.RENDEZVOUS)
 
     /** Shows [text], cut to the firmware's limit, and waits until the glasses acknowledge it. */
     override suspend fun showText(text: String) {

@@ -5,13 +5,13 @@
 // another pairing runs, so bonds are made one at a time. The arms pair with Just Works, for which
 // Android shows a consent dialog; Android ends a pairing nobody answers.
 //
-// Sequence per bonded arm: connectGatt over LE, request MTU 512 and
-// require at least G2Protocol.MIN_MTU, discover services, enable notifications on 5402 through
-// its CCCD, then write packets to 5401 without response. One GATT operation runs at a time;
-// each waits for its callback. A disconnect fails the pending operation and closes the
-// notification channel with G2LinkLostException. Every platform call that throws on a missing
-// BLUETOOTH_CONNECT permission or a rejected argument goes through bluetoothCall(), so callers
-// see only G2Exception.
+// Sequence per bonded arm: connectGatt over LE, request MTU 512 and require at least
+// G2Protocol.MIN_MTU, discover services, enable notifications on 5402 through its CCCD, and on the
+// audio characteristic 6402 when the arm has it, then write packets to 5401 without response. One
+// GATT operation runs at a time; each waits for its callback. A disconnect fails the pending
+// operation and closes both notification channels with G2LinkLostException. Every platform call that
+// throws on a missing BLUETOOTH_CONNECT permission or a rejected argument goes through
+// bluetoothCall(), so callers see only G2Exception.
 //
 // A background connection passes autoConnect to connectGatt: Android adds the arm to the
 // controller's LE accept list and connects when the arm next advertises, without a deadline and at
@@ -144,6 +144,7 @@ private class G2GattLink(
     override val side: G2Side,
 ) : G2ArmLink {
     private val channel = Channel<ByteArray>(NOTIFICATION_CAPACITY, BufferOverflow.DROP_OLDEST)
+    private val audioChannel = Channel<ByteArray>(AUDIO_CAPACITY, BufferOverflow.DROP_OLDEST)
     private val operations = Mutex()
     private val connected = CompletableDeferred<Unit>()
 
@@ -162,6 +163,8 @@ private class G2GattLink(
 
     override val notifications: ReceiveChannel<ByteArray> = channel
 
+    override val audio: ReceiveChannel<ByteArray> = audioChannel
+
     private val callback =
         object : BluetoothGattCallback() {
             override fun onConnectionStateChange(
@@ -177,6 +180,7 @@ private class G2GattLink(
                     connected.completeExceptionally(e)
                     pending?.status?.completeExceptionally(e)
                     channel.close(e)
+                    audioChannel.close(e)
                 }
             }
 
@@ -217,7 +221,10 @@ private class G2GattLink(
                 characteristic: BluetoothGattCharacteristic,
                 value: ByteArray,
             ) {
-                if (characteristic.uuid == G2Protocol.NOTIFY_CHARACTERISTIC) channel.trySend(value.copyOf())
+                when (characteristic.uuid) {
+                    G2Protocol.NOTIFY_CHARACTERISTIC -> channel.trySend(value.copyOf())
+                    G2Protocol.AUDIO_CHARACTERISTIC -> audioChannel.trySend(value.copyOf())
+                }
             }
         }
 
@@ -254,17 +261,28 @@ private class G2GattLink(
         val notify =
             characteristics.firstOrNull { it.uuid == G2Protocol.NOTIFY_CHARACTERISTIC }
                 ?: throw G2Exception("notify characteristic not found")
+        enableNotifications(gatt, notify)
+        val audio = characteristics.firstOrNull { it.uuid == G2Protocol.AUDIO_CHARACTERISTIC }
+        if (audio != null) enableNotifications(gatt, audio)
+        writeCharacteristic = write
+    }
+
+    private suspend fun enableNotifications(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+    ) {
         val config =
-            notify.getDescriptor(G2Protocol.CLIENT_CONFIG_DESCRIPTOR)
-                ?: throw G2Exception("notify characteristic has no configuration descriptor")
-        if (!bluetoothCall("setCharacteristicNotification") { gatt.setCharacteristicNotification(notify, true) }) {
-            throw G2Exception("notifications could not be enabled")
+            characteristic.getDescriptor(G2Protocol.CLIENT_CONFIG_DESCRIPTOR)
+                ?: throw G2Exception("characteristic ${characteristic.uuid} has no configuration descriptor")
+        val enabled =
+            bluetoothCall("setCharacteristicNotification") { gatt.setCharacteristicNotification(characteristic, true) }
+        if (!enabled) {
+            throw G2Exception("notifications of ${characteristic.uuid} could not be enabled")
         }
         operation(Operation.DESCRIPTOR_WRITE) {
             it.writeDescriptor(config, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
                 BluetoothStatusCodes.SUCCESS
         }
-        writeCharacteristic = write
     }
 
     override suspend fun write(packet: ByteArray) {
@@ -307,6 +325,7 @@ private class G2GattLink(
         val gatt = gatt ?: return
         this.gatt = null
         channel.close()
+        audioChannel.close()
         try {
             gatt.disconnect()
             gatt.close()
@@ -326,5 +345,8 @@ private class G2GattLink(
         // Bounded: on overflow the oldest packet is dropped, and the assembler discards the
         // partial message it belonged to.
         const val NOTIFICATION_CAPACITY = 256
+
+        // Bounded as well: 3.2 s of microphone packets, the oldest of which are dropped on overflow.
+        const val AUDIO_CAPACITY = 64
     }
 }

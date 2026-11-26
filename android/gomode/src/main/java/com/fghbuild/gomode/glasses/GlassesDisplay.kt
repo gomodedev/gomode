@@ -1,10 +1,11 @@
-// Host-neutral contract for showing text and images on one connected pair of glasses and hearing its gestures.
+// Host-neutral contract for showing text and images on one connected pair of glasses, its gestures, and its microphone.
 package com.fghbuild.gomode.glasses
 
 import android.graphics.Bitmap
 import androidx.core.graphics.scale
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.voice.PNG_MIME_TYPE
+import com.fghbuild.gomode.voice.VOICE_AUDIO_RATE_HZ
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -69,6 +70,16 @@ internal interface GlassesImageDisplay : GlassesDisplay {
      * [GlassesException] when the glasses do not take it.
      */
     suspend fun showImage(image: Bitmap)
+}
+
+/** Glasses whose microphone the phone hears. */
+internal interface GlassesMicrophone : GlassesDisplay {
+    /**
+     * The microphone as [VOICE_AUDIO_RATE_HZ] Hz mono PCM while collected and connected; collecting it
+     * turns the microphone on. Collectors share each array and must not change it. The flow completes
+     * when the connection ends.
+     */
+    val microphone: Flow<ShortArray>
 }
 
 /**

@@ -1,4 +1,4 @@
-// G2GattConnector on Robolectric's Bluetooth: bonding, callback matching, disconnect mid-operation, close after failure.
+// G2GattConnector on Robolectric's Bluetooth: bonding, callback matching, audio, disconnects, close after failure.
 
 package com.fghbuild.eveng2
 
@@ -53,6 +53,7 @@ class G2GattConnectorTest {
     fun setUp() {
         shadowOf(context).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
         ManualGatt.latest = null
+        ManualGatt.withAudio = false
         AutoConnectRecorder.autoConnects.clear()
     }
 
@@ -138,6 +139,42 @@ class G2GattConnectorTest {
             writing.await()
             assertArrayEquals(byteArrayOf(9), link.notifications.receive())
             assertTrue(link.notifications.isEmpty)
+        }
+
+    @Test
+    fun anArmWithTheAudioCharacteristicNotifiesItsPacketsApartUntilTheLinkDrops() =
+        runTest {
+            ManualGatt.withAudio = true
+            val opening = async { connector.connect(ARM, background = false) }
+            runCurrent()
+            val gatt = gatt()
+            gatt.callback.onConnectionStateChange(
+                gatt.real,
+                BluetoothGatt.GATT_SUCCESS,
+                BluetoothProfile.STATE_CONNECTED,
+            )
+            runCurrent()
+            gatt.callback.onMtuChanged(gatt.real, G2Protocol.REQUESTED_MTU, BluetoothGatt.GATT_SUCCESS)
+            runCurrent()
+            gatt.callback.onServicesDiscovered(gatt.real, BluetoothGatt.GATT_SUCCESS)
+            runCurrent()
+            gatt.callback.onDescriptorWrite(gatt.real, gatt.config, BluetoothGatt.GATT_SUCCESS)
+            runCurrent()
+            assertFalse(opening.isCompleted)
+            gatt.callback.onDescriptorWrite(gatt.real, gatt.audioConfig, BluetoothGatt.GATT_SUCCESS)
+            runCurrent()
+            val link = opening.await()
+            assertEquals(listOf(gatt.config, gatt.audioConfig), gatt.described)
+
+            gatt.callback.onCharacteristicChanged(gatt.real, gatt.audio, byteArrayOf(7))
+            gatt.callback.onCharacteristicChanged(gatt.real, gatt.notify, byteArrayOf(9))
+            assertArrayEquals(byteArrayOf(7), link.audio.receive())
+            assertTrue(link.audio.isEmpty)
+            assertArrayEquals(byteArrayOf(9), link.notifications.receive())
+
+            gatt.callback.onConnectionStateChange(gatt.real, 8, BluetoothProfile.STATE_DISCONNECTED)
+            val lost = runCatching { link.audio.receive() }.exceptionOrNull() as G2LinkLostException
+            assertEquals(8, lost.status)
         }
 
     @Test
@@ -306,7 +343,7 @@ class G2GattConnectorTest {
 /**
  * A GATT client whose operations start and then wait for the callback the test delivers, as a
  * peripheral answers later; Robolectric's own shadow answers each operation at once. Services
- * expose the arm's write and notify characteristics.
+ * expose the arm's write and notify characteristics, and its audio characteristic [withAudio].
  */
 @Implements(BluetoothGatt::class)
 class ManualGatt : ShadowBluetoothGatt() {
@@ -315,6 +352,7 @@ class ManualGatt : ShadowBluetoothGatt() {
 
     val started = mutableListOf<String>()
     val written = mutableListOf<ByteArray>()
+    val described = mutableListOf<BluetoothGattDescriptor>()
     val write =
         BluetoothGattCharacteristic(
             G2Protocol.WRITE_CHARACTERISTIC,
@@ -325,10 +363,16 @@ class ManualGatt : ShadowBluetoothGatt() {
     val notify =
         BluetoothGattCharacteristic(G2Protocol.NOTIFY_CHARACTERISTIC, BluetoothGattCharacteristic.PROPERTY_NOTIFY, 0)
             .also { it.addDescriptor(config) }
+    val audioConfig =
+        BluetoothGattDescriptor(G2Protocol.CLIENT_CONFIG_DESCRIPTOR, BluetoothGattDescriptor.PERMISSION_WRITE)
+    val audio =
+        BluetoothGattCharacteristic(G2Protocol.AUDIO_CHARACTERISTIC, BluetoothGattCharacteristic.PROPERTY_NOTIFY, 0)
+            .also { it.addDescriptor(audioConfig) }
     private val service =
         BluetoothGattService(G2Protocol.WRITE_CHARACTERISTIC, BluetoothGattService.SERVICE_TYPE_PRIMARY).also {
             it.addCharacteristic(write)
             it.addCharacteristic(notify)
+            if (withAudio) it.addCharacteristic(audio)
         }
     val callback: BluetoothGattCallback get() = gattCallback
 
@@ -350,7 +394,7 @@ class ManualGatt : ShadowBluetoothGatt() {
     override fun setCharacteristicNotification(
         characteristic: BluetoothGattCharacteristic,
         enable: Boolean,
-    ): Boolean = characteristic === notify && enable
+    ): Boolean = (characteristic === notify || characteristic === audio) && enable
 
     @Implementation
     override fun writeDescriptor(
@@ -358,6 +402,7 @@ class ManualGatt : ShadowBluetoothGatt() {
         value: ByteArray,
     ): Int {
         started += "DESCRIPTOR_WRITE"
+        described += descriptor
         return 0
     }
 
@@ -373,6 +418,7 @@ class ManualGatt : ShadowBluetoothGatt() {
 
     companion object {
         var latest: ManualGatt? = null
+        var withAudio = false
     }
 }
 

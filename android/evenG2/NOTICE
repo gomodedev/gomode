@@ -12,7 +12,9 @@ f931d52d4716fd150f885f5168b64faabf20783a.
 G2Frame.kt, G2Protobuf.kt, G2Auth.kt, and G2EvenHub.kt port and modify
 G2EvenHubTransport.kt, G2EvenHubCodec.kt, and G2BusinessAuthCodec.kt.
 src/test/resources/even-realities/contract.json is an unmodified copy of
-native/protocol/contract.json.
+native/protocol/contract.json. The microphone command's reply in G2EvenHub.kt
+follows the AUDIO command of G2EvenHubCodec.kt and the acknowledgements in
+native/android/src/test/kotlin/com/evenrealities/devices/G2EvenHubTest.kt.
 
 The NOTICE of the Even Devices SDK reads:
 
@@ -44,6 +46,9 @@ G2Prelude.kt, G2Auth.kt, G2EvenHub.kt, G2Arm.kt, and the golden bytes in
 G2PythonGoldenTest.kt follow its message builders, device event decoder, and
 advertisement format; the device events come from its tests.
 G2Session.kt follows its order after AUTH: prelude, text page, heartbeat.
+G2Microphone.kt and G2GattConnector.kt follow enable_mic of
+transport/session.py, which enables the audio characteristic on both arms, and
+G2PythonGoldenTest.kt holds the bytes of build_audio_control.
 Its pyproject.toml declares the MIT License and the author "eveng2"; the
 repository has no LICENSE file.
 
@@ -66,6 +71,31 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+------------------------------------------------------------------------------
+liblc3 (google/liblc3)
+https://github.com/google/liblc3
+Tag v1.1.3, commit 96a3af0beb5487aca3b98a4b992a539a1f6d80d1.
+
+G2Lc3Decoder.kt ports and modifies the decoder of src/lc3.c, bits.c, bwdet.c,
+spec.c, sns.c, tns.c, ltpf.c, mdct.c, plc.c, and fastmath.h, narrowed to
+frames of 10 ms at 16 kHz. G2Lc3Tables.kt holds the constants of src/tables.c,
+sns.c, and spec.c that it reads. src/test/c/g2_lc3_fixture.c links liblc3 to
+write the fixtures in src/test/resources/lc3/.
+
+    Copyright 2022 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use these files except in compliance with the License. The full text of the
+License is in LICENSE-APACHE-2.0 beside this file, and at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
 
 ------------------------------------------------------------------------------
 @evenrealities/pretext (npm)
@@ -107,8 +137,8 @@ G2Settings.kt ports and modifies buildSettingsQuery,
 parseSettingsFirmwareInfo, and buildFaceclawWakeControl of
 native/kotlin/shared/src/commonMain/kotlin/com/faceclaw/app/g2protocol/
 BleProtocol.kt, and the revision check of app/g2/firmware-compat.ts.
-G2CfwStream.kt ports and modifies g2protocol/CfwTransport.kt. G2Panel.kt
-ports and modifies the stockText, bbox, clear, and message builders of
+G2CfwStream.kt ports and modifies g2protocol/CfwTransport.kt. G2Panel.kt ports
+and modifies the stockText, bbox, clear, and message builders of
 g2protocol/DrawProtocol.kt and the message and call IDs of CfwMessageType.kt,
 DrawCallType.kt, and DrawFlags.kt. G2RingFilter in G2EvenHub.kt ports
 app/ui/input-monitor.ts. G2Battery.kt ports and modifies parseSettingsBattery,
@@ -116,8 +146,17 @@ buildCaseInfoQuery, parseCaseInfo, and CaseInfoSnapshot of BleProtocol.kt, the
 case rules of updateCaseInfoLocked in session/GlassesSessionControls.kt, and
 the battery read of batteryQuery in g2protocol/MessageBuilder.kt; G2Session.kt
 follows the battery poll cadence of g2protocol/ConnectionOptions.kt and
-session/GlassesSessionSend.kt. The golden bytes in G2FaceclawWireTest.kt come
-from tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
+session/GlassesSessionSend.kt. G2Microphone.kt ports and modifies the packet
+layout and the duplicate, late, and missing packet rules of
+native/kotlin/shared/src/commonMain/kotlin/com/faceclaw/app/audio/
+Lc3PacketFramer.kt; the microphone command in G2EvenHub.kt follows
+buildAudioControl of BleProtocol.kt, its reply matching by SID and magic follows
+createAudioControlMessageLocked and resolveAckLocked of
+session/GlassesSessionSend.kt, and G2Session.kt follows startG2AudioCapture
+and the page resume of session/GlassesSessionCore.kt, which takes the
+microphone as off on a new page. The golden bytes in
+G2FaceclawWireTest.kt come from
+tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
 DrawWireTest.kt, and those in G2BatteryTest.kt from GlassesSessionCoreTest.kt.
 
 ------------------------------------------------------------------------------

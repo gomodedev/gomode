@@ -31,6 +31,12 @@ interface G2ArmLink {
      */
     val notifications: ReceiveChannel<ByteArray>
 
+    /**
+     * Notification values of the audio characteristic, [G2Microphone]'s packets, in arrival order;
+     * none when the arm has no such characteristic. The channel closes with the link.
+     */
+    val audio: ReceiveChannel<ByteArray>
+
     /** Write one packet to the write characteristic without response; throws [G2Exception]. */
     suspend fun write(packet: ByteArray)
 

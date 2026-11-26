@@ -3,7 +3,8 @@
 // Generated from even-g2-protocol commit f352806135c1a892eb10ca4d616f9fa0c186fc83 (MIT) by
 // loading transport/transport.py and widgets/evenhub.py with `python3 -I` and calling
 // auth_frame() with its counter at 41, PRELUDE_F5872, build_create_input_page(101, "Hello"),
-// build_text_upgrade(…), build_heartbeat(103), and frame_pb(…, 0xE0, 0x20, seq). The device events
+// build_text_upgrade(…), build_heartbeat(103), build_audio_control(104 and 105, …), and
+// frame_pb(…, 0xE0, 0x20, seq). The device events
 // come from tests/test_g2_widgets.py, which built them by hand from the Even app's proto schema and
 // never sent them to glasses.
 
@@ -30,6 +31,14 @@ class G2PythonGoldenTest {
     fun textUpdateFrame() {
         val golden = "aa210c230101e020080510664a1b0801120964617368626f617264180020082a084869207468657265260e"
         assertEquals(golden, G2EvenHub.updateText(dashboard, "Hi there", magic = 102, sync = 12).single().hex())
+    }
+
+    @Test
+    fun microphoneFrames() {
+        val on = G2EvenHub.microphone(true, magic = 104, sync = 15).single()
+        assertEquals("aa210f0b0101e020080f106892010208013b6e", on.hex())
+        val off = G2EvenHub.microphone(false, magic = 105, sync = 16).single()
+        assertEquals("aa21100b0101e020080f10699201020800ba3b", off.hex())
     }
 
     // The Python create page omits the page session ID (field 7) and its heartbeat body writes

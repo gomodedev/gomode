@@ -17,6 +17,7 @@ import androidx.activity.compose.setContent
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Charge
 import com.fghbuild.eveng2.G2InputEvent
+import com.fghbuild.eveng2.G2Microphone
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Protocol
 import com.fghbuild.eveng2.G2Scanner
@@ -76,6 +77,9 @@ private val G2_PAIR =
         G2Arm(G2Side.RIGHT, G2_RIGHT_ADDRESS, "Even G2_7_R_335502"),
     )
 private val HALO = GlassesDevice.Halo(ADDRESS)
+
+// Five LC3 frames of 40 bytes and a 5-byte trailer.
+private const val G2_MICROPHONE_PACKET_BYTES = 205
 private val G2 = GlassesDevice.EvenG2(G2_PAIR)
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -400,6 +404,41 @@ class GlassesOwnerTest {
                 ),
                 firmware.requests.filter { it.kind != "heartbeat" }.map { it.toString() },
             )
+        }
+
+    @Test
+    fun anEvenG2sMicrophoneRunsWhileCollectedUntilItsConnectionEnds() =
+        runOwnerTest {
+            owner.start()
+            assertEquals(null, owner.microphone.value)
+            owner.connect(G2)
+            val microphone = owner.microphone.first { it != null }!!
+            finishGreeting()
+            assertFalse(firmware.microphone)
+
+            val heard = mutableListOf<ShortArray>()
+            val listening =
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                    microphone.microphone.collect { heard += it }
+                }
+            runCurrent()
+            assertTrue(firmware.microphone)
+            // Any 205 bytes decode to 50 ms of samples.
+            firmware.speak(ByteArray(G2_MICROPHONE_PACKET_BYTES))
+            runCurrent()
+            assertEquals(listOf(G2Microphone.SAMPLES_PER_PACKET), heard.map { it.size })
+
+            owner.disconnect()
+            runCurrent()
+            assertEquals(null, owner.microphone.value)
+            assertTrue(listening.isCompleted)
+            assertFalse(firmware.microphone)
+
+            // The owner keeps its G2Glasses: a finished collector must not start the next connection's microphone.
+            owner.connect(G2)
+            owner.microphone.first { it != null }
+            finishGreeting()
+            assertFalse(firmware.microphone)
         }
 
     @Test

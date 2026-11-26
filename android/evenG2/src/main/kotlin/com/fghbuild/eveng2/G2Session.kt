@@ -57,6 +57,14 @@
 // the charging at once. Nothing awaits a reply: a
 // missing one keeps the last reading, and a session whose arm or case never answers goes on
 // without it.
+//
+// Microphone (G2Microphone): while the host listens and a page is open, the session starts the
+// microphone with an Even Hub command and decodes the packets that either arm notifies, from the
+// start's acknowledgement to the stop or the page's close, into PCM for the host. It stops the
+// microphone when the last listener leaves. Each page starts with the microphone off, as faceclaw
+// takes a page that comes back, so the session starts it again on the next page. An ending session
+// sends no stop: it shuts the page down and closes both links. The decoding runs in the session's
+// context: one packet of five frames took 30 µs on a desktop JVM.
 
 package com.fghbuild.eveng2
 
@@ -65,6 +73,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -133,6 +142,11 @@ private sealed interface Inbound {
     ) : Inbound
 }
 
+private class G2AudioPacket(
+    val side: G2Side,
+    val packet: ByteArray,
+)
+
 internal class G2Session(
     private val pair: G2Pair,
     private val connector: G2ArmConnector,
@@ -140,10 +154,13 @@ internal class G2Session(
     private val page: G2TextPage,
     private val ids: G2Ids,
     private val desired: StateFlow<G2Content>,
+    // How many collectors listen to the microphone; it runs while there is one.
+    private val listeners: StateFlow<Int>,
     private val onReady: (G2Firmware, G2Content) -> Unit,
     private val onGesture: (G2Gesture) -> Unit,
     private val onEvent: (G2InputEvent) -> Unit,
     private val onBattery: (G2Battery) -> Unit,
+    private val onAudio: (ShortArray) -> Unit,
     private val log: (String) -> Unit,
 ) {
     private val links = ConcurrentHashMap<G2Side, G2ArmLink>()
@@ -168,12 +185,26 @@ internal class G2Session(
     // Wakes the battery poll when the glasses enter the case.
     private val docked = Channel<Unit>(Channel.CONFLATED)
 
+    // Both arms' microphone packets, in arrival order, for one decoder.
+    private val audio = Channel<G2AudioPacket>(AUDIO_CAPACITY, BufferOverflow.DROP_OLDEST)
+
+    // The microphone's stream from the acknowledgement of its start to its stop or the page's close;
+    // null while it is off. Only microphone() and stopListening() change it.
+    @Volatile private var listening: G2MicrophoneStream? = null
+
+    // Packets that arrived while the microphone was off, since its last start; a count for the log.
+    @Volatile private var stray = 0L
+
     /** Run until the session ends; returns why. Cancellation closes the page and both links. */
     suspend fun run(): G2CloseCause {
         try {
             coroutineScope {
                 connectBoth()
-                links.values.forEach { pump(this, it) }
+                links.values.forEach {
+                    pump(this, it)
+                    pumpAudio(this, it)
+                }
+                launch { decodeAudio() }
                 authenticate(G2Side.RIGHT)
                 authenticate(G2Side.LEFT)
                 prelude()
@@ -186,6 +217,7 @@ internal class G2Session(
                 launch { pollBattery() }
                 val wake = Channel<Unit>(Channel.CONFLATED)
                 launch { desired.collect { wake.send(Unit) } }
+                launch { listeners.collect { wake.send(Unit) } }
                 servePages(this, firmware, wake)
             }
         } catch (e: G2Closed) {
@@ -199,6 +231,7 @@ internal class G2Session(
             shutdownPage()
             throw e
         } finally {
+            stopListening()
             links.values.forEach { it.close() }
             stream.close()
         }
@@ -263,6 +296,40 @@ internal class G2Session(
                     e.status
                 }
             inbox.send(Inbound.Lost(link.side, status))
+        }
+    }
+
+    /** Forward one arm's microphone packets to [audio]; [pump] reports the link's loss. */
+    private fun pumpAudio(
+        scope: CoroutineScope,
+        link: G2ArmLink,
+    ) {
+        scope.launch {
+            try {
+                for (packet in link.audio) audio.send(G2AudioPacket(link.side, packet))
+            } catch (_: G2LinkLostException) {
+                // The notification pump reports it.
+            }
+        }
+    }
+
+    /** Decode the microphone's packets into PCM for the host while it is on, forever. */
+    private suspend fun decodeAudio(): Nothing {
+        // The stream whose first packet went to the log.
+        var logged: G2MicrophoneStream? = null
+        while (true) {
+            val received = audio.receive()
+            val stream = listening
+            if (stream == null) {
+                stray++
+                continue
+            }
+            if (stream !== logged) {
+                logged = stream
+                val hex = received.packet.joinToString("") { "%02x".format(it) }
+                log("Even G2 first microphone packet from ${received.side}: $hex")
+            }
+            stream.accept(received.side, received.packet)?.let(onAudio)
         }
     }
 
@@ -484,19 +551,61 @@ internal class G2Session(
         command: G2HubCommand,
         build: (magic: Int, sync: Int) -> List<ByteArray>,
     ) {
+        val reply = exchange(command, build) { message, magic, sync -> G2EvenHub.reply(message, command, magic, sync) }
+        if (reply is G2HubReply.Rejected) throw G2Closed(G2CloseCause.CommandRejected(command, reply.result))
+    }
+
+    /**
+     * Send [command] to the right arm and return the first message from it that [reply] matches, given
+     * the request's magic and sync; throws when none comes in time.
+     */
+    private suspend fun <T : Any> exchange(
+        command: G2HubCommand,
+        build: (magic: Int, sync: Int) -> List<ByteArray>,
+        reply: (message: G2Message, magic: Int, sync: Int) -> T?,
+    ): T {
         activity++
         val magic = ids.magic()
         val sync = ids.sync()
         write(G2Side.RIGHT, build(magic, sync))
+        return await(G2Protocol.COMMAND_TIMEOUT_MS) { from, message ->
+            if (from == G2Side.RIGHT) reply(message, magic, sync) else null
+        } ?: throw G2Closed(G2CloseCause.CommandTimedOut(command))
+    }
+
+    // On a pair on 2.3.0.24 with Faceclaw/45, a worn 5 s recording came from the left arm alone: 100
+    // packets, none lost, none duplicated, none from the right arm. Both pumps stay, since one recording
+    // does not show which arm sends on other firmware or when an arm drops.
+    // TODO(hardware): Unverified on a pair: whether the glasses stop the microphone when they close the
+    // page. faceclaw takes a page that comes back as one with the microphone off, which this follows.
+    // Each start logs the packets that came while it was off. Record with the glasses on, take them off
+    // and on so that the page comes back, and read the log: if packets came between the close and the
+    // next start, the close leaves the microphone on, and the session must either stop it before the
+    // next page or keep its stream across pages. The decoding fixtures are liblc3's encoding of a
+    // synthetic signal: each start logs its first packet in hex, so a recording on a pair can give a
+    // fixture of the glasses' own encoder.
+
+    /** Start the microphone when [on], else stop it; any reply with the request's magic counts, as faceclaw counts it. */
+    private suspend fun microphone(on: Boolean) {
+        if (!on) stopListening()
+        val command = if (on) G2HubCommand.MICROPHONE_ON else G2HubCommand.MICROPHONE_OFF
         val reply =
-            await(G2Protocol.COMMAND_TIMEOUT_MS) { from, message ->
-                if (from == G2Side.RIGHT) G2EvenHub.reply(message, command, magic, sync) else null
+            exchange(command, { magic, sync -> G2EvenHub.microphone(on, magic, sync) }) { message, magic, _ ->
+                G2EvenHub.microphoneReply(message, magic)
             }
-        when (reply) {
-            null -> throw G2Closed(G2CloseCause.CommandTimedOut(command))
-            is G2HubReply.Rejected -> throw G2Closed(G2CloseCause.CommandRejected(command, reply.result))
-            G2HubReply.Success -> Unit
+        if (!reply.expected(command)) log("Even G2 $command answered $reply")
+        if (on) {
+            log("Even G2 microphone on; $stray packets came while it was off")
+            stray = 0
+            listening = G2MicrophoneStream()
         }
+    }
+
+    // The microphone's stream ends; its counts go to the log.
+    private fun stopListening() {
+        val stream = listening ?: return
+        listening = null
+        log("Even G2 microphone off: $stream")
     }
 
     /**
@@ -581,6 +690,7 @@ internal class G2Session(
             } finally {
                 settling.cancel()
                 beating.cancel()
+                stopListening()
             }
             if (pause > 0) {
                 log("Even G2 page reopens in $pause ms")
@@ -591,7 +701,10 @@ internal class G2Session(
         }
     }
 
-    /** Show the host's content until the page closes; unsolicited messages only matter as page exits and gestures. */
+    /**
+     * Show the host's content and run the microphone while the host listens, until the page closes;
+     * unsolicited messages only matter as page exits and gestures.
+     */
     private suspend fun serve(
         firmware: G2Firmware,
         initial: G2Content,
@@ -600,7 +713,10 @@ internal class G2Session(
         var shown = initial
         while (true) {
             val target = shown(firmware, desired.value)
-            if (target == shown) {
+            val listen = listeners.value > 0
+            if (listen != (listening != null)) {
+                microphone(listen)
+            } else if (target == shown) {
                 select<Unit> {
                     wake.onReceive { }
                     inbox.onReceive { accept(it) }
@@ -651,6 +767,9 @@ internal class G2Session(
 
     private companion object {
         const val INBOX_CAPACITY = 64
+
+        // 3.2 s of microphone packets; the oldest are dropped on overflow.
+        const val AUDIO_CAPACITY = 64
 
         // The Python library spaces the packets of one message 50 ms apart and reports that the
         // glasses need it.
