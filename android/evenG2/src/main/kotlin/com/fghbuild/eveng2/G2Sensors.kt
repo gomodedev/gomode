@@ -1,6 +1,6 @@
 // G2Sensors: worn, head, accelerometer, and on Faceclaw firmware light and compass, as an Even G2 session reports them.
 //
-// Ported and modified from parseWearState, buildImuControl, and readFloatFieldValue of
+// Ported and modified from parseWearState, buildSetWearDetection, buildImuControl, and readFloatFieldValue of
 // BleProtocol.kt, the IMU sample of G2Event.kt, and the frame of session/ImuOrientation.kt of
 // jimrandomh/faceclaw (GPL-3.0), and from its parseFaceclawAlsReport and parseCompassPayload of
 // BleProtocol.kt, app/native/ambient-light-types.ts, alsPassivePayload of
@@ -13,8 +13,9 @@
 //   header flag, since stock firmware sends it with flag 0x00. g2flash says the stock sender first
 //   checks which app runs, and its own faceclaw_send_wear_event sends the same bytes from the right
 //   arm on Faceclaw firmware in answer to G2Settings.WEAR_QUERY, which the session sends once per
-//   connection so the state shows before the wearer moves. faceclaw also turns the stock wear
-//   detector on with a settings write; this SDK leaves the wearer's setting alone.
+//   connection so the state shows before the wearer moves. Before that query the session turns the
+//   stock wear detector on with faceclaw's settings write (G2Settings.enableWearDetection), as
+//   faceclaw's enableWearDetectionAndRequestState does: the setting stays on after the session.
 // - Head up and down: system events 12 and 15 (G2InputEvent.HEAD_UP and HEAD_DOWN), which only
 //   Faceclaw firmware sends while a page is open (gesture_fwd.c), and only while the stock head-up
 //   setting is on.
@@ -43,8 +44,10 @@
 //   on SID 0x08, {1: 15, 2: 0, 10: {1: degrees 0..359}, 100: 12 diagnostic bytes}; compass.c writes the
 //   heading field even for 0.
 //
+// On a pair on 2.3.0.24 with Faceclaw/45, the right arm answered the wear query and sent each wear
+// change while Go Mode's page was open, once the session had turned the detector on.
 // TODO(hardware): Unverified on a pair: that stock firmware sends the wear event while Go Mode's
-// page is open, that Faceclaw/45 answers the wear query, which arm sends each, that the IMU start
+// page is open, that the IMU start
 // streams samples at pace 200 and how often, and whether a closed page stops the stream. The
 // session logs each wear event with its arm, each IMU start and stop with its reply and sample
 // count, the first sample of each start in hex, and the samples that arrived while it took the

@@ -67,6 +67,8 @@ internal object G2Settings {
     internal const val REQUEST_FIELD = 4
     private const val REVISION_FIELD = 100
     private const val CONTROL_FIELD = 101
+    private const val WRITE_FIELD = 3
+    private const val WEAR_DETECTION_FIELD = 5
 
     /** Arms or renews the framebuffer lease. */
     const val LEASE_ACQUIRE = 5
@@ -108,6 +110,35 @@ internal object G2Settings {
         if (echoed != magic.toLong()) return null
         val revision = fields.firstOrNull { (number, field) -> number == REVISION_FIELD && field.wire == 2 }
         return G2Firmware.of(revision?.second?.bytes?.let(::decodeUtf8))
+    }
+
+    /**
+     * Turns the stock wear detector on (DeviceReceiveInfoFromAPP field 5), as faceclaw's
+     * buildSetWearDetection writes it before its wear query: with the detector off, the firmware
+     * reports the glasses not worn and sends no wear events.
+     */
+    fun enableWearDetection(
+        magic: Int,
+        sync: Int,
+    ): List<ByteArray> {
+        require(magic in G2EvenHub.MAGIC_RANGE) { "magic $magic" }
+        val payload =
+            protobuf {
+                scalar(1, WRITE)
+                scalar(2, magic.toLong())
+                bytes(WRITE_FIELD, protobuf { bytes(WEAR_DETECTION_FIELD, protobuf { scalar(1, 1) }) })
+            }
+        return G2Frame.packets(payload, G2Protocol.SID_SETTINGS, G2Protocol.FLAG_SYNC_BOTH, sync)
+    }
+
+    /** Whether [message] is a settings reply that echoes [magic]. */
+    fun answers(
+        message: G2Message,
+        magic: Int,
+    ): Boolean {
+        if (message.sid != G2Protocol.SID_SETTINGS) return false
+        val fields = G2ProtoReader.all(message.payload) ?: return false
+        return fields.any { (number, field) -> number == 2 && field.wire == 0 && field.scalar == magic.toLong() }
     }
 
     /** The Faceclaw control [op] for one arm. */

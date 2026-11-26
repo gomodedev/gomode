@@ -67,7 +67,8 @@
 // context: one packet of five frames took 30 µs on a desktop JVM.
 //
 // Sensors (G2Sensors): wear events and head up and down are read from either arm whenever they come;
-// on Faceclaw firmware the session asks both arms for the wear state once, after the lease. While the
+// on Faceclaw firmware the session turns the stock wear detector on and then asks both arms for the
+// wear state once, after the lease. While the
 // host collects the sensors and a page is open, the session streams the accelerometer with an Even Hub
 // command, as it runs the microphone, and stops it when the last collector leaves; each page starts
 // with it off. Its samples are no input: they never delay a battery round. On Faceclaw firmware the
@@ -244,6 +245,7 @@ internal class G2Session(
                     leased = true
                     control(G2Settings.LEASE_ACQUIRE)
                     launch { renewLease() }
+                    enableWearDetection()
                     control(G2Settings.WEAR_QUERY)
                 }
                 launch { pollBattery() }
@@ -573,6 +575,22 @@ internal class G2Session(
         } ?: G2Firmware.EvenHub(null)
     }
 
+    // A pair on 2.3.0.24 with Faceclaw/45 answered the wear query "not worn" while worn and sent no
+    // wear event on taking the glasses off and on until this write, as faceclaw makes it before its
+    // query; after it, the query answered "worn" and the right arm sent "not worn" and "worn" as the
+    // glasses came off and went back on, with the accelerometer streaming.
+
+    /** Turn the stock wear detector on, on the right arm, and log its reply, so the next wear query reads it. */
+    private suspend fun enableWearDetection() {
+        val magic = ids.magic()
+        write(G2Side.RIGHT, G2Settings.enableWearDetection(magic, ids.sync()))
+        val reply =
+            await(G2Protocol.COMMAND_TIMEOUT_MS) { from, message ->
+                message.takeIf { from == G2Side.RIGHT && G2Settings.answers(it, magic) }
+            }
+        log("Even G2 wear detection on: ${reply?.let { "result ${it.result}: ${it.payload.hex()}" } ?: "no answer"}")
+    }
+
     /** Send Faceclaw control [op] to both arms. */
     private suspend fun control(op: Int) {
         write(G2Side.RIGHT, G2Settings.control(op, ids.sync()))
@@ -811,10 +829,11 @@ internal class G2Session(
         }
     }
 
-    // TODO(hardware): Why the glasses close the page is not established. On a pair, taking the
-    // glasses off and putting them back on brought an exit (7) from an unspecified source naming
-    // this page's widget and session from the right arm; hypotheses are the stock heartbeat
-    // timeout and the stock quit dialog. The host log now shows each exit's type, source, and reason
+    // TODO(hardware): Why the glasses close the page is not established. On a pair on 2.3.0.24 with
+    // Faceclaw/45, putting the glasses back on brought an exit (7) with no reason 0.5 s after the
+    // right arm reported them worn, and the next create was acknowledged within a second, so the
+    // page came back without a tap on the phone; hypotheses are the stock wear handler, the stock
+    // heartbeat timeout, and the stock quit dialog. The host log now shows each exit's type, source, and reason
     // (field 4), and each create's request and acknowledgement: on a pair, take them off and on and
     // record whether the create is acknowledged while they are off. If the firmware refuses or
     // closes pages until they are worn again, create the next page on the wear event instead of
