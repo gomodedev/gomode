@@ -160,7 +160,11 @@ the IMU sample of g2protocol/G2Event.kt, and the axes of
 session/ImuOrientation.kt; its wear query follows faceclawWearQuery of
 MessageBuilder.kt and enableWearDetectionAndRequestState of
 GlassesSessionCore.kt, and its report pace app/apps/developer/
-accelerometer-demo.ts. The golden bytes in
+accelerometer-demo.ts. Its light reports and headings port and modify
+parseFaceclawAlsReport and parseCompassPayload of BleProtocol.kt and
+app/native/ambient-light-types.ts, and their controls follow alsPassivePayload
+of session/GlassesSessionBrightness.kt and enqueueCompassControlLocked of
+session/GlassesSessionSend.kt. The golden bytes in
 G2FaceclawWireTest.kt come from
 tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
 DrawWireTest.kt, and those in G2BatteryTest.kt from GlassesSessionCoreTest.kt.
@@ -174,8 +178,8 @@ scripts/g2_cfw.py pins.
 The wire formats in G2Settings.kt, G2CfwStream.kt, G2Panel.kt, G2EvenHub.kt,
 G2Sensors.kt, and the fake glasses in src/testFixtures/ follow
 patches/settings_ext.c, message_transport.c, transport_compression.c,
-zlib_glue.c, display_list.c, rle.h, texture_draw.c, and gesture_fwd.c, the
-receivers of the messages above.
+zlib_glue.c, display_list.c, rle.h, texture_draw.c, gesture_fwd.c,
+als_sensor.c, and compass.c, the receivers and senders of the messages above.
 
 Both projects are free software: you can redistribute and/or modify them under
 the terms of the GNU General Public License as published by the Free Software

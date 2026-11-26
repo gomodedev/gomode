@@ -1,4 +1,4 @@
-// Sensor readings of G2Glasses on fake firmware: wear events and query, head up and down, and the accelerometer's stream.
+// G2Glasses' sensors on fake firmware: wear events and query, head up and down, accelerometer, light, compass.
 
 package com.fghbuild.eveng2
 
@@ -105,5 +105,44 @@ class G2SensorsTest {
             advanceTimeBy(G2Protocol.COMMAND_TIMEOUT_MS + 1)
             assertEquals(listOf("RIGHT imu on", "RIGHT imu off"), firmware.imuRequests())
             assertFalse(firmware.imu)
+        }
+
+    @Test
+    fun faceclawFirmwareRunsTheLightSensorAndCompassWhileCollected() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.revision = "Faceclaw/45"
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair())
+            glasses.state.first { it is G2State.Ready }
+            runCurrent()
+            val seen = mutableListOf<G2Sensors>()
+            val reading = read(glasses, seen)
+            // After the accelerometer's start, whose reply is awaited.
+            advanceTimeBy(G2Protocol.COMMAND_TIMEOUT_MS + 1)
+            assertTrue(firmware.light)
+            assertTrue(firmware.compass)
+            firmware.shine(123)
+            firmware.turn(0)
+            runCurrent()
+            assertEquals(123L, seen.last().light)
+            assertEquals(0, seen.last().heading)
+
+            reading.cancel()
+            advanceTimeBy(G2Protocol.COMMAND_TIMEOUT_MS + 1)
+            assertFalse(firmware.light)
+            assertFalse(firmware.compass)
+        }
+
+    @Test
+    fun stockFirmwareRunsNeitherTheLightSensorNorTheCompass() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair())
+            glasses.state.first { it is G2State.Ready }
+            read(glasses, mutableListOf())
+            advanceTimeBy(G2Protocol.COMMAND_TIMEOUT_MS + 1)
+            assertTrue(firmware.requests.none { it.kind == "light" || it.kind == "compass" })
         }
 }

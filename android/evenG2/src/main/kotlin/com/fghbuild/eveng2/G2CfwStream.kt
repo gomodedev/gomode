@@ -56,8 +56,8 @@ internal class G2CfwStream : AutoCloseable {
         mtu: Int,
     ): List<ByteArray> = split(record(message), stream, mtu)
 
-    // Start a new zlib context with the next record.
-    private fun reset() {
+    /** Start a new zlib context with the next record, as after a NACK, which resets the receiver's. */
+    fun reset() {
         deflater?.reset()
         resetPending = true
     }

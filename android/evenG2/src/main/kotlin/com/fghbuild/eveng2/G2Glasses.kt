@@ -83,8 +83,9 @@ class G2Glasses(
 
     /**
      * The current session's sensor readings, each null until its first; see [G2Sensors]. Collecting this
-     * flow streams the accelerometer while a page is open; its reading is null again once the last
-     * collector leaves. Whether the glasses are worn and where the head went come without collectors.
+     * flow streams the accelerometer while a page is open, and on Faceclaw firmware the light sensor and
+     * compass; their readings are null again once the last collector leaves. Whether the glasses are
+     * worn and where the head went come without collectors.
      */
     val sensors: Flow<G2Sensors> =
         mutableSensors

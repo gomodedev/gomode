@@ -70,7 +70,10 @@
 // on Faceclaw firmware the session asks both arms for the wear state once, after the lease. While the
 // host collects the sensors and a page is open, the session streams the accelerometer with an Even Hub
 // command, as it runs the microphone, and stops it when the last collector leaves; each page starts
-// with it off. Its samples are no input: they never delay a battery round.
+// with it off. Its samples are no input: they never delay a battery round. On Faceclaw firmware the
+// same collectors also run the ambient light sensor and the compass through the private stream; they
+// outlive pages, a refused or unanswered control is logged and leaves the session up, and an exit
+// stops the compass, best effort, while the lease's release stops the light sensor.
 
 package com.fghbuild.eveng2
 
@@ -214,6 +217,14 @@ internal class G2Session(
     // Samples since the stream's last start, and those that came while it was off; counts for the log.
     private var imuSamples = 0L
     private var strayImu = 0L
+
+    // Whether Faceclaw firmware's light sensor and compass may run: set before their start is written,
+    // cleared before their stop. Only faceclawSensors() changes it.
+    @Volatile private var faceclawSensors = false
+
+    // Light reports and headings since their last start; counts for the log.
+    private var lightReports = 0L
+    private var headings = 0L
 
     /** Run until the session ends; returns why. Cancellation closes the page and both links. */
     suspend fun run(): G2CloseCause {
@@ -410,6 +421,14 @@ internal class G2Session(
             log("Even G2 $side reports the glasses ${if (worn) "worn" else "not worn"}: ${message.payload.hex()}")
             updateSensors { it.copy(wearing = worn) }
         }
+        G2SensorCodec.light(message)?.let { light ->
+            if (lightReports++ == 0L) log("Even G2 first light report from $side, $light: ${message.payload.hex()}")
+            if (faceclawSensors) updateSensors { it.copy(light = light) }
+        }
+        G2SensorCodec.heading(message)?.let { heading ->
+            if (headings++ == 0L) log("Even G2 first heading from $side, $heading°: ${message.payload.hex()}")
+            if (faceclawSensors) updateSensors { it.copy(heading = heading) }
+        }
         val sample = G2EvenHub.acceleration(message) ?: return
         if (!imu) {
             strayImu++
@@ -432,7 +451,9 @@ internal class G2Session(
         side: G2Side,
         message: G2Message,
     ) {
-        if (message.sid == G2Protocol.SID_SETTINGS || message.sid == G2Protocol.SID_CASE) {
+        // Light reports come twice a second; readSensors logs the first.
+        val settings = message.sid == G2Protocol.SID_SETTINGS && G2SensorCodec.light(message) == null
+        if (settings || message.sid == G2Protocol.SID_CASE) {
             val sid = "%02x".format(message.sid)
             log("Even G2 $side reply on SID 0x$sid, result ${message.result}: ${message.payload.hex()}")
         }
@@ -565,11 +586,22 @@ internal class G2Session(
         }
     }
 
-    /** Best effort, after the pumps stop: release the lease on every arm whose link remains. */
+    /**
+     * Best effort, after the pumps stop: stop the compass, which nothing else stops, then release the
+     * lease on every arm whose link remains, which stops the light sensor.
+     */
     private suspend fun releaseLease() {
         if (!leased) return
         withContext(NonCancellable) {
             withTimeoutOrNull(G2Protocol.COMMAND_TIMEOUT_MS) {
+                val left = links[G2Side.LEFT]
+                if (faceclawSensors && left != null) {
+                    try {
+                        stream.packets(G2SensorCodec.compass(false), ids.stream(), left.mtu).forEach { left.write(it) }
+                    } catch (_: G2Exception) {
+                        // The link is gone; the compass runs until a later session stops it.
+                    }
+                }
                 for (link in listOfNotNull(links[G2Side.RIGHT], links[G2Side.LEFT])) {
                     try {
                         G2Settings.control(G2Settings.LEASE_RELEASE, ids.sync()).forEach { link.write(it) }
@@ -581,7 +613,7 @@ internal class G2Session(
         }
     }
 
-    /** Send [message] on the private stream and wait until both lenses acknowledge it. */
+    /** Send [message] on the private stream and wait until both lenses acknowledge it; throws otherwise. */
     private suspend fun cfw(message: ByteArray) {
         // TODO(hardware): Every drawing message waits for its ACK before the next one goes out; faceclaw
         // keeps three in flight. g2flash says a PRESENT fails when the display task does not answer within
@@ -591,6 +623,15 @@ internal class G2Session(
         // message once with a reset record before ending the session. faceclaw also requests
         // CONNECTION_PRIORITY_HIGH on each arm, which G2GattConnector does not; g2flash's firmware asks
         // for a 7.5 ms interval on its own (patches/ble_link.c). If frames are slow, request it too.
+        val outcome = send(message)
+        if (outcome != true) throw G2Closed(G2CloseCause.DrawFailed(rejected = outcome == false))
+    }
+
+    /**
+     * Send [message] on the private stream and wait for both lenses: true when both acknowledge it, false
+     * when one refuses it, and null without both answers in time.
+     */
+    private suspend fun send(message: ByteArray): Boolean? {
         activity++
         val link = links.getValue(G2Side.LEFT)
         val id = ids.stream()
@@ -607,7 +648,28 @@ internal class G2Session(
                     else -> true.takeIf { acked.add(ack.lens) && acked.size == 2 }
                 }
             }
-        if (outcome != true) throw G2Closed(G2CloseCause.DrawFailed(rejected = outcome == false))
+        return outcome
+    }
+
+    /** Start Faceclaw firmware's light sensor and compass when [on], else stop them; a failure is logged. */
+    private suspend fun faceclawSensors(on: Boolean) {
+        if (on) {
+            lightReports = 0
+            headings = 0
+            faceclawSensors = true
+        } else {
+            faceclawSensors = false
+            log("Even G2 light and compass off after $lightReports light reports and $headings headings")
+            updateSensors { it.copy(light = null, heading = null) }
+        }
+        val controls = listOf("light" to G2SensorCodec.ambientLight(on), "compass" to G2SensorCodec.compass(on))
+        for ((name, message) in controls) {
+            val outcome = send(message)
+            val answer = outcome?.let { if (it) "ACK" else "NACK" } ?: "no answer"
+            log("Even G2 $name ${if (on) "start" else "stop"}: $answer")
+            // A refusal resets the lens's zlib context; an unanswered message may have.
+            if (outcome != true) stream.reset()
+        }
     }
 
     private suspend fun draw(content: G2Content) = G2Draw.frame(content).forEach { cfw(it) }
@@ -813,6 +875,8 @@ internal class G2Session(
                 microphone(listen)
             } else if (stream != imu) {
                 imu(stream)
+            } else if (firmware is G2Firmware.Faceclaw && stream != faceclawSensors) {
+                faceclawSensors(stream)
             } else if (target == shown) {
                 select<Unit> {
                     wake.onReceive { }

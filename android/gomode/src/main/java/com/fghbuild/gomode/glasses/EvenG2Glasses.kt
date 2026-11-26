@@ -8,7 +8,8 @@
 // The session polls the glasses' battery and the case's; batteries are G2Glasses.battery. The
 // microphone is G2Glasses.microphone and the sensors G2Glasses.sensors, which run while collected;
 // they outlive the connection, so a connection's flows complete when that connection ends. Head up
-// and down come only from Faceclaw firmware (see G2Sensors.kt), so only its sensors list the head.
+// and down, ambient light, and the compass come only from Faceclaw firmware (see G2Sensors.kt), so
+// only its sensors list them.
 //
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
 // another. connect() returns at the session's first G2State.Ready and fails if it reaches
@@ -356,14 +357,28 @@ internal fun glassesSensors(
 ): GlassesSensors {
     val report =
         when (firmware) {
-            is G2Firmware.Faceclaw -> listOf(GlassesSensor.WORN, GlassesSensor.HEAD, GlassesSensor.ACCELEROMETER)
-            is G2Firmware.EvenHub -> listOf(GlassesSensor.WORN, GlassesSensor.ACCELEROMETER)
+            is G2Firmware.Faceclaw -> {
+                listOf(
+                    GlassesSensor.WORN,
+                    GlassesSensor.HEAD,
+                    GlassesSensor.ACCELEROMETER,
+                    GlassesSensor.LIGHT,
+                    GlassesSensor.HEADING,
+                )
+            }
+
+            is G2Firmware.EvenHub -> {
+                listOf(GlassesSensor.WORN, GlassesSensor.ACCELEROMETER)
+            }
         }
     return GlassesSensors(
         report = report,
         worn = sensors.wearing,
         headUp = sensors.head?.let { it == G2Head.UP },
         acceleration = sensors.acceleration?.let { GlassesAcceleration(it.x, it.y, it.z) },
+        // g2flash's als_sensor.c gives the stock driver's unit as roughly a tenth of a lux.
+        lux = sensors.light?.let { it / 10f },
+        heading = sensors.heading,
     )
 }
 

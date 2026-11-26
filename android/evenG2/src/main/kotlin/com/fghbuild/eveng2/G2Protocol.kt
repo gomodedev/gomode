@@ -43,6 +43,9 @@ object G2Protocol {
     /** Service ID of device configuration, which carries AUTH. */
     const val SID_DEVICE_CONFIG = 0x80
 
+    /** Service ID of navigation, whose notifications carry the compass's heading; see [G2SensorCodec]. */
+    const val SID_NAVIGATION = 0x08
+
     /** Service ID of device settings, whose read reports the firmware; see [G2Settings]. */
     const val SID_SETTINGS = 0x09
 

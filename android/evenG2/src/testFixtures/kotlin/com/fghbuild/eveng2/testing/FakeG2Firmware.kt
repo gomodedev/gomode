@@ -11,7 +11,9 @@
 // on SID 0xF0 that both lenses acknowledge through the receiving arm, as g2flash's
 // patches/message_transport.c does. The right arm sends wear events, and answers the wear query on
 // Faceclaw firmware; the accelerometer streams the test's samples from a start until a stop or the
-// page's close, and answers neither, since no source shows the reply. Also holds a fake scan.
+// page's close, and answers neither, since no source shows the reply. On Faceclaw firmware the lenses
+// take the light sensor's and the compass's controls without the lease, as g2flash's zlib_glue.c
+// does, and the right arm sends the test's light reports and headings. Also holds a fake scan.
 
 package com.fghbuild.eveng2.testing
 
@@ -76,6 +78,14 @@ class FakeG2Firmware {
 
     /** Whether the accelerometer streams: from a start to a stop or the close of the page. */
     @Volatile var imu = false
+        private set
+
+    /** Whether the light sensor polls, from its start to its stop or the lease's release. */
+    @Volatile var light = false
+        private set
+
+    /** Whether the compass runs, from its start to its stop. */
+    @Volatile var compass = false
         private set
 
     /** Whether the glasses are on the head, which the wear query reports; null for no state yet. */
@@ -303,6 +313,34 @@ class FakeG2Firmware {
         deviceEvent(G2Side.RIGHT, proto { bytes(3, system) })
     }
 
+    /** The right arm reports a light [value] in the stock driver's units; the light sensor must poll. */
+    fun shine(value: Long) {
+        check(light) { "the light sensor is off" }
+        val report =
+            byteArrayOf('A'.code.toByte(), 'L'.code.toByte(), 1, 2, 0x0B, 3) +
+                ByteArray(4) { (value ushr (8 * it)).toByte() } +
+                ByteArray(14)
+        val payload =
+            proto {
+                scalar(1, 3)
+                scalar(2, 0)
+                bytes(105, report)
+            }
+        link(G2Side.RIGHT).notify(G2Protocol.SID_SETTINGS, 0, G2Protocol.FLAG_NOTIFY, payload)
+    }
+
+    /** The right arm reports a compass heading of [degrees], as g2flash's compass.c writes it; the compass must run. */
+    fun turn(degrees: Int) {
+        check(compass) { "the compass is off" }
+        val payload =
+            proto {
+                scalar(1, 15)
+                scalar(2, 0)
+                bytes(10, proto { scalar(1, degrees.toLong()) })
+            }
+        link(G2Side.RIGHT).notify(G2Protocol.SID_NAVIGATION, 0, G2Protocol.FLAG_NOTIFY, payload)
+    }
+
     /**
      * The arms in [sides] notify one microphone [packet] each on their audio characteristic; the
      * microphone must run.
@@ -470,6 +508,7 @@ class FakeG2Firmware {
 
                     6 -> {
                         leases -= link.side
+                        if (leases.isEmpty()) light = false
                     }
 
                     7 -> {
@@ -512,6 +551,16 @@ class FakeG2Firmware {
         message: ByteArray,
         record: (String, String?) -> Unit,
     ): Boolean {
+        if (message.size >= 2 && message[0].toInt() == 10) {
+            compass = message[1].toInt() != 0
+            record("compass", if (compass) "on" else "off")
+            return true
+        }
+        if (message.size >= 2 && message[0].toInt() == 16) {
+            light = message[1].toInt() == 1
+            record("light", if (light) "on" else "off")
+            return true
+        }
         if (!draws || message.isEmpty() || leases.size < 2) return false
         return when (message[0].toInt()) {
             26 -> {

@@ -181,8 +181,15 @@ private fun SensorRow(
 private fun GlassesSensors.reading(sensor: GlassesSensor): String? =
     when (sensor) {
         GlassesSensor.WORN -> worn?.let { if (it) "Yes" else "No" }
+
         GlassesSensor.HEAD -> headUp?.let { if (it) "Up" else "Down" }
+
         GlassesSensor.ACCELEROMETER -> acceleration?.let { "x %+.2f  y %+.2f  z %+.2f g".format(it.x, it.y, it.z) }
+
+        // Approximate: the unit is the firmware's, roughly a tenth of a lux.
+        GlassesSensor.LIGHT -> lux?.let { "≈ %.0f lx".format(it) }
+
+        GlassesSensor.HEADING -> heading?.let { "$it°" }
     }
 
 // Records the glasses' microphone to a file that adb can pull; the log names its path. Play, shown once
