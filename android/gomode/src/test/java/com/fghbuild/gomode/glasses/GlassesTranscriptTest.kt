@@ -1,4 +1,4 @@
-// Tests the transcript lines glasses show, held tool content and its screens, frame coalescing, and clearing.
+// Tests the transcript lines glasses show, held tool content and its scrolled screens, frame coalescing, and clearing.
 package com.fghbuild.gomode.glasses
 
 import android.graphics.Bitmap
@@ -16,7 +16,10 @@ import com.fghbuild.halo.msg.TextPageData
 import com.fghbuild.voicegateway.sdk.v2.MessageKind
 import com.fghbuild.voicegateway.sdk.v2.TranscriptDraft
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -56,6 +59,7 @@ private const val LINK_REPLY =
 private val G2_FIT = G2ScreenFit(G2TextPage())
 private val HALO = GlassesLink.Connected(HALO_DISPLAY, HaloScreenFit)
 private val G2 = GlassesLink.Connected(G2_DISPLAY, G2_FIT)
+private val NO_SCROLLS = emptyFlow<GlassesScroll>()
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -240,7 +244,7 @@ class GlassesTranscriptTest {
             val voice = MutableStateFlow(VoiceState(transcript = EARLIER))
             val job =
                 launch {
-                    showVoiceTranscript(voice, MutableStateFlow(true), MutableStateFlow(HALO)) {
+                    showVoiceTranscript(voice, MutableStateFlow(true), MutableStateFlow(HALO), NO_SCROLLS) {
                         error("Idle sent $it")
                     }
                 }
@@ -259,6 +263,7 @@ class GlassesTranscriptTest {
                         MutableStateFlow(active(EARLIER)),
                         MutableStateFlow(true),
                         MutableStateFlow(HALO),
+                        NO_SCROLLS,
                     ) { frames += it.text() }
                 }
             runCurrent()
@@ -318,7 +323,15 @@ class GlassesTranscriptTest {
             val voice = MutableStateFlow(active(EARLIER).withUserContent(content))
             val screen = MutableStateFlow<GlassesLink.Connected?>(HALO)
             val frames = mutableListOf<GlassesFrame>()
-            backgroundScope.launch { showVoiceTranscript(voice, MutableStateFlow(false), screen, frames::add) }
+            backgroundScope.launch {
+                showVoiceTranscript(
+                    voice,
+                    MutableStateFlow(false),
+                    screen,
+                    NO_SCROLLS,
+                    frames::add,
+                )
+            }
             runCurrent()
             // Even G2 declares no images, so it draws the text.
             screen.value = G2
@@ -332,45 +345,86 @@ class GlassesTranscriptTest {
         }
 
     @Test
-    fun aLongHeldTextShowsItsScreensInTurnEachForItsReadingTime() =
+    fun aLongHeldTextShowsItsScreensInTurnUntilTheFirstSwipeThenScrollsALinePerSwipe() =
         runTest {
-            val pages = glassesPages(REPLY, HaloScreenFit)
-            assertEquals(List(pages.size) { "${it + 1}/${pages.size}" }, pages.map { it.lines().last() })
-            val frames = follow(MutableStateFlow(active(EARLIER).withUserContent(listOf(UserContent.Text(REPLY)))))
-            assertEquals(pages.take(1), frames)
-            advanceTimeBy(glassesPageMillis(pages[0]) - 1)
+            val lines = HaloScreenFit.lines(REPLY)
+            val first = glassesScreen(lines, 0, HaloScreenFit)
+            val second = glassesScreen(lines, first.end, HaloScreenFit)
+            assertEquals("${first.end}/${lines.size}", first.text.lines().last())
+            val scrolls = MutableSharedFlow<GlassesScroll>()
+            val frames =
+                follow(
+                    MutableStateFlow(active(EARLIER).withUserContent(listOf(UserContent.Text(REPLY)))),
+                    scrolls = scrolls,
+                )
+            assertEquals(listOf(first.text), frames)
+            advanceTimeBy(glassesPageMillis(first.text) + GLASSES_FRAME_INTERVAL_MS)
             runCurrent()
-            assertEquals(pages.take(1), frames)
-            advanceTimeBy(1)
+            assertEquals(listOf(first.text, second.text), frames)
+
+            // From the first swipe, only swipes move the text, a line each, and stop at either end.
+            scrolls.emit(GlassesScroll.BACK)
+            advanceTimeBy(GLASSES_FRAME_INTERVAL_MS)
             runCurrent()
-            assertEquals(pages.take(2), frames)
-            for (page in pages.drop(1)) advanceTimeBy(glassesPageMillis(page))
+            assertEquals(glassesScreen(lines, second.top - 1, HaloScreenFit).text, frames.last())
+            frames.clear()
+            repeat(lines.size) {
+                scrolls.emit(GlassesScroll.BACK)
+                advanceTimeBy(GLASSES_FRAME_INTERVAL_MS)
+            }
             runCurrent()
-            assertEquals(pages + pages.first(), frames)
+            assertEquals(first.text, frames.last())
+            advanceTimeBy(10 * glassesPageMillis(first.text))
+            runCurrent()
+            assertEquals(first.text, frames.last())
+            frames.clear()
+            repeat(lines.size) {
+                scrolls.emit(GlassesScroll.FORWARD)
+                advanceTimeBy(GLASSES_FRAME_INTERVAL_MS)
+            }
+            runCurrent()
+            val tops = frames.map { frame -> lines.indexOf(frame.lines().first()) }
+            assertEquals(tops.indices.map { it + 1 }, tops)
+            assertEquals("${lines.size}/${lines.size}", frames.last().lines().last())
         }
 
     @Test
     fun screensOfAHeldTextEachFitAndKeepEveryWordInOrder() {
-        for (fit in listOf(HaloScreenFit, G2_FIT)) {
-            val text = "$REPLY\n$WIDE_REPLY $LINK_REPLY $QUESTION"
-            val pages = glassesPages(text, fit)
-            assertTrue(pages.size > 1)
-            assertTrue(pages.all(fit::fits))
-            val bodies = pages.mapIndexed { index, page -> page.removeSuffix("\n${index + 1}/${pages.size}") }
-            assertEquals(text.filterNot(Char::isWhitespace), bodies.joinToString("").filterNot(Char::isWhitespace))
+        val text = "$REPLY\n$WIDE_REPLY $LINK_REPLY $QUESTION"
+        for (fit in listOf(HaloScreenFit, G2_FIT, G2PanelFit)) {
+            val lines = fit.lines(text)
+            assertEquals(text.filterNot(Char::isWhitespace), lines.joinToString("").filterNot(Char::isWhitespace))
+            var screen = glassesScreen(lines, 0, fit)
+            val bodies = mutableListOf<String>()
+            while (true) {
+                assertTrue(fit.fits(screen.text))
+                // Each line of a screen is a row of it, so scrolling moves one line.
+                assertEquals(lines.subList(screen.top, screen.end) + "${screen.end}/${lines.size}", screen.text.lines())
+                bodies += lines.subList(screen.top, screen.end)
+                if (screen.end == lines.size) break
+                screen = glassesScreen(lines, screen.end, fit)
+            }
+            assertEquals(lines, bodies)
         }
-        assertEquals(listOf("Build green"), glassesPages("  Build green\n", HaloScreenFit))
-        assertEquals(GLASSES_MAX_PAGES, glassesPages(REPLY.repeat(GLASSES_MAX_PAGES), HaloScreenFit).size)
     }
+
+    @Test
+    fun aHeldTextThatOneScreenShowsShowsWholeWithoutAMarker() =
+        runTest {
+            val frames =
+                follow(MutableStateFlow(active(EARLIER).withUserContent(listOf(UserContent.Text("  Build green\n")))))
+            assertEquals(listOf("Build green"), frames)
+        }
 
     // Records the text a fake display is told to show until the test ends.
     private fun TestScope.follow(
         voice: MutableStateFlow<VoiceState>,
         enabled: MutableStateFlow<Boolean> = MutableStateFlow(true),
         screen: MutableStateFlow<GlassesLink.Connected?> = MutableStateFlow(HALO),
-    ): List<String> {
+        scrolls: Flow<GlassesScroll> = NO_SCROLLS,
+    ): MutableList<String> {
         val frames = mutableListOf<String>()
-        backgroundScope.launch { showVoiceTranscript(voice, enabled, screen) { frames += it.text() } }
+        backgroundScope.launch { showVoiceTranscript(voice, enabled, screen, scrolls) { frames += it.text() } }
         runCurrent()
         return frames
     }

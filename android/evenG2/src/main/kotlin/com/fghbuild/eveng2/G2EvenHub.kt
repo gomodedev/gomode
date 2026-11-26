@@ -38,7 +38,7 @@
 // this page's widget and session closes it. The Python library's live-confirmed create page omits
 // the page session ID (field 7), which the enterprise SDK sends; on a pair, the glasses took a page
 // created with it and named it in an exit while the wearer took them off and put them on. A gesture
-// is a click, a double click, or a long press: a text event that names this page's container, which
+// is a click, a double click, a long press, or a scroll: a text event that names this page's container, which
 // captures input, or a system event from a touchpad or the ring whose widget and session, when
 // present, are this page's. Either arm may report input, as the enterprise SDK accepts it from both.
 // The enterprise contract vector g2_evenhub_click_hex is a text event click, and the Python
@@ -56,8 +56,8 @@
 // of the last; G2RingFilter, ported from faceclaw's app/ui/input-monitor.ts (GPL-3.0), suppresses
 // them as faceclaw does. gesture_fwd.c maps the R1 report type to the event: 0 long press (9), 1
 // click (0), 2 double click (3), 4 and 5 scroll up and down (1, 2), 8 release (10), 9 tap then hold
-// (11), 10 touch-down (14), and any other to 127. So the ring's clicks, double clicks, and long
-// presses are gestures, as are a touchpad's long presses; the other new events are not.
+// (11), 10 touch-down (14), and any other to 127. So the ring's clicks, double clicks, long
+// presses, and scrolls are gestures, as are a touchpad's long presses; the other new events are not.
 //
 // On a pair on 2.3.0.24 with Faceclaw/45, a capture of 7 temple double taps and 6 long presses showed
 // each double click as one type 3 event after a release, with no click before it, and no gesture
@@ -107,6 +107,13 @@ data class G2TextPage(
     }
 
     /**
+     * The lines the stock firmware wraps [text] into in this container, without their line feeds;
+     * see [G2TextLayout]. Joined with line feeds, each shows on one line. The first call reads the
+     * firmware font table unless [loadMetrics] did.
+     */
+    fun lines(text: String): List<String> = G2TextLayout.lines(text, width - 2 * padding)
+
+    /**
      * Whether the container shows all of [text] without scrolling, as the stock firmware wraps it;
      * see [G2TextLayout]. Text over [G2Display.MAX_TEXT_BYTES] never fits: [G2Glasses.show] refuses
      * it. The first call reads the firmware font table unless [loadMetrics] did.
@@ -117,8 +124,7 @@ data class G2TextPage(
         // container puts its first line or whether it spaces lines further apart. On a real pair,
         // show 10 and then 11 lines of "Hg" in the default 576×288 container: 10 should show whole
         // and 11 scroll. If not, correct this.
-        val inner = 2 * padding
-        return G2TextLayout.lines(text, width - inner).size * G2TextLayout.lineHeightPx <= height - inner
+        return lines(text).size * G2TextLayout.lineHeightPx <= height - 2 * padding
     }
 
     companion object {
@@ -363,9 +369,9 @@ object G2EvenHub {
 
     /**
      * The gesture that [message] is on the page identified by [page] and [session]: a click, double
-     * click, or long press on its text container, or one from a temple touchpad or the R1 ring as a
-     * system event. Null for other input, such as a scroll, a release, or a system event of an
-     * unspecified source.
+     * click, long press, or scroll on its text container, or one from a temple touchpad or the R1 ring
+     * as a system event. Null for other input, such as a release, or a system event of an unspecified
+     * source.
      */
     fun gesture(
         message: G2Message,
@@ -408,6 +414,8 @@ object G2EvenHub {
             G2InputEvent.CLICK -> G2GestureType.CLICK
             G2InputEvent.DOUBLE_CLICK -> G2GestureType.DOUBLE_CLICK
             G2InputEvent.LONG_PRESS -> G2GestureType.LONG_PRESS
+            G2InputEvent.SCROLL_UP -> G2GestureType.SCROLL_UP
+            G2InputEvent.SCROLL_DOWN -> G2GestureType.SCROLL_DOWN
             else -> null
         }
 

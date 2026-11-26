@@ -53,6 +53,10 @@ enum class G2GestureType {
     CLICK,
     DOUBLE_CLICK,
     LONG_PRESS,
+
+    // A swipe; the firmware names its direction, not the content it moves.
+    SCROLL_UP,
+    SCROLL_DOWN,
 }
 
 enum class G2GestureSource {

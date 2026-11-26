@@ -43,6 +43,12 @@ internal interface GlassesDisplay {
     val actions: Flow<GlassesAction>
 
     /**
+     * Each swipe that scrolls held text, as GlassesAction.kt maps them, while connected. Empty for
+     * glasses whose gestures scroll nothing. The flow may end when the connection ends.
+     */
+    val scrolls: Flow<GlassesScroll>
+
+    /**
      * Each gesture and system event the glasses report while connected, for the wearer checking
      * their input; [actions] alone says which ones act. Empty for glasses that report only the
      * gestures that act. The flow may end when the connection ends.
@@ -88,6 +94,12 @@ internal interface GlassesMicrophone : GlassesDisplay {
  */
 internal interface ScreenFit {
     fun fits(text: String): Boolean
+
+    /**
+     * [text] wrapped into lines, each of which shows on one row of any screen of them joined with
+     * line feeds, so that a screen can scroll a line at a time.
+     */
+    fun lines(text: String): List<String>
 }
 
 /** Whether glasses with this display draw images: it declares the PNG images the shell decodes. */

@@ -61,9 +61,12 @@ import (
 // session clears it. It shows even when the user hides the transcript on the
 // glasses.
 //
-// The client lays text out. A text longer than one screen shows in screens of
-// at most 20, each ending with a marker such as "2/3", that advance on their
-// own after their reading time and start again after the last. The client
+// The client lays text out. A text longer than one screen shows as a run of
+// its wrapped lines above a marker such as "12/80" that counts the lines read.
+// Screens advance on their own after their reading time and start again after
+// the last, until the wearer's first swipe; from then on, each swipe of a
+// temple or the ring on Even G2 scrolls one line. The client shows at most
+// 65536 characters of a text. The client
 // centres an image, scales one larger than the display down to fit, and picks
 // its 2^BitsPerPixel levels or colours as ColorSpace defines.
 const DisplayExtension = "com.fghbuild.gomode/display"

@@ -41,6 +41,54 @@ abstract class TextLayout(
 
     /** Whether one page holds all of [text], laid out as [TxTextPage] lays out its first page. */
     fun fitsOnePage(text: String): Boolean = !TxTextPage(this, text).also { it.measureNextPage() }.hasMoreText
+
+    /**
+     * [text] wrapped into lines that a page of any of them, joined with line feeds, shows one per
+     * row. They are as wide as the narrowest row of the page whose row count times that width is
+     * largest, so a page of that many lines holds the most text: in a circle, about its inscribed
+     * square, since the outer rows of a fuller page are too narrow for words. Lines wrap at
+     * whitespace and a line feed ends one, as [TxTextPage] wraps them, and blank lines go, as it
+     * collapses them.
+     */
+    fun lines(text: String): List<String> {
+        val paint = textPaint(this)
+        val width = scrollRowWidth(paint).toFloat()
+        val lines = mutableListOf<String>()
+        for (paragraph in text.split('\n')) {
+            var rest = paragraph.trim()
+            while (rest.isNotEmpty()) {
+                val measured = paint.breakText(rest, true, width, null)
+                val cut =
+                    when {
+                        measured >= rest.length -> rest.length
+                        else -> rest.substring(0, measured).indexOfLast { it.isWhitespace() }.takeIf { it > 0 }
+                    } ?: measured.coerceAtLeast(Character.charCount(rest.codePointAt(0)))
+                rest
+                    .substring(0, cut)
+                    .trim()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let(lines::add)
+                rest = rest.substring(cut).trimStart()
+            }
+        }
+        return lines
+    }
+
+    // The narrowest row of the page whose row count times that width is largest.
+    private fun scrollRowWidth(paint: Paint): Int {
+        val lineHeight = lineHeight(paint)
+        var best = 0 to 0
+        var lineCount = 1
+        while (true) {
+            val top = pageTop(lineCount, lineHeight) ?: break
+            val rows = List(lineCount) { lineLayout(top + it * lineHeight, lineHeight) }
+            if (rows.any { it == null }) break
+            val narrowest = rows.minOf { checkNotNull(it).width }
+            if (lineCount * narrowest > best.first * best.second) best = lineCount to narrowest
+            lineCount++
+        }
+        return best.second
+    }
 }
 
 data class LineLayout(
@@ -127,7 +175,7 @@ class TxTextPage(
         if (remainingText.isEmpty()) return null
 
         val paint = textPaint(layout)
-        val lineHeight = max(layout.fontSizePx.toFloat(), paint.fontMetrics.let { it.descent - it.ascent })
+        val lineHeight = layout.lineHeight(paint)
         // Where lines start depends on how many there are, so try each count until one takes the text.
         var page: PageLines? = null
         var lineCount = 1
@@ -292,6 +340,10 @@ internal data class TextLineData(
     val yOffset: Int,
     val lineHeight: Int,
 )
+
+// The height of each line of a page, which the font's ascent and descent may make taller than its size.
+private fun TextLayout.lineHeight(paint: Paint): Float =
+    max(fontSizePx.toFloat(), paint.fontMetrics.let { it.descent - it.ascent })
 
 private fun textPaint(layout: TextLayout): Paint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {

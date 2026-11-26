@@ -45,7 +45,14 @@ object G2Panel {
      * [G2TextPage.loadMetrics] did.
      */
     fun fits(text: String): Boolean =
-        text.toByteArray().size <= G2Display.MAX_TEXT_BYTES && G2TextLayout.lines(text, WIDTH_PX).size <= maxLines
+        text.toByteArray().size <= G2Display.MAX_TEXT_BYTES && lines(text).size <= maxLines
+
+    /**
+     * The lines [G2Glasses.show] wraps [text] into on the panel, without their line feeds. Joined with
+     * line feeds, each shows on one line. The first call reads the firmware font table unless
+     * [G2TextPage.loadMetrics] did.
+     */
+    fun lines(text: String): List<String> = G2TextLayout.lines(text, WIDTH_PX)
 
     // TODO(hardware): g2flash's README says the firmware uses "the full 640x480 resolution of the
     // screens"; nobody has said how much of it a wearer sees. On a pair on Faceclaw/45, draw a

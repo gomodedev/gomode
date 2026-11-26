@@ -6,6 +6,9 @@
 // as a temple's, and its single tap acts on nothing. Stock firmware opens its own
 // menu on a long press, so only Faceclaw firmware, which forwards the long press instead, mutes.
 // Halo's one reported gesture, a single press of its button, starts or stops voice.
+//
+// A swipe of either temple or the ring scrolls held tool text by one line, as glassesScroll maps it,
+// apart from the actions: it acts on nothing else, so nothing needs to tell the wearer it did not act.
 package com.fghbuild.gomode.glasses
 
 import android.content.Context
@@ -26,6 +29,12 @@ internal enum class GlassesAction {
     TOGGLE_VOICE,
 }
 
+/** Which way a swipe scrolls held text: [FORWARD] shows the next line, [BACK] the one before. */
+internal enum class GlassesScroll {
+    BACK,
+    FORWARD,
+}
+
 /** The action that Even G2 [gesture] triggers on [firmware], or null when it acts on nothing. */
 internal fun g2Action(
     gesture: G2Gesture,
@@ -35,6 +44,15 @@ internal fun g2Action(
         G2GestureType.CLICK -> null
         G2GestureType.DOUBLE_CLICK -> GlassesAction.TOGGLE_VOICE
         G2GestureType.LONG_PRESS -> GlassesAction.TOGGLE_MUTE.takeIf { firmware is G2Firmware.Faceclaw }
+        G2GestureType.SCROLL_UP, G2GestureType.SCROLL_DOWN -> null
+    }
+
+/** How Even G2 [gesture] scrolls held text, or null when it is no swipe: scroll down shows the next line. */
+internal fun g2Scroll(gesture: G2Gesture): GlassesScroll? =
+    when (gesture.type) {
+        G2GestureType.SCROLL_DOWN -> GlassesScroll.FORWARD
+        G2GestureType.SCROLL_UP -> GlassesScroll.BACK
+        G2GestureType.CLICK, G2GestureType.DOUBLE_CLICK, G2GestureType.LONG_PRESS -> null
     }
 
 /** The action that a Halo button press of [click] triggers, or null when it acts on nothing. */

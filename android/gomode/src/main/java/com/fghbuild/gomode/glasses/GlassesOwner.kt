@@ -128,7 +128,7 @@ internal data class GlassesState(
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
  * settings, and when [updateAutoConnect] turns it on while no connection runs. Every connection
- * shows the latest [show] frame, or a [notify] notice over it, reports its [actions], keeps its
+ * shows the latest [show] frame, or a [notify] notice over it, reports its [actions] and [scrolls], keeps its
  * battery readings in [state] for every screen that shows them, and offers its [microphone], if it
  * has one. While that frame is blank, a
  * connection first plays a short greeting that confirms it on the glasses; content that is not
@@ -182,6 +182,7 @@ internal class GlassesOwner(
     private val logoRequests =
         MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val mutableActions = MutableSharedFlow<GlassesAction>(extraBufferCapacity = ACTION_BUFFER)
+    private val mutableScrolls = MutableSharedFlow<GlassesScroll>(extraBufferCapacity = ACTION_BUFFER)
     private var scanJob: Job? = null
     private var linkJob: Job? = null
     private var started = false
@@ -257,6 +258,12 @@ internal class GlassesOwner(
      * no Activity is open to start voice, an action instead shows a notice that says why it cannot act.
      */
     val actions: SharedFlow<GlassesAction> = mutableActions.asSharedFlow()
+
+    /**
+     * Each scroll of the connected glasses, see [GlassesDisplay.scrolls], while nobody [inspectInputs].
+     * A scroll that nothing collects, as when no held text shows, is lost.
+     */
+    val scrolls: SharedFlow<GlassesScroll> = mutableScrolls.asSharedFlow()
 
     // Main thread only, like every action.
     private var firstActionHandler: ((GlassesAction) -> Boolean)? = null
@@ -588,7 +595,11 @@ internal class GlassesOwner(
                                 }
                             }
                     }
-                val acting = launch { glasses.actions.collect(::act) }
+                val acting =
+                    launch {
+                        launch { glasses.actions.collect(::act) }
+                        glasses.scrolls.collect { if (inspections.value == 0) mutableScrolls.tryEmit(it) }
+                    }
                 val listening = launch { glasses.events.collect(::record) }
                 val metering =
                     launch {

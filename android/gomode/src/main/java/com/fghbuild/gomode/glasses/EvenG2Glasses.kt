@@ -3,7 +3,8 @@
 // The session's first G2State.Ready names the firmware, and connect() returns the display it
 // draws: on stock firmware, one text container, created on connect and updated in place; on
 // Faceclaw firmware (G2Firmware.Faceclaw), text and images that the SDK draws on the whole panel.
-// The page's text container captures the touchpads and an R1 ring, whose gestures g2Action maps to actions.
+// The page's text container captures the touchpads and an R1 ring, whose gestures g2Action maps to
+// actions and g2Scroll to scrolls.
 // The session polls the glasses' battery and the case's; batteries are G2Glasses.battery. The
 // microphone is G2Glasses.microphone, which runs while collected; it outlives the connection, so a
 // connection's microphone completes when that connection ends.
@@ -104,11 +105,15 @@ internal data class G2ScreenFit(
     val page: G2TextPage,
 ) : ScreenFit {
     override fun fits(text: String): Boolean = page.fits(utf8(text))
+
+    override fun lines(text: String): List<String> = page.lines(utf8(text))
 }
 
 /** The Faceclaw panel: it shows a text whole when [G2Panel.fits] it as [g2Text] sends it. */
 internal data object G2PanelFit : ScreenFit {
     override fun fits(text: String): Boolean = G2Panel.fits(utf8(text))
+
+    override fun lines(text: String): List<String> = G2Panel.lines(utf8(text))
 }
 
 internal sealed class EvenG2Glasses(
@@ -120,6 +125,7 @@ internal sealed class EvenG2Glasses(
 
     override val closeCause: StateFlow<Exception?> = ended.asStateFlow()
     override val actions: Flow<GlassesAction> = glasses.gestures.mapNotNull { g2Action(it, firmware) }
+    override val scrolls: Flow<GlassesScroll> = glasses.gestures.mapNotNull(::g2Scroll)
     override val events: Flow<GlassesEvent> = glasses.events.map(::glassesEvent)
     override val batteries: Flow<List<GlassesBattery>> = glasses.battery.map(::glassesBatteries)
     override val microphone: Flow<ShortArray> =

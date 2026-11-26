@@ -45,6 +45,8 @@ private val HALO_LAYOUT = CircularTextLayout(HaloDisplay.SIZE_PX, HaloDisplay.SI
 /** One page of [haloTextMessages]: Halo shows a text whole when its first page holds all of it. */
 internal data object HaloScreenFit : ScreenFit {
     override fun fits(text: String): Boolean = HALO_LAYOUT.fitsOnePage(text)
+
+    override fun lines(text: String): List<String> = HALO_LAYOUT.lines(text)
 }
 
 /**
@@ -101,6 +103,9 @@ internal class HaloGlasses private constructor(
 
     // Go Mode's Halo app reports only the button's single press.
     override val events: Flow<GlassesEvent> = emptyFlow()
+
+    // Halo has no swipe; its button starts and stops voice.
+    override val scrolls: Flow<GlassesScroll> = emptyFlow()
 
     // Go Mode's Halo app reports no battery.
     override val batteries: Flow<List<GlassesBattery>> = flowOf(emptyList())

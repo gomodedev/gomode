@@ -193,6 +193,7 @@ internal class CarDialVoiceOwner(
                         voice.state,
                         settingsRepository.settings.map { it.showTranscriptOnGlasses },
                         glasses.screen,
+                        glasses.scrolls,
                         glasses::show,
                     )
                 }

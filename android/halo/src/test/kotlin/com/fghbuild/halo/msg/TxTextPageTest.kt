@@ -1,4 +1,4 @@
-// Unit tests for TxTextPage layout in Halo's circle: vertical centring and whether one page holds a text.
+// Unit tests for TxTextPage layout in Halo's circle: vertical centring, whether one page holds a text, and scroll lines.
 package com.fghbuild.halo.msg
 
 import org.junit.Assert.assertEquals
@@ -42,6 +42,23 @@ class TxTextPageTest {
         assertFalse(circle.fitsOnePage(text))
         assertTrue(circle.fitsOnePage(first.lineTexts.joinToString(" ")))
         assertTrue(circle.fitsOnePage(" "))
+    }
+
+    @Test
+    fun aPageOfAnyRunOfLinesShowsEachOnOneRow() {
+        val lines = circle.lines("$LONG_TEXT\n\n  Done.  \n$LONG_TEXT")
+        assertEquals("$LONG_TEXT Done. $LONG_TEXT", lines.joinToString(" "))
+        assertTrue(lines.none { it.isBlank() || it != it.trim() })
+        // Five lines hold the most text at this size; every window of them keeps one line per row.
+        for (start in 0..lines.size - 5) {
+            val window = lines.subList(start, start + 5)
+            val page = checkNotNull(TxTextPage(circle, window.joinToString("\n")).measureNextPage())
+            assertEquals(window, page.lineTexts)
+        }
+        // A word wider than every row breaks between characters.
+        val word = "x".repeat(200)
+        assertEquals(word, circle.lines(word).joinToString(""))
+        assertEquals(emptyList<String>(), circle.lines(" \n "))
     }
 
     // The y of each line's sprite in the page header that TextPageData.pack writes.

@@ -216,9 +216,12 @@ class G2FaceclawSessionTest {
             // Type 2 is a double click (event 3), type 0 a long press (event 9).
             firmware.ringReport(type = 2, event = 3, tick = 1_200)
             firmware.ringReport(type = 0, event = 9, tick = 1_300)
+            // Types 4 and 5 are scrolls up and down (events 1 and 2).
+            firmware.ringReport(type = 4, event = 1, tick = 1_400)
+            firmware.ringReport(type = 5, event = 2, tick = 1_500)
             // A ring touch-down and release, a tap then hold, and the head going up and down are not gestures.
-            firmware.ringReport(type = 10, event = 14, tick = 1_400)
-            firmware.ringReport(type = 8, event = 10, tick = 1_500)
+            firmware.ringReport(type = 10, event = 14, tick = 1_600)
+            firmware.ringReport(type = 8, event = 10, tick = 1_700)
             for (type in listOf(9L, 11L, 12L, 15L)) firmware.systemInput(G2Side.RIGHT, type, source = 1)
             firmware.touch(G2Side.RIGHT, type = 3)
             runCurrent()
@@ -227,6 +230,8 @@ class G2FaceclawSessionTest {
                     G2Gesture(G2GestureType.CLICK, G2GestureSource.RING),
                     G2Gesture(G2GestureType.DOUBLE_CLICK, G2GestureSource.RING),
                     G2Gesture(G2GestureType.LONG_PRESS, G2GestureSource.RING),
+                    G2Gesture(G2GestureType.SCROLL_UP, G2GestureSource.RING),
+                    G2Gesture(G2GestureType.SCROLL_DOWN, G2GestureSource.RING),
                     G2Gesture(G2GestureType.LONG_PRESS, G2GestureSource.RIGHT_TEMPLE),
                     G2Gesture(G2GestureType.DOUBLE_CLICK, null),
                 ),

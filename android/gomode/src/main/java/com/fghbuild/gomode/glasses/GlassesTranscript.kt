@@ -12,9 +12,12 @@
 // A tool result's user content, as VoiceState.heldUserContent holds it, replaces the transcript until
 // the user's next turn starts, whether or not the transcript setting is on: its last block that the
 // connected display draws, an image only where the display declares PNG. The image fills the display
-// as GlassesImageDisplay.showImage fits it. Text shows in screens that glassesPages cuts and that advance
-// on their own, each for its reading time, and start again after the last, so no gesture pages through
-// them and each keeps its one action.
+// as GlassesImageDisplay.showImage fits it. A text that one screen shows whole shows alone. A longer
+// one shows as a run of the lines ScreenFit.lines wraps it into, above a marker such as "12/80" that
+// counts the lines read: glassesScreen picks the run. Screens advance on their own, each for its
+// reading time, and start again after the last, until the wearer's first swipe; from then on, each
+// GlassesScroll moves the run by one line and nothing else does, so the wearer reads at their own
+// pace. Text past GLASSES_MAX_TEXT_CHARS is not shown.
 //
 // A voice owner calls showVoiceTranscript for the session it owns; the shell and car-dial owners never
 // run active sessions at once. An idle session sends nothing, so it cannot clear the glasses while the
@@ -27,14 +30,16 @@ import com.fghbuild.gomode.voice.UserContent
 import com.fghbuild.gomode.voice.VoiceState
 import com.fghbuild.gomode.voice.heldUserContent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 
 // A Halo page costs one 1-bpp image per line over BLE; recognition drafts change several times a second.
 internal const val GLASSES_FRAME_INTERVAL_MS = 500L
@@ -46,11 +51,8 @@ private const val MIN_CUT_TURN_CHARS = 16
 internal const val GLASSES_PAGE_MIN_MS = 4_000L
 internal const val GLASSES_PAGE_MS_PER_CHAR = 60L
 
-// Tool text past this many screens is not shown; a glance is not the place for a document.
-internal const val GLASSES_MAX_PAGES = 20
-
-// The widest page marker, which each screen of a paged text reserves room for below its text.
-private const val PAGE_MARKER_PROBE = "$GLASSES_MAX_PAGES/$GLASSES_MAX_PAGES"
+// Tool text past this many characters is not shown; it bounds wrapping, which runs on the main thread.
+internal const val GLASSES_MAX_TEXT_CHARS = 64 * 1024
 
 private const val USER_LABEL = "You: "
 private const val ELLIPSIS = "…"
@@ -137,51 +139,37 @@ private fun tail(
 }
 
 /**
- * The screens that show [text] on a display that [fit] measures. A text that fits shows whole on one.
- * A longer one takes up to [GLASSES_MAX_PAGES] screens, each with the most words that fit above a
- * page marker such as "2/3"; a word too long for a screen is cut between characters.
+ * The screen of [lines] that starts at line [top]: as many lines as [fit] shows whole above the marker
+ * of the last one shown, such as "12/80", and at least one.
  */
-internal fun glassesPages(
-    text: String,
+internal fun glassesScreen(
+    lines: List<String>,
+    top: Int,
     fit: ScreenFit,
-): List<String> {
-    val whole = text.trim()
-    if (fit.fits(whole)) return listOf(whole)
-    val pages = mutableListOf<String>()
-    var rest = whole
-    while (rest.isNotEmpty() && pages.size < GLASSES_MAX_PAGES) {
-        val page = longestHeadThatFits(rest) { fit.fits("$it\n$PAGE_MARKER_PROBE") }
-        pages += page
-        rest = rest.substring(page.length).trimStart()
-    }
-    return pages.mapIndexed { index, page -> "$page\n${index + 1}/${pages.size}" }
-}
-
-// The longest start of [text], ending before whitespace, that [fits]; at least one code point.
-private fun longestHeadThatFits(
-    text: String,
-    fits: (String) -> Boolean,
-): String {
-    val wordEnds =
-        text.indices.filter { it > 0 && text[it].isWhitespace() && !text[it - 1].isWhitespace() } + text.length
-    val words = longestFitting(wordEnds) { fits(text.substring(0, it)) }
-    if (words != null) return text.substring(0, words)
-    val codePointEnds = (1..text.length).filter { it == text.length || !text[it].isLowSurrogate() }
-    return text.substring(0, longestFitting(codePointEnds) { fits(text.substring(0, it)) } ?: codePointEnds.first())
-}
-
-// The largest of the ascending [ends] that [fits], or null when none does; fitting holds for a prefix of them.
-private fun longestFitting(
-    ends: List<Int>,
-    fits: (Int) -> Boolean,
-): Int? {
-    var fitting = -1
-    var tooLong = ends.size
+): GlassesScreen {
+    fun text(end: Int) = lines.subList(top, end).joinToString("\n") + "\n$end/${lines.size}"
+    var fitting = top + 1
+    var tooLong = lines.size + 1
     while (tooLong - fitting > 1) {
         val middle = (fitting + tooLong) / 2
-        if (fits(ends[middle])) fitting = middle else tooLong = middle
+        if (fit.fits(text(middle))) fitting = middle else tooLong = middle
     }
-    return ends.getOrNull(fitting)
+    return GlassesScreen(text(fitting), top, fitting)
+}
+
+/** A screen of held text: its [text] shows lines from [top] until [end], exclusive. */
+internal data class GlassesScreen(
+    val text: String,
+    val top: Int,
+    val end: Int,
+)
+
+// [text] without its outer whitespace, cut to GLASSES_MAX_TEXT_CHARS with an ellipsis, never inside a code point.
+private fun heldText(text: String): String {
+    val whole = text.trim()
+    if (whole.length <= GLASSES_MAX_TEXT_CHARS) return whole
+    val end = if (whole[GLASSES_MAX_TEXT_CHARS].isLowSurrogate()) GLASSES_MAX_TEXT_CHARS - 1 else GLASSES_MAX_TEXT_CHARS
+    return whole.substring(0, end) + ELLIPSIS
 }
 
 /** How long a screen of tool text shows: its reading time, at least [GLASSES_PAGE_MIN_MS]. */
@@ -213,8 +201,11 @@ private fun glassesView(
     }
 }
 
-// The frames of [view] in order: held text cycles through its screens, each for its reading time.
-private fun frames(view: GlassesView?): Flow<GlassesFrame?> =
+// The frames of [view] in order: held text scrolls as the header says, following [scrolls].
+private fun frames(
+    view: GlassesView?,
+    scrolls: Flow<GlassesScroll>,
+): Flow<GlassesFrame?> =
     when (view) {
         null -> {
             flowOf(null)
@@ -231,20 +222,48 @@ private fun frames(view: GlassesView?): Flow<GlassesFrame?> =
                 }
 
                 is UserContent.Text -> {
-                    val pages = glassesPages(content.text, view.fit)
-                    if (pages.size == 1) {
-                        flowOf(GlassesFrame.Text(pages.single()))
+                    val text = heldText(content.text)
+                    if (view.fit.fits(
+                            text,
+                        )
+                    ) {
+                        flowOf(GlassesFrame.Text(text))
                     } else {
-                        flow {
-                            while (true) {
-                                for (page in pages) {
-                                    emit(GlassesFrame.Text(page))
-                                    delay(glassesPageMillis(page))
-                                }
-                            }
-                        }
+                        scrolled(view.fit.lines(text), view.fit, scrolls)
                     }
                 }
+            }
+        }
+    }
+
+// The screens of [lines]: each in turn for its reading time until the first of [scrolls], then a line per scroll.
+private fun scrolled(
+    lines: List<String>,
+    fit: ScreenFit,
+    scrolls: Flow<GlassesScroll>,
+): Flow<GlassesFrame> =
+    channelFlow {
+        var screen = glassesScreen(lines, 0, fit)
+        send(GlassesFrame.Text(screen.text))
+        val reading =
+            launch {
+                while (true) {
+                    delay(glassesPageMillis(screen.text))
+                    screen = glassesScreen(lines, if (screen.end < lines.size) screen.end else 0, fit)
+                    send(GlassesFrame.Text(screen.text))
+                }
+            }
+        scrolls.collect { scroll ->
+            // Joined, so the screen the timer last set is the one a scroll moves.
+            reading.cancelAndJoin()
+            val top =
+                when (scroll) {
+                    GlassesScroll.FORWARD -> if (screen.end < lines.size) screen.top + 1 else screen.top
+                    GlassesScroll.BACK -> (screen.top - 1).coerceAtLeast(0)
+                }
+            if (top != screen.top) {
+                screen = glassesScreen(lines, top, fit)
+                send(GlassesFrame.Text(screen.text))
             }
         }
     }
@@ -252,7 +271,7 @@ private fun frames(view: GlassesView?): Flow<GlassesFrame?> =
 /**
  * Shows what the glasses show for [voice] through [show] while the session is active and glasses
  * are connected, fitted to the connected [screen], null without glasses: the held user content of a
- * tool result, or else the transcript while [transcriptOn] holds. Clears the display when the session
+ * tool result, which [scrolls] scroll, or else the transcript while [transcriptOn] holds. Clears the display when the session
  * ends, nothing is left to show, the glasses disconnect, or the caller cancels. Frames follow the
  * state at most once per [GLASSES_FRAME_INTERVAL_MS], always ending on the newest; a state change
  * that leaves the frame as it was, such as the microphone level, sends nothing. Returns only when
@@ -263,13 +282,14 @@ internal suspend fun showVoiceTranscript(
     voice: Flow<VoiceState>,
     transcriptOn: Flow<Boolean>,
     screen: Flow<GlassesLink.Connected?>,
+    scrolls: Flow<GlassesScroll>,
     show: (GlassesFrame) -> Unit,
 ) {
     var showing = false
     try {
         combine(voice, transcriptOn, screen, ::glassesView)
             .distinctUntilChanged()
-            .flatMapLatest(::frames)
+            .flatMapLatest { frames(it, scrolls) }
             .conflate()
             .collect { frame ->
                 if (frame != null) {

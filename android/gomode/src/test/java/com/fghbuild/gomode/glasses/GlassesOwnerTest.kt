@@ -803,6 +803,23 @@ class GlassesOwnerTest {
         }
 
     @Test
+    fun evenG2SwipesScrollAndActOnNothing() =
+        runOwnerTest {
+            val actions = mutableListOf<GlassesAction>()
+            val scrolls = mutableListOf<GlassesScroll>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.actions.collect { actions += it } }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.scrolls.collect { scrolls += it } }
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            finishGreeting()
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.SCROLL_DOWN)
+            firmware.systemInput(G2Side.LEFT, G2InputEvent.SCROLL_UP, G2InputEvent.SOURCE_RING)
+            runCurrent()
+            assertEquals(listOf(GlassesScroll.FORWARD, GlassesScroll.BACK), scrolls)
+            assertEquals(emptyList<GlassesAction>(), actions)
+        }
+
+    @Test
     fun evenG2EventsAreListedNewestFirst() =
         runOwnerTest {
             owner.connect(G2)

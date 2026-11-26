@@ -302,7 +302,7 @@ class G2GlassesTest {
         }
 
     @Test
-    fun clicksDoubleClicksAndLongPressesFromEitherTempleAndTheRingAreGesturesThatKeepThePageOpen() =
+    fun clicksDoubleClicksLongPressesAndScrollsFromEitherTempleAndTheRingAreGesturesThatKeepThePageOpen() =
         runTest {
             val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
@@ -319,8 +319,10 @@ class G2GlassesTest {
             firmware.systemInput(G2Side.RIGHT, G2InputEvent.CLICK, G2InputEvent.SOURCE_RING)
             firmware.systemInput(G2Side.LEFT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_LEFT_TEMPLE)
             firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
-            // Scrolls, releases, and a tap then hold are not gestures.
-            for (type in listOf(1L, 2L, 10L, 11L)) {
+            firmware.touch(G2Side.LEFT, type = G2InputEvent.SCROLL_UP)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.SCROLL_DOWN, G2InputEvent.SOURCE_RING)
+            // Releases and a tap then hold are not gestures.
+            for (type in listOf(10L, 11L)) {
                 firmware.touch(G2Side.RIGHT, type)
                 firmware.systemInput(G2Side.RIGHT, type, G2InputEvent.SOURCE_RING)
             }
@@ -337,6 +339,8 @@ class G2GlassesTest {
                     G2Gesture(G2GestureType.CLICK, G2GestureSource.RING),
                     G2Gesture(G2GestureType.DOUBLE_CLICK, G2GestureSource.LEFT_TEMPLE),
                     G2Gesture(G2GestureType.LONG_PRESS, G2GestureSource.RIGHT_TEMPLE),
+                    G2Gesture(G2GestureType.SCROLL_UP, null),
+                    G2Gesture(G2GestureType.SCROLL_DOWN, G2GestureSource.RING),
                 ).sortedBy { it.toString() },
                 gestures.sortedBy { it.toString() },
             )

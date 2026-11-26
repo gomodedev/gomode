@@ -63,7 +63,7 @@ class G2Glasses(
     private val mutableGestures = MutableSharedFlow<G2Gesture>(extraBufferCapacity = GESTURE_BUFFER)
 
     /**
-     * Each click, double click, and long press of a touchpad or an R1 ring while a page is open; see
+     * Each click, double click, long press, and scroll of a touchpad or an R1 ring while a page is open; see
      * [G2EvenHub.gesture]. A gesture that nobody collects is lost.
      */
     val gestures: SharedFlow<G2Gesture> = mutableGestures.asSharedFlow()
