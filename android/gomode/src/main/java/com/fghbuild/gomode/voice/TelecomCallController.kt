@@ -16,9 +16,9 @@
 // yields to a cellular or VoIP call, voice ends with an error naming it. The foreground service posts a
 // Notification.CallStyle.
 //
-// The endpoint picker still uses AudioManager; docs/PLAN_GOMODE.md phase telecom-routing replaces
-// it with Core-Telecom endpoints, keeping the AudioDeviceCallback and SCO receiver as diagnostics
-// and as the fallback without FEATURE_TELECOM.
+// Audio routing uses Core-Telecom's live endpoints during a call. When AOSP Telecom drops initial
+// endpoint callbacks on call setup, the controller falls back to Core-Telecom's
+// AudioManager-backed starting endpoints until live Telecom endpoints arrive.
 //
 // Unit tests use a fake adapter at the Telecom boundary. HFP implementations vary and an emulator
 // cannot validate them; on a Bluetooth headset and the target car, verify that a hang-up ends
@@ -101,7 +101,14 @@ internal class TelecomCallController(
                             _audioState.update { it.copy(error = "Could not list audio devices") }
                         }.collect { available ->
                             startingEndpoints = available.sortedBy(::endpointId)
-                            if (activeCall == 0L) publishIdleAudio()
+                            if (activeCall == 0L) {
+                                publishIdleAudio()
+                            } else if (endpoints.isEmpty()) {
+                                // AOSP Telecom can route focus before binding the transactional callback,
+                                // dropping the initial endpoint callbacks for the call. Keep AudioManager's
+                                // starting endpoints visible until live Telecom endpoints arrive.
+                                publishStartingEndpointsForCall()
+                            }
                         }
                 }
         }
@@ -225,7 +232,7 @@ internal class TelecomCallController(
 
     override fun selectAudioDevice(deviceId: Int) {
         if (_audioState.value.switching) return
-        val available = if (activeCall == 0L) startingEndpoints else endpoints
+        val available = if (activeCall == 0L || endpoints.isEmpty()) startingEndpoints else endpoints
         val endpoint = available.firstOrNull { endpointId(it) == deviceId }
         if (endpoint == null) {
             _audioState.update { it.copy(error = "Audio device is no longer available") }
@@ -244,9 +251,12 @@ internal class TelecomCallController(
             if (activeCall != generation) return@launch
             if (result is CallControlResult.Error) {
                 _audioState.update { it.copy(error = "Could not switch audio device (${result.errorCode})") }
+            } else if (endpoints.isEmpty()) {
+                preferredEndpoint = endpoint
+                _audioState.update { it.copy(selectedDeviceId = deviceId) }
             }
             _audioState.update { it.copy(switching = false) }
-            // The currentCallEndpoint flow confirms the actual route.
+            // The currentCallEndpoint flow confirms the actual route when Telecom delivers endpoint updates.
         }
     }
 
@@ -291,25 +301,40 @@ internal class TelecomCallController(
     }
 
     private fun publishIdleAudio() {
-        val selected =
-            startingEndpoints.firstOrNull { it.identifier == preferredEndpoint?.identifier }
-                ?: startingEndpoints.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
-                ?: startingEndpoints.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
-                ?: startingEndpoints.firstOrNull()
+        val selected = selectedStartingEndpoint()
         preferredEndpoint = selected
         _audioState.value =
             CallAudioState(
-                devices =
-                    startingEndpoints.map {
-                        AudioDevice(
-                            endpointId(it),
-                            it.audioDeviceType(),
-                            it.name.toString(),
-                        )
-                    },
+                devices = startingAudioDevices(),
                 selectedDeviceId = selected?.let(::endpointId),
             )
     }
+
+    private fun publishStartingEndpointsForCall() {
+        val selected = selectedStartingEndpoint()
+        preferredEndpoint = selected
+        _audioState.update {
+            it.copy(
+                devices = startingAudioDevices(),
+                selectedDeviceId = selected?.let(::endpointId),
+            )
+        }
+    }
+
+    private fun selectedStartingEndpoint(): CallEndpointCompat? =
+        startingEndpoints.firstOrNull { it.identifier == preferredEndpoint?.identifier }
+            ?: startingEndpoints.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
+            ?: startingEndpoints.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
+            ?: startingEndpoints.firstOrNull()
+
+    private fun startingAudioDevices(): List<AudioDevice> =
+        startingEndpoints.map {
+            AudioDevice(
+                endpointId(it),
+                it.audioDeviceType(),
+                it.name.toString(),
+            )
+        }
 
     // Audio choices clear after asynchronous call and observer cleanup completes.
     fun close() {

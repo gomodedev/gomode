@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.Person
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.util.Log
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
@@ -15,7 +16,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
 import com.fghbuild.gomode.MainActivity
+import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.service.ServiceSettingsClient
@@ -43,6 +46,7 @@ import org.junit.rules.TestRule
 import org.junit.runner.RunWith
 import java.io.File
 import java.net.Inet4Address
+import java.util.concurrent.TimeUnit
 
 // Uses production session clients against a controlled server for text and WebRTC
 // transports, background setup, caller identity, network recovery, and Telecom ownership.
@@ -73,7 +77,7 @@ class GatewaySessionIntegrationTest {
                 repository.updateSavedVoiceSetup(null) {
                     it.copy(preference = it.preference.copy(mode = VoiceSetupMode.FOLLOW_GATEWAY))
                 }
-                repository.settings.first { it.activeServiceURL == baseUrl && !it.voiceSetup.deviceSpeech }
+                awaitSettings(repository) { it.activeServiceURL == baseUrl && !it.voiceSetup.deviceSpeech }
                 val activity = ActivityScenario.launch(MainActivity::class.java)
                 val pages = ServiceShellOwner(context, repository, glassesDisplay = { null })
                 val conversation =
@@ -138,7 +142,7 @@ class GatewaySessionIntegrationTest {
                             ),
                     )
                 }
-                repository.settings.first { it.activeServiceURL == baseUrl && it.voiceSetup.deviceSpeech }
+                awaitSettings(repository) { it.activeServiceURL == baseUrl && it.voiceSetup.deviceSpeech }
                 val expectedName = ServiceSettingsClient().fetch(baseUrl).service
 
                 val speech = AndroidDeviceSpeech(context, "en-US", "", 1f)
@@ -208,8 +212,8 @@ class GatewaySessionIntegrationTest {
         var stockWifi = false
         try {
             setWifiEnabled(device, true)
-            awaitWifiRoute(connectivity)
-            stockWifi = device.executeShellCommand("cmd wifi status").contains("Wifi is connected to \"AndroidWifi\"")
+            stockWifi = hasStockWifiConfig(device)
+            ensureWifiRoute(device, connectivity, reconnectStockWifi = stockWifi)
             awaitConnected(session)
             // The stock fixture disables its modem. Cycling Wi-Fi exercises actual
             // route replacement and the offline wait without requiring a carrier.
@@ -230,18 +234,56 @@ class GatewaySessionIntegrationTest {
                 // Ask for the stock AP explicitly. CI has reported a completed scan
                 // after enabling Wi-Fi without ever attempting to rejoin AndroidWifi.
                 if (stockWifi) device.executeShellCommand("cmd wifi connect-network AndroidWifi open")
-                awaitWifiRoute(connectivity)
+                ensureWifiRoute(device, connectivity, reconnectStockWifi = stockWifi)
                 awaitConnected(session)
                 assertTrue("Telecom call ended during handoff", calls.isStarted)
             }
         } finally {
             withContext(NonCancellable) {
                 setWifiEnabled(device, wifiEnabled)
-                if (wifiEnabled && stockWifi && !hasWifiRoute(connectivity)) {
-                    device.executeShellCommand("cmd wifi connect-network AndroidWifi open")
+                if (wifiEnabled && !hasWifiRoute(connectivity)) {
+                    runCatching { ensureWifiRoute(device, connectivity, reconnectStockWifi = stockWifi) }
+                        .onFailure { Log.w(TAG, "Failed to restore Wi-Fi IPv4 route during teardown", it) }
                 }
             }
         }
+    }
+
+    private suspend fun awaitSettings(
+        repository: SettingsRepository,
+        predicate: (SettingsState) -> Boolean,
+    ) {
+        val state =
+            withTimeout(TIMEOUT_MS) {
+                repository.settings.first { it.loadState is SettingsLoadState.Failed || predicate(it) }
+            }
+        val failed = state.loadState as? SettingsLoadState.Failed
+        assertNull("Settings failed to load: ${failed?.message}", failed)
+    }
+
+    private fun hasStockWifiConfig(device: UiDevice): Boolean =
+        device.executeShellCommand("cmd wifi list-networks").lines().any { line ->
+            line.trim().split(Regex("\\s+")).getOrNull(1) == "AndroidWifi"
+        }
+
+    private suspend fun ensureWifiRoute(
+        device: UiDevice,
+        connectivity: ConnectivityManager,
+        reconnectStockWifi: Boolean,
+    ) {
+        val initialTimeoutMs = if (reconnectStockWifi) WIFI_ROUTE_ATTEMPT_TIMEOUT_MS else TIMEOUT_MS
+        if (awaitWifiRoute(connectivity, initialTimeoutMs)) return
+        if (reconnectStockWifi) {
+            repeat(WIFI_RECOVERY_ATTEMPTS) {
+                setWifiEnabled(device, false)
+                setWifiEnabled(device, true)
+                device.executeShellCommand("cmd wifi connect-network AndroidWifi open")
+                if (awaitWifiRoute(connectivity, WIFI_ROUTE_ATTEMPT_TIMEOUT_MS)) return
+            }
+        }
+        val status = device.executeShellCommand("cmd wifi status").trim()
+        val route = device.executeShellCommand("ip -4 route get 192.0.2.1").trim()
+        throw AssertionError("Wi-Fi IPv4 default route unavailable: wifi=$status; route=$route")
     }
 
     private suspend fun setWifiEnabled(
@@ -263,12 +305,16 @@ class GatewaySessionIntegrationTest {
         assertTrue(ready.connected)
     }
 
-    private suspend fun awaitWifiRoute(connectivity: ConnectivityManager) {
-        withTimeout(TIMEOUT_MS) {
-            while (!hasWifiRoute(connectivity)) {
-                delay(50)
-            }
+    private suspend fun awaitWifiRoute(
+        connectivity: ConnectivityManager,
+        timeoutMs: Long,
+    ): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        while (!hasWifiRoute(connectivity)) {
+            if (System.nanoTime() >= deadline) return false
+            delay(50)
         }
+        return true
     }
 
     private fun hasWifiRoute(connectivity: ConnectivityManager): Boolean {
@@ -305,6 +351,9 @@ class GatewaySessionIntegrationTest {
     }
 
     private companion object {
+        const val TAG = "GatewaySessionTest"
         const val TIMEOUT_MS = 30_000L
+        const val WIFI_ROUTE_ATTEMPT_TIMEOUT_MS = 12_000L
+        const val WIFI_RECOVERY_ATTEMPTS = 2
     }
 }

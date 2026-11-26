@@ -13,7 +13,6 @@ import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.service.ServiceNotification
 import com.fghbuild.gomode.service.ServiceNotificationPublisher
@@ -81,7 +80,11 @@ class ServiceNotificationNavigationTest {
                     secondIntent.send()
                     assertTrue(
                         "Cold launch did not open the second service's stable route",
-                        device.wait(Until.hasObject(By.text("B route /work/stable-b")), GOMODE_LOAD_TIMEOUT_MS),
+                        device.awaitFreshObject(
+                            instrumentation.uiAutomation,
+                            By.text("B route /work/stable-b"),
+                            GOMODE_LOAD_TIMEOUT_MS,
+                        ) != null,
                     )
                     lateinit var coldActivity: MainActivity
                     instrumentation.runOnMainSync {
@@ -119,10 +122,11 @@ class ServiceNotificationNavigationTest {
                     posted(manager, "Beta background")
                     firstIntent.send()
                     val warmOpened =
-                        device.wait(
-                            Until.hasObject(By.text("A route /work/stable-a")),
+                        device.awaitFreshObject(
+                            instrumentation.uiAutomation,
+                            By.text("A route /work/stable-a"),
                             GOMODE_LOAD_TIMEOUT_MS,
-                        )
+                        ) != null
                     var visibleURL: String? = null
                     instrumentation.runOnMainSync {
                         visibleURL = coldActivity.findViewById<WebView>(R.id.web_shell)?.url

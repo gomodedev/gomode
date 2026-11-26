@@ -702,22 +702,21 @@ internal class VoiceSession(
                                             throw e
                                         } catch (e: NoUsableICECandidateException) {
                                             // A fresh start retries too, bounded by recovery.
-                                            // TODO: Find why gathering sometimes yields only IPv6 host
-                                            // candidates. Before this retry, CI failed one CLOUD
-                                            // CarDialInterceptionTest case in most runs with "Voice
-                                            // controls did not connect", a different case each time, and
-                                            // one degraded local emulator gathered only IPv6 on every
-                                            // start. Users reported "voice fails, restarting works". The
-                                            // cause is unconfirmed. An earlier inference that the IPv4 UDP
-                                            // socket reported 0.0.0.0 rested on "Discarding candidate
-                                            // because it doesn't match filter"; healthy runs log that line
-                                            // for every TCP port, which listens on 0.0.0.0. In M125, a
-                                            // failed AndroidNetworkMonitor::BindSocketToNetwork makes
-                                            // PhysicalSocket::Bind fail, which drops the UDP port with no
-                                            // filter line. In a failing run's logcat, find this warning,
-                                            // then look beside the IPv4 network for "BindSocketToNetwork
-                                            // got error", "Binding socket to network address failed", or
-                                            // "UDP bind failed".
+                                            // On the stock API 35 emulator, init.ranchu.rc runs
+                                            // `/vendor/bin/dhcpclient -i wlan0 --no-gateway`,
+                                            // which leaves 10.0.2.x/24 on wlan0 without an IPv4
+                                            // default route when NetworkStack DhcpClient stalls;
+                                            // libwebrtc then gathers a UDP host candidate at
+                                            // 0.0.0.x on wlan0 and discards it at
+                                            // basic_port_allocator.cc:1017 ("Discarding candidate
+                                            // because it doesn't match filter"), leaving only
+                                            // IPv6 host candidates (seen in CI run 45672104557).
+                                            // TODO: Investigate why real-device users also
+                                            // reported "voice fails, restarting works". The
+                                            // real-device cause is still unconfirmed (a transient
+                                            // missing IPv4 route during gathering is only a
+                                            // hypothesis). Keep this bounded retry and inspect
+                                            // libwebrtc candidate/network logs when reproduced.
                                             if (ownsAttempt(attempt)) {
                                                 Log.w(TAG, "No usable ICE candidate after gathering", e)
                                                 retryRecovery("Network connection failed")

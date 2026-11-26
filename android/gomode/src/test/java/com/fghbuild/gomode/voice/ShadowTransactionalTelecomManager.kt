@@ -29,6 +29,12 @@ class ShadowTransactionalTelecomManager : ShadowTelecomManager() {
     // Telecom's callbacks into each added call, such as onSetInactive, in call order.
     val controlCallbacks = CopyOnWriteArrayList<CallControlCallback>()
 
+    // Telecom's event callbacks into each added call, such as endpoint updates, in call order.
+    val eventCallbacks = CopyOnWriteArrayList<CallEventCallback>()
+
+    // Tests can disable initial endpoint callbacks to simulate AOSP's focus-before-bind race.
+    var emitInitialEndpoints = true
+
     @Implementation(minSdk = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     fun addCall(
         attributes: CallAttributes,
@@ -55,10 +61,13 @@ class ShadowTransactionalTelecomManager : ShadowTelecomManager() {
         // Telecom reports the starting route after adding a call; core-telecom waits for it.
         val earpiece = CallEndpoint("Earpiece", CallEndpoint.TYPE_EARPIECE, ParcelUuid(UUID.randomUUID()))
         controlCallbacks += controlCallback
+        eventCallbacks += eventCallback
         executor.execute {
             receiver.onResult(control)
-            eventCallback.onAvailableCallEndpointsChanged(listOf(earpiece))
-            eventCallback.onCallEndpointChanged(earpiece)
+            if (emitInitialEndpoints) {
+                eventCallback.onAvailableCallEndpointsChanged(listOf(earpiece))
+                eventCallback.onCallEndpointChanged(earpiece)
+            }
         }
     }
 

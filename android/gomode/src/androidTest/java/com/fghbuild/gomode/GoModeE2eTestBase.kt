@@ -2,6 +2,7 @@
 package com.fghbuild.gomode
 
 import android.Manifest
+import android.app.UiAutomation
 import android.util.AtomicFile
 import android.webkit.WebView
 import androidx.compose.ui.test.ComposeTimeoutException
@@ -15,7 +16,9 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.datastore.preferences.core.edit
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Rule
@@ -28,6 +31,31 @@ import kotlin.math.roundToInt
 
 internal const val GOMODE_DEFAULT_TIMEOUT_MS = 30_000L
 internal const val GOMODE_LOAD_TIMEOUT_MS = 60_000L
+
+// AndroidComposeViewAccessibilityDelegateCompat.isEnabled$ui() returns false under UiAutomation
+// when no AccessibilityService is enabled, so Compose skips TYPE_WINDOW_CONTENT_CHANGED events
+// and AccessibilityInteractionClient serves stale cached nodes (and WebView updates asynchronously).
+// Clear the cache on every poll and snapshot read.
+internal fun UiDevice.hasFreshObject(
+    uiAutomation: UiAutomation,
+    selector: BySelector,
+): Boolean {
+    uiAutomation.clearCache()
+    return hasObject(selector)
+}
+
+internal fun UiDevice.awaitFreshObject(
+    uiAutomation: UiAutomation,
+    selector: BySelector,
+    timeoutMs: Long,
+): UiObject2? =
+    wait(
+        {
+            uiAutomation.clearCache()
+            findObject(selector)
+        },
+        timeoutMs,
+    )
 
 abstract class GoModeE2eTestBase {
     @get:Rule(order = 0)

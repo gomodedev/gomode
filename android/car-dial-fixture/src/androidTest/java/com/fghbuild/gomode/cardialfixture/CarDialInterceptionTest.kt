@@ -128,7 +128,7 @@ class CarDialInterceptionTest {
     @After
     fun tearDown() {
         if (!snapshotCaptured) return
-        if (device.hasObject(By.text("Set as default"))) device.pressBack()
+        if (hasFresh(By.text("Set as default"))) device.pressBack()
         shell("cmd role remove-role-holder ${RoleManager.ROLE_CALL_REDIRECTION} $APP")
         // Observe owner cancellation before restoring a previous role/component selection.
         // Debug probe Activities do not own Telecom calls; stop their owned service by UID.
@@ -199,7 +199,7 @@ class CarDialInterceptionTest {
                 endNativeVoice()
                 val policy = shell("dumpsys window policy")
                 assertTrue(policy, policy.contains("showing=true") && policy.contains("secure=true"))
-                assertFalse(device.hasObject(By.text("Voice fixture server")))
+                assertFalse(hasFresh(By.text("Voice fixture server")))
                 awaitVoiceClosed()
             }
         }
@@ -227,7 +227,7 @@ class CarDialInterceptionTest {
             assertLockedNativeSurface()
             assertTrue(
                 "Wrong dial target: expected Second fixture",
-                device.hasObject(By.res("car_dial_server").text("Second fixture")),
+                hasFresh(By.res("car_dial_server").text("Second fixture")),
             )
             endNativeVoice()
             awaitVoiceClosed()
@@ -242,17 +242,11 @@ class CarDialInterceptionTest {
             dial(NUMBER)
             awaitVoice("CLOUD", before)
             assertLockedNativeSurface()
-            assertTrue(device.wait(Until.hasObject(By.textContains("Your service is ready.")), 5_000))
-            assertTrue(device.hasObject(By.textContains("How is the service doing?")))
-            assertTrue(
-                device.wait(
-                    Until.hasObject(
-                        By.res(
-                            java.util.regex.Pattern
-                                .compile("gomode-voice-audio-[0-9]+"),
-                        ),
-                    ),
-                    5_000,
+            assertNotNull(awaitFresh(By.textContains("Your service is ready.")))
+            assertTrue(hasFresh(By.textContains("How is the service doing?")))
+            assertNotNull(
+                awaitFresh(
+                    By.res(Pattern.compile("gomode-voice-audio-[0-9]+")),
                 ),
             )
             assertTrue(device.takeScreenshot(File(context.getExternalFilesDir(null), "locked-call-transcript.png")))
@@ -275,7 +269,7 @@ class CarDialInterceptionTest {
         )
         shell("pm grant $APP ${Manifest.permission.RECORD_AUDIO}")
         shell("am start -W -n $APP/.MainActivity")
-        assertTrue(device.wait(Until.hasObject(By.textStartsWith(secondURL)), 15_000))
+        assertNotNull(awaitFresh(By.textStartsWith(secondURL), 15_000))
         // CarDialRedirectionTest owns resolution order; these dials prove a non-default
         // selection and a server number's override reach the resolved WebView. Both dial
         // from the same warm shell, so the second also leaves a page another call opened.
@@ -283,15 +277,15 @@ class CarDialInterceptionTest {
             Triple(GENERIC_NUMBER, secondURL, SECOND_SERVER_ID),
             Triple(NUMBER, firstURL, FIRST_SERVER_ID),
         )) {
-            requireNotNull(device.wait(Until.findObject(By.desc("Settings")), 5_000)).click()
-            assertTrue(device.wait(Until.hasObject(By.res("gomode-settings")), 5_000))
+            requireNotNull(awaitFresh(By.desc("Settings"))).click()
+            assertNotNull(awaitFresh(By.res("gomode-settings")))
             val before = fixtureStats()
             dial(number)
             awaitVoice("CLOUD", before)
             assertUnlockedShell()
-            assertTrue("Wrong service page", device.wait(Until.hasObject(By.textStartsWith(expectedURL)), 15_000))
-            assertFalse(device.hasObject(By.res("gomode-settings")))
-            assertTrue(device.wait(Until.hasObject(By.desc("End voice")), 5_000))
+            assertNotNull("Wrong service page", awaitFresh(By.textStartsWith(expectedURL), 15_000))
+            assertFalse(hasFresh(By.res("gomode-settings")))
+            assertNotNull(awaitFresh(By.desc("End voice")))
             assertEquals(before.getInt("rtcSetups") + 1, fixtureStats().getInt("rtcSetups"))
             assertTrue(
                 browserTool("warm-$number", "fixture_echo", targetID).getString("url").startsWith(expectedURL),
@@ -388,7 +382,7 @@ class CarDialInterceptionTest {
                 val before = fixtureStats()
                 dial(NUMBER)
                 awaitSettingsRequest(before)
-                assertTrue(device.wait(Until.hasObject(By.res("car_dial_status").text("Connecting voice…")), 5_000))
+                assertNotNull(awaitFresh(By.res("car_dial_status").text("Connecting voice…")))
                 assertTrue(device.takeScreenshot(File(context.getExternalFilesDir(null), "locked-call-connecting.png")))
                 assertLockedNativeSurface()
                 endNativeVoice()
@@ -420,14 +414,14 @@ class CarDialInterceptionTest {
         shell("pm grant $APP ${Manifest.permission.RECORD_AUDIO}")
         withSecureKeyguard {
             dial(NUMBER)
-            assertTrue(
-                device.wait(Until.hasObject(By.text("Service page unavailable.")), 15_000),
+            assertNotNull(
+                awaitFresh(By.text("Service page unavailable."), 15_000),
             )
             assertLockedNativeSurface()
             assertTrue(device.takeScreenshot(File(context.getExternalFilesDir(null), "locked-call-failed.png")))
             awaitVoiceClosed()
             endNativeVoice()
-            assertTrue(device.wait(Until.gone(By.res("car_dial_end")), 5_000))
+            assertTrue(awaitFreshGone(By.res("car_dial_end")))
             val policy = shell("dumpsys window policy")
             assertTrue(policy, policy.contains("showing=true") && policy.contains("secure=true"))
         }
@@ -460,12 +454,11 @@ class CarDialInterceptionTest {
             val policy = shell("dumpsys window policy")
             assertTrue(policy, policy.contains("showing=true") && policy.contains("secure=true"))
             // Settings/Glasses must not become a route to Android permission dialogs above keyguard.
-            val settings = device.wait(Until.findObject(By.desc("Settings")), 5_000)
-            assertNotNull(settings)
+            val settings = requireNotNull(awaitFresh(By.desc("Settings")))
             settings.click()
             device.waitForIdle()
-            assertFalse(device.hasObject(By.res("gomode-settings")))
-            assertFalse(device.hasObject(By.desc("Manage glasses")))
+            assertFalse(hasFresh(By.res("gomode-settings")))
+            assertFalse(hasFresh(By.desc("Manage glasses")))
             assertUnlockedShell()
             val shown = browserTool("locked-normal-ui", "fixture_echo")
             assertTrue(shown.getBoolean("visible"))
@@ -474,19 +467,19 @@ class CarDialInterceptionTest {
             if (warm) {
                 unlockFixtureKeyguard()
                 assertUnlockedShell()
-                device.findObject(By.desc("Settings")).click()
-                assertTrue(device.wait(Until.hasObject(By.res("gomode-settings")), 5_000))
+                requireNotNull(awaitFresh(By.desc("Settings"))).click()
+                assertNotNull(awaitFresh(By.res("gomode-settings")))
                 device.sleep()
                 device.wakeUp()
                 assertUnlockedShell()
-                assertFalse(device.hasObject(By.res("gomode-settings")))
+                assertFalse(hasFresh(By.res("gomode-settings")))
                 val relocked = browserTool("relocked-normal-ui", "fixture_state")
                 assertTrue(relocked.getBoolean("visible"))
                 assertEquals(shown.getString("document"), relocked.getString("document"))
             }
             endNativeVoice()
             awaitVoiceClosed()
-            assertTrue(device.wait(Until.gone(By.text("Voice fixture server")), 5_000))
+            assertTrue(awaitFreshGone(By.text("Voice fixture server")))
             val after = shell("dumpsys window policy")
             assertTrue(after, after.contains("showing=true") && after.contains("secure=true"))
         }
@@ -505,7 +498,7 @@ class CarDialInterceptionTest {
             assertLockedNativeSurface()
             val hidden = browserTool("warm-locked", "fixture_echo")
             assertFalse(hidden.getBoolean("visible"))
-            assertFalse(device.hasObject(By.text("Voice fixture server")))
+            assertFalse(hasFresh(By.text("Voice fixture server")))
             unlockFixtureKeyguard()
             assertUnlockedShell()
             awaitFreshText("Tool count: 1")
@@ -550,7 +543,7 @@ class CarDialInterceptionTest {
                 device.sleep()
                 device.wakeUp()
                 Thread.sleep(500)
-                assertFalse(device.hasObject(By.text("Voice fixture server")))
+                assertFalse(hasFresh(By.text("Voice fixture server")))
                 val hidden = browserTool("locked-state", "fixture_state")
                 assertFalse(hidden.getBoolean("visible"))
                 assertEquals(first.getString("document"), hidden.getString("document"))
@@ -682,7 +675,7 @@ class CarDialInterceptionTest {
             awaitMicrophoneForeground()
             awaitSettingsRequest(before)
             awaitMainActivityResumed()
-            assertFalse(device.hasObject(By.res("car_dial_end")))
+            assertFalse(hasFresh(By.res("car_dial_end")))
             settingsBlocked(false)
             awaitVoice("CLOUD", before)
             assertUnlockedShell()
@@ -727,14 +720,14 @@ class CarDialInterceptionTest {
         device.setOrientationLeft()
         try {
             assertUnlockedShell()
-            assertTrue(device.wait(Until.hasObject(By.desc("End voice")), 5_000))
+            assertNotNull(awaitFresh(By.desc("End voice")))
             assertEquals(before.getInt("rtcSetups") + 1, fixtureStats().getInt("rtcSetups"))
             endNativeVoice()
             awaitVoiceClosed()
             // Returning to normal controls must start a new manual call rather
             // than reconnecting a disposed car-owned controller.
             val manualBefore = fixtureStats()
-            requireNotNull(device.wait(Until.findObject(By.desc("Connect voice assistant")), 5_000)).click()
+            requireNotNull(awaitFresh(By.desc("Connect voice assistant"))).click()
             awaitVoice("CLOUD", manualBefore)
             assertEquals(before.getInt("rtcSetups") + 2, fixtureStats().getInt("rtcSetups"))
             endNativeVoice()
@@ -755,32 +748,54 @@ class CarDialInterceptionTest {
             // Authenticate with the credential created by this guarded fixture.
             unlockFixtureKeyguard()
             assertUnlockedShell()
-            assertTrue(device.wait(Until.hasObject(By.desc("End voice")), 5_000))
+            assertNotNull(awaitFresh(By.desc("End voice")))
             assertEquals(before.getInt("rtcSetups") + 1, fixtureStats().getInt("rtcSetups"))
             device.sleep()
             device.wakeUp()
             Thread.sleep(500)
-            assertFalse(device.hasObject(By.text("Voice fixture server")))
+            assertFalse(hasFresh(By.text("Voice fixture server")))
             unlockFixtureKeyguard()
             assertUnlockedShell()
-            requireNotNull(device.findObject(By.text("Fixture sign out"))).click()
+            requireNotNull(awaitFresh(By.text("Fixture sign out"))).click()
             awaitVoiceClosed()
             Thread.sleep(500)
             assertEquals(before.getInt("rtcSetups") + 1, fixtureStats().getInt("rtcSetups"))
         }
     }
 
-    // Compose and WebView publish content changes to accessibility asynchronously, and
-    // UiAutomation can keep serving a cached node: a page showing "Tool count: 1" stayed
-    // "Tool count: 0" in the hierarchy. Poll a fresh tree rather than the cached snapshot.
-    private fun awaitFresh(selector: BySelector): androidx.test.uiautomator.UiObject2? {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    // AndroidComposeViewAccessibilityDelegateCompat.isEnabled$ui() returns false under
+    // UiAutomation when no AccessibilityService is enabled, so Compose skips
+    // TYPE_WINDOW_CONTENT_CHANGED events and AccessibilityInteractionClient keeps serving
+    // stale cached nodes (and WebView updates asynchronously). Clear the cache on every poll.
+    private fun awaitFresh(
+        selector: BySelector,
+        timeoutMs: Long = 5_000,
+    ): androidx.test.uiautomator.UiObject2? {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
         do {
             instrumentation.uiAutomation.clearCache()
             device.findObject(selector)?.let { return it }
             Thread.sleep(50)
         } while (System.nanoTime() < deadline)
         return null
+    }
+
+    private fun awaitFreshGone(
+        selector: BySelector,
+        timeoutMs: Long = 5_000,
+    ): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        do {
+            instrumentation.uiAutomation.clearCache()
+            if (!device.hasObject(selector)) return true
+            Thread.sleep(50)
+        } while (System.nanoTime() < deadline)
+        return false
+    }
+
+    private fun hasFresh(selector: BySelector): Boolean {
+        instrumentation.uiAutomation.clearCache()
+        return device.hasObject(selector)
     }
 
     private fun awaitFreshText(text: String) {
@@ -802,12 +817,12 @@ class CarDialInterceptionTest {
     }
 
     private fun assertUnlockedShell() {
-        if (!device.wait(Until.hasObject(By.text("Voice fixture server")), 15_000)) {
+        if (awaitFresh(By.text("Voice fixture server"), 15_000) == null) {
             throw AssertionError(
                 "Hosted server not visible: ${shell("dumpsys window policy")} ${shell("dumpsys activity top")}",
             )
         }
-        assertFalse(device.hasObject(By.res("car_dial_end")))
+        assertFalse(hasFresh(By.res("car_dial_end")))
         awaitMainActivityResumed()
     }
 
@@ -829,7 +844,7 @@ class CarDialInterceptionTest {
     fun backgroundedActivityStartsCloudModeAndDuplicateDialDoesNotStartAnotherSession() {
         prepareVoice("CLOUD")
         shell("am start -n $APP/.MainActivity")
-        device.wait(Until.hasObject(By.pkg(APP)), 5_000)
+        awaitFresh(By.pkg(APP))
         device.pressHome()
         assertTrue(shell("pidof $APP").isNotBlank())
         val before = fixtureStats()
@@ -898,9 +913,9 @@ class CarDialInterceptionTest {
         prepareVoice("CLOUD", "http://localhost:1")
         val before = fixtureStats()
         dial(NUMBER)
-        assertTrue(
+        assertNotNull(
             "Native failure was not displayed",
-            device.wait(Until.hasObject(By.text("Service page unavailable.")), 15_000),
+            awaitFresh(By.text("Service page unavailable."), 15_000),
         )
         awaitVoiceClosed()
         assertTrue(FixtureConnectionService.connections.isEmpty())
@@ -1121,7 +1136,10 @@ class CarDialInterceptionTest {
             "windows:\n$windows"
     }
 
-    private fun voiceStatusText(): String = device.findObject(By.res("car_dial_status"))?.text ?: "no status"
+    private fun voiceStatusText(): String {
+        instrumentation.uiAutomation.clearCache()
+        return device.findObject(By.res("car_dial_status"))?.text ?: "no status"
+    }
 
     // Tells a missing Go Mode window apart from a session that did not connect, and names the app
     // process's last voice session record. Each test starts a fresh process, so its PID scopes the log.
@@ -1137,7 +1155,7 @@ class CarDialInterceptionTest {
                     .lastOrNull { it.isNotBlank() && !it.startsWith("ICE candidate") }
                     ?: "none"
             }
-        val window = if (device.hasObject(By.pkg(APP))) "status: ${voiceStatusText()}" else "Go Mode window not showing"
+        val window = if (hasFresh(By.pkg(APP))) "status: ${voiceStatusText()}" else "Go Mode window not showing"
         return "Voice did not connect; $window; last voice record: $record"
     }
 
@@ -1155,10 +1173,11 @@ class CarDialInterceptionTest {
         // Telecom can reject a duplicate before redirection and show an informational
         // dialog over the still-live native call surface. Dismiss only its OK button.
         device.findObject(By.res("android", "button1").text("OK"))?.click()
+        instrumentation.uiAutomation.clearCache()
         val end =
             device.findObject(By.res("car_dial_end"))
                 ?: device.findObject(By.desc("Cancel"))
-                ?: device.wait(Until.findObject(By.desc("End voice")), 5_000)
+                ?: awaitFresh(By.desc("End voice"))
         requireNotNull(end) { "Voice End control unavailable" }.click()
     }
 
@@ -1332,7 +1351,13 @@ class CarDialInterceptionTest {
         } finally {
             instrumentation.uiAutomation.dropShellPermissionIdentity()
         }
-        val ended = latestCallRecord(shell("dumpsys telecom"))
+        // endCall() posts removal asynchronously onto Telecom's main handler before returning.
+        val destroyDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
+        var ended = latestCallRecord(shell("dumpsys telecom"))
+        while (!ended.contains("DESTROYED") && System.nanoTime() < destroyDeadline) {
+            Thread.sleep(20)
+            ended = latestCallRecord(shell("dumpsys telecom"))
+        }
         assertTrue(ended, ended.contains("DESTROYED") && !ended.contains("REDIRECTION_COMPLETED_USER"))
         // This assertion intentionally records the platform limitation, not desired product
         // behavior: microphone FGS starts AFTER the original call was already destroyed.
@@ -1446,17 +1471,19 @@ class CarDialInterceptionTest {
         val launch = shell("am start -W -f 0x10008000 -n $APP/.MainActivity")
         assertTrue(launch, launch.contains("Status: ok"))
         // A configured but unavailable fixture host exposes the native recovery Settings action.
-        val settings = device.wait(Until.findObject(By.desc("Settings")), 5_000)
+        val settings = awaitFresh(By.desc("Settings"))
         settings?.click()
-        assertTrue("Native settings did not open", device.wait(Until.hasObject(By.res("gomode-settings")), 5_000))
+        assertNotNull("Native settings did not open", awaitFresh(By.res("gomode-settings")))
     }
 
     private fun scrollToText(text: String): androidx.test.uiautomator.UiObject2 {
-        fun visible(): androidx.test.uiautomator.UiObject2? =
-            device.findObject(By.text(text))?.takeIf {
+        fun visible(): androidx.test.uiautomator.UiObject2? {
+            instrumentation.uiAutomation.clearCache()
+            return device.findObject(By.text(text))?.takeIf {
                 val bounds = it.visibleBounds
                 bounds.height() > 0
             }
+        }
         // Use the settings margin so a voice-language text field cannot consume the gesture.
         for (forward in listOf(true, false)) {
             repeat(24) {
@@ -1482,6 +1509,7 @@ class CarDialInterceptionTest {
             repeat(node.childCount) { index -> node.getChild(index)?.let { find(it)?.let { match -> return match } } }
             return null
         }
+        instrumentation.uiAutomation.clearCache()
         return instrumentation.uiAutomation.rootInActiveWindow?.let(::find)
     }
 
@@ -1492,6 +1520,7 @@ class CarDialInterceptionTest {
             node.text?.toString()?.let(text::add)
             repeat(node.childCount) { index -> node.getChild(index)?.let(::collect) }
         }
+        instrumentation.uiAutomation.clearCache()
         instrumentation.uiAutomation.rootInActiveWindow?.let(::collect)
         return text.joinToString()
     }
@@ -1550,7 +1579,7 @@ class CarDialInterceptionTest {
         awaitCanceledCall()
         assertTrue(FixtureConnectionService.connections.isEmpty())
         assertFalse(activeTelecomCalls().contains("self_mng"))
-        assertFalse(device.hasObject(By.res("car_dial_status")))
+        assertFalse(hasFresh(By.res("car_dial_status")))
         dial(NUMBER)
         val request = FixtureConnectionService.connections.poll(5, TimeUnit.SECONDS)
         requireNotNull(request) { "Removed server identifier was intercepted" }
@@ -1698,6 +1727,7 @@ class CarDialInterceptionTest {
     }
 
     private fun vacateForeground() {
+        instrumentation.uiAutomation.clearCache()
         device.findObject(By.res("car_dial_end"))?.click()
         // HOME retains the previous app in LAST_ACTIVITY, where am kill cannot
         // reclaim it. Use the fixture's own UID: system-UID Settings does not

@@ -8,7 +8,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import com.fghbuild.gomode.ui.web.ServiceShellKey
 import com.fghbuild.gomode.ui.web.ServiceShellSession
 import com.fghbuild.gomode.ui.web.WebShellScreen
@@ -229,7 +228,13 @@ class FrontendToolInvocationBridgeTest {
             compose.waitUntil { prepared.isCompleted }
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val device = UiDevice.getInstance(instrumentation)
-            checkNotNull(device.wait(Until.findObject(By.text("Select second")), GOMODE_DEFAULT_TIMEOUT_MS)).click()
+            checkNotNull(
+                device.awaitFreshObject(
+                    instrumentation.uiAutomation,
+                    By.text("Select second"),
+                    GOMODE_DEFAULT_TIMEOUT_MS,
+                ),
+            ).click()
             compose.waitUntil { evaluate(view, "selected") == "\"second\"" }
             awaitVisibleFrame(view)
             device.waitForIdle()

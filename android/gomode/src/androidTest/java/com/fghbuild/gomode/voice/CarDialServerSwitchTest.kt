@@ -17,9 +17,9 @@ import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.MainActivity
+import com.fghbuild.gomode.awaitFreshObject
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
 import kotlinx.coroutines.flow.first
@@ -143,15 +143,22 @@ class CarDialServerSwitchTest {
                     }
                     device.executeShellCommand("cmd role add-role-holder $role ${context.packageName}")
                     device.executeShellCommand("am start -W -n ${context.packageName}/.MainActivity")
-                    assertTrue(device.wait(Until.hasObject(By.desc("Connect voice assistant")), 30_000))
-                    run {
-                        assertTrue(
-                            device.wait(
-                                Until.hasObject(By.desc("Connect voice assistant").enabled(true)),
-                                30_000,
-                            ),
-                        )
-                    }
+                    assertTrue(
+                        "Connect voice assistant did not appear: ${shellDiagnostics()}",
+                        device.awaitFreshObject(
+                            instrumentation.uiAutomation,
+                            By.desc("Connect voice assistant"),
+                            30_000,
+                        ) != null,
+                    )
+                    assertTrue(
+                        "Connect voice assistant stayed disabled: ${shellDiagnostics()}",
+                        device.awaitFreshObject(
+                            instrumentation.uiAutomation,
+                            By.desc("Connect voice assistant").enabled(true),
+                            30_000,
+                        ) != null,
+                    )
                     device.pressHome()
                     awaitCondition { device.currentPackageName != context.packageName }
                     val target =
@@ -186,8 +193,13 @@ class CarDialServerSwitchTest {
                     }
                     // Withdrawal is not model content; it sends nothing.
                     cookie.withdrawServiceResources()
-                    assertTrue(device.wait(Until.hasObject(By.desc("End voice")), 15_000))
-                    assertTrue(device.wait(Until.hasObject(By.text("Hosted service")), 15_000))
+                    assertTrue(
+                        device.awaitFreshObject(instrumentation.uiAutomation, By.desc("End voice"), 15_000) != null,
+                    )
+                    assertTrue(
+                        device.awaitFreshObject(instrumentation.uiAutomation, By.text("Hosted service"), 15_000) !=
+                            null,
+                    )
                     probe(cookie, cookieID, cookie)
                     cookie.sessions.single().send(switchCommand(bearerID))
                     awaitCondition { repository.settings.value.activeServiceId == bearerID }
@@ -298,6 +310,12 @@ class CarDialServerSwitchTest {
 
     private fun switchCommand(id: String): String =
         """{"kind":"tool.call","id":"switch","name":"switch_server","args":{"server_id":"$id"}}"""
+
+    private fun shellDiagnostics(): String =
+        application.serviceShellOwner.entries.entries.joinToString { (key, session) ->
+            "${key.serviceID}(state=${session.state.value}, auth=${session.bearerStore.authReady.value}, " +
+                "frontend=${session.frontendPreparation.ready.value}, ready=${session.isFrontendReady})"
+        }
 
     private fun awaitCondition(check: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)

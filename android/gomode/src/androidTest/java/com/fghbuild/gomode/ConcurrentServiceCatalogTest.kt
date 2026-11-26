@@ -270,9 +270,10 @@ class ConcurrentServiceCatalogTest {
                         notifications.size >= 2 &&
                         entries.all { it.isFrontendReady && it.frontendTools.declarations.isNotEmpty() }
                 }
-                val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+                val instrumentation = InstrumentationRegistry.getInstrumentation()
+                val device = UiDevice.getInstance(instrumentation)
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
-                    device.hasObject(By.text("Generic retained participant A"))
+                    device.hasFreshObject(instrumentation.uiAutomation, By.text("Generic retained participant A"))
                 }
                 assertNotEquals(notifications[0].notification.id, notifications[1].notification.id)
                 assertEquals(setOf("a", "b"), notifications.map { it.source.serviceID }.toSet())
@@ -337,7 +338,7 @@ class ConcurrentServiceCatalogTest {
                 }
                 composeRule.runOnIdle { selected = entries[1] }
                 composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
-                    device.hasObject(By.text("Generic retained participant B"))
+                    device.hasFreshObject(instrumentation.uiAutomation, By.text("Generic retained participant B"))
                 }
                 composeRule.runOnUiThread {
                     composeRule.activity.findViewById<WebView>(R.id.web_shell).evaluateJavascript(

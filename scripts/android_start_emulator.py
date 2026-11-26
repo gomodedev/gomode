@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 
-from android_devices import adb_path, ready_device_serials
+from android_devices import adb_path, ensure_emulator_ipv4_route, ready_device_serials
 from android_sdk import AVD_NAME
 
 DEFAULT_SDK_ROOT = os.path.expanduser("~/.local/share/android-sdk")
@@ -192,7 +192,7 @@ def _wait_for_device(adb: str, emulator_proc: subprocess.Popen, log_path: str, t
 
 
 def _wait_for_boot(adb: str, emulator_proc: subprocess.Popen, log_path: str, deadline: float) -> int:
-    """Wait until the device's boot animation completes."""
+    """Wait until the device finishes booting and AndroidWifi has an IPv4 default route."""
     while time.monotonic() < deadline:
         msg = _emulator_exited(emulator_proc, log_path)
         if msg:
@@ -208,6 +208,13 @@ def _wait_for_boot(adb: str, emulator_proc: subprocess.Popen, log_path: str, dea
                 check=False,
             )
             if result.stdout.strip() == "1":
+                serial = _running_avd_serial(adb)
+                if serial is not None:
+                    try:
+                        ensure_emulator_ipv4_route(adb, serial, 5.0)
+                    except (RuntimeError, subprocess.SubprocessError) as error:
+                        print(error, file=sys.stderr)
+                        return 1
                 return 0
         except subprocess.TimeoutExpired:
             pass
@@ -218,7 +225,7 @@ def _wait_for_boot(adb: str, emulator_proc: subprocess.Popen, log_path: str, dea
 
 
 def _wait_for_existing_boot(adb: str, serial: str, timeout: int = 180) -> int:
-    """Wait for an already-running emulator to finish booting."""
+    """Wait for an already-running emulator to finish booting and verify its IPv4 route."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -230,6 +237,11 @@ def _wait_for_existing_boot(adb: str, serial: str, timeout: int = 180) -> int:
                 check=False,
             )
             if result.stdout.strip() == "1":
+                try:
+                    ensure_emulator_ipv4_route(adb, serial, 5.0)
+                except (RuntimeError, subprocess.SubprocessError) as error:
+                    print(error, file=sys.stderr)
+                    return 1
                 return 0
         except subprocess.TimeoutExpired:
             pass
