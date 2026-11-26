@@ -186,7 +186,7 @@ def prepare_apks(adb: str, serial: str, telecom: bool, verbose: bool, skip_build
         gradle_env = {**os.environ, "ANDROID_HOME": sdk[1], "ANDROID_SDK_ROOT": sdk[1], "ANDROID_SERIAL": serial}
         tasks = [f":{module}:{task}" for module in modules for task in ("assembleDebug", "assembleDebugAndroidTest")]
         log = "--console=plain" if verbose else "--quiet"
-        # android/gradle.properties keeps Gradle single-use and Kotlin in-process so build RAM is freed on exit.
+        # android/gradle.properties owns Gradle daemon idle timeout, configuration cache, and in-process Kotlin.
         subprocess.run(["./gradlew", *tasks, log], cwd=ROOT / "android", env=gradle_env, check=True)
     for path in apk_paths:
         subprocess.run([adb, "-s", serial, "install", "-r", "-t", str(path)], check=True)
