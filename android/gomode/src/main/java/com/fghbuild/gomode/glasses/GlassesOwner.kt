@@ -2,6 +2,7 @@
 package com.fghbuild.gomode.glasses
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -118,7 +119,8 @@ internal data class GlassesState(
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
  * settings. Every connection shows the latest [show] frame, or a [notify] notice over it, and reports
- * its [presses]. Callers hold BLUETOOTH_SCAN before
+ * its [presses]. While that frame is blank, a connection first plays a short greeting that confirms
+ * it on the glasses; content that is not blank, or a notice, ends it. Callers hold BLUETOOTH_SCAN before
  * [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks BLUETOOTH_CONNECT again before
  * connecting on its own.
  *
@@ -159,6 +161,10 @@ internal class GlassesOwner(
     private val frame = MutableStateFlow<GlassesFrame>(GlassesFrame.Text(""))
     private val notice = MutableStateFlow<String?>(null)
     private var noticeJob: Job? = null
+
+    // The greeting frame over [frame], set by the connection that plays it.
+    private val greeting = MutableStateFlow<GlassesFrame?>(null)
+    private var greetingJob: Job? = null
     private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
     private var scanJob: Job? = null
     private var linkJob: Job? = null
@@ -235,11 +241,15 @@ internal class GlassesOwner(
 
     /**
      * Shows [frame] on the glasses now and after every reconnection, as [GlassesDisplay.showText] or
-     * [GlassesImageDisplay.showImage]. An image or text that is not blank ends a [notify] notice.
+     * [GlassesImageDisplay.showImage]. An image or text that is not blank ends a [notify] notice and
+     * the connection's greeting.
      */
     fun show(frame: GlassesFrame) {
         this.frame.value = frame
-        if (frame !is GlassesFrame.Text || frame.text.isNotBlank()) endNotice()
+        if (frame !is GlassesFrame.Text || frame.text.isNotBlank()) {
+            endNotice()
+            greetingJob?.cancel()
+        }
     }
 
     /**
@@ -249,6 +259,7 @@ internal class GlassesOwner(
      */
     fun notify(message: String) {
         endNotice()
+        greetingJob?.cancel()
         notice.value = message
         noticeJob =
             scope.launch {
@@ -448,10 +459,12 @@ internal class GlassesOwner(
     private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
         try {
             coroutineScope {
+                greetingJob = launch { greet(glasses) }
                 val drawing =
                     launch {
-                        combine(frame, notice) { frame, notice -> notice?.let(GlassesFrame::Text) ?: frame }
-                            .distinctUntilChanged()
+                        combine(frame, greeting, notice) { frame, greeting, notice ->
+                            notice?.let(GlassesFrame::Text) ?: greeting ?: frame
+                        }.distinctUntilChanged()
                             .collect { shown ->
                                 when (shown) {
                                     is GlassesFrame.Text -> {
@@ -495,6 +508,26 @@ internal class GlassesOwner(
                 glasses.close()
             }
         }
+
+    // Plays the greeting over the frame of [glasses], unless content arrives first, then yields to it.
+    private suspend fun greet(glasses: GlassesDisplay) {
+        if (frame.value.let { it !is GlassesFrame.Text || it.text.isNotBlank() }) return
+        val steps =
+            greetingSteps(
+                images = glasses is GlassesImageDisplay,
+                width = glasses.description.width,
+                height = glasses.description.height,
+                animate = ValueAnimator.areAnimatorsEnabled(),
+            )
+        try {
+            for (step in steps) {
+                greeting.value = step.frame
+                delay(step.durationMs)
+            }
+        } finally {
+            greeting.value = null
+        }
+    }
 
     private fun hasConnectPermission(): Boolean =
         appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED

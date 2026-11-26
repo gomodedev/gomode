@@ -84,7 +84,9 @@ class GlassesPairingTest {
                 composeRule.onNodeWithTag("gomode-glasses-connect").performClick()
                 composeRule.waitUntil(TIMEOUT_MS) { glasses.connectedDisplay == G2_DISPLAY }
                 composeRule.onNodeWithTag("gomode-glasses-link", useUnmergedTree = true).assertTextEquals("Connected")
-                assertEquals("", firmware.shownText())
+                // The glasses greet the connection, then show the blank frame.
+                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == GREETING_TEXT }
+                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
 
                 composeRule.onNodeWithTag("gomode-glasses-scan").performClick()
                 waitForTag("gomode-glasses-found")

@@ -48,6 +48,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -116,16 +117,16 @@ class GlassesOwnerTest {
                     .device,
             )
             owner.state.first { it.link is GlassesLink.Connected }
-            runCurrent()
+            finishGreeting()
             assertEquals(false, owner.state.value.scanning)
             assertEquals(HALO, repository.settings.first { it.glasses != null }.glasses)
             val halo = transport.halos.single()
             assertTrue(halo.files.toString(), halo.files.containsAll(listOf("text_page.lua", "main.lua")))
-            assertEquals(listOf(Shown.Clear), halo.shown())
+            assertEquals(Shown.Clear, halo.shown().last())
 
             owner.show(GlassesFrame.Text("one\ntwo"))
             runCurrent()
-            assertEquals(listOf(Shown.Clear, Shown.Page(lines = 2)), halo.shown())
+            assertEquals(listOf(Shown.Clear, Shown.Page(lines = 2)), halo.shown().takeLast(2))
         }
 
     @Test
@@ -147,7 +148,10 @@ class GlassesOwnerTest {
             assertEquals(0, transport.disconnects)
             assertEquals(
                 listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Page(lines = 2)),
-                transport.halos.single().shown(),
+                transport.halos
+                    .single()
+                    .shown()
+                    .takeLast(3),
             )
             second.pause().stop().destroy()
         }
@@ -284,7 +288,13 @@ class GlassesOwnerTest {
             runCurrent()
             assertEquals(GlassesLink.Disconnected, owner.state.value.link)
             assertEquals(null, owner.connectedDisplay)
-            assertEquals(listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Clear), transport.halos.single().shown())
+            assertEquals(
+                listOf(Shown.Clear, Shown.Page(lines = 1), Shown.Clear),
+                transport.halos
+                    .single()
+                    .shown()
+                    .takeLast(3),
+            )
             assertEquals(1, transport.disconnects)
             repository.settings.first { it.glasses == null }
             owner.state.first { it.saved == null }
@@ -615,6 +625,7 @@ class GlassesOwnerTest {
 
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
+            finishGreeting()
             firmware.touch(G2Side.RIGHT, type = 3)
             firmware.touch(G2Side.RIGHT, type = 0)
             firmware.systemInput(G2Side.LEFT, type = 0, source = 2)
@@ -664,6 +675,63 @@ class GlassesOwnerTest {
             halo.pressButton(ClickType.SINGLE)
             runCurrent()
             assertEquals(2 to 2, offered to presses.size)
+        }
+
+    @Test
+    fun aConnectionGreetsOnTheGlassesThenShowsTheFrame() =
+        runOwnerTest {
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            runCurrent()
+            assertEquals("Go", firmware.shownText())
+            // The typed text has ended and holds.
+            advanceTimeBy(1_000)
+            runCurrent()
+            assertEquals(GREETING_TEXT, firmware.shownText())
+            advanceTimeBy(GREETING_LIMIT_MS)
+            runCurrent()
+            assertEquals("", firmware.shownText())
+        }
+
+    @Test
+    fun contentEndsTheGreetingAndAReconnectionDoesNotCoverIt() =
+        runOwnerTest {
+            owner.start()
+            owner.connect(HALO)
+            owner.state.first { it.link is GlassesLink.Connected }
+            runCurrent()
+            val halo = transport.halos.single()
+            assertTrue(halo.shown().isNotEmpty())
+            assertFalse(halo.lastSent(haloTextMessages("")))
+
+            owner.show(GlassesFrame.Text("hello"))
+            runCurrent()
+            assertTrue(halo.lastSent(haloTextMessages("hello")))
+            advanceTimeBy(GREETING_LIMIT_MS)
+            runCurrent()
+            assertTrue(halo.lastSent(haloTextMessages("hello")))
+
+            halo.drop()
+            advanceTimeBy(RECONNECT_INITIAL_DELAY_MS)
+            owner.state.first { it.link is GlassesLink.Connected }
+            runCurrent()
+            assertEquals(listOf(Shown.Page(lines = 1)), transport.halos.last().shown())
+        }
+
+    @Test
+    fun aNoticeEndsTheGreeting() =
+        runOwnerTest {
+            owner.start()
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            runCurrent()
+            owner.notify("Notice")
+            runCurrent()
+            assertEquals("Notice", firmware.shownText())
+            advanceTimeBy(GLASSES_NOTICE_MS + 1)
+            runCurrent()
+            assertEquals("", firmware.shownText())
         }
 
     @Test
@@ -722,13 +790,22 @@ class GlassesOwnerTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
+    // Connects the saved Halo and lets its greeting end.
     private suspend fun TestScope.connectSavedGlasses() {
         owner.start()
         owner.connect(HALO)
         owner.state.first { it.link is GlassesLink.Connected }
+        finishGreeting()
+    }
+
+    private fun TestScope.finishGreeting() {
+        advanceTimeBy(GREETING_LIMIT_MS)
         runCurrent()
     }
 }
+
+// The longest a connection's greeting may last.
+private const val GREETING_LIMIT_MS = 10_000L
 
 // What a fake Halo was told to show through Go Mode's app on the glasses.
 private sealed interface Shown {
