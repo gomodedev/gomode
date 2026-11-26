@@ -20,7 +20,7 @@
 // the session. Its packets go out back to back, which the stream allows, and carry up to 252
 // bytes, zlib-compressed, where the Even Hub messages carry 139 bytes 50 ms apart.
 //
-// Once the page may be open, a press from either arm is reported and leaves the page open.
+// Once the page may be open, a gesture from either arm is reported and leaves the page open.
 // A dropped link or a missing or refused reply ends the session with a G2CloseCause. From the
 // moment the create request is written, the page may be open: unless the right link is gone or
 // the glasses closed the page, every exit shuts it down before both links close, so a quick
@@ -137,7 +137,7 @@ internal class G2Session(
     private val ids: G2Ids,
     private val desired: StateFlow<G2Content>,
     private val onReady: (G2Firmware, G2Content) -> Unit,
-    private val onPress: () -> Unit,
+    private val onGesture: (G2Gesture) -> Unit,
     private val onEvent: (G2InputEvent) -> Unit,
     private val onBattery: (G2Battery) -> Unit,
     private val log: (String) -> Unit,
@@ -265,7 +265,7 @@ internal class G2Session(
         }
     }
 
-    /** Accept one inbound item: throws on a lost link or an exit of the open page, and reports presses. */
+    /** Accept one inbound item: throws on a lost link or an exit of the open page, and reports gestures. */
     private fun accept(inbound: Inbound): Inbound.Message {
         when (inbound) {
             is Inbound.Lost -> {
@@ -287,10 +287,8 @@ internal class G2Session(
                     }
                 }
                 val ring = G2EvenHub.ringReport(inbound.message)
-                if ((ring == null || ringFilter.accept(ring)) &&
-                    G2EvenHub.press(inbound.message, page, session)
-                ) {
-                    onPress()
+                if (ring == null || ringFilter.accept(ring)) {
+                    G2EvenHub.gesture(inbound.message, page, session)?.let(onGesture)
                 }
                 return inbound
             }
@@ -598,7 +596,7 @@ internal class G2Session(
         }
     }
 
-    /** Show the host's content until the page closes; unsolicited messages only matter as page exits and presses. */
+    /** Show the host's content until the page closes; unsolicited messages only matter as page exits and gestures. */
     private suspend fun serve(
         firmware: G2Firmware,
         initial: G2Content,

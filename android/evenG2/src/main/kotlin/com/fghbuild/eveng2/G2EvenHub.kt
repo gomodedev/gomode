@@ -1,4 +1,4 @@
-// G2EvenHub: Even Hub (SID 0xE0) text page, in-place text update, heartbeat, shutdown, replies, presses, and exits.
+// G2EvenHub: Even Hub (SID 0xE0) text page, in-place text update, heartbeat, shutdown, replies, gestures, and exits.
 //
 // Ported and modified from G2EvenHubCodec.kt of the Even Realities enterprise SDK
 // 0.1.0-beta.14 (Apache-2.0, Copyright 2026 Hong Kong Even Realities Limited), narrowed to one
@@ -32,11 +32,12 @@
 // press, 10 its release. Proto3 omits type 0, so a click carries no type. Only an exit that names
 // this page's widget and session closes it. The Python library's live-confirmed create page omits
 // the page session ID (field 7), which the enterprise SDK sends; on a pair, the glasses took a page
-// created with it and named it in an exit while the wearer took them off and put them on. A press
-// is a click: a text event that names this page's container, which captures input, or a system
-// event from a touchpad or the ring whose widget and session, when present, are this page's. Either
-// arm may report input, as the enterprise SDK accepts it from both. The enterprise contract vector
-// g2_evenhub_click_hex is a text event click; the README of Even Realities'
+// created with it and named it in an exit while the wearer took them off and put them on. A gesture
+// is a click, a double click, or a long press: a text event that names this page's container, which
+// captures input, or a system event from a touchpad or the ring whose widget and session, when
+// present, are this page's. Either arm may report input, as the enterprise SDK accepts it from both.
+// The enterprise contract vector g2_evenhub_click_hex is a text event click, and the Python
+// library's tests hold a long press as a text event; the README of Even Realities'
 // @evenrealities/even_hub_sdk 0.0.16 npm package (MIT) says source-aware input, whose sources
 // include the ring, arrives as system events.
 //
@@ -48,14 +49,21 @@
 // as a system event from the ring whose field 100 holds it: 'R' 'I' 1 1 <report type> <aux> <speed>
 // 0 <ring tick u32 LE>, without the stock firmware's suppression of a report within 100 ring ticks
 // of the last; G2RingFilter, ported from faceclaw's app/ui/input-monitor.ts (GPL-3.0), suppresses
-// them as faceclaw does. None of the new events is a click, so a press stays one click of a
-// touchpad or the ring.
+// them as faceclaw does. gesture_fwd.c maps the R1 report type to the event: 0 long press (9), 1
+// click (0), 2 double click (3), 4 and 5 scroll up and down (1, 2), 8 release (10), 9 tap then hold
+// (11), 10 touch-down (14), and any other to 127. So the ring's clicks, double clicks, and long
+// presses are gestures, as are a touchpad's long presses; the other new events are not.
 //
-// TODO(hardware): Confirm on a real pair, on stock firmware, which event one touchpad click and one
-// R1 ring click send, from which arm, and that a double click sends only type 3, not a click
-// first. Log every event command 2 message while tapping each temple and the ring once. If one
-// press arrives twice (from both arms, or as both a text and a system event), accept only one arm
-// or one form in press(); otherwise every press would start and at once end voice.
+// On a pair on 2.3.0.24 with Faceclaw/45, a capture of 7 temple double taps and 6 long presses showed
+// each double click as one type 3 event after a release, with no click before it, and no gesture
+// reported twice across the arms.
+//
+// TODO(hardware): Confirm on a real pair, on stock firmware, which event one touchpad double click,
+// one R1 ring click, and one ring double click send, from which arm, and that a double click sends
+// only type 3, not a click first; on Faceclaw firmware, the same for the ring. Log every event command 2
+// message while tapping each temple and the ring. If one gesture arrives twice (from both arms, or as
+// both a text and a system event), accept only one arm or one form in gesture(); otherwise every
+// double tap would start and at once end voice.
 
 package com.fghbuild.eveng2
 
@@ -145,8 +153,6 @@ object G2EvenHub {
     private const val TEXT_EVENT = 2
     private const val SYSTEM_EVENT = 3
 
-    // Input sources of a system event: right temple touchpad, R1 ring, left temple touchpad.
-    private val PRESS_SOURCES = G2InputEvent.SOURCE_RIGHT_TEMPLE..G2InputEvent.SOURCE_LEFT_TEMPLE
     private const val RING_REPORT_FIELD = 100
     private const val RING_REPORT_SIZE = 12
 
@@ -297,37 +303,54 @@ object G2EvenHub {
     }
 
     /**
-     * Whether [message] is a press on the page identified by [page] and [session]: a click on its
-     * text container, or a system click from a temple touchpad or the R1 ring. Other input, such as
-     * a double click, a scroll, a long press, or a click of an unspecified source, is not one.
+     * The gesture that [message] is on the page identified by [page] and [session]: a click, double
+     * click, or long press on its text container, or one from a temple touchpad or the R1 ring as a
+     * system event. Null for other input, such as a scroll, a release, or a system event of an
+     * unspecified source.
      */
-    fun press(
+    fun gesture(
         message: G2Message,
         page: G2TextPage,
         session: Long,
-    ): Boolean {
-        val (branch, event) = deviceEvent(message) ?: return false
+    ): G2Gesture? {
+        val (branch, event) = deviceEvent(message) ?: return null
         return when (branch) {
             TEXT_EVENT -> {
-                event.keys.all { it in 1..3 } &&
-                    event.scalar(1) == page.containerId &&
-                    (2 !in event || event.bytes(2)?.let(::decodeUtf8) == page.containerName) &&
-                    event.enum(3) == G2InputEvent.CLICK
+                val ours =
+                    event.keys.all { it in 1..3 } &&
+                        event.scalar(1) == page.containerId &&
+                        (2 !in event || event.bytes(2)?.let(::decodeUtf8) == page.containerName)
+                gestureType(event.enum(3))?.takeIf { ours }?.let { G2Gesture(it, source = null) }
             }
 
             SYSTEM_EVENT -> {
-                event.keys.all { it in 1..6 || (it == RING_REPORT_FIELD && ringReport(event) != null) } &&
-                    event.enum(1) == G2InputEvent.CLICK &&
-                    event.scalar(2) in PRESS_SOURCES &&
-                    (5 !in event || event.scalar(5) == page.widgetId) &&
-                    (6 !in event || event.scalar(6) == session)
+                val source =
+                    when (event.scalar(2)) {
+                        G2InputEvent.SOURCE_LEFT_TEMPLE -> G2GestureSource.LEFT_TEMPLE
+                        G2InputEvent.SOURCE_RIGHT_TEMPLE -> G2GestureSource.RIGHT_TEMPLE
+                        G2InputEvent.SOURCE_RING -> G2GestureSource.RING
+                        else -> return null
+                    }
+                val ours =
+                    event.keys.all { it in 1..6 || (it == RING_REPORT_FIELD && ringReport(event) != null) } &&
+                        (5 !in event || event.scalar(5) == page.widgetId) &&
+                        (6 !in event || event.scalar(6) == session)
+                gestureType(event.enum(1))?.takeIf { ours }?.let { G2Gesture(it, source) }
             }
 
             else -> {
-                false
+                null
             }
         }
     }
+
+    private fun gestureType(type: Long?): G2GestureType? =
+        when (type) {
+            G2InputEvent.CLICK -> G2GestureType.CLICK
+            G2InputEvent.DOUBLE_CLICK -> G2GestureType.DOUBLE_CLICK
+            G2InputEvent.LONG_PRESS -> G2GestureType.LONG_PRESS
+            else -> null
+        }
 
     /** The input or system event that [arm] reported in [message], or null when it is none or an IMU sample. */
     fun inputEvent(

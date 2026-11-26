@@ -1,4 +1,4 @@
-// Voice over WebRTC with fake Halo and Even G2 glasses: transcripts drawn on them and presses that toggle voice.
+// Voice over WebRTC with fake Halo and Even G2 glasses: transcripts drawn on them, and gestures that act on voice.
 package com.fghbuild.gomode.voice
 
 import android.Manifest
@@ -24,12 +24,14 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
 import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.G2TextPage
 import com.fghbuild.eveng2.testing.FakeG2Firmware
 import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.LocalEmulatorOnly
+import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -379,22 +381,88 @@ class GlassesVoiceTranscriptTest {
 
     @Test
     fun aHaloButtonPressStartsVoiceAndTheNextPressEndsIt() =
-        pressesStartAndEndVoice(GlassesDevice.Halo(HALO_ADDRESS)) { _, transport, _ ->
-            transport.halos.single().pressButton(ClickType.SINGLE)
+        withVoiceReady(GlassesDevice.Halo(HALO_ADDRESS)) { ready ->
+            val halo = ready.transport.halos.single()
+            halo.pressButton(ClickType.SINGLE)
+            ready.awaitVoice(on = true)
+            halo.pressButton(ClickType.SINGLE)
+            ready.awaitVoice(on = false)
+            assertEquals(1, ready.fixture.sessions.size)
         }
 
+    // Had a single tap acted, voice would have started before the first double tap, which would then
+    // end it, or ended before the ring's double tap, which would then start a second session.
     @LocalEmulatorOnly
     @Test
-    fun anR1RingClickStartsVoiceAndAnEvenG2TouchpadClickEndsIt() =
-        pressesStartAndEndVoice(GlassesDevice.EvenG2(G2_PAIR)) { press, _, firmware ->
-            if (press == 0) firmware.systemInput(G2Side.RIGHT, type = 0, source = 2) else firmware.touch(G2Side.LEFT, 0)
+    fun anEvenG2TempleDoubleTapStartsVoiceAndARingDoubleTapEndsItWhileSingleTapsActOnNothing() =
+        withVoiceReady(GlassesDevice.EvenG2(G2_PAIR)) { ready ->
+            val firmware = ready.firmware
+            firmware.touch(G2Side.LEFT, G2InputEvent.CLICK)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.CLICK, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            firmware.systemInput(G2Side.LEFT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            ready.awaitVoice(on = true)
+            firmware.touch(G2Side.RIGHT, G2InputEvent.CLICK)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.CLICK, G2InputEvent.SOURCE_RING)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_RING)
+            ready.awaitVoice(on = false)
+            composeRule.waitForIdle()
+            assertEquals(1, ready.fixture.sessions.size)
         }
 
-    // Connects [device] with Go Mode open and its service ready, then presses it twice through [press],
-    // given the press's index and the fakes: the first press starts voice and the second ends it.
-    private fun pressesStartAndEndVoice(
+    @Test
+    fun onFaceclawFirmwareALongPressMutesVoiceAndTheNextUnmutesIt() =
+        withVoiceReady(GlassesDevice.EvenG2(G2_PAIR), revision = "Faceclaw/45") { ready ->
+            val firmware = ready.firmware
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            ready.awaitVoice(on = true)
+            ready.awaitMicrophoneButton(next = "Mute once")
+
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            composeRule.waitUntil(TIMEOUT_MS) {
+                firmware.presented.lastOrNull()?.lines == listOf(context.getString(R.string.glasses_notice_muted))
+            }
+            // The phone's microphone button shows it muted until unmuted: its next mode is Listening.
+            ready.awaitMicrophoneButton(next = "Listening")
+
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            composeRule.waitUntil(TIMEOUT_MS) {
+                firmware.presented.lastOrNull()?.lines == listOf(context.getString(R.string.glasses_notice_unmuted))
+            }
+            ready.awaitMicrophoneButton(next = "Mute once")
+            assertEquals(1, ready.fixture.sessions.size)
+        }
+
+    private inner class VoiceReady(
+        val transport: FakeHaloTransport,
+        val firmware: FakeG2Firmware,
+        val fixture: ServerVoiceSwitchTest.HostedVoiceFixture,
+    ) {
+        // Waits until the voice panel shows voice running, its session opened, or not running.
+        fun awaitVoice(on: Boolean) {
+            if (on) composeRule.waitUntil(TIMEOUT_MS) { fixture.sessions.isNotEmpty() }
+            composeRule.waitUntil(TIMEOUT_MS) {
+                composeRule.onAllNodesWithContentDescription("End voice").fetchSemanticsNodes().isNotEmpty() == on
+            }
+        }
+
+        // Waits until the connected voice's microphone button offers [next] as its next mode.
+        fun awaitMicrophoneButton(next: String) {
+            composeRule.waitUntil(TIMEOUT_MS) {
+                composeRule
+                    .onAllNodesWithContentDescription("Microphone mode. Next: $next")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+        }
+    }
+
+    // Connects [device], Even G2 on firmware that reports [revision], with Go Mode open and its service
+    // ready to start voice, and runs [body]; the glasses stay connected throughout.
+    private fun withVoiceReady(
         device: GlassesDevice,
-        press: (Int, FakeHaloTransport, FakeG2Firmware) -> Unit,
+        revision: String? = null,
+        body: (VoiceReady) -> Unit,
     ) = runBlocking {
         MockWebServer().use { server ->
             val fixture = ServerVoiceSwitchTest.HostedVoiceFixture(bearer = false)
@@ -408,7 +476,7 @@ class GlassesVoiceTranscriptTest {
             repository.settings.first { it.services.isNotEmpty() && !it.voiceSetup.deviceSpeech }
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val transport = FakeHaloTransport(context)
-            val firmware = FakeG2Firmware()
+            val firmware = FakeG2Firmware().apply { this.revision = revision }
             val glassesScope = MainScope()
             val glasses =
                 GlassesOwner(glassesScope, context, repository, transport, fakeG2Scanner(), firmware.connector)
@@ -425,17 +493,7 @@ class GlassesVoiceTranscriptTest {
                         .isNotEmpty()
                 }
 
-                press(0, transport, firmware)
-                composeRule.waitUntil(TIMEOUT_MS) { fixture.sessions.size == 1 }
-                composeRule.waitUntil(TIMEOUT_MS) {
-                    composeRule.onAllNodesWithContentDescription("End voice").fetchSemanticsNodes().isNotEmpty()
-                }
-
-                press(1, transport, firmware)
-                composeRule.waitUntil(TIMEOUT_MS) {
-                    composeRule.onAllNodesWithContentDescription("End voice").fetchSemanticsNodes().isEmpty()
-                }
-                assertEquals(1, fixture.sessions.size)
+                body(VoiceReady(transport, firmware, fixture))
                 assertTrue(glasses.state.value.link is GlassesLink.Connected)
             } finally {
                 composeRule.runOnUiThread {
@@ -488,19 +546,41 @@ class GlassesVoiceTranscriptTest {
             )
         }
 
-    // Telecom owns a released call's hang-up, so the call outlives the shell; a press still ends it.
+    // Telecom owns a released call's hang-up, so the call outlives the shell; a double tap still ends it.
     @Test
-    fun aPressEndsACarDialCallThatOutlivesTheShell() =
+    fun aDoubleTapEndsACarDialCallThatOutlivesTheShell() =
         connectedCarDialCall { call ->
-            composeRule.runOnUiThread { check(call.carDial.releaseToShell(call.identity, call.activity)) }
-            composeRule.runOnIdle { call.mounted.value = false }
-            composeRule.waitForIdle()
-            assertEquals(CarDialStatus.CONNECTED, call.carDial.state.value.status)
-
-            call.firmware.touch(G2Side.RIGHT, 0)
+            releaseToShellAndUnmountIt(call)
+            call.firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
             composeRule.waitUntil(TIMEOUT_MS) { call.carDial.state.value.status == CarDialStatus.IDLE }
             composeRule.waitUntil(TIMEOUT_MS) { call.firmware.shownText() == "" }
         }
+
+    // Without the shell, nothing but the car-dial owner acts on the glasses: an action it left would
+    // say on the glasses that voice is off.
+    @Test
+    fun onFaceclawFirmwareALongPressMutesACarDialCallThatOutlivesTheShell() =
+        connectedCarDialCall(revision = "Faceclaw/45") { call ->
+            releaseToShellAndUnmountIt(call)
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            call.firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            composeRule.waitUntil(TIMEOUT_MS) {
+                call.firmware.presented
+                    .lastOrNull()
+                    ?.lines == listOf(context.getString(R.string.glasses_notice_muted))
+            }
+            val voice = checkNotNull(call.carDial.session.value)
+            assertEquals(MicrophoneMode.MUTED, voice.state.value.microphoneMode)
+            assertEquals(CarDialStatus.CONNECTED, call.carDial.state.value.status)
+        }
+
+    // Hands the call to the shell, as Telecom's released call does, then removes the shell.
+    private fun releaseToShellAndUnmountIt(call: CarDialCall) {
+        composeRule.runOnUiThread { check(call.carDial.releaseToShell(call.identity, call.activity)) }
+        composeRule.runOnIdle { call.mounted.value = false }
+        composeRule.waitForIdle()
+        assertEquals(CarDialStatus.CONNECTED, call.carDial.state.value.status)
+    }
 
     private class CarDialCall(
         val fixture: ServerVoiceSwitchTest.HostedVoiceFixture,
@@ -515,90 +595,92 @@ class GlassesVoiceTranscriptTest {
 
     // Connects a fake Even G2, starts a car-dial call to a hosted service, and runs [body] once it
     // connects; the shell hosts the service page whose frontend the call waits for.
-    private fun connectedCarDialCall(body: (CarDialCall) -> Unit) =
-        runBlocking {
-            MockWebServer().use { server ->
-                val fixture = ServerVoiceSwitchTest.HostedVoiceFixture(bearer = false)
-                server.dispatcher = fixture
-                server.start()
-                val repository = SettingsRepository(MemoryPreferences())
-                repository.addService("Local stack", server.url("/").toString())
-                repository.updateSavedVoiceSetup(null) {
-                    it.copy(preference = it.preference.copy(mode = VoiceSetupMode.FOLLOW_GATEWAY))
+    private fun connectedCarDialCall(
+        revision: String? = null,
+        body: (CarDialCall) -> Unit,
+    ) = runBlocking {
+        MockWebServer().use { server ->
+            val fixture = ServerVoiceSwitchTest.HostedVoiceFixture(bearer = false)
+            server.dispatcher = fixture
+            server.start()
+            val repository = SettingsRepository(MemoryPreferences())
+            repository.addService("Local stack", server.url("/").toString())
+            repository.updateSavedVoiceSetup(null) {
+                it.copy(preference = it.preference.copy(mode = VoiceSetupMode.FOLLOW_GATEWAY))
+            }
+            val service =
+                repository.settings
+                    .first { it.services.isNotEmpty() && !it.voiceSetup.deviceSpeech }
+                    .services
+                    .single()
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val firmware = FakeG2Firmware().apply { this.revision = revision }
+            val glassesScope = MainScope()
+            val glasses =
+                GlassesOwner(
+                    glassesScope,
+                    context,
+                    repository,
+                    FakeHaloTransport(context),
+                    fakeG2Scanner(),
+                    firmware.connector,
+                )
+            val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
+            val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
+            val carDial = CarDialVoiceOwner(context, repository, models, shellOwner, glasses)
+            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            val role = RoleManager.ROLE_CALL_REDIRECTION
+            val previousHolders =
+                device.executeShellCommand("cmd role get-role-holders $role").lines().filter(String::isNotBlank)
+            val component = ComponentName(context, CarDialRedirectionService::class.java)
+            val originalEnabled = context.packageManager.getComponentEnabledSetting(component)
+            val mounted = mutableStateOf(true)
+            try {
+                context.packageManager.setComponentEnabledSetting(
+                    component,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP,
+                )
+                device.executeShellCommand("cmd role add-role-holder $role ${context.packageName}")
+                composeRule.runOnUiThread { glasses.connect(GlassesDevice.EvenG2(G2_PAIR)) }
+                withTimeout(TIMEOUT_MS) { glasses.state.first { it.link is GlassesLink.Connected } }
+                composeRule.setContent {
+                    if (mounted.value) GoModeTheme { GoModeApp(shellOwner, models, glasses) }
                 }
-                val service =
-                    repository.settings
-                        .first { it.services.isNotEmpty() && !it.voiceSetup.deviceSpeech }
-                        .services
-                        .single()
-                val context = InstrumentationRegistry.getInstrumentation().targetContext
-                val firmware = FakeG2Firmware()
-                val glassesScope = MainScope()
-                val glasses =
-                    GlassesOwner(
-                        glassesScope,
-                        context,
-                        repository,
-                        FakeHaloTransport(context),
-                        fakeG2Scanner(),
-                        firmware.connector,
-                    )
-                val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
-                val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
-                val carDial = CarDialVoiceOwner(context, repository, models, shellOwner, glasses)
-                val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-                val role = RoleManager.ROLE_CALL_REDIRECTION
-                val previousHolders =
-                    device.executeShellCommand("cmd role get-role-holders $role").lines().filter(String::isNotBlank)
-                val component = ComponentName(context, CarDialRedirectionService::class.java)
-                val originalEnabled = context.packageManager.getComponentEnabledSetting(component)
-                val mounted = mutableStateOf(true)
-                try {
-                    context.packageManager.setComponentEnabledSetting(
-                        component,
-                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                        PackageManager.DONT_KILL_APP,
-                    )
-                    device.executeShellCommand("cmd role add-role-holder $role ${context.packageName}")
-                    composeRule.runOnUiThread { glasses.connect(GlassesDevice.EvenG2(G2_PAIR)) }
-                    withTimeout(TIMEOUT_MS) { glasses.state.first { it.link is GlassesLink.Connected } }
-                    composeRule.setContent {
-                        if (mounted.value) GoModeTheme { GoModeApp(shellOwner, models, glasses) }
-                    }
-                    composeRule.waitUntil(TIMEOUT_MS) {
-                        composeRule
-                            .onAllNodes(hasTestTag("gomode-voice-connect") and isEnabled())
-                            .fetchSemanticsNodes()
-                            .isNotEmpty()
-                    }
-                    val activity = Any()
-                    val identity =
-                        composeRule.runOnUiThread {
-                            val identity = requireNotNull(carDial.request(service))
-                            check(carDial.attach(identity, activity))
-                            carDial.start(identity, activity)
-                            identity
-                        }
-                    composeRule.waitUntil(TIMEOUT_MS) {
-                        fixture.sessions.size == 1 && carDial.state.value.status == CarDialStatus.CONNECTED
-                    }
-                    body(CarDialCall(fixture, firmware, glasses, carDial, identity, activity, mounted))
-                } finally {
+                composeRule.waitUntil(TIMEOUT_MS) {
+                    composeRule
+                        .onAllNodes(hasTestTag("gomode-voice-connect") and isEnabled())
+                        .fetchSemanticsNodes()
+                        .isNotEmpty()
+                }
+                val activity = Any()
+                val identity =
                     composeRule.runOnUiThread {
-                        carDial.close()
-                        glassesScope.cancel()
-                        shellOwner.close()
+                        val identity = requireNotNull(carDial.request(service))
+                        check(carDial.attach(identity, activity))
+                        carDial.start(identity, activity)
+                        identity
                     }
-                    models.close()
-                    fixture.close()
-                    device.executeShellCommand("cmd role remove-role-holder $role ${context.packageName}")
-                    previousHolders.forEach { device.executeShellCommand("cmd role add-role-holder $role $it") }
-                    context.packageManager.setComponentEnabledSetting(
-                        component,
-                        originalEnabled,
-                        PackageManager.DONT_KILL_APP,
-                    )
+                composeRule.waitUntil(TIMEOUT_MS) {
+                    fixture.sessions.size == 1 && carDial.state.value.status == CarDialStatus.CONNECTED
                 }
+                body(CarDialCall(fixture, firmware, glasses, carDial, identity, activity, mounted))
+            } finally {
+                composeRule.runOnUiThread {
+                    carDial.close()
+                    glassesScope.cancel()
+                    shellOwner.close()
+                }
+                models.close()
+                fixture.close()
+                device.executeShellCommand("cmd role remove-role-holder $role ${context.packageName}")
+                previousHolders.forEach { device.executeShellCommand("cmd role add-role-holder $role $it") }
+                context.packageManager.setComponentEnabledSetting(
+                    component,
+                    originalEnabled,
+                    PackageManager.DONT_KILL_APP,
+                )
             }
         }
+    }
 }

@@ -142,7 +142,7 @@ class HaloEmulatorRenderingTest {
         }
     }
 
-    // Of the button's gestures and an IMU tap, only the single press reaches HaloGlasses' presses, and
+    // Of the button's gestures and an IMU tap, only the single press reaches HaloGlasses' actions, and
     // the app sends nothing else but late acknowledgements. The emulator reports what the app passes
     // to frame.bluetooth.send, which is what HaloDevice.dataResponse yields once it strips the 0x01
     // that the firmware prepends.
@@ -152,14 +152,16 @@ class HaloEmulatorRenderingTest {
         bridge.imuTap()
         bridge.buttonSingle()
         val sent = mutableListOf<List<Byte>>()
-        withTimeout(FRAME_TIMEOUT_MS) {
-            haloPresses(
-                bridge.events
-                    .filterIsInstance<HaloEmulatorEvent.BluetoothSent>()
-                    .map { it.data }
-                    .onEach { if (!it.contentEquals(DATA_ACK)) sent += it.toList() },
-            ).first()
-        }
+        val action =
+            withTimeout(FRAME_TIMEOUT_MS) {
+                haloActions(
+                    bridge.events
+                        .filterIsInstance<HaloEmulatorEvent.BluetoothSent>()
+                        .map { it.data }
+                        .onEach { if (!it.contentEquals(DATA_ACK)) sent += it.toList() },
+                ).first()
+            }
+        assertEquals(GlassesAction.TOGGLE_VOICE, action)
         assertEquals(listOf(listOf<Byte>(0x0B, 0x01)), sent)
         println("press: a single press sent 0B 01; double, long, and IMU tap sent nothing")
     }

@@ -67,8 +67,8 @@ private const val CLEAR_ON_DISCONNECT_TIMEOUT_MS = 3_000L
 /** How long a [GlassesOwner.notify] notice stays, long enough to read at a glance. */
 internal const val GLASSES_NOTICE_MS = 4_000L
 
-// Presses a slow collector may lag behind; a person presses far slower than one is handled.
-private const val PRESS_BUFFER = 8
+// Actions a slow collector may lag behind; a person gestures far slower than one is handled.
+private const val ACTION_BUFFER = 8
 
 /** How many of the latest [GlassesOwner.inputs] it keeps. */
 internal const val GLASSES_INPUT_HISTORY = 20
@@ -128,7 +128,7 @@ internal data class GlassesState(
  * a permanent failure. This is the only reconnection policy for either model: each attempt is one
  * session of the model's SDK. Auto-connect starts that connection when [start] first sees the saved
  * settings, and when [updateAutoConnect] turns it on while no connection runs. Every connection
- * shows the latest [show] frame, or a [notify] notice over it, reports its [presses], and keeps its
+ * shows the latest [show] frame, or a [notify] notice over it, reports its [actions], and keeps its
  * battery readings in [state] for every screen that shows them. While that frame is blank, a
  * connection first plays a short greeting that confirms it on the glasses; content that is not
  * blank, or a notice, ends it. Callers hold BLUETOOTH_SCAN before [startScan]
@@ -180,7 +180,7 @@ internal class GlassesOwner(
     // [toggleLogo]'s requests to play the greeting, which only a connection collects.
     private val logoRequests =
         MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
+    private val mutableActions = MutableSharedFlow<GlassesAction>(extraBufferCapacity = ACTION_BUFFER)
     private var scanJob: Job? = null
     private var linkJob: Job? = null
     private var started = false
@@ -246,18 +246,18 @@ internal class GlassesOwner(
     }
 
     /**
-     * Each press of the connected glasses that the [takePressesFirst] handler leaves; see
-     * [GlassesDisplay.presses], while nobody [inspectInputs]. While nothing collects them, as when
-     * no Activity is open to start voice, a press instead shows a notice that says so.
+     * Each action of the connected glasses that the [takeActionsFirst] handler leaves; see
+     * [GlassesDisplay.actions], while nobody [inspectInputs]. While nothing collects them, as when
+     * no Activity is open to start voice, an action instead shows a notice that says why it cannot act.
      */
-    val presses: SharedFlow<Unit> = mutablePresses.asSharedFlow()
+    val actions: SharedFlow<GlassesAction> = mutableActions.asSharedFlow()
 
-    // Main thread only, like every press.
-    private var firstPressHandler: (() -> Boolean)? = null
+    // Main thread only, like every action.
+    private var firstActionHandler: ((GlassesAction) -> Boolean)? = null
 
     /**
      * Until the returned handle closes, the wearer tries gestures: no handler, collector, or notice
-     * acts on a press, and the connected glasses show the latest
+     * acts on an action, and the connected glasses show the latest
      * [inputs] over everything else. Handles nest; closing one twice releases it once. Main thread only.
      */
     fun inspectInputs(): AutoCloseable {
@@ -272,11 +272,11 @@ internal class GlassesOwner(
     }
 
     /**
-     * Offers each press to [handler] before [presses]; it returns whether it acted on the press. Work
-     * that outlives every Activity, such as a car call, ends through it. Null removes the handler.
+     * Offers each action to [handler] before [actions]; it returns whether it acted on the action.
+     * Work that outlives every Activity, such as a car call, ends through it. Null removes the handler.
      */
-    fun takePressesFirst(handler: (() -> Boolean)?) {
-        firstPressHandler = handler
+    fun takeActionsFirst(handler: ((GlassesAction) -> Boolean)?) {
+        firstActionHandler = handler
     }
 
     /**
@@ -294,8 +294,7 @@ internal class GlassesOwner(
 
     /**
      * Shows [message] over the [show] frame for [GLASSES_NOTICE_MS], until [show] sends an image or text
-     * that is not blank, or until the next notice: feedback on the glasses for a press the phone cannot
-     * act on.
+     * that is not blank, or until the next notice: feedback on the glasses for a gesture's action.
      */
     fun notify(message: String) {
         endNotice()
@@ -340,20 +339,23 @@ internal class GlassesOwner(
         mutableInputs.update { (listOf(shown) + it).take(GLASSES_INPUT_HISTORY) }
     }
 
-    private fun press() {
+    private fun act(action: GlassesAction) {
         when {
             inspections.value > 0 -> {}
 
-            firstPressHandler?.invoke() == true -> {}
+            firstActionHandler?.invoke(action) == true -> {}
 
-            mutablePresses.subscriptionCount.value == 0 -> {
-                notify(
-                    appContext.getString(R.string.glasses_notice_open_app),
-                )
+            mutableActions.subscriptionCount.value == 0 -> {
+                val notice =
+                    when (action) {
+                        GlassesAction.TOGGLE_MUTE -> R.string.glasses_notice_voice_off
+                        GlassesAction.TOGGLE_VOICE -> R.string.glasses_notice_open_app
+                    }
+                notify(appContext.getString(notice))
             }
 
             else -> {
-                mutablePresses.tryEmit(Unit)
+                mutableActions.tryEmit(action)
             }
         }
     }
@@ -533,7 +535,7 @@ internal class GlassesOwner(
         }
     }
 
-    // Shows each frame, reports each press, and keeps the state's batteries until the connection ends,
+    // Shows each frame, reports each action, and keeps the state's batteries until the connection ends,
     // and returns why it ended: the glasses' close cause once they report one. Cancellation clears the
     // display, best effort, and every exit empties the batteries and closes the glasses.
     private suspend fun showUntilClosed(glasses: GlassesDisplay): GlassesException =
@@ -578,7 +580,7 @@ internal class GlassesOwner(
                                 }
                             }
                     }
-                val pressing = launch { glasses.presses.collect { press() } }
+                val acting = launch { glasses.actions.collect(::act) }
                 val listening = launch { glasses.events.collect(::record) }
                 val metering =
                     launch {
@@ -588,7 +590,7 @@ internal class GlassesOwner(
                     }
                 val cause = glasses.closeCause.filterNotNull().first()
                 drawing.cancel()
-                pressing.cancel()
+                acting.cancel()
                 listening.cancel()
                 metering.cancel()
                 greetings.cancel()

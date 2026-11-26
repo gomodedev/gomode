@@ -12,7 +12,6 @@ import com.fghbuild.halo.ble.HaloConnection
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloException
 import com.fghbuild.halo.msg.CircularTextLayout
-import com.fghbuild.halo.msg.ClickType
 import com.fghbuild.halo.msg.HaloDisplay
 import com.fghbuild.halo.msg.HalosideApp
 import com.fghbuild.halo.msg.RxClick
@@ -25,9 +24,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.withContext
 
 // Message codes that Go Mode's Halo app, assets/halo/main.lua, handles. A page is text or an image.
@@ -83,21 +81,20 @@ internal fun haloImageMessages(image: Bitmap): List<Pair<Int, TxMessage>> {
 }
 
 /**
- * The presses in the data of Go Mode's Halo app, which reports each single press of the button.
- * They end with the link, whose end the device data reports as a [HaloException].
+ * The actions of the presses in the data of Go Mode's Halo app, which reports each single press of
+ * the button. They end with the link, whose end the device data reports as a [HaloException].
  */
-internal fun haloPresses(data: Flow<ByteArray>): Flow<Unit> =
+internal fun haloActions(data: Flow<ByteArray>): Flow<GlassesAction> =
     RxClick()
         .attach(data)
-        .filter { it == ClickType.SINGLE }
-        .map { }
+        .mapNotNull(::haloAction)
         .catch { if (it !is HaloException) throw it }
 
 internal class HaloGlasses private constructor(
     private val connection: HaloConnection,
     private val app: HalosideApp,
     override val closeCause: StateFlow<Exception?>,
-    override val presses: Flow<Unit>,
+    override val actions: Flow<GlassesAction>,
 ) : GlassesImageDisplay {
     override val description = HALO_DISPLAY
     override val screenFit = HaloScreenFit
@@ -158,7 +155,7 @@ internal class HaloGlasses private constructor(
                         .bufferedReader()
                         .use { it.readText() }
                 app.start(main, HALO_APP_LIBS)
-                return HaloGlasses(connection, app, halo.closeCause, haloPresses(halo.dataResponse)).also {
+                return HaloGlasses(connection, app, halo.closeCause, haloActions(halo.dataResponse)).also {
                     glasses = it
                 }
             } catch (e: HaloException) {

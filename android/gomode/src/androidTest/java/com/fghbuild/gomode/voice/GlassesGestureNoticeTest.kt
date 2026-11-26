@@ -1,4 +1,4 @@
-// Checks the notice that fake Even G2 glasses show when their press cannot start voice, one per reason.
+// Checks the notice that fake Even G2 glasses show when a gesture's action cannot act, one per reason.
 package com.fghbuild.gomode.voice
 
 import android.Manifest
@@ -14,6 +14,7 @@ import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.testing.FakeG2Firmware
@@ -56,7 +57,7 @@ private const val RTC_OFFER = "/api/voicegateway/v2/voice/rtc/offer"
 
 // The microphone stays as the suite left it: granted by the cases that need it, revoked for the
 // microphone prompt by the denied-microphone suite.
-class GlassesPressNoticeTest {
+class GlassesGestureNoticeTest {
     @get:Rule(order = 0)
     val permissions: GrantPermissionRule =
         GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.BLUETOOTH_CONNECT)
@@ -67,7 +68,7 @@ class GlassesPressNoticeTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    fun aPressWhileGoModeIsInTheBackgroundAsksToOpenIt() =
+    fun aDoubleTapWhileGoModeIsInTheBackgroundAsksToOpenIt() =
         withGoMode { firmware, _ ->
             // ActivityScenario.moveToState(CREATED) took 46 s to stop the Activity here; Home stops it at once.
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressHome()
@@ -78,31 +79,31 @@ class GlassesPressNoticeTest {
                     )
                 }
             }
-            firmware.touch(G2Side.RIGHT, 0)
+            firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
             awaitShown(firmware, context.getString(R.string.glasses_notice_open_app))
         }
 
     @Test
-    fun aPressWithoutAServiceAsksToAddOne() =
+    fun aDoubleTapWithoutAServiceAsksToAddOne() =
         withGoMode(service = false) { firmware, _ ->
-            firmware.touch(G2Side.RIGHT, 0)
+            firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
             awaitShown(firmware, context.getString(R.string.glasses_notice_add_service))
         }
 
     @Test
-    fun aPressInSettingsSaysVoiceIsNotReady() =
+    fun aDoubleTapInSettingsSaysVoiceIsNotReady() =
         withGoMode { firmware, _ ->
             composeRule.onNodeWithContentDescription("Settings").performClick()
             composeRule.waitForIdle()
-            firmware.touch(G2Side.RIGHT, 0)
+            firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
             awaitShown(firmware, context.getString(R.string.glasses_notice_voice_unavailable))
         }
 
     @Test
     @DeniedMicrophonePermission
-    fun aPressAsksToAllowTheMicrophoneWhileThePhonePromptsForIt() =
+    fun aDoubleTapAsksToAllowTheMicrophoneWhileThePhonePromptsForIt() =
         withGoMode { firmware, fixture ->
-            firmware.touch(G2Side.RIGHT, 0)
+            firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
             awaitShown(firmware, context.getString(R.string.glasses_notice_allow_microphone))
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val device = UiDevice.getInstance(instrumentation)
@@ -117,13 +118,13 @@ class GlassesPressNoticeTest {
         }
 
     @Test
-    fun aPressWhoseVoiceFailsToStartShowsTheError() {
+    fun aDoubleTapWhoseVoiceFailsToStartShowsTheError() {
         InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(
             context.packageName,
             Manifest.permission.RECORD_AUDIO,
         )
         withGoMode(failOffer = true) { firmware, _ ->
-            firmware.touch(G2Side.RIGHT, 0)
+            firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
             val notices =
                 listOf(
                     R.string.glasses_notice_open_app,
@@ -138,6 +139,15 @@ class GlassesPressNoticeTest {
         }
     }
 
+    @Test
+    fun onFaceclawFirmwareALongPressWithoutVoiceSaysVoiceIsOff() =
+        withGoMode(revision = "Faceclaw/45") { firmware, fixture ->
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            val notice = context.getString(R.string.glasses_notice_voice_off)
+            composeRule.waitUntil(TIMEOUT_MS) { firmware.presented.lastOrNull()?.lines == listOf(notice) }
+            assertEquals(0, fixture.sessions.size)
+        }
+
     private fun awaitShown(
         firmware: FakeG2Firmware,
         notice: String,
@@ -145,11 +155,13 @@ class GlassesPressNoticeTest {
         composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == notice }
     }
 
-    // Connects fake Even G2 glasses, shows Go Mode with one hosted service unless [service] is false,
-    // waits until it can start voice, and runs [body]. [failOffer] makes the gateway reject the call.
+    // Connects fake Even G2 glasses on firmware that reports [revision], shows Go Mode with one hosted
+    // service unless [service] is false, waits until it can start voice, and runs [body]. [failOffer]
+    // makes the gateway reject the call.
     private fun withGoMode(
         service: Boolean = true,
         failOffer: Boolean = false,
+        revision: String? = null,
         body: (FakeG2Firmware, ServerVoiceSwitchTest.HostedVoiceFixture) -> Unit,
     ) = runBlocking {
         MockWebServer().use { server ->
@@ -170,7 +182,7 @@ class GlassesPressNoticeTest {
                 it.copy(preference = it.preference.copy(mode = VoiceSetupMode.FOLLOW_GATEWAY))
             }
             repository.settings.first { it.services.isNotEmpty() == service && !it.voiceSetup.deviceSpeech }
-            val firmware = FakeG2Firmware()
+            val firmware = FakeG2Firmware().apply { this.revision = revision }
             val glassesScope = MainScope()
             val glasses =
                 GlassesOwner(

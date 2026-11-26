@@ -9,7 +9,7 @@
 // across the sessions of one G2Glasses, and each page starts with the latest content from show().
 // A superseded session never publishes state. A replaced or stopped session stays in `job` until
 // it has finished, so a later connect() joins it and never runs two sessions at once. An exception
-// that escapes a session ends it with G2CloseCause.Failed. presses, events, and battery report the
+// that escapes a session ends it with G2CloseCause.Failed. gestures, events, and battery report the
 // current session's only; battery is empty again when a session starts or ends.
 
 package com.fghbuild.eveng2
@@ -54,20 +54,20 @@ class G2Glasses(
      */
     val battery: StateFlow<G2Battery> = mutableBattery.asStateFlow()
 
-    private val mutablePresses = MutableSharedFlow<Unit>(extraBufferCapacity = PRESS_BUFFER)
+    private val mutableGestures = MutableSharedFlow<G2Gesture>(extraBufferCapacity = GESTURE_BUFFER)
 
     /**
-     * Each press of a touchpad or an R1 ring while a page is open; see [G2EvenHub.press]. Other
-     * gestures are not reported, and a press that nobody collects is lost.
+     * Each click, double click, and long press of a touchpad or an R1 ring while a page is open; see
+     * [G2EvenHub.gesture]. A gesture that nobody collects is lost.
      */
-    val presses: SharedFlow<Unit> = mutablePresses.asSharedFlow()
+    val gestures: SharedFlow<G2Gesture> = mutableGestures.asSharedFlow()
 
     private val mutableEvents = MutableSharedFlow<G2InputEvent>(extraBufferCapacity = EVENT_BUFFER)
 
     /**
-     * Each input and system event while a page is open, IMU samples aside, presses included, for a
-     * host that shows the wearer's gestures; [presses] alone says which ones press. An event that
-     * nobody collects is lost.
+     * Each input and system event while a page is open, IMU samples aside, gestures included, for a
+     * host that shows the wearer's input; [gestures] alone says which ones are deliberate gestures. An
+     * event that nobody collects is lost.
      */
     val events: SharedFlow<G2InputEvent> = mutableEvents.asSharedFlow()
 
@@ -143,7 +143,7 @@ class G2Glasses(
                 ids,
                 desired,
                 onReady = { firmware, shown -> publish(current, G2State.Ready(pair, firmware, shown)) },
-                onPress = { press(current) },
+                onGesture = { gesture(current, it) },
                 onEvent = { event(current, it) },
                 onBattery = { battery(current, it) },
                 log = log,
@@ -180,9 +180,12 @@ class G2Glasses(
         }
     }
 
-    private fun press(current: Long) {
+    private fun gesture(
+        current: Long,
+        gesture: G2Gesture,
+    ) {
         synchronized(lock) {
-            if (current == generation) mutablePresses.tryEmit(Unit)
+            if (current == generation) mutableGestures.tryEmit(gesture)
         }
     }
 
@@ -196,8 +199,8 @@ class G2Glasses(
     }
 
     private companion object {
-        // Presses a slow collector may lag behind; a person presses far slower than one is handled.
-        const val PRESS_BUFFER = 8
+        // Gestures a slow collector may lag behind; a person gestures far slower than one is handled.
+        const val GESTURE_BUFFER = 8
 
         // One gesture sends up to four events, such as a release, a double click, and two scrolls.
         const val EVENT_BUFFER = 16

@@ -1,4 +1,4 @@
-// Compose screen for trying glasses gestures: the latest inputs, mirrored on the glasses, with presses held.
+// Compose screen for trying glasses gestures: the latest inputs, mirrored on the glasses, with actions held.
 package com.fghbuild.gomode.ui.glasses
 
 import androidx.activity.compose.BackHandler
@@ -43,7 +43,7 @@ internal fun GlassesInputsScreen(
     owner: GlassesOwner,
     onNavigateBack: () -> Unit,
 ) {
-    // Started, not composed: a screen left in the background must not keep presses from voice.
+    // Started, not composed: a screen left in the background must not keep gestures from their actions.
     LifecycleStartEffect(owner) {
         val inspection = owner.inspectInputs()
         onStopOrDispose { inspection.close() }

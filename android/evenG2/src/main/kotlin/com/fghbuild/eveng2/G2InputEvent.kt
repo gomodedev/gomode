@@ -1,4 +1,4 @@
-// G2InputEvent: one input or system event that an Even G2 arm reports while a page is open.
+// G2InputEvent: one input or system event that an Even G2 arm reports while a page is open, and its gestures.
 
 package com.fghbuild.eveng2
 
@@ -38,4 +38,25 @@ data class G2InputEvent(
         const val SOURCE_RING = 2L
         const val SOURCE_LEFT_TEMPLE = 3L
     }
+}
+
+/**
+ * A deliberate gesture on the open page, which [G2EvenHub.gesture] reads from an input event: its
+ * [type], and its [source], null for a text event, which names none.
+ */
+data class G2Gesture(
+    val type: G2GestureType,
+    val source: G2GestureSource?,
+)
+
+enum class G2GestureType {
+    CLICK,
+    DOUBLE_CLICK,
+    LONG_PRESS,
+}
+
+enum class G2GestureSource {
+    LEFT_TEMPLE,
+    RIGHT_TEMPLE,
+    RING,
 }

@@ -99,29 +99,29 @@ class GlassesPairingTest {
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == GREETING_TEXT }
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
 
-                // The input events screen lists a tap, the glasses show the same list, and the tap's
-                // press acts on nothing; system back returns to the glasses screen.
-                val pressed = AtomicBoolean(false)
+                // The input events screen lists a double tap, the glasses show the same list, and the
+                // double tap's action is held; system back returns to the glasses screen.
+                val acted = AtomicBoolean(false)
                 composeRule.runOnUiThread {
-                    glasses.takePressesFirst {
-                        pressed.set(true)
+                    glasses.takeActionsFirst {
+                        acted.set(true)
                         true
                     }
                 }
                 composeRule.onNodeWithTag("gomode-glasses-open-inputs").performClick()
                 waitForTag("gomode-glasses-inputs")
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "Input events\nTry a gesture." }
-                firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
+                firmware.touch(G2Side.RIGHT, type = G2InputEvent.DOUBLE_CLICK)
                 composeRule.waitUntil(TIMEOUT_MS) {
                     composeRule.onAllNodesWithTag("gomode-glasses-input").fetchSemanticsNodes().size == 1
                 }
-                composeRule.onNodeWithText("Tap").assertExists()
-                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "Input events\nTap" }
+                composeRule.onNodeWithText("Double tap").assertExists()
+                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "Input events\nDouble tap" }
                 composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
                 waitForTag("gomode-glasses-screen")
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
-                assertFalse(pressed.get())
-                composeRule.runOnUiThread { glasses.takePressesFirst(null) }
+                assertFalse(acted.get())
+                composeRule.runOnUiThread { glasses.takeActionsFirst(null) }
 
                 // Once the session is quiet, the row shows each battery; a screen reader hears them in words.
                 composeRule.waitUntil(TIMEOUT_MS) {

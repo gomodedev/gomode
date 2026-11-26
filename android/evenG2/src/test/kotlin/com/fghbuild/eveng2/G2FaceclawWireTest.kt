@@ -235,16 +235,19 @@ class G2FaceclawWireTest {
     }
 
     @Test
-    fun aRingClickUnderTheLeaseIsAPress() {
+    fun aRingClickUnderTheLeaseIsAGesture() {
         // As gesture_fwd.c sends a ring click (report type 1) at ring tick 0x01020304.
         val click = hex("08026a151a1308001002a2060c52490101010000000403020100".dropLast(2))
         val message = G2Message(1, G2Protocol.SID_EVEN_HUB, G2Protocol.FLAG_NOTIFY, click)
         assertEquals(G2RingReport(1, 0x01020304), G2EvenHub.ringReport(message))
-        assertTrue(G2EvenHub.press(message, G2TextPage(), session = 5))
-        // A ring touch-down (report type 10, event 14) is not a press.
+        assertEquals(
+            G2Gesture(G2GestureType.CLICK, G2GestureSource.RING),
+            G2EvenHub.gesture(message, G2TextPage(), session = 5),
+        )
+        // A ring touch-down (report type 10, event 14) is not a gesture.
         val down = hex("08026a151a13080e1002a2060c524901010a0000000403020100".dropLast(2))
-        assertFalse(
-            G2EvenHub.press(G2Message(1, G2Protocol.SID_EVEN_HUB, G2Protocol.FLAG_NOTIFY, down), G2TextPage(), 5),
+        assertNull(
+            G2EvenHub.gesture(G2Message(1, G2Protocol.SID_EVEN_HUB, G2Protocol.FLAG_NOTIFY, down), G2TextPage(), 5),
         )
     }
 

@@ -4,15 +4,24 @@ package com.fghbuild.gomode.voice
 import android.Manifest
 import android.app.Application
 import android.app.role.RoleManager
+import android.bluetooth.BluetoothManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Process
 import android.telecom.TelecomManager
+import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2GattConnector
+import com.fghbuild.eveng2.G2InputEvent
+import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Scanner
+import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.testing.FakeG2Firmware
+import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.glasses.GlassesAction
+import com.fghbuild.gomode.glasses.GlassesLink
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.service.ServiceCatalog
 import com.fghbuild.gomode.service.ServiceSettingsClient
@@ -25,6 +34,7 @@ import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.gomode.ui.web.WebShellLoadState
 import com.fghbuild.gomode.ui.web.completeFrontendPreparation
 import com.fghbuild.halo.ble.HaloConnection
+import com.fghbuild.halo.testing.FakeHaloTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -63,6 +73,13 @@ import org.robolectric.shadows.ShadowRoleManager
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
 import java.util.concurrent.TimeUnit
+
+private val G2_PAIR =
+    G2Pair(
+        "7",
+        G2Arm(G2Side.LEFT, "00:11:22:33:55:01", "Even G2_7_L_335501"),
+        G2Arm(G2Side.RIGHT, "00:11:22:33:55:02", "Even G2_7_R_335502"),
+    )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -384,6 +401,47 @@ class CarDialVoiceOwnerTest {
                 // A live request keeps polling its role, which runTest's cleanup would advance forever.
                 owner.cancel(identity)
                 server.shutdown()
+            }
+        }
+
+    // A mute before the call's session exists acts on nothing: the shell would say voice is off.
+    @Test
+    fun aMuteWhileACallWaitsForItsSessionActsOnNothing() =
+        runTest {
+            shadowOf(context).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+            shadowOf(context.getSystemService(BluetoothManager::class.java).adapter).setEnabled(true)
+            val firmware = FakeG2Firmware().apply { revision = "Faceclaw/45" }
+            val fakeGlasses =
+                GlassesOwner(
+                    backgroundScope,
+                    context,
+                    repository,
+                    FakeHaloTransport(context),
+                    G2Scanner(context),
+                    firmware.connector,
+                )
+            val carDial = CarDialVoiceOwner(context, repository, model, pages, fakeGlasses)
+            try {
+                val shell = mutableListOf<GlassesAction>()
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                    fakeGlasses.actions.collect { shell += it }
+                }
+                fakeGlasses.connect(GlassesDevice.EvenG2(G2_PAIR))
+                fakeGlasses.state.first { it.link is GlassesLink.Connected }
+                val identity = carDial.request(server)
+                assertEquals(CarDialStatus.WAITING, carDial.state.value.status)
+                firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+                runCurrent()
+                assertEquals(emptyList<GlassesAction>(), shell)
+                assertNull(carDial.session.value)
+
+                // Without a call, the shell gets it.
+                carDial.cancel(identity)
+                firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+                runCurrent()
+                assertEquals(listOf(GlassesAction.TOGGLE_MUTE), shell)
+            } finally {
+                carDial.close()
             }
         }
 

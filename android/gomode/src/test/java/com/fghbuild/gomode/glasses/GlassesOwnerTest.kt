@@ -706,33 +706,66 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun pressesOfHaloAndEvenG2ReachTheCollectorAndOtherGesturesDoNot() =
+    fun aHaloPressAndEvenG2DoubleTapsToggleVoiceAndSingleTapsAndStockLongPressesDoNothing() =
         runOwnerTest {
-            val presses = mutableListOf<Unit>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.presses.collect { presses += it } }
+            val actions = mutableListOf<GlassesAction>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.actions.collect { actions += it } }
             connectSavedGlasses()
             val halo = transport.halos.single()
             halo.pressButton(ClickType.DOUBLE)
             halo.pressButton(ClickType.LONG)
             halo.pressButton(ClickType.SINGLE)
             runCurrent()
-            assertEquals(1, presses.size)
+            assertEquals(listOf(GlassesAction.TOGGLE_VOICE), actions)
 
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected && it.saved == G2 }
             finishGreeting()
-            firmware.touch(G2Side.RIGHT, type = 3)
-            firmware.touch(G2Side.RIGHT, type = 0)
-            firmware.systemInput(G2Side.LEFT, type = 0, source = 2)
+            // Single taps of either temple, as text and system events, and of the ring act on nothing.
+            firmware.touch(G2Side.RIGHT, G2InputEvent.CLICK)
+            firmware.systemInput(G2Side.LEFT, G2InputEvent.CLICK, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.CLICK, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            firmware.systemInput(G2Side.LEFT, G2InputEvent.CLICK, G2InputEvent.SOURCE_RING)
+            // Stock firmware opens its own menu on a long press, which therefore acts on nothing here.
+            firmware.touch(G2Side.RIGHT, G2InputEvent.LONG_PRESS)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
             runCurrent()
-            assertEquals(3, presses.size)
-            // Nothing a press does reaches the glasses on its own.
+            assertEquals(listOf(GlassesAction.TOGGLE_VOICE), actions)
+
+            firmware.touch(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK)
+            firmware.systemInput(G2Side.LEFT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            firmware.systemInput(G2Side.LEFT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_RING)
+            runCurrent()
+            assertEquals(List(5) { GlassesAction.TOGGLE_VOICE }, actions)
+            // Nothing an action does reaches the glasses on its own.
             assertEquals(GlassesLink.Connected(G2_DISPLAY, G2ScreenFit(G2TextPage())), owner.state.value.link)
             assertEquals("", firmware.shownText())
         }
 
     @Test
-    fun evenG2EventsAreListedNewestFirstWithoutThePressesTheyMake() =
+    fun onFaceclawFirmwareALongPressOfEitherTempleOrTheRingTogglesMute() =
+        runOwnerTest {
+            firmware.revision = "Faceclaw/45"
+            val actions = mutableListOf<GlassesAction>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.actions.collect { actions += it } }
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            finishGreeting()
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            // g2flash forwards a ring long press as R1 report type 0, system event 9.
+            firmware.ringReport(type = 0, event = G2InputEvent.LONG_PRESS, tick = 1_000)
+            // Single taps still act on nothing, and double taps toggle voice.
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.CLICK, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            firmware.ringReport(type = 1, event = G2InputEvent.CLICK, tick = 2_000)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            runCurrent()
+            assertEquals(List(3) { GlassesAction.TOGGLE_MUTE } + GlassesAction.TOGGLE_VOICE, actions)
+        }
+
+    @Test
+    fun evenG2EventsAreListedNewestFirst() =
         runOwnerTest {
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected }
@@ -748,19 +781,19 @@ class GlassesOwnerTest {
                 )
             assertEquals(older, owner.inputs.value.map { it.event })
 
-            // A click is also a press, which is not listed.
+            // A tap, which acts on nothing, is listed too.
             firmware.touch(G2Side.LEFT, type = G2InputEvent.CLICK)
             runCurrent()
             assertEquals(listOf(GlassesEvent(GlassesGesture.TAP)) + older, owner.inputs.value.map { it.event })
         }
 
     @Test
-    fun theInputsScreenMirrorsInputsOnTheGlassesAndKeepsPressesFromActingWhileItIsStarted() =
+    fun theInputsScreenMirrorsInputsOnTheGlassesAndKeepsGesturesFromActingWhileItIsStarted() =
         runOwnerTest {
-            val presses = mutableListOf<Unit>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.presses.collect { presses += it } }
+            val actions = mutableListOf<GlassesAction>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.actions.collect { actions += it } }
             var offered = 0
-            owner.takePressesFirst {
+            owner.takeActionsFirst {
                 offered++
                 false
             }
@@ -774,24 +807,24 @@ class GlassesOwnerTest {
             runCurrent()
             assertEquals("Input events\nTry a gesture.", firmware.shownText())
 
-            firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.DOUBLE_CLICK)
             runCurrent()
-            assertEquals(0 to 0, offered to presses.size)
+            assertEquals(0 to 0, offered to actions.size)
             val shown = checkNotNull(firmware.shownText()).lines()
-            assertEquals(listOf("Input events", "Tap"), shown)
+            assertEquals(listOf("Input events", "Double tap"), shown)
 
-            // A stopped screen, as when Go Mode goes to the background, gives the glasses and presses back.
+            // A stopped screen, as when Go Mode goes to the background, gives the glasses and actions back.
             activity.pause().stop()
             runCurrent()
             assertEquals("transcript", firmware.shownText())
-            firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.DOUBLE_CLICK)
             runCurrent()
-            assertEquals(1 to 1, offered to presses.size)
+            assertEquals(1 to 1, offered to actions.size)
             activity.destroy()
         }
 
     @Test
-    fun aPressThatNothingCollectsSaysOnTheGlassesToOpenGoMode() =
+    fun aVoiceToggleThatNothingCollectsSaysOnTheGlassesToOpenGoMode() =
         runOwnerTest {
             connectSavedGlasses()
             val halo = transport.halos.single()
@@ -804,31 +837,44 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun theFirstPressHandlerTakesThePressesItActsOnAndLeavesTheRest() =
+    fun aMuteThatNothingCollectsSaysOnTheGlassesThatVoiceIsOff() =
         runOwnerTest {
-            val presses = mutableListOf<Unit>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.presses.collect { presses += it } }
+            firmware.revision = "Faceclaw/45"
+            owner.connect(G2)
+            owner.state.first { it.link is GlassesLink.Connected }
+            finishGreeting()
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            runCurrent()
+            assertEquals(listOf(context.getString(R.string.glasses_notice_voice_off)), firmware.presented.last().lines)
+        }
+
+    @Test
+    fun theFirstActionHandlerTakesTheActionsItActsOnAndLeavesTheRest() =
+        runOwnerTest {
+            val actions = mutableListOf<GlassesAction>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { owner.actions.collect { actions += it } }
             var take = true
-            var offered = 0
-            owner.takePressesFirst {
-                offered++
+            val offered = mutableListOf<GlassesAction>()
+            owner.takeActionsFirst {
+                offered += it
                 take
             }
             connectSavedGlasses()
             val halo = transport.halos.single()
             halo.pressButton(ClickType.SINGLE)
             runCurrent()
-            assertEquals(1 to 0, offered to presses.size)
+            assertEquals(1 to 0, offered.size to actions.size)
 
             take = false
             halo.pressButton(ClickType.SINGLE)
             runCurrent()
-            assertEquals(2 to 1, offered to presses.size)
+            assertEquals(2 to 1, offered.size to actions.size)
 
-            owner.takePressesFirst(null)
+            owner.takeActionsFirst(null)
             halo.pressButton(ClickType.SINGLE)
             runCurrent()
-            assertEquals(2 to 2, offered to presses.size)
+            assertEquals(2 to 2, offered.size to actions.size)
+            assertEquals(List(2) { GlassesAction.TOGGLE_VOICE }, offered)
         }
 
     @Test

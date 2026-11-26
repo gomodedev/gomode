@@ -10,8 +10,7 @@
 package com.fghbuild.eveng2
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class G2PythonGoldenTest {
@@ -73,14 +72,17 @@ class G2PythonGoldenTest {
 
     // Root field 2, which the enterprise vectors omit, carries 1 in these events.
     @Test
-    fun onlyAClickOnTheTextContainerIsAPress() {
+    fun textEventsOnTheTextContainerAreGesturesAndListEventsAreNot() {
         val page = G2TextPage(containerName = "t")
         val longPress = hex("080210016a09120708011201741809")
-        assertFalse(G2EvenHub.press(event(longPress), page, 1))
+        assertEquals(G2Gesture(G2GestureType.LONG_PRESS, null), G2EvenHub.gesture(event(longPress), page, 1))
         // The same text event without its type is a click.
-        assertTrue(G2EvenHub.press(event(hex("080210016a0712050801120174")), page, 1))
+        assertEquals(
+            G2Gesture(G2GestureType.CLICK, null),
+            G2EvenHub.gesture(event(hex("080210016a0712050801120174")), page, 1),
+        )
         val listClick = hex("080210016a070a05080412016d")
-        assertFalse(G2EvenHub.press(event(listClick), page.copy(containerId = 4, containerName = "m"), 1))
+        assertNull(G2EvenHub.gesture(event(listClick), page.copy(containerId = 4, containerName = "m"), 1))
     }
 
     private fun event(payload: ByteArray) = G2Message(1, G2Protocol.SID_EVEN_HUB, G2Protocol.FLAG_NOTIFY, payload)

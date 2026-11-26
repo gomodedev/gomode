@@ -66,8 +66,10 @@ import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
+import com.fghbuild.gomode.glasses.GlassesAction
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.showVoiceTranscript
+import com.fghbuild.gomode.glasses.toggleMute
 import com.fghbuild.gomode.service.CatalogNotification
 import com.fghbuild.gomode.service.CatalogService
 import com.fghbuild.gomode.service.ServiceCatalog
@@ -621,7 +623,7 @@ internal fun GoModeApp(
             timing.finish(VoiceStartupOutcome.FAILED)
         }
     }
-    // Reads the car call's live state: a glasses press can end voice while this shell is stopped and its
+    // Reads the car call's live state: a glasses gesture can end voice while this shell is stopped and its
     // composed state is stale.
     val disconnectVoice = { reason: String ->
         connectAfterMicPermission?.timing?.finish(VoiceStartupOutcome.CANCELED)
@@ -638,11 +640,12 @@ internal fun GoModeApp(
     val addServiceNotice = stringResource(R.string.glasses_notice_add_service)
     val voiceUnavailableNotice = stringResource(R.string.glasses_notice_voice_unavailable)
     val allowMicrophoneNotice = stringResource(R.string.glasses_notice_allow_microphone)
-    val pressVoice = {
+    val voiceOffNotice = stringResource(R.string.glasses_notice_voice_off)
+    val toggleVoice = {
         when {
-            // CarDialVoiceOwner takes a press that ends its call first, also while this shell is stopped.
+            // CarDialVoiceOwner takes the action that ends its call first, also while this shell is stopped.
             manualVoiceSession.state.value.started -> {
-                disconnectVoice("glasses press")
+                disconnectVoice("glasses gesture")
             }
 
             // Only a visible Activity may start the microphone's foreground service.
@@ -669,8 +672,24 @@ internal fun GoModeApp(
             }
         }
     }
-    val currentPressVoice by rememberUpdatedState(pressVoice)
-    LaunchedEffect(glassesOwner) { glassesOwner.presses.collect { currentPressVoice() } }
+    // CarDialVoiceOwner takes a mute of its call first.
+    val glassesAction = { action: GlassesAction ->
+        when (action) {
+            GlassesAction.TOGGLE_MUTE -> {
+                if (manualVoiceSession.state.value.started) {
+                    toggleMute(manualVoiceSession, glassesOwner, context)
+                } else {
+                    glassesOwner.notify(voiceOffNotice)
+                }
+            }
+
+            GlassesAction.TOGGLE_VOICE -> {
+                toggleVoice()
+            }
+        }
+    }
+    val currentGlassesAction by rememberUpdatedState(glassesAction)
+    LaunchedEffect(glassesOwner) { glassesOwner.actions.collect { currentGlassesAction(it) } }
     val density = LocalDensity.current
     val keyboardOpen = WindowInsets.ime.getBottom(density) > 0
 

@@ -248,8 +248,8 @@ class G2GlassesTest {
         runTest {
             val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
-            val presses = mutableListOf<Unit>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.presses.toList(presses) }
+            val gestures = mutableListOf<G2Gesture>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.gestures.toList(gestures) }
             glasses.connect(pair)
             glasses.await { it is G2State.Ready }
             val creates = { firmware.requests.count { it.kind == "create" } }
@@ -258,8 +258,8 @@ class G2GlassesTest {
                 firmware.exitPage(type = G2InputEvent.EXIT, session = firmware.pageSession)
                 runCurrent()
                 firmware.requests.clear()
-                // No page is open during the pause, so a click there is no press.
-                firmware.touch(G2Side.RIGHT, type = 0)
+                // No page is open during the pause, so a double click there is no gesture.
+                firmware.touch(G2Side.RIGHT, type = G2InputEvent.DOUBLE_CLICK)
                 advanceTimeBy(pause - 1)
                 runCurrent()
                 assertEquals(0, creates())
@@ -269,7 +269,7 @@ class G2GlassesTest {
                 runCurrent()
                 assertEquals(listOf("RIGHT create "), firmware.requestsBesideBattery())
             }
-            assertEquals(emptyList<Unit>(), presses)
+            assertEquals(emptyList<G2Gesture>(), gestures)
 
             // A page that stays open long enough to settle has heartbeats and resets the pause.
             firmware.requests.clear()
@@ -302,32 +302,44 @@ class G2GlassesTest {
         }
 
     @Test
-    fun clicksFromEitherTempleAndTheRingArePressesThatKeepThePageOpen() =
+    fun clicksDoubleClicksAndLongPressesFromEitherTempleAndTheRingAreGesturesThatKeepThePageOpen() =
         runTest {
             val firmware = FakeG2Firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
-            val presses = mutableListOf<Unit>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.presses.toList(presses) }
+            val gestures = mutableListOf<G2Gesture>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.gestures.toList(gestures) }
             glasses.connect(pair)
             glasses.await { it is G2State.Ready }
             firmware.requests.clear()
 
-            firmware.touch(G2Side.RIGHT, type = 0)
-            firmware.touch(G2Side.LEFT, type = 0)
-            firmware.systemInput(G2Side.RIGHT, type = 0, source = 2)
-            runCurrent()
-            assertEquals(3, presses.size)
-
-            // Double clicks, scrolls, and long presses are not presses.
-            for (type in listOf(1L, 2L, 3L, 9L, 10L)) {
+            // A text event names no source; either arm reports either temple.
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
+            firmware.touch(G2Side.LEFT, type = G2InputEvent.DOUBLE_CLICK)
+            firmware.touch(G2Side.RIGHT, type = G2InputEvent.LONG_PRESS)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.CLICK, G2InputEvent.SOURCE_RING)
+            firmware.systemInput(G2Side.LEFT, G2InputEvent.DOUBLE_CLICK, G2InputEvent.SOURCE_LEFT_TEMPLE)
+            firmware.systemInput(G2Side.RIGHT, G2InputEvent.LONG_PRESS, G2InputEvent.SOURCE_RIGHT_TEMPLE)
+            // Scrolls, releases, and a tap then hold are not gestures.
+            for (type in listOf(1L, 2L, 10L, 11L)) {
                 firmware.touch(G2Side.RIGHT, type)
-                firmware.systemInput(G2Side.RIGHT, type, source = 2)
+                firmware.systemInput(G2Side.RIGHT, type, G2InputEvent.SOURCE_RING)
             }
-            // A system click names its touchpad or the ring; one of an unspecified source is not a press.
-            firmware.systemInput(G2Side.RIGHT, type = 0, source = 0)
-            firmware.systemInput(G2Side.RIGHT, type = 0, source = 4)
+            // A system event names its touchpad or the ring; one of an unspecified source is not a gesture.
+            firmware.systemInput(G2Side.RIGHT, type = 3, source = 0)
+            firmware.systemInput(G2Side.RIGHT, type = 3, source = 4)
             runCurrent()
-            assertEquals(3, presses.size)
+            // Each arm's link keeps its order, but the two links interleave.
+            assertEquals(
+                listOf(
+                    G2Gesture(G2GestureType.CLICK, null),
+                    G2Gesture(G2GestureType.DOUBLE_CLICK, null),
+                    G2Gesture(G2GestureType.LONG_PRESS, null),
+                    G2Gesture(G2GestureType.CLICK, G2GestureSource.RING),
+                    G2Gesture(G2GestureType.DOUBLE_CLICK, G2GestureSource.LEFT_TEMPLE),
+                    G2Gesture(G2GestureType.LONG_PRESS, G2GestureSource.RIGHT_TEMPLE),
+                ).sortedBy { it.toString() },
+                gestures.sortedBy { it.toString() },
+            )
             assertTrue(glasses.state.value is G2State.Ready)
             assertEquals(emptyList<String>(), firmware.requests.map { it.toString() })
             assertTrue(firmware.links.none { it.closed })

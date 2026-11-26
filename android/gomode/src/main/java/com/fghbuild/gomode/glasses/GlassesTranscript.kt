@@ -13,8 +13,8 @@
 // the user's next turn starts, whether or not the transcript setting is on: its last block that the
 // connected display draws, an image only where the display declares PNG. The image fills the display
 // as GlassesImageDisplay.showImage fits it. Text shows in screens that glassesPages cuts and that advance
-// on their own, each for its reading time, and start again after the last, so a press keeps its one
-// meaning, starting or ending voice.
+// on their own, each for its reading time, and start again after the last, so no gesture pages through
+// them and each keeps its one action.
 //
 // A voice owner calls showVoiceTranscript for the session it owns; the shell and car-dial owners never
 // run active sessions at once. An idle session sends nothing, so it cannot clear the glasses while the

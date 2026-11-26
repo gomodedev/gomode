@@ -1,4 +1,4 @@
-// Host-neutral contract for showing text and images on one connected pair of glasses and hearing its press.
+// Host-neutral contract for showing text and images on one connected pair of glasses and hearing its gestures.
 package com.fghbuild.gomode.glasses
 
 import android.graphics.Bitmap
@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * A connected pair of glasses that shows text and reports its one deliberate press; a
+ * A connected pair of glasses that shows text and reports the actions its gestures trigger; a
  * [GlassesImageDisplay] also draws images. Each glasses model implements it: [HaloGlasses]
  * rasterizes text on the phone; [EvenG2Glasses] hands it to stock firmware that lays it out, or
  * draws it on custom firmware. [GlassesOwner] holds at most one and replaces it after the
@@ -36,16 +36,15 @@ internal interface GlassesDisplay {
     suspend fun showText(text: String)
 
     /**
-     * Each deliberate press while connected: one press of Halo's button, or a click of an Even G2
-     * touchpad or R1 ring. Other gestures, such as double or long presses and taps, are not reported.
-     * The flow may end when the connection ends.
+     * The action of each gesture bound to one while connected, as GlassesAction.kt maps them. Other
+     * gestures are not reported. The flow may end when the connection ends.
      */
-    val presses: Flow<Unit>
+    val actions: Flow<GlassesAction>
 
     /**
      * Each gesture and system event the glasses report while connected, for the wearer checking
-     * their input; [presses] alone says which ones act. Empty for glasses that report only their
-     * press. The flow may end when the connection ends.
+     * their input; [actions] alone says which ones act. Empty for glasses that report only the
+     * gestures that act. The flow may end when the connection ends.
      */
     val events: Flow<GlassesEvent>
 

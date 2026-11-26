@@ -2242,7 +2242,7 @@ data class VoiceState(
     val active: Boolean
         get() = connected || connectStatus != null || listening || speaking
 
-    /** started is true while connecting or connected: the voice button, or a glasses press, then ends voice. */
+    /** started is true while connecting or connected: the voice button, or a glasses voice toggle, then ends voice. */
     val started: Boolean
         get() = connected || connectStatus != null
 }

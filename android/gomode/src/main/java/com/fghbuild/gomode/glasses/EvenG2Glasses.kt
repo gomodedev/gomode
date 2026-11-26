@@ -3,7 +3,7 @@
 // The session's first G2State.Ready names the firmware, and connect() returns the display it
 // draws: on stock firmware, one text container, created on connect and updated in place; on
 // Faceclaw firmware (G2Firmware.Faceclaw), text and images that the SDK draws on the whole panel.
-// The page's text container captures the touchpads and an R1 ring, whose clicks are presses.
+// The page's text container captures the touchpads and an R1 ring, whose gestures g2Action maps to actions.
 // The session polls each arm's battery and the case's; batteries are G2Glasses.battery.
 //
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -107,12 +108,13 @@ internal data object G2PanelFit : ScreenFit {
 
 internal sealed class EvenG2Glasses(
     protected val glasses: G2Glasses,
+    firmware: G2Firmware,
 ) : GlassesDisplay {
     private val ended = MutableStateFlow<GlassesException?>(null)
     private var watcher: Job? = null
 
     override val closeCause: StateFlow<Exception?> = ended.asStateFlow()
-    override val presses: Flow<Unit> = glasses.presses
+    override val actions: Flow<GlassesAction> = glasses.gestures.mapNotNull { g2Action(it, firmware) }
     override val events: Flow<GlassesEvent> = glasses.events.map(::glassesEvent)
     override val batteries: Flow<List<GlassesBattery>> = glasses.battery.map(::glassesBatteries)
 
@@ -143,7 +145,8 @@ internal sealed class EvenG2Glasses(
     /** Stock firmware: one text container. */
     private class Stock(
         glasses: G2Glasses,
-    ) : EvenG2Glasses(glasses) {
+        firmware: G2Firmware.EvenHub,
+    ) : EvenG2Glasses(glasses, firmware) {
         override val description = G2_DISPLAY
         override val screenFit = G2ScreenFit(glasses.page)
     }
@@ -151,7 +154,8 @@ internal sealed class EvenG2Glasses(
     /** Faceclaw firmware: text and images drawn on the whole panel. */
     private class Faceclaw(
         glasses: G2Glasses,
-    ) : EvenG2Glasses(glasses),
+        firmware: G2Firmware.Faceclaw,
+    ) : EvenG2Glasses(glasses, firmware),
         GlassesImageDisplay {
         override val description = G2_FACECLAW_DISPLAY
         override val screenFit = G2PanelFit
@@ -185,7 +189,11 @@ internal sealed class EvenG2Glasses(
                 val first = glasses.state.first { it is G2State.Ready || it is G2State.Closed }
                 if (first is G2State.Closed) throw first.cause.toGlassesException()
                 val firmware = (first as G2State.Ready).firmware
-                val display = if (firmware is G2Firmware.Faceclaw) Faceclaw(glasses) else Stock(glasses)
+                val display =
+                    when (firmware) {
+                        is G2Firmware.Faceclaw -> Faceclaw(glasses, firmware)
+                        is G2Firmware.EvenHub -> Stock(glasses, firmware)
+                    }
                 display.watcher =
                     scope.launch {
                         val closed = glasses.state.filterIsInstance<G2State.Closed>().first()

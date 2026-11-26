@@ -201,26 +201,37 @@ class G2FaceclawSessionTest {
         }
 
     @Test
-    fun ringClicksArePressesOnceAndOtherGesturesAreNot() =
+    fun ringAndTouchpadGesturesAreReportedOnceAndOtherEventsAreNot() =
         runTest {
             val firmware = firmware()
             val glasses = G2Glasses(firmware.connector, backgroundScope)
-            val presses = mutableListOf<Unit>()
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.presses.toList(presses) }
+            val gestures = mutableListOf<G2Gesture>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { glasses.gestures.toList(gestures) }
             glasses.connect(pair)
             glasses.ready(G2Content.Text(""))
 
             // Report type 1 is a click, sent as system event 0; one within 100 ring ticks repeats it.
             firmware.ringReport(type = 1, event = 0, tick = 1_000)
             firmware.ringReport(type = 1, event = 0, tick = 1_050)
-            firmware.ringReport(type = 1, event = 0, tick = 1_200)
-            // A ring touch-down and release, a long press, a tap then hold, and the head going up and down.
-            firmware.ringReport(type = 10, event = 14, tick = 1_300)
-            firmware.ringReport(type = 8, event = 10, tick = 1_400)
+            // Type 2 is a double click (event 3), type 0 a long press (event 9).
+            firmware.ringReport(type = 2, event = 3, tick = 1_200)
+            firmware.ringReport(type = 0, event = 9, tick = 1_300)
+            // A ring touch-down and release, a tap then hold, and the head going up and down are not gestures.
+            firmware.ringReport(type = 10, event = 14, tick = 1_400)
+            firmware.ringReport(type = 8, event = 10, tick = 1_500)
             for (type in listOf(9L, 11L, 12L, 15L)) firmware.systemInput(G2Side.RIGHT, type, source = 1)
-            firmware.touch(G2Side.LEFT, type = 0)
+            firmware.touch(G2Side.RIGHT, type = 3)
             runCurrent()
-            assertEquals(3, presses.size)
+            assertEquals(
+                listOf(
+                    G2Gesture(G2GestureType.CLICK, G2GestureSource.RING),
+                    G2Gesture(G2GestureType.DOUBLE_CLICK, G2GestureSource.RING),
+                    G2Gesture(G2GestureType.LONG_PRESS, G2GestureSource.RING),
+                    G2Gesture(G2GestureType.LONG_PRESS, G2GestureSource.RIGHT_TEMPLE),
+                    G2Gesture(G2GestureType.DOUBLE_CLICK, null),
+                ),
+                gestures,
+            )
             assertTrue(glasses.state.value is G2State.Ready)
         }
 

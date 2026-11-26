@@ -42,8 +42,10 @@ import com.fghbuild.gomode.data.ServiceInstance
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
+import com.fghbuild.gomode.glasses.GlassesAction
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.showVoiceTranscript
+import com.fghbuild.gomode.glasses.toggleMute
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.ui.web.ServiceCallStage
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
@@ -167,11 +169,21 @@ internal class CarDialVoiceOwner(
             IntentFilter(VoiceService.ACTION_HANG_UP),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        // A press of the glasses ends a starting or running call, also one that no Activity hosts any
-        // more; GoModeApp's shell handles every other press.
-        glasses.takePressesFirst {
-            mutableState.value.status.busy
-                .also { if (it) cancel() }
+        // While a call starts or runs, also one that no Activity hosts any more, the glasses' voice
+        // action ends it and their mute action toggles its microphone; a mute before the call's session
+        // exists does nothing. GoModeApp's shell handles every action outside a call.
+        glasses.takeActionsFirst { action ->
+            if (!mutableState.value.status.busy) return@takeActionsFirst false
+            when (action) {
+                GlassesAction.TOGGLE_MUTE -> {
+                    session.value?.let { toggleMute(it, glasses, context) }
+                }
+
+                GlassesAction.TOGGLE_VOICE -> {
+                    cancel()
+                }
+            }
+            true
         }
         // Like the native call surface, the glasses show the call's transcript while the phone is locked.
         scope.launch {
@@ -620,7 +632,7 @@ internal class CarDialVoiceOwner(
 
     override fun close() {
         cancel()
-        glasses.takePressesFirst(null)
+        glasses.takeActionsFirst(null)
         context.unregisterReceiver(hangupReceiver)
         scope.cancel()
     }
