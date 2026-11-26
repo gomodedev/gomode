@@ -9,9 +9,10 @@
 // across the sessions of one G2Glasses, and each page starts with the latest content from show().
 // A superseded session never publishes state. A replaced or stopped session stays in `job` until
 // it has finished, so a later connect() joins it and never runs two sessions at once. An exception
-// that escapes a session ends it with G2CloseCause.Failed. gestures, events, battery, and microphone
-// report the current session's only; battery is empty again when a session starts or ends. The
-// microphone runs while anything collects it, in whichever session runs then.
+// that escapes a session ends it with G2CloseCause.Failed. gestures, events, battery, sensors, and
+// microphone report the current session's only; battery and sensors are empty again when a session
+// starts or ends. The microphone, and the sensors that cost power, run while anything collects them, in
+// whichever session runs then.
 
 package com.fghbuild.eveng2
 
@@ -77,6 +78,19 @@ class G2Glasses(
      */
     val events: SharedFlow<G2InputEvent> = mutableEvents.asSharedFlow()
 
+    private val streamers = MutableStateFlow(0)
+    private val mutableSensors = MutableStateFlow(G2Sensors())
+
+    /**
+     * The current session's sensor readings, each null until its first; see [G2Sensors]. Collecting this
+     * flow streams the accelerometer while a page is open; its reading is null again once the last
+     * collector leaves. Whether the glasses are worn and where the head went come without collectors.
+     */
+    val sensors: Flow<G2Sensors> =
+        mutableSensors
+            .onSubscription { streamers.update { it + 1 } }
+            .onCompletion { streamers.update { it - 1 } }
+
     private val listeners = MutableStateFlow(0)
     private val mutableAudio =
         MutableSharedFlow<ShortArray>(extraBufferCapacity = AUDIO_BUFFER, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -110,6 +124,7 @@ class G2Glasses(
             val current = ++generation
             mutableState.value = G2State.Connecting(pair)
             mutableBattery.value = G2Battery()
+            mutableSensors.value = G2Sensors()
             job =
                 scope.launch {
                     previous?.cancelAndJoin()
@@ -166,10 +181,12 @@ class G2Glasses(
                 ids,
                 desired,
                 listeners,
+                streamers,
                 onReady = { firmware, shown -> publish(current, G2State.Ready(pair, firmware, shown)) },
                 onGesture = { gesture(current, it) },
                 onEvent = { event(current, it) },
                 onBattery = { battery(current, it) },
+                onSensors = { sensors(current, it) },
                 onAudio = { audio(current, it) },
                 log = log,
             )
@@ -191,7 +208,10 @@ class G2Glasses(
         synchronized(lock) {
             if (current == generation) {
                 mutableState.value = state
-                if (state is G2State.Closed) mutableBattery.value = G2Battery()
+                if (state is G2State.Closed) {
+                    mutableBattery.value = G2Battery()
+                    mutableSensors.value = G2Sensors()
+                }
             }
         }
     }
@@ -202,6 +222,15 @@ class G2Glasses(
     ) {
         synchronized(lock) {
             if (current == generation) mutableBattery.value = battery
+        }
+    }
+
+    private fun sensors(
+        current: Long,
+        sensors: G2Sensors,
+    ) {
+        synchronized(lock) {
+            if (current == generation) mutableSensors.value = sensors
         }
     }
 

@@ -6,8 +6,9 @@
 // The page's text container captures the touchpads and an R1 ring, whose gestures g2Action maps to
 // actions and g2Scroll to scrolls.
 // The session polls the glasses' battery and the case's; batteries are G2Glasses.battery. The
-// microphone is G2Glasses.microphone, which runs while collected; it outlives the connection, so a
-// connection's microphone completes when that connection ends.
+// microphone is G2Glasses.microphone and the sensors G2Glasses.sensors, which run while collected;
+// they outlive the connection, so a connection's flows complete when that connection ends. Head up
+// and down come only from Faceclaw firmware (see G2Sensors.kt), so only its sensors list the head.
 //
 // Each GlassesOwner attempt is one G2Glasses session; GlassesOwner alone decides whether to start
 // another. connect() returns at the session's first G2State.Ready and fails if it reaches
@@ -28,10 +29,12 @@ import com.fghbuild.eveng2.G2Content
 import com.fghbuild.eveng2.G2Display
 import com.fghbuild.eveng2.G2Firmware
 import com.fghbuild.eveng2.G2Glasses
+import com.fghbuild.eveng2.G2Head
 import com.fghbuild.eveng2.G2Image
 import com.fghbuild.eveng2.G2InputEvent
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Panel
+import com.fghbuild.eveng2.G2Sensors
 import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.G2State
 import com.fghbuild.eveng2.G2TextPage
@@ -49,6 +52,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -119,7 +123,8 @@ internal data object G2PanelFit : ScreenFit {
 internal sealed class EvenG2Glasses(
     protected val glasses: G2Glasses,
     firmware: G2Firmware,
-) : GlassesMicrophone {
+) : GlassesMicrophone,
+    GlassesSensing {
     private val ended = MutableStateFlow<GlassesException?>(null)
     private var watcher: Job? = null
 
@@ -128,12 +133,17 @@ internal sealed class EvenG2Glasses(
     override val scrolls: Flow<GlassesScroll> = glasses.gestures.mapNotNull(::g2Scroll)
     override val events: Flow<GlassesEvent> = glasses.events.map(::glassesEvent)
     override val batteries: Flow<List<GlassesBattery>> = glasses.battery.map(::glassesBatteries)
-    override val microphone: Flow<ShortArray> =
+    override val microphone: Flow<ShortArray> = whileConnected(glasses.microphone).buffer(Channel.RENDEZVOUS)
+    override val sensors: Flow<GlassesSensors> =
+        whileConnected(glasses.sensors).map { glassesSensors(it, firmware) }.conflate()
+
+    // [flow] until the connection ends.
+    private fun <T> whileConnected(flow: Flow<T>): Flow<T> =
         channelFlow {
-            val audio = launch { glasses.microphone.collect(::send) }
+            val forwarding = launch { flow.collect(::send) }
             ended.first { it != null }
-            audio.cancel()
-        }.buffer(Channel.RENDEZVOUS)
+            forwarding.cancel()
+        }
 
     /** Shows [text], cut to the firmware's limit, and waits until the glasses acknowledge it. */
     override suspend fun showText(text: String) {
@@ -336,6 +346,24 @@ internal fun glassesBatteries(battery: G2Battery): List<GlassesBattery> {
     return listOfNotNull(
         reading(GlassesBatteryPart.GLASSES, battery.glasses),
         reading(GlassesBatteryPart.CASE, battery.case),
+    )
+}
+
+/** [sensors] as the input events screen lists them: [firmware] decides which it reports. */
+internal fun glassesSensors(
+    sensors: G2Sensors,
+    firmware: G2Firmware,
+): GlassesSensors {
+    val report =
+        when (firmware) {
+            is G2Firmware.Faceclaw -> listOf(GlassesSensor.WORN, GlassesSensor.HEAD, GlassesSensor.ACCELEROMETER)
+            is G2Firmware.EvenHub -> listOf(GlassesSensor.WORN, GlassesSensor.ACCELEROMETER)
+        }
+    return GlassesSensors(
+        report = report,
+        worn = sensors.wearing,
+        headUp = sensors.head?.let { it == G2Head.UP },
+        acceleration = sensors.acceleration?.let { GlassesAcceleration(it.x, it.y, it.z) },
     )
 }
 

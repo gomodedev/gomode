@@ -25,8 +25,9 @@
 // the update, the name must match. Heartbeat and shutdown bodies are empty. Microphone body: {1: 1
 // to start, 0 to stop}, as faceclaw's BleProtocol.kt (GPL-3.0) and the Python library's
 // live-confirmed build_audio_control write it. The enterprise SDK's tests answer a start with 1 and a
-// stop with 0 on the reply branch above; as faceclaw's resolveAckLocked does, G2MicrophoneReply takes
+// stop with 0 on the reply branch above; as faceclaw's resolveAckLocked does, G2HubEcho takes
 // any reply on SID 0xE0 that echoes the magic. Its packets arrive apart from Even Hub; see G2Microphone.
+// The accelerometer's command and samples are in G2Sensors.kt.
 //
 // The glasses report input and page exits as event command 2, branch 13, whose body holds one
 // event: a text event (branch 2) {1: container ID, 2: container name, 3: event type}, or a system
@@ -161,10 +162,10 @@ sealed interface G2HubReply {
 }
 
 /**
- * A reply to a microphone request: its [command], response [branch], and [result] code, each null when
- * absent, and the frame header's result code [header].
+ * A reply that echoes a request's magic: its [command], response [branch], and [result] code, each null
+ * when absent, and the frame header's result code [header].
  */
-internal data class G2MicrophoneReply(
+internal data class G2HubEcho(
     val command: Long?,
     val branch: Int?,
     val result: Long?,
@@ -184,6 +185,7 @@ object G2EvenHub {
     private const val TEXT_EVENT = 2
     private const val SYSTEM_EVENT = 3
 
+    private const val IMU_SAMPLE = 3
     private const val RING_REPORT_FIELD = 100
     private const val RING_REPORT_SIZE = 12
 
@@ -266,7 +268,7 @@ object G2EvenHub {
 
     // The reply's command, branch, and result come from the enterprise SDK's tests; a pair on 2.3.0.24
     // with Faceclaw/45 answered a start and a stop with them. faceclaw matches the reply by SID and
-    // magic alone, which microphoneReply follows, and G2Session logs a reply whose command, branch,
+    // magic alone, which echo follows, and G2Session logs a reply whose command, branch,
     // result, or header result differ from MICROPHONE_ON and MICROPHONE_OFF.
 
     /** Start the microphone when [on], else stop it; the page must be open. */
@@ -287,31 +289,40 @@ object G2EvenHub {
         body: ByteArray,
         magic: Int,
         sync: Int,
+    ): List<ByteArray> = request(command.request, command.requestBranch, body, magic, sync)
+
+    /** The packets of request [command] with [body] in [branch]. */
+    internal fun request(
+        command: Long,
+        branch: Int,
+        body: ByteArray,
+        magic: Int,
+        sync: Int,
     ): List<ByteArray> {
         require(magic in MAGIC_RANGE) { "magic $magic" }
         val payload =
             protobuf {
-                scalar(1, command.request)
+                scalar(1, command)
                 scalar(2, magic.toLong())
-                bytes(command.requestBranch, body)
+                bytes(branch, body)
             }
         return G2Frame.packets(payload, G2Protocol.SID_EVEN_HUB, G2Protocol.FLAG_SYNC_BOTH, sync)
     }
 
     /**
-     * The reply that [message] is to a microphone request sent with [magic]: a message on SID 0xE0, not
-     * a notification, that echoes the magic, whatever its command and code. Null when it is not one.
+     * The reply that [message] is to a request sent with [magic]: a message on SID 0xE0, not a
+     * notification, that echoes the magic, whatever its command and code. Null when it is not one.
      */
-    internal fun microphoneReply(
+    internal fun echo(
         message: G2Message,
         magic: Int,
-    ): G2MicrophoneReply? {
+    ): G2HubEcho? {
         if (message.sid != G2Protocol.SID_EVEN_HUB || message.notify) return null
         val root = G2ProtoReader.fields(message.payload) ?: return null
         if (root.scalar(2) != magic.toLong()) return null
         val branch = root.keys.firstOrNull { it in BRANCHES }
         val result = branch?.let(root::bytes)?.let(G2ProtoReader::fields)?.scalar(1)
-        return G2MicrophoneReply(root.scalar(1), branch, result, message.result)
+        return G2HubEcho(root.scalar(1), branch, result, message.result)
     }
 
     /** Classify [message] as the reply to [command] sent with [magic] and [sync]; null when it is not. */
@@ -440,6 +451,14 @@ object G2EvenHub {
                 null
             }
         }
+    }
+
+    /** The accelerometer sample that [message] carries, as G2Sensors.kt describes it; null when it is none. */
+    fun acceleration(message: G2Message): G2Acceleration? {
+        val (branch, event) = deviceEvent(message) ?: return null
+        if (branch != SYSTEM_EVENT || event.enum(1) != G2InputEvent.IMU_DATA) return null
+        val sample = event.bytes(IMU_SAMPLE)?.let(G2ProtoReader::fields) ?: return null
+        return G2Acceleration(sample.float(1) ?: 0f, sample.float(2) ?: 0f, sample.float(3) ?: 0f)
     }
 
     /** The raw R1 report that Faceclaw firmware attaches to a ring system event in [message], or null. */

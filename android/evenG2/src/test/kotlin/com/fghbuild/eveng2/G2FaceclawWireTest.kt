@@ -38,11 +38,11 @@ class G2FaceclawWireTest {
         assertEquals("0802102a22020801", payload(G2Settings.read(magic = 42, sync = 7).single()))
         assertEquals(
             "08011000aa0606464301050000",
-            payload(G2Settings.lease(G2Settings.LEASE_ACQUIRE, sync = 8).single()),
+            payload(G2Settings.control(G2Settings.LEASE_ACQUIRE, sync = 8).single()),
         )
         assertEquals(
             "08011000aa0606464301060000",
-            payload(G2Settings.lease(G2Settings.LEASE_RELEASE, sync = 9).single()),
+            payload(G2Settings.control(G2Settings.LEASE_RELEASE, sync = 9).single()),
         )
     }
 

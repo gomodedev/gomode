@@ -46,6 +46,9 @@ object G2Protocol {
     /** Service ID of device settings, whose read reports the firmware; see [G2Settings]. */
     const val SID_SETTINGS = 0x09
 
+    /** Service ID of onboarding, whose events report whether the glasses are worn; see [G2SensorCodec]. */
+    const val SID_ONBOARDING = 0x10
+
     /** Service ID of Even Hub pages, heartbeat, and page events. */
     const val SID_EVEN_HUB = 0xE0
 

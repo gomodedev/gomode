@@ -12,11 +12,12 @@
 //   g2flash builds sent "EVENCFW/<ver> <feature tokens>". The reply has fields only the
 //   firmware's schema names, so it is read leniently: this file uses only fields 2 and 100, and
 //   G2BatteryCodec the battery that field 4 also holds.
-// - Framebuffer lease control, to each arm, fire-and-forget (magic 0, nothing answers):
-//   {1: 1, 2: 0, 101: ['F', 'C', 1, op, 0, 0]}. Op 5 arms or renews a 90-second lease under
-//   which the firmware draws the phone's frames on the whole panel and keeps stock widgets from
-//   repainting over them; op 6 releases it and stock repaints resume. faceclaw renews it every
-//   45 s on both arms.
+// - Faceclaw control, to each arm, fire-and-forget (magic 0, nothing answers):
+//   {1: 1, 2: 0, 101: ['F', 'C', 1, op, 0, 0]}. Op 5 arms or renews a 90-second framebuffer lease
+//   under which the firmware draws the phone's frames on the whole panel and keeps stock widgets
+//   from repainting over them; op 6 releases it and stock repaints resume. faceclaw renews it every
+//   45 s on both arms. Op 7 asks the firmware to send its cached wear state as the stock wear event
+//   (G2SensorCodec); faceclaw sends it to both arms, and g2flash sends the event from the right.
 //
 // g2flash bumps <n> on every change of its contract. This SDK draws on Faceclaw/45, the revision
 // that scripts/g2_cfw.py's pinned g2flash commit builds, and on later ones: faceclaw accepts any
@@ -73,6 +74,9 @@ internal object G2Settings {
     /** Releases the framebuffer lease. */
     const val LEASE_RELEASE = 6
 
+    /** Asks for the wear state. */
+    const val WEAR_QUERY = 7
+
     /** The firmware drops a lease this long after its last renewal. */
     const val LEASE_MS = 90_000L
 
@@ -106,12 +110,12 @@ internal object G2Settings {
         return G2Firmware.of(revision?.second?.bytes?.let(::decodeUtf8))
     }
 
-    /** The lease control [op] for one arm. */
-    fun lease(
+    /** The Faceclaw control [op] for one arm. */
+    fun control(
         op: Int,
         sync: Int,
     ): List<ByteArray> {
-        require(op == LEASE_ACQUIRE || op == LEASE_RELEASE) { "lease op $op" }
+        require(op == LEASE_ACQUIRE || op == LEASE_RELEASE || op == WEAR_QUERY) { "control op $op" }
         val control = byteArrayOf('F'.code.toByte(), 'C'.code.toByte(), 1, op.toByte(), 0, 0)
         val payload =
             protobuf {

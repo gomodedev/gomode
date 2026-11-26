@@ -9,7 +9,9 @@
 // the charging case's state as faceclaw reports stock firmware doing. Stock firmware by default; a
 // [FakeG2Firmware.revision] adds settings field 100, the framebuffer lease, and the private stream
 // on SID 0xF0 that both lenses acknowledge through the receiving arm, as g2flash's
-// patches/message_transport.c does. Also holds a fake scan.
+// patches/message_transport.c does. The right arm sends wear events, and answers the wear query on
+// Faceclaw firmware; the accelerometer streams the test's samples from a start until a stop or the
+// page's close, and answers neither, since no source shows the reply. Also holds a fake scan.
 
 package com.fghbuild.eveng2.testing
 
@@ -71,6 +73,13 @@ class FakeG2Firmware {
     /** Whether the microphone runs: from a start to a stop or the close of the page. */
     @Volatile var microphone = false
         private set
+
+    /** Whether the accelerometer streams: from a start to a stop or the close of the page. */
+    @Volatile var imu = false
+        private set
+
+    /** Whether the glasses are on the head, which the wear query reports; null for no state yet. */
+    @Volatile var worn: Boolean? = null
 
     /** The revision the settings read reports in field 100, such as "Faceclaw/45"; null for stock firmware. */
     @Volatile var revision: String? = null
@@ -178,6 +187,7 @@ class FakeG2Firmware {
         session: Long,
     ) {
         microphone = false
+        imu = false
         val system =
             proto {
                 scalar(1, type)
@@ -246,6 +256,51 @@ class FakeG2Firmware {
                 scalar(6, pageSession)
             }
         deviceEvent(side, proto { bytes(3, system) })
+    }
+
+    /** The glasses go on the head, or off it when not [worn], and the right arm sends the wear event. */
+    fun wear(worn: Boolean) {
+        this.worn = worn
+        wearEvent(worn)
+    }
+
+    // The stock wear event, as g2flash's faceclaw_send_wear_event writes it.
+    private fun wearEvent(worn: Boolean) {
+        val payload =
+            proto {
+                scalar(1, 3)
+                scalar(2, 0)
+                bytes(
+                    5,
+                    proto {
+                        scalar(1, 1)
+                        scalar(2, if (worn) 1 else 0)
+                    },
+                )
+            }
+        link(G2Side.RIGHT).notify(G2Protocol.SID_ONBOARDING, 0, 0, payload)
+    }
+
+    /** The right arm reports one accelerometer sample of [x], [y], and [z] g; the stream must run. */
+    fun accelerate(
+        x: Float,
+        y: Float,
+        z: Float,
+    ) {
+        check(imu) { "the accelerometer is off" }
+        val sample =
+            proto {
+                fixed32(1, x.toRawBits())
+                fixed32(2, y.toRawBits())
+                fixed32(3, z.toRawBits())
+            }
+        val system =
+            proto {
+                scalar(1, 8)
+                scalar(2, 1)
+                bytes(3, sample)
+            }
+        deviceEvent(G2Side.RIGHT, proto { bytes(3, system) })
     }
 
     /**
@@ -409,9 +464,23 @@ class FakeG2Firmware {
                 // Stock firmware ignores the field.
                 if (revision == null || control == null || control.size != 6) return
                 when (control[3].toInt()) {
-                    5 -> leases += link.side
-                    6 -> leases -= link.side
-                    else -> return
+                    5 -> {
+                        leases += link.side
+                    }
+
+                    6 -> {
+                        leases -= link.side
+                    }
+
+                    7 -> {
+                        record("wear query", null)
+                        if (link.side == G2Side.RIGHT) worn?.let(::wearEvent)
+                        return
+                    }
+
+                    else -> {
+                        return
+                    }
                 }
                 record("lease", if (control[3].toInt() == 5) "acquire" else "release")
             }
@@ -508,12 +577,19 @@ class FakeG2Firmware {
             9L -> {
                 record("shutdown", null)
                 microphone = false
+                imu = false
                 if (answersShutdown) ack(10, 12, proto { scalar(1, 10) })
             }
 
             12L -> {
                 record("heartbeat", null)
                 ack(13, 15, proto { scalar(2, 12) })
+            }
+
+            19L -> {
+                val on = fields(checkNotNull(root.bytes(22))).scalar(1) == 1L
+                record("imu", if (on) "on" else "off")
+                imu = on
             }
 
             15L -> {
@@ -810,6 +886,14 @@ private class ProtoOut {
         varint(((field shl 3) or 2).toLong())
         varint(value.size.toLong())
         out.write(value)
+    }
+
+    fun fixed32(
+        field: Int,
+        bits: Int,
+    ) {
+        varint(((field shl 3) or 5).toLong())
+        repeat(4) { out.write(bits ushr (8 * it)) }
     }
 
     private fun varint(value: Long) {

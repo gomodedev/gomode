@@ -154,7 +154,13 @@ buildAudioControl of BleProtocol.kt, its reply matching by SID and magic follows
 createAudioControlMessageLocked and resolveAckLocked of
 session/GlassesSessionSend.kt, and G2Session.kt follows startG2AudioCapture
 and the page resume of session/GlassesSessionCore.kt, which takes the
-microphone as off on a new page. The golden bytes in
+microphone as off on a new page. G2Sensors.kt ports and modifies
+parseWearState, buildImuControl, and readFloatFieldValue of BleProtocol.kt,
+the IMU sample of g2protocol/G2Event.kt, and the axes of
+session/ImuOrientation.kt; its wear query follows faceclawWearQuery of
+MessageBuilder.kt and enableWearDetectionAndRequestState of
+GlassesSessionCore.kt, and its report pace app/apps/developer/
+accelerometer-demo.ts. The golden bytes in
 G2FaceclawWireTest.kt come from
 tests/kotlin/src/commonTest/kotlin/com/faceclaw/app/ProtocolTest.kt and
 DrawWireTest.kt, and those in G2BatteryTest.kt from GlassesSessionCoreTest.kt.
@@ -166,9 +172,10 @@ Commit c8fd8e85c77e8f378cce52029dd1225e4ab11caa, the commit that
 scripts/g2_cfw.py pins.
 
 The wire formats in G2Settings.kt, G2CfwStream.kt, G2Panel.kt, G2EvenHub.kt,
-and the fake glasses in src/testFixtures/ follow patches/settings_ext.c,
-message_transport.c, transport_compression.c, zlib_glue.c, display_list.c,
-rle.h, texture_draw.c, and gesture_fwd.c, the receivers of the messages above.
+G2Sensors.kt, and the fake glasses in src/testFixtures/ follow
+patches/settings_ext.c, message_transport.c, transport_compression.c,
+zlib_glue.c, display_list.c, rle.h, texture_draw.c, and gesture_fwd.c, the
+receivers of the messages above.
 
 Both projects are free software: you can redistribute and/or modify them under
 the terms of the GNU General Public License as published by the Free Software

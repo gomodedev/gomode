@@ -65,6 +65,12 @@
 // takes a page that comes back, so the session starts it again on the next page. An ending session
 // sends no stop: it shuts the page down and closes both links. The decoding runs in the session's
 // context: one packet of five frames took 30 µs on a desktop JVM.
+//
+// Sensors (G2Sensors): wear events and head up and down are read from either arm whenever they come;
+// on Faceclaw firmware the session asks both arms for the wear state once, after the lease. While the
+// host collects the sensors and a page is open, the session streams the accelerometer with an Even Hub
+// command, as it runs the microphone, and stops it when the last collector leaves; each page starts
+// with it off. Its samples are no input: they never delay a battery round.
 
 package com.fghbuild.eveng2
 
@@ -156,10 +162,13 @@ internal class G2Session(
     private val desired: StateFlow<G2Content>,
     // How many collectors listen to the microphone; it runs while there is one.
     private val listeners: StateFlow<Int>,
+    // How many collectors read the sensors; the accelerometer streams while there is one.
+    private val streamers: StateFlow<Int>,
     private val onReady: (G2Firmware, G2Content) -> Unit,
     private val onGesture: (G2Gesture) -> Unit,
     private val onEvent: (G2InputEvent) -> Unit,
     private val onBattery: (G2Battery) -> Unit,
+    private val onSensors: (G2Sensors) -> Unit,
     private val onAudio: (ShortArray) -> Unit,
     private val log: (String) -> Unit,
 ) {
@@ -195,6 +204,17 @@ internal class G2Session(
     // Packets that arrived while the microphone was off, since its last start; a count for the log.
     @Volatile private var stray = 0L
 
+    // The readings so far; only updateSensors() changes them.
+    @Volatile private var sensors = G2Sensors()
+
+    // Whether this page's accelerometer stream may run: set before its start is written, cleared before
+    // its stop and when the page closes. Only imu() and imuOff() change it.
+    @Volatile private var imu = false
+
+    // Samples since the stream's last start, and those that came while it was off; counts for the log.
+    private var imuSamples = 0L
+    private var strayImu = 0L
+
     /** Run until the session ends; returns why. Cancellation closes the page and both links. */
     suspend fun run(): G2CloseCause {
         try {
@@ -211,13 +231,15 @@ internal class G2Session(
                 val firmware = firmware()
                 if (firmware is G2Firmware.Faceclaw) {
                     leased = true
-                    lease(G2Settings.LEASE_ACQUIRE)
+                    control(G2Settings.LEASE_ACQUIRE)
                     launch { renewLease() }
+                    control(G2Settings.WEAR_QUERY)
                 }
                 launch { pollBattery() }
                 val wake = Channel<Unit>(Channel.CONFLATED)
                 launch { desired.collect { wake.send(Unit) } }
                 launch { listeners.collect { wake.send(Unit) } }
+                launch { streamers.collect { wake.send(Unit) } }
                 servePages(this, firmware, wake)
             }
         } catch (e: G2Closed) {
@@ -326,8 +348,7 @@ internal class G2Session(
             }
             if (stream !== logged) {
                 logged = stream
-                val hex = received.packet.joinToString("") { "%02x".format(it) }
-                log("Even G2 first microphone packet from ${received.side}: $hex")
+                log("Even G2 first microphone packet from ${received.side}: ${received.packet.hex()}")
             }
             stream.accept(received.side, received.packet)?.let(onAudio)
         }
@@ -344,7 +365,9 @@ internal class G2Session(
                 G2EvenHub.inputEvent(inbound.message, inbound.side)?.let {
                     activity++
                     onEvent(it)
+                    readHead(inbound.side, it)
                 }
+                readSensors(inbound.side, inbound.message)
                 readBattery(inbound.side, inbound.message)
                 val session = pageSession ?: return inbound
                 if (inbound.side == G2Side.RIGHT) {
@@ -363,14 +386,55 @@ internal class G2Session(
         }
     }
 
+    /** Takes where the head went from [event] that [side] reported, when it is head up or down. */
+    private fun readHead(
+        side: G2Side,
+        event: G2InputEvent,
+    ) {
+        val head =
+            when (event.type) {
+                G2InputEvent.HEAD_UP -> G2Head.UP
+                G2InputEvent.HEAD_DOWN -> G2Head.DOWN
+                else -> return
+            }
+        log("Even G2 head $head from $side")
+        updateSensors { it.copy(head = head) }
+    }
+
+    /** Takes the wear state or accelerometer sample that [message] from [side] may hold. */
+    private fun readSensors(
+        side: G2Side,
+        message: G2Message,
+    ) {
+        G2SensorCodec.wearing(message)?.let { worn ->
+            log("Even G2 $side reports the glasses ${if (worn) "worn" else "not worn"}: ${message.payload.hex()}")
+            updateSensors { it.copy(wearing = worn) }
+        }
+        val sample = G2EvenHub.acceleration(message) ?: return
+        if (!imu) {
+            strayImu++
+            return
+        }
+        if (imuSamples++ == 0L) log("Even G2 first IMU sample from $side, $sample: ${message.payload.hex()}")
+        updateSensors { it.copy(acceleration = sample) }
+    }
+
+    private fun updateSensors(change: (G2Sensors) -> G2Sensors) {
+        val next = change(sensors)
+        if (next != sensors) {
+            sensors = next
+            onSensors(next)
+        }
+    }
+
     /** Takes the battery or case reading that [message] from [side] may hold. */
     private fun readBattery(
         side: G2Side,
         message: G2Message,
     ) {
         if (message.sid == G2Protocol.SID_SETTINGS || message.sid == G2Protocol.SID_CASE) {
-            val hex = message.payload.joinToString("") { "%02x".format(it) }
-            log("Even G2 $side reply on SID 0x${"%02x".format(message.sid)}, result ${message.result}: $hex")
+            val sid = "%02x".format(message.sid)
+            log("Even G2 $side reply on SID 0x$sid, result ${message.result}: ${message.payload.hex()}")
         }
         // Only the right arm reads and pushes the glasses' level; see G2Battery.
         val glasses = if (side == G2Side.RIGHT) G2BatteryCodec.glasses(message) else null
@@ -488,15 +552,16 @@ internal class G2Session(
         } ?: G2Firmware.EvenHub(null)
     }
 
-    private suspend fun lease(op: Int) {
-        write(G2Side.RIGHT, G2Settings.lease(op, ids.sync()))
-        write(G2Side.LEFT, G2Settings.lease(op, ids.sync()))
+    /** Send Faceclaw control [op] to both arms. */
+    private suspend fun control(op: Int) {
+        write(G2Side.RIGHT, G2Settings.control(op, ids.sync()))
+        write(G2Side.LEFT, G2Settings.control(op, ids.sync()))
     }
 
     private suspend fun renewLease() {
         while (true) {
             delay(G2Settings.LEASE_RENEW_MS)
-            lease(G2Settings.LEASE_ACQUIRE)
+            control(G2Settings.LEASE_ACQUIRE)
         }
     }
 
@@ -507,7 +572,7 @@ internal class G2Session(
             withTimeoutOrNull(G2Protocol.COMMAND_TIMEOUT_MS) {
                 for (link in listOfNotNull(links[G2Side.RIGHT], links[G2Side.LEFT])) {
                     try {
-                        G2Settings.lease(G2Settings.LEASE_RELEASE, ids.sync()).forEach { link.write(it) }
+                        G2Settings.control(G2Settings.LEASE_RELEASE, ids.sync()).forEach { link.write(it) }
                     } catch (_: G2Exception) {
                         // The link is gone; the firmware drops the lease on its own.
                     }
@@ -591,7 +656,7 @@ internal class G2Session(
         val command = if (on) G2HubCommand.MICROPHONE_ON else G2HubCommand.MICROPHONE_OFF
         val reply =
             exchange(command, { magic, sync -> G2EvenHub.microphone(on, magic, sync) }) { message, magic, _ ->
-                G2EvenHub.microphoneReply(message, magic)
+                G2EvenHub.echo(message, magic)
             }
         if (!reply.expected(command)) log("Even G2 $command answered $reply")
         if (on) {
@@ -599,6 +664,34 @@ internal class G2Session(
             stray = 0
             listening = G2MicrophoneStream()
         }
+    }
+
+    /** Start the accelerometer's stream when [on], else stop it; any reply with its magic counts. */
+    private suspend fun imu(on: Boolean) {
+        if (on) {
+            log("Even G2 IMU on; $strayImu samples came while it was off")
+            strayImu = 0
+            imuSamples = 0
+            imu = true
+        } else {
+            imuOff()
+        }
+        activity++
+        val magic = ids.magic()
+        write(G2Side.RIGHT, G2SensorCodec.imu(on, magic, ids.sync()))
+        val echo =
+            await(G2Protocol.COMMAND_TIMEOUT_MS) { from, message ->
+                if (from == G2Side.RIGHT) G2EvenHub.echo(message, magic) else null
+            }
+        log("Even G2 IMU ${if (on) "start" else "stop"} answered ${echo ?: "nothing"}")
+    }
+
+    // The accelerometer's stream ends, and with it its last sample; its count goes to the log.
+    private fun imuOff() {
+        if (!imu) return
+        imu = false
+        log("Even G2 IMU off after $imuSamples samples")
+        updateSensors { it.copy(acceleration = null) }
     }
 
     // The microphone's stream ends; its counts go to the log.
@@ -691,6 +784,7 @@ internal class G2Session(
                 settling.cancel()
                 beating.cancel()
                 stopListening()
+                imuOff()
             }
             if (pause > 0) {
                 log("Even G2 page reopens in $pause ms")
@@ -714,8 +808,11 @@ internal class G2Session(
         while (true) {
             val target = shown(firmware, desired.value)
             val listen = listeners.value > 0
+            val stream = streamers.value > 0
             if (listen != (listening != null)) {
                 microphone(listen)
+            } else if (stream != imu) {
+                imu(stream)
             } else if (target == shown) {
                 select<Unit> {
                     wake.onReceive { }
@@ -776,3 +873,5 @@ internal class G2Session(
         const val PACKET_GAP_MS = 50L
     }
 }
+
+private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }

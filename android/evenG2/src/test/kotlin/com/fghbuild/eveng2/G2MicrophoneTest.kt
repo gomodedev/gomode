@@ -186,7 +186,7 @@ class G2MicrophoneTest {
             assertTrue(glasses.state.value is G2State.Ready)
             assertArrayEquals(expected(0, 2), heard.joined())
             assertEquals(
-                listOf("Even G2 MICROPHONE_ON answered G2MicrophoneReply(command=99, branch=19, result=1, header=0)"),
+                listOf("Even G2 MICROPHONE_ON answered G2HubEcho(command=99, branch=19, result=1, header=0)"),
                 logs.filter { "answered" in it },
             )
             val hex = packet(0).joinToString("") { "%02x".format(it) }

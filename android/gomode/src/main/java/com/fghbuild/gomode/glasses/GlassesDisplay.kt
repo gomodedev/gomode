@@ -1,4 +1,4 @@
-// Host-neutral contract for showing text and images on one connected pair of glasses, its gestures, and its microphone.
+// Host-neutral contract for showing text and images on one pair of glasses, its gestures, microphone, and sensors.
 package com.fghbuild.gomode.glasses
 
 import android.graphics.Bitmap
@@ -86,6 +86,16 @@ internal interface GlassesMicrophone : GlassesDisplay {
      * when the connection ends.
      */
     val microphone: Flow<ShortArray>
+}
+
+/** Glasses that report sensors. */
+internal interface GlassesSensing : GlassesDisplay {
+    /**
+     * The sensors' latest readings while collected and connected; collecting it runs the sensors that
+     * cost power, such as the accelerometer's stream, so collect it only while a screen shows it. The
+     * flow completes when the connection ends.
+     */
+    val sensors: Flow<GlassesSensors>
 }
 
 /**

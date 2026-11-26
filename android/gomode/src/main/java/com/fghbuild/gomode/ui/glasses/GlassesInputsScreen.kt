@@ -1,4 +1,4 @@
-// Compose screen for trying glasses input: the latest gestures, mirrored on the glasses, and a microphone recording.
+// Compose screen for trying glasses input: the latest gestures, mirrored on the glasses, a recording, and the sensors.
 package com.fghbuild.gomode.ui.glasses
 
 import android.media.MediaPlayer
@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +27,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -44,6 +47,8 @@ import com.fghbuild.gomode.glasses.GLASSES_RECORDING_SECONDS
 import com.fghbuild.gomode.glasses.GlassesGesture
 import com.fghbuild.gomode.glasses.GlassesInput
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.GlassesSensor
+import com.fghbuild.gomode.glasses.GlassesSensors
 import com.fghbuild.gomode.glasses.recordGlassesMicrophone
 import kotlinx.coroutines.launch
 import java.io.File
@@ -77,30 +82,108 @@ internal fun GlassesInputsScreen(
             )
         },
     ) { padding ->
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp)
-                    .verticalScroll(rememberScrollState())
-                    .testTag("gomode-glasses-inputs"),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = "Gestures do nothing else while this screen is open. The glasses show the same list.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-            MicrophoneRecorder(owner)
-            if (inputs.isEmpty()) {
-                Text("No input yet. Try a gesture.", style = MaterialTheme.typography.bodyMedium)
-            }
-            inputs.forEach { InputRow(it) }
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            InputList(owner, inputs, Modifier.weight(1f))
+            SensorPanel(owner)
         }
     }
 }
+
+// The microphone recorder and the latest inputs, newest first, one line each.
+@Composable
+private fun InputList(
+    owner: GlassesOwner,
+    inputs: List<GlassesInput>,
+    modifier: Modifier,
+) {
+    Column(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState())
+                .testTag("gomode-glasses-inputs"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "Gestures do nothing else while this screen is open. The glasses show the same list.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        MicrophoneRecorder(owner)
+        if (inputs.isEmpty()) {
+            Text("No input yet. Try a gesture.", style = MaterialTheme.typography.bodyMedium)
+        }
+        inputs.forEach { InputRow(it) }
+    }
+}
+
+// The latest reading of each sensor the connected glasses report, then their batteries. The sensors are
+// collected only while this screen is started, so those that cost power, such as the accelerometer's
+// stream, stop with it. Hidden while the glasses report neither.
+@Composable
+private fun SensorPanel(owner: GlassesOwner) {
+    val sensing by owner.sensing.collectAsStateWithLifecycle()
+    val batteries =
+        owner.state
+            .collectAsStateWithLifecycle()
+            .value.batteries
+    // Keyed by connection, so a new one starts without the last one's readings.
+    val sensors = sensing?.let { glasses -> key(glasses) { glasses.sensors.collectAsStateWithLifecycle(null).value } }
+    if (sensors == null && batteries.isEmpty()) return
+    HorizontalDivider()
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("gomode-glasses-sensors"),
+    ) {
+        sensors?.report?.forEach { SensorRow(it.label, sensors.reading(it) ?: NO_READING) }
+        batteries.forEach { battery ->
+            SensorRow(
+                "${battery.part.label} battery",
+                "${battery.percent}%" + if (battery.charging) ", charging" else "",
+            )
+        }
+    }
+}
+
+// One line: the sensor's name, then its reading.
+@Composable
+private fun SensorRow(
+    label: String,
+    reading: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.testTag("gomode-glasses-sensor"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = reading,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+            maxLines = 1,
+        )
+    }
+}
+
+// The reading of [sensor] as the panel shows it; null before its first.
+private fun GlassesSensors.reading(sensor: GlassesSensor): String? =
+    when (sensor) {
+        GlassesSensor.WORN -> worn?.let { if (it) "Yes" else "No" }
+        GlassesSensor.HEAD -> headUp?.let { if (it) "Up" else "Down" }
+        GlassesSensor.ACCELEROMETER -> acceleration?.let { "x %+.2f  y %+.2f  z %+.2f g".format(it.x, it.y, it.z) }
+    }
 
 // Records the glasses' microphone to a file that adb can pull; the log names its path. Play, shown once
 // this screen has recorded audio, plays the latest recording; a playback failure has its own line.
@@ -278,6 +361,8 @@ private const val TAG = "GoModeGlasses"
 private const val RECORDING_FILE = "glasses-microphone.wav"
 
 private const val NO_AUDIO = "No audio came from the glasses."
+
+private const val NO_READING = "—"
 
 // To the nearest 10 ms: one gesture sends several events within a few hundred milliseconds, and
 // a BLE connection interval of 7.5 ms makes finer digits noise.

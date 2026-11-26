@@ -52,11 +52,12 @@ internal class G2ProtoWriter {
 
 internal fun protobuf(block: G2ProtoWriter.() -> Unit): ByteArray = G2ProtoWriter().apply(block).toByteArray()
 
-/** One decoded field: a varint [scalar], length-delimited [bytes], or a skipped fixed64 or fixed32 (wire 1 or 5). */
+/** One decoded field: a varint [scalar], length-delimited [bytes], a [fixed32] (wire 5), or a skipped fixed64. */
 internal class G2ProtoField(
     val wire: Int,
     val scalar: Long? = null,
     val bytes: ByteArray? = null,
+    val fixed32: Int? = null,
 )
 
 internal object G2ProtoReader {
@@ -123,10 +124,10 @@ internal object G2ProtoReader {
                     }
 
                     5 -> {
-                        // Floats (IMU samples) are skipped: no decoded message uses them.
                         if (data.size - offset < 4) return null
+                        val bits = (0 until 4).sumOf { (data[offset + it].toInt() and 0xFF) shl (8 * it) }
                         offset += 4
-                        G2ProtoField(wire)
+                        G2ProtoField(wire, fixed32 = bits)
                     }
 
                     else -> {
@@ -140,6 +141,10 @@ internal object G2ProtoReader {
 
 /** The varint value of [field], or null when absent or of another wire type. */
 internal fun Map<Int, G2ProtoField>.scalar(field: Int): Long? = get(field)?.takeIf { it.wire == 0 }?.scalar
+
+/** The float that [field] holds as a fixed32, or null when absent or of another wire type. */
+internal fun Map<Int, G2ProtoField>.float(field: Int): Float? =
+    get(field)?.takeIf { it.wire == 5 }?.fixed32?.let(Float::fromBits)
 
 /** The length-delimited value of [field], or null when absent or of another wire type. */
 internal fun Map<Int, G2ProtoField>.bytes(field: Int): ByteArray? = get(field)?.takeIf { it.wire == 2 }?.bytes
