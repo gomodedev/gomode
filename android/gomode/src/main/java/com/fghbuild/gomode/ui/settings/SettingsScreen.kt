@@ -74,7 +74,7 @@ internal fun SettingsScreen(
     settings: SettingsState,
     settingsRepository: SettingsRepository,
     voiceSessionActive: Boolean,
-    glassesMicrophoneConnected: Boolean,
+    voiceHearsGlasses: Boolean,
     onDone: () -> Unit,
     onOpenGlasses: () -> Unit,
     edits: SettingsEdits,
@@ -227,7 +227,7 @@ internal fun SettingsScreen(
             }
             GlassesMicrophoneSetting(
                 checked = settings.glassesMicrophoneForVoice,
-                connected = glassesMicrophoneConnected,
+                hearsGlasses = voiceHearsGlasses,
                 enabled = settings.loadState == SettingsLoadState.Ready,
             ) { value -> scope.launch { edits.setGlassesMicrophoneForVoice(value) } }
             HorizontalDivider()
@@ -302,11 +302,12 @@ private fun ThinkingMusicPreview(enabled: Boolean) {
 }
 
 // Voice switches sources under a running conversation, so the choice stays available during calls. While on,
-// the row says which microphone voice hears now: without glasses that have one, it is the phone's.
+// the row says which microphone voice hears now, the selected VoiceAudioInput source: the phone's without
+// glasses that have one, or after the glasses' stream ended.
 @Composable
 private fun GlassesMicrophoneSetting(
     checked: Boolean,
-    connected: Boolean,
+    hearsGlasses: Boolean,
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -323,11 +324,7 @@ private fun GlassesMicrophoneSetting(
             if (checked) {
                 {
                     Text(
-                        if (connected) {
-                            "Voice hears the connected glasses."
-                        } else {
-                            "No glasses with a microphone are connected. Voice hears the phone."
-                        },
+                        if (hearsGlasses) "Voice hears the connected glasses." else "Voice hears the phone.",
                         modifier = Modifier.testTag("gomode-glasses-microphone-status"),
                     )
                 }

@@ -67,6 +67,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.glasses.GlassesAction
+import com.fghbuild.gomode.glasses.GlassesMicrophoneStream
 import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.glasses.toggleMute
@@ -107,6 +108,7 @@ import com.fghbuild.gomode.voice.MicrophonePermissionRecovery
 import com.fghbuild.gomode.voice.ServiceReconnectDetail
 import com.fghbuild.gomode.voice.SpeechLanguageRecovery
 import com.fghbuild.gomode.voice.TelecomCallController
+import com.fghbuild.gomode.voice.VoiceAudioInput
 import com.fghbuild.gomode.voice.VoiceConversation
 import com.fghbuild.gomode.voice.VoicePanel
 import com.fghbuild.gomode.voice.VoiceService
@@ -227,6 +229,7 @@ internal fun GoModeApp(
     shellOwner.start()
     val shellSnapshot by shellOwner.state.collectAsStateWithLifecycle()
     val carVoiceOwner = (context.applicationContext as GoModeApplication).carDialVoiceOwner
+    val voiceAudioInput = (context.applicationContext as GoModeApplication).voiceAudioInput
     val carVoiceState by carVoiceOwner.state.collectAsStateWithLifecycle()
     val carVoiceSession by carVoiceOwner.session.collectAsStateWithLifecycle()
     val carVoiceBusy = carVoiceState.status.busy
@@ -723,6 +726,7 @@ internal fun GoModeApp(
                     settingsRepository = settingsRepository,
                     settingsEdits = settingsEdits,
                     glassesOwner = glassesOwner,
+                    voiceAudioInput = voiceAudioInput,
                     activeURL = activeURL,
                     serviceSession = serviceSession,
                     onSetNativeScreen = { if (!keyguard.isKeyguardLocked) activeNativeScreen = it },
@@ -971,6 +975,7 @@ private fun GoModeContent(
     settingsRepository: SettingsRepository,
     settingsEdits: SettingsEdits,
     glassesOwner: GlassesOwner,
+    voiceAudioInput: VoiceAudioInput,
     activeURL: String,
     serviceSession: ServiceShellSession,
     activeNativeScreen: NativeScreen?,
@@ -1032,13 +1037,13 @@ private fun GoModeContent(
         }
 
         activeURL.isBlank() || activeNativeScreen == NativeScreen.Settings -> {
-            val glassesMicrophone by glassesOwner.microphone.collectAsStateWithLifecycle()
+            val voiceSource by voiceAudioInput.source.collectAsStateWithLifecycle()
             SettingsScreen(
                 settings = settings,
                 settingsRepository = settingsRepository,
                 edits = settingsEdits,
                 voiceSessionActive = voiceSessionActive,
-                glassesMicrophoneConnected = glassesMicrophone != null,
+                voiceHearsGlasses = voiceSource is GlassesMicrophoneStream,
                 serviceStatus = serviceStatus,
                 onRetryService = { id ->
                     serviceSessions.firstOrNull { it.key.serviceID == id }?.let { entry ->

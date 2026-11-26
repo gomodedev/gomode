@@ -114,7 +114,7 @@ class VoiceSettingsTest {
                             settings = settings,
                             settingsRepository = repository,
                             voiceSessionActive = false,
-                            glassesMicrophoneConnected = false,
+                            voiceHearsGlasses = false,
                             onDone = {},
                             onOpenGlasses = {},
                             edits = rememberSettingsEdits(repository, settings),
@@ -174,7 +174,7 @@ class VoiceSettingsTest {
                     settingsRepository = repository,
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
-                    glassesMicrophoneConnected = false,
+                    voiceHearsGlasses = false,
                     onDone = {},
                     onOpenGlasses = {},
                 )
@@ -209,7 +209,7 @@ class VoiceSettingsTest {
                     settingsRepository = repository,
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
-                    glassesMicrophoneConnected = false,
+                    voiceHearsGlasses = false,
                     onDone = {},
                     onOpenGlasses = {},
                 )
@@ -241,7 +241,7 @@ class VoiceSettingsTest {
                     settingsRepository = repository,
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
-                    glassesMicrophoneConnected = false,
+                    voiceHearsGlasses = false,
                     onDone = {},
                     onOpenGlasses = {},
                 )
@@ -272,7 +272,7 @@ class VoiceSettingsTest {
                     settingsRepository = repository,
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
-                    glassesMicrophoneConnected = false,
+                    voiceHearsGlasses = false,
                     onDone = {},
                     onOpenGlasses = {},
                 )
@@ -293,7 +293,7 @@ class VoiceSettingsTest {
     @Test
     fun glassesMicrophoneToggleStartsOffPersistsSaysWhatVoiceHearsAndStaysAvailableDuringCalls() {
         val active = mutableStateOf(false)
-        val connected = mutableStateOf(false)
+        val hearsGlasses = mutableStateOf(false)
         val store = MemoryPreferences()
         val repository = SettingsRepository(store)
         composeRule.setContent {
@@ -304,7 +304,7 @@ class VoiceSettingsTest {
                     settingsRepository = repository,
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
-                    glassesMicrophoneConnected = connected.value,
+                    voiceHearsGlasses = hearsGlasses.value,
                     onDone = {},
                     onOpenGlasses = {},
                 )
@@ -319,8 +319,8 @@ class VoiceSettingsTest {
         composeRule.waitUntil { repository.settings.value.glassesMicrophoneForVoice }
         toggle.performScrollTo().assertIsOn()
         val status = composeRule.onNodeWithTag("gomode-glasses-microphone-status", useUnmergedTree = true)
-        status.assertTextContains("No glasses with a microphone are connected. Voice hears the phone.")
-        composeRule.runOnIdle { connected.value = true }
+        status.assertTextContains("Voice hears the phone.")
+        composeRule.runOnIdle { hearsGlasses.value = true }
         status.assertTextContains("Voice hears the connected glasses.")
         val reopened = SettingsRepository(store)
         composeRule.waitUntil { reopened.settings.value.loadState == SettingsLoadState.Ready }
@@ -560,7 +560,7 @@ class VoiceSettingsTest {
                     settingsRepository = repository,
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active.value,
-                    glassesMicrophoneConnected = false,
+                    voiceHearsGlasses = false,
                     onDone = {},
                     onOpenGlasses = {},
                 )
@@ -708,7 +708,7 @@ class VoiceSettingsTest {
                     settingsRepository = repository,
                     edits = rememberSettingsEdits(repository, settings),
                     voiceSessionActive = active(),
-                    glassesMicrophoneConnected = false,
+                    voiceHearsGlasses = false,
                     onDone = {},
                     onOpenGlasses = {},
                 )
