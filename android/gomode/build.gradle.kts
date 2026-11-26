@@ -32,7 +32,8 @@ android {
         release {
             // Reuse the debug keystore for sideloading so `adb install -r` upgrades in place.
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             ndk {
                 // Emulators run debug; release targets arm64-v8a phones, not ChromeOS.
                 //noinspection ChromeOsAbiSupport
