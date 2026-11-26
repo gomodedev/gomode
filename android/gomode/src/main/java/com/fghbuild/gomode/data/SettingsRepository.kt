@@ -33,7 +33,8 @@
 // Saved glasses: GLASSES_KIND names the kind, HALO or EVEN_G2; without it, as before Even G2,
 // HALO_ADDRESS is a Halo's. EVEN_G2_PAIR holds a pair's ID and both arms as JSON (version 1).
 // One write replaces the kind and its keys and removes the other kind's. HALO_AUTO_CONNECT
-// keeps its name and applies to either kind.
+// keeps its name and applies to either kind. GLASSES_MICROPHONE_FOR_VOICE, off by default, makes
+// voice hear any connected glasses that have a microphone.
 package com.fghbuild.gomode.data
 
 import androidx.datastore.core.DataStore
@@ -351,6 +352,7 @@ data class SettingsState(
     val activeServiceURL: String = "",
     val glasses: GlassesDevice? = null,
     val glassesAutoConnect: Boolean = false,
+    val glassesMicrophoneForVoice: Boolean = false,
     val services: List<ServiceInstance> = emptyList(),
     val activeServiceId: String = "",
     val voiceSetup: VoiceSetupPreference = VoiceSetupPreference(),
@@ -385,6 +387,7 @@ class SettingsRepository(
         val HALO_ADDRESS = stringPreferencesKey("HALO_ADDRESS")
         val EVEN_G2_PAIR = stringPreferencesKey("EVEN_G2_PAIR")
         val HALO_AUTO_CONNECT = booleanPreferencesKey("HALO_AUTO_CONNECT")
+        val GLASSES_MICROPHONE_FOR_VOICE = booleanPreferencesKey("GLASSES_MICROPHONE_FOR_VOICE")
         val SPEAKING_VOICES = stringPreferencesKey("SPEAKING_VOICES")
         val SYNTHESIS_VOICES = stringPreferencesKey("SYNTHESIS_VOICES")
         val VOICE_SETUP = stringPreferencesKey("VOICE_SETUP")
@@ -419,6 +422,7 @@ class SettingsRepository(
                     showServiceOnLockScreen = prefs[Keys.SHOW_SERVICE_ON_LOCK_SCREEN] ?: false,
                     glasses = decodeGlasses(prefs),
                     glassesAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
+                    glassesMicrophoneForVoice = prefs[Keys.GLASSES_MICROPHONE_FOR_VOICE] ?: false,
                     services = services,
                     activeServiceId = active?.id ?: "",
                     voiceAudioDeviceType = prefs[Keys.VOICE_AUDIO_DEVICE_TYPE],
@@ -541,6 +545,10 @@ class SettingsRepository(
         dataStore.edit { prefs ->
             prefs[Keys.HALO_AUTO_CONNECT] = enabled
         }
+    }
+
+    suspend fun updateGlassesMicrophoneForVoice(enabled: Boolean) {
+        dataStore.edit { it[Keys.GLASSES_MICROPHONE_FOR_VOICE] = enabled }
     }
 
     /** Edits the voice setup and, when [gatewayURL] is set, that gateway's selections, in one write. */

@@ -47,6 +47,7 @@ class ThinkingMusicPreviewTest {
                         settings,
                         repository,
                         active.value,
+                        false,
                         {},
                         {},
                         edits = rememberSettingsEdits(repository, settings),

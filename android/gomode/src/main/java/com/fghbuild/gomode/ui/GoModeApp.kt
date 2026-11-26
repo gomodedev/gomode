@@ -1031,11 +1031,13 @@ private fun GoModeContent(
         }
 
         activeURL.isBlank() || activeNativeScreen == NativeScreen.Settings -> {
+            val glassesMicrophone by glassesOwner.microphone.collectAsStateWithLifecycle()
             SettingsScreen(
                 settings = settings,
                 settingsRepository = settingsRepository,
                 edits = settingsEdits,
                 voiceSessionActive = voiceSessionActive,
+                glassesMicrophoneConnected = glassesMicrophone != null,
                 serviceStatus = serviceStatus,
                 onRetryService = { id ->
                     serviceSessions.firstOrNull { it.key.serviceID == id }?.let { entry ->

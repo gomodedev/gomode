@@ -1,4 +1,4 @@
-// Drives device recognition and the WebRTC microphone track from synthetic PCM, switching and ending it mid-call.
+// Drives device recognition and the WebRTC microphone track from synthetic PCM and fake glasses, switching mid-call.
 package com.fghbuild.gomode.voice
 
 import android.Manifest
@@ -6,26 +6,43 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import com.fghbuild.eveng2.G2Arm
+import com.fghbuild.eveng2.G2Pair
+import com.fghbuild.eveng2.G2Side
+import com.fghbuild.eveng2.testing.FakeG2Firmware
+import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.MainActivity
+import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
+import com.fghbuild.gomode.glasses.GlassesMicrophoneStream
+import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.followGlassesMicrophone
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
+import com.fghbuild.halo.testing.FakeHaloTransport
 import com.fghbuild.voicegateway.sdk.v2.TurnState
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestRule
@@ -43,7 +60,11 @@ class VoiceAudioSourceSessionTest {
 
     @get:Rule(order = 1)
     val permissions: GrantPermissionRule =
-        GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+        GrantPermissionRule.grant(
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.POST_NOTIFICATIONS,
+            Manifest.permission.RECORD_AUDIO,
+        )
 
     private val input =
         (InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as GoModeApplication)
@@ -102,6 +123,57 @@ class VoiceAudioSourceSessionTest {
             delay(1_000)
             assertEquals("The phone microphone must replace the ended stream", settled, tones(fixtureStats(), 900))
             assertNull(session.state.value.error)
+        }
+
+    @Test
+    fun webRtcHearsTheGlassesMicrophoneAndKeepsTheCallOnThePhoneWhileTheyReconnect() =
+        withSession(SpeechStageLocation.GATEWAY) { session ->
+            awaitState(session) { it.turnState == TurnState.Idle && !it.speaking && it.transcript.size >= 2 }
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val firmware = FakeG2Firmware()
+            val glassesScope = MainScope()
+            val owner =
+                GlassesOwner(
+                    glassesScope,
+                    context,
+                    SettingsRepository(MemoryPreferences()),
+                    FakeHaloTransport(context),
+                    fakeG2Scanner(),
+                    firmware.connector,
+                )
+            val streams = CoroutineScope(glassesScope.coroutineContext + Dispatchers.Default)
+            glassesScope.launch { followGlassesMicrophone(input, flowOf(true), owner.microphone, streams) }
+            // The glasses speak every 50 ms, as a pair does, so the capture post-processor transmits them.
+            val speaking =
+                glassesScope.launch(Dispatchers.Default) {
+                    while (true) {
+                        // The microphone can stop between the check and the packet, which speak refuses.
+                        if (firmware.microphone) runCatching { firmware.speak(ByteArray(G2_MICROPHONE_PACKET_BYTES)) }
+                        delay(50)
+                    }
+                }
+            try {
+                withContext(Dispatchers.Main) { owner.connect(GlassesDevice.EvenG2(G2_PAIR)) }
+                val first = withTimeout(TIMEOUT_MS) { input.source.first { it is GlassesMicrophoneStream } }
+                // Only a voice reader collects the microphone: the peer connection opened the glasses' stream.
+                awaitStream { firmware.microphone }
+
+                firmware.link(G2Side.RIGHT).drop(status = 8)
+                withTimeout(TIMEOUT_MS) { input.source.first { it == VoiceAudioSource.PhoneMicrophone } }
+                assertNull(session.state.value.error)
+                assertTrue(session.state.value.connected)
+
+                // A reconnection offers a new microphone, which the call hears again. A direct connection
+                // stands in for the background one, which waits for the emulator's Bluetooth adapter.
+                withContext(Dispatchers.Main) { owner.connect(GlassesDevice.EvenG2(G2_PAIR)) }
+                val second = withTimeout(TIMEOUT_MS) { input.source.first { it is GlassesMicrophoneStream } }
+                assertNotSame(first, second)
+                awaitStream { firmware.requests.count { it.kind == "microphone" && it.text == "on" } == 2 }
+                assertNull(session.state.value.error)
+            } finally {
+                speaking.cancel()
+                withContext(Dispatchers.Main) { glassesScope.cancel() }
+            }
         }
 
     // Selects [stream] while recognition listens, so it replaces the previous source under a running recognizer.
@@ -223,5 +295,15 @@ class VoiceAudioSourceSessionTest {
 
     private companion object {
         const val TIMEOUT_MS = 30_000L
+
+        // Five LC3 frames of 40 bytes and a 5-byte trailer; any such packet decodes to 50 ms.
+        const val G2_MICROPHONE_PACKET_BYTES = 205
+
+        val G2_PAIR =
+            G2Pair(
+                "7",
+                G2Arm(G2Side.LEFT, "00:00:5E:00:53:0A", "Even G2_7_L_00530A"),
+                G2Arm(G2Side.RIGHT, "00:00:5E:00:53:0B", "Even G2_7_R_00530B"),
+            )
     }
 }

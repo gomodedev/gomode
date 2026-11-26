@@ -74,6 +74,7 @@ internal fun SettingsScreen(
     settings: SettingsState,
     settingsRepository: SettingsRepository,
     voiceSessionActive: Boolean,
+    glassesMicrophoneConnected: Boolean,
     onDone: () -> Unit,
     onOpenGlasses: () -> Unit,
     edits: SettingsEdits,
@@ -224,6 +225,11 @@ internal fun SettingsScreen(
             ) {
                 Text("Device")
             }
+            GlassesMicrophoneSetting(
+                checked = settings.glassesMicrophoneForVoice,
+                connected = glassesMicrophoneConnected,
+                enabled = settings.loadState == SettingsLoadState.Ready,
+            ) { value -> scope.launch { edits.setGlassesMicrophoneForVoice(value) } }
             HorizontalDivider()
             CreditsSetting(voiceSessionActive)
         }
@@ -293,6 +299,45 @@ private fun ThinkingMusicPreview(enabled: Boolean) {
         }
     }
     if (failed) Text("Could not play thinking music.", color = MaterialTheme.colorScheme.error)
+}
+
+// Voice switches sources under a running conversation, so the choice stays available during calls. While on,
+// the row says which microphone voice hears now: without glasses that have one, it is the phone's.
+@Composable
+private fun GlassesMicrophoneSetting(
+    checked: Boolean,
+    connected: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        modifier =
+            Modifier.testTag("gomode-glasses-microphone-for-voice").toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
+        leadingContent = { Icon(painterResource(R.drawable.ic_mic), contentDescription = null) },
+        supportingContent =
+            if (checked) {
+                {
+                    Text(
+                        if (connected) {
+                            "Voice hears the connected glasses."
+                        } else {
+                            "No glasses with a microphone are connected. Voice hears the phone."
+                        },
+                        modifier = Modifier.testTag("gomode-glasses-microphone-status"),
+                    )
+                }
+            } else {
+                null
+            },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
+    ) {
+        Text("Use glasses microphone for voice")
+    }
 }
 
 /** A switch row whose label starts at the field-label inset; the whole row toggles. */

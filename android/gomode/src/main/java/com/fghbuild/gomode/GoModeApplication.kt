@@ -10,6 +10,7 @@ import com.fghbuild.eveng2.G2Scanner
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.followGlassesMicrophone
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.gomode.voice.CarDialVoiceOwner
@@ -19,8 +20,12 @@ import com.fghbuild.gomode.voice.LocalModelOwner
 import com.fghbuild.gomode.voice.VoiceAudioInput
 import com.fghbuild.gomode.voice.VoiceErrorLog
 import com.fghbuild.halo.ble.HaloConnection
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 internal val Context.goModeSettingsDataStore by preferencesDataStore(name = "gomode_settings")
 
@@ -72,9 +77,17 @@ class GoModeApplication :
             CarDialVoiceOwner(this, settingsRepository, localModelOwner, serviceShellOwner, glassesOwner)
         }
     internal val carDialVoiceOwner by carDialVoiceOwnerDelegate
+
+    // Voice follows the owner's microphone from its creation: no glasses connect before then.
     private val glassesOwnerDelegate =
         lazy {
             GlassesOwner(scope, this, settingsRepository, HaloConnection(this), G2Scanner(this), G2GattConnector(this))
+                .also { owner ->
+                    val enabled = settingsRepository.settings.map { it.glassesMicrophoneForVoice }
+                    // Sinks meter, duck, and buffer each block off the main thread.
+                    val streams = CoroutineScope(scope.coroutineContext + Dispatchers.Default)
+                    scope.launch { followGlassesMicrophone(voiceAudioInput, enabled, owner.microphone, streams) }
+                }
         }
     internal val glassesOwner by glassesOwnerDelegate
 

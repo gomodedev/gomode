@@ -74,6 +74,7 @@ class PublicModelDownloadAcceptanceTest {
                             settings,
                             repository,
                             false,
+                            false,
                             {},
                             {},
                             edits = rememberSettingsEdits(repository, settings),

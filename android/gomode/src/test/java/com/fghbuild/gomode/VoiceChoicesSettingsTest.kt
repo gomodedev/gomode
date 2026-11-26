@@ -465,6 +465,7 @@ class VoiceChoicesSettingsTest {
                     settings,
                     repository,
                     active(),
+                    false,
                     {},
                     {},
                     edits = rememberSettingsEdits(repository, settings),
