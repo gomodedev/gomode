@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/gomodedev/gomode/internal/testlog"
 	"github.com/gomodedev/gomode/voicegateway"
@@ -47,7 +49,7 @@ func TestStartRestartWatch(t *testing.T) {
 			}
 			cfg := filepath.Join(dir, tc.file)
 			ctx, cancel := context.WithCancelCause(t.Context())
-			w, err := startRestartWatch(ctx, testlog.New(t), path, filepath.Join(dir, envFileName), cancel)
+			w, err := startRestartWatch(ctx, testlog.New(t), path, "", cancel)
 			if err != nil {
 				cancel(nil)
 				t.Fatal(err)
@@ -87,7 +89,7 @@ func TestStartRestartWatch(t *testing.T) {
 		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "missing", "nested")
 		ctx, cancel := context.WithCancelCause(t.Context())
-		w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
+		w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "config.toml"), "", cancel)
 		if err != nil {
 			cancel(nil)
 			t.Fatal(err)
@@ -115,7 +117,7 @@ func TestStartRestartWatch(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		t.Cleanup(func() { cancel(nil) })
 		dir := t.TempDir()
-		w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "config.toml"), filepath.Join(dir, envFileName), cancel)
+		w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "config.toml"), "", cancel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +249,7 @@ func TestRestartWatchProcess(t *testing.T) { //nolint:paralleltest // Subprocess
 	}
 	ctx, cancel := context.WithCancelCause(t.Context())
 	// A missing config directory must not disable executable watching.
-	w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "missing", "config.toml"), filepath.Join(dir, "missing", envFileName), cancel)
+	w, err := startRestartWatch(ctx, testlog.New(t), filepath.Join(dir, "missing", "config.toml"), "", cancel)
 	if err != nil {
 		cancel(nil)
 		t.Fatal(err)
@@ -271,41 +273,80 @@ func TestRestartWatchProcess(t *testing.T) { //nolint:paralleltest // Subprocess
 	}
 }
 
-func TestLoadEnvFile(t *testing.T) { //nolint:paralleltest // Setenv mutates the process environment.
+func TestLoadEnvFiles(t *testing.T) { //nolint:paralleltest // Setenv mutates the process environment.
 	const name = "GOMODE_TEST_LOAD_ENV_FILE"
-	t.Setenv(name, "inherited")
-	t.Run("missing default", func(t *testing.T) {
-		dir := t.TempDir()
-		got, err := loadEnvFile(filepath.Join(dir, "config.toml"), "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := filepath.Join(dir, envFileName); got != want {
-			t.Errorf("path = %q, want %q", got, want)
-		}
-		if v := os.Getenv(name); v != "inherited" {
-			t.Errorf("%s = %q, want inherited value", name, v)
-		}
+	t.Run("valid", func(t *testing.T) {
+		t.Run("missing default", func(t *testing.T) {
+			t.Setenv(name, "inherited")
+			if err := loadEnvFiles(t.Context(), testlog.New(t), filepath.Join(t.TempDir(), "config.toml"), ""); err != nil {
+				t.Fatal(err)
+			}
+			if v := os.Getenv(name); v != "inherited" {
+				t.Errorf("%s = %q, want inherited value", name, v)
+			}
+		})
+		t.Run("default beside config", func(t *testing.T) {
+			dir := t.TempDir()
+			// Windows editors may add a byte order mark and CRLF line endings.
+			if err := os.WriteFile(filepath.Join(dir, envFileName), []byte("\uFEFF"+name+"=\"from file\"\r\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(name, "inherited")
+			if err := loadEnvFiles(t.Context(), testlog.New(t), filepath.Join(dir, "config.toml"), ""); err != nil {
+				t.Fatal(err)
+			}
+			if v := os.Getenv(name); v != "from file" {
+				t.Errorf("%s = %q, want file value", name, v)
+			}
+		})
+		t.Run("explicit over default", func(t *testing.T) {
+			// Windows tasks registered before v0.5.0 pass -env-file with the
+			// former, usually untouched, %LOCALAPPDATA% template.
+			const other = name + "_OTHER"
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, envFileName), []byte(name+"=default\n"+other+"=default\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			explicit := filepath.Join(t.TempDir(), envFileName)
+			if err := os.WriteFile(explicit, []byte("# "+name+"=commented\n"+other+"=explicit\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(name, "inherited")
+			t.Setenv(other, "inherited")
+			if err := loadEnvFiles(t.Context(), testlog.New(t), filepath.Join(dir, "config.toml"), explicit); err != nil {
+				t.Fatal(err)
+			}
+			if v := os.Getenv(name); v != "default" {
+				t.Errorf("%s = %q, want default file value", name, v)
+			}
+			if v := os.Getenv(other); v != "explicit" {
+				t.Errorf("%s = %q, want explicit file value", other, v)
+			}
+		})
 	})
-	t.Run("default beside config", func(t *testing.T) {
-		dir := t.TempDir()
-		// Windows editors may add a byte order mark and CRLF line endings.
-		if err := os.WriteFile(filepath.Join(dir, envFileName), []byte("\uFEFF"+name+"=\"from file\"\r\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv(name, "inherited")
-		if _, err := loadEnvFile(filepath.Join(dir, "config.toml"), ""); err != nil {
-			t.Fatal(err)
-		}
-		if v := os.Getenv(name); v != "from file" {
-			t.Errorf("%s = %q, want file value", name, v)
-		}
-	})
-	t.Run("missing explicit", func(t *testing.T) {
-		dir := t.TempDir()
-		if _, err := loadEnvFile(filepath.Join(dir, "config.toml"), filepath.Join(dir, "other.env")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("err = %v, want not exist", err)
-		}
+	t.Run("error", func(t *testing.T) {
+		t.Run("missing explicit", func(t *testing.T) {
+			dir := t.TempDir()
+			if err := loadEnvFiles(t.Context(), testlog.New(t), filepath.Join(dir, "config.toml"), filepath.Join(dir, "other.env")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("err = %v, want not exist", err)
+			}
+		})
+		t.Run("UTF-16 default", func(t *testing.T) {
+			// Windows PowerShell 5.1 redirection writes UTF-16LE with a BOM.
+			dir := t.TempDir()
+			units := utf16.Encode([]rune("\uFEFF" + name + "=secret\r\n"))
+			data := make([]byte, 0, 2*len(units))
+			for _, u := range units {
+				data = binary.LittleEndian.AppendUint16(data, u)
+			}
+			if err := os.WriteFile(filepath.Join(dir, envFileName), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := loadEnvFiles(t.Context(), testlog.New(t), filepath.Join(dir, "config.toml"), "")
+			if err == nil || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("err = %v, want a parse error that omits values", err)
+			}
+		})
 	})
 }
 
