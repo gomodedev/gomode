@@ -165,9 +165,9 @@ android-start-emulator:
 android-stop-emulator:
 	@uv run --locked python scripts/android_stop_emulator.py
 
-# Builds, installs, and launches the app on a connected device.
+# Builds, installs, and launches the release app on a connected device.
 android-push: android-sdk
-	@cd ./android && ./gradlew :gomode:assembleDebug $(GRADLE_LOG_ARGS)
+	@cd ./android && ./gradlew :gomode:assembleRelease $(GRADLE_LOG_ARGS)
 	@uv run --locked python scripts/android_push.py
 
 # Slow: runs all model-free app and independent Telecom tests on an emulator.

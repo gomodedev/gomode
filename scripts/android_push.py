@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install and launch the debug Go Mode APK on a selected Android device."""
+"""Install and launch the release Go Mode APK on a selected Android device."""
 
 import os
 import subprocess
@@ -19,7 +19,7 @@ def main() -> int:
     if not ready:
         raise RuntimeError("No ready Android device found")
 
-    apk = "android/gomode/build/outputs/apk/debug/gomode-debug.apk"
+    apk = "android/gomode/build/outputs/apk/release/gomode-release.apk"
     for serial in ready:
         print(f"Installing Go Mode on {serial}", flush=True)
         subprocess.run([adb, "-s", serial, "install", "-r", apk], check=True)

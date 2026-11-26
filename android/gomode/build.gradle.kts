@@ -31,6 +31,8 @@ android {
             enableUnitTestCoverage = true
         }
         release {
+            // Reuse the debug keystore for sideloading so `adb install -r` upgrades in place.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
