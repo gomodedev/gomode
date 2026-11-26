@@ -201,7 +201,7 @@ internal class CarDialVoiceOwner(
         }
         scope.launch {
             session.collectLatest { voice ->
-                if (voice != null) glasses.detectHeadFlicks(voice.state.map { it.started })
+                if (voice != null) glasses.detectHeadGestures(voice.state.map { it.started })
             }
         }
     }

@@ -435,8 +435,13 @@ internal class G2Session(
             if (lightRuns) updateSensors { it.copy(light = light) }
         }
         G2SensorCodec.heading(message)?.let { heading ->
-            if (headings++ == 0L) log("Even G2 first heading from $side, $heading°: ${message.payload.hex()}")
-            if (compassRuns) updateSensors { it.copy(heading = heading) }
+            // On a pair on 2.3.0.24 with Faceclaw/45, the first heading after each start read 90° whichever
+            // way the wearer faced, and the next ones the real heading, so the first is dropped.
+            if (headings++ == 0L) {
+                log("Even G2 first heading from $side, $heading°, dropped: ${message.payload.hex()}")
+            } else if (compassRuns) {
+                updateSensors { it.copy(heading = heading) }
+            }
         }
         val sample = G2EvenHub.acceleration(message) ?: return
         if (!imu) {

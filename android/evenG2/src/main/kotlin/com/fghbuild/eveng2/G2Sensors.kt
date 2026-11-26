@@ -98,8 +98,13 @@ internal object G2SensorCodec {
     private const val IMU_COMMAND = 19L
     private const val IMU_BRANCH = 22
 
-    /** The pace faceclaw streams at: a firmware code, not a rate. */
-    private const val IMU_PACE = 200L
+    // TODO(hardware): faceclaw streams at 200, which gave about 5.5 samples a second on a pair on
+    // 2.3.0.24 with Faceclaw/45, as if the code were a period in ms; 100 is the hypothesis that the
+    // rate doubles. Read "Even G2 IMU off after N samples" against the time since "IMU on"; if the
+    // samples are all zero or stop, return to 200.
+
+    /** The report pace: a firmware code from 100 to 1000 in steps of 100. */
+    private const val IMU_PACE = 100L
 
     private const val LIGHT_MESSAGE = 16
     private const val LIGHT_START = 1

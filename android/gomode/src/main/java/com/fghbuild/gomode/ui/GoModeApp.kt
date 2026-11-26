@@ -400,7 +400,7 @@ internal fun GoModeApp(
         )
     }
     LaunchedEffect(manualVoiceSession, glassesOwner) {
-        glassesOwner.detectHeadFlicks(manualVoiceSession.state.map { it.started })
+        glassesOwner.detectHeadGestures(manualVoiceSession.state.map { it.started })
     }
     DisposableEffect(manualVoiceSession) {
         carVoiceOwner.registerManualSession(manualVoiceSession)
