@@ -1,12 +1,10 @@
-// The glasses input Go Mode lists for the wearer: gestures and system events by place, and the presses it acts on.
+// The glasses input Go Mode lists for the wearer: gestures and system events, with the temple each came from.
 package com.fghbuild.gomode.glasses
 
 /** What the wearer did, or what the glasses reported, as the input events screen names it. */
 internal enum class GlassesGesture(
     val label: String,
 ) {
-    // Go Mode's own: a gesture it acts on as a press.
-    PRESS("Press"),
     TAP("Tap"),
     DOUBLE_TAP("Double tap"),
     HOLD("Hold"),
@@ -51,9 +49,6 @@ internal data class GlassesInput(
     val atMillis: Long,
     val event: GlassesEvent,
 )
-
-/** The press [GlassesOwner] records for each press it receives. */
-internal val PRESS_EVENT = GlassesEvent(GlassesGesture.PRESS)
 
 /**
  * The inputs, newest first, as the glasses show them while the wearer inspects them: a title, then

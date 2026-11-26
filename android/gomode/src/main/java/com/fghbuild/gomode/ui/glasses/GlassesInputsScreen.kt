@@ -16,7 +16,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.AdsClick
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DoNotTouch
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.North
@@ -41,7 +40,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -89,7 +87,7 @@ internal fun GlassesInputsScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                text = "Presses do nothing while this screen is open. The glasses show the same list.",
+                text = "Gestures do nothing else while this screen is open. The glasses show the same list.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp),
@@ -102,28 +100,24 @@ internal fun GlassesInputsScreen(
     }
 }
 
-// One line: the gesture's icon and name, then its time. A press stands out in the primary color.
+// One line: the gesture's icon and name, then its time.
 @Composable
 private fun InputRow(input: GlassesInput) {
-    val press = input.event.gesture == GlassesGesture.PRESS
-    val color = if (press) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     Row(
         modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).testTag("gomode-glasses-input"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(input.event.gesture.icon(), contentDescription = null, tint = color)
+        Icon(input.event.gesture.icon(), contentDescription = null)
         Text(
             text = input.event.label,
             style = MaterialTheme.typography.bodyLarge,
-            color = color,
-            fontWeight = if (press) FontWeight.Bold else null,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         Text(
-            text = InputTime.format(Instant.ofEpochMilli(input.atMillis)),
+            text = inputTime(input.atMillis),
             style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -133,7 +127,6 @@ private fun InputRow(input: GlassesInput) {
 
 private fun GlassesGesture.icon(): ImageVector =
     when (this) {
-        GlassesGesture.PRESS -> Icons.Filled.Bolt
         GlassesGesture.TAP -> Icons.Filled.TouchApp
         GlassesGesture.DOUBLE_TAP -> Icons.Filled.AdsClick
         GlassesGesture.HOLD -> Icons.Filled.PanTool
@@ -150,5 +143,8 @@ private fun GlassesGesture.icon(): ImageVector =
         GlassesGesture.OTHER -> Icons.Filled.QuestionMark
     }
 
-// Milliseconds: one gesture sends several events within a few hundred of them.
-private val InputTime = DateTimeFormatter.ofPattern("HH:mm:ss.SSS").withZone(ZoneId.systemDefault())
+// To the nearest 10 ms: one gesture sends several events within a few hundred milliseconds, and
+// a BLE connection interval of 7.5 ms makes finer digits noise.
+private val InputTime = DateTimeFormatter.ofPattern("HH:mm:ss.SS").withZone(ZoneId.systemDefault())
+
+private fun inputTime(atMillis: Long): String = InputTime.format(Instant.ofEpochMilli((atMillis + 5) / 10 * 10))

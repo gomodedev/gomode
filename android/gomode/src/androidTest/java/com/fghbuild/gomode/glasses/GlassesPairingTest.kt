@@ -91,8 +91,8 @@ class GlassesPairingTest {
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == GREETING_TEXT }
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }
 
-                // The input events screen lists a tap and its press, the glasses show the same list,
-                // and the press acts on nothing; system back returns to the glasses screen.
+                // The input events screen lists a tap, the glasses show the same list, and the tap's
+                // press acts on nothing; system back returns to the glasses screen.
                 val pressed = AtomicBoolean(false)
                 composeRule.runOnUiThread {
                     glasses.takePressesFirst {
@@ -105,11 +105,10 @@ class GlassesPairingTest {
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "Input events\nTry a gesture." }
                 firmware.touch(G2Side.RIGHT, type = G2InputEvent.CLICK)
                 composeRule.waitUntil(TIMEOUT_MS) {
-                    composeRule.onAllNodesWithTag("gomode-glasses-input").fetchSemanticsNodes().size == 2
+                    composeRule.onAllNodesWithTag("gomode-glasses-input").fetchSemanticsNodes().size == 1
                 }
                 composeRule.onNodeWithText("Tap").assertExists()
-                composeRule.onNodeWithText("Press").assertExists()
-                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText()?.lines()?.size == 3 }
+                composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "Input events\nTap" }
                 composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
                 waitForTag("gomode-glasses-screen")
                 composeRule.waitUntil(TIMEOUT_MS) { firmware.shownText() == "" }

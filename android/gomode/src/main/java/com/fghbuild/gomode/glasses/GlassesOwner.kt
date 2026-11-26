@@ -207,8 +207,8 @@ internal class GlassesOwner(
     private val mutableInputs = MutableStateFlow<List<GlassesInput>>(emptyList())
 
     /**
-     * The latest [GLASSES_INPUT_HISTORY] inputs of every connection, newest first: each of
-     * [GlassesDisplay.events] and each press, so the wearer sees which gestures act.
+     * The latest [GLASSES_INPUT_HISTORY] [GlassesDisplay.events] of every connection, newest first,
+     * so the wearer sees what the glasses report for each gesture.
      */
     val inputs: StateFlow<List<GlassesInput>> = mutableInputs.asStateFlow()
 
@@ -254,8 +254,8 @@ internal class GlassesOwner(
     private var firstPressHandler: (() -> Boolean)? = null
 
     /**
-     * Until the returned handle closes, the wearer tries gestures: each press goes to [inputs] alone,
-     * so no handler, collector, or notice acts on it, and the connected glasses show the latest
+     * Until the returned handle closes, the wearer tries gestures: no handler, collector, or notice
+     * acts on a press, and the connected glasses show the latest
      * [inputs] over everything else. Handles nest; closing one twice releases it once. Main thread only.
      */
     fun inspectInputs(): AutoCloseable {
@@ -339,7 +339,6 @@ internal class GlassesOwner(
     }
 
     private fun press() {
-        record(PRESS_EVENT)
         when {
             inspections.value > 0 -> {}
 

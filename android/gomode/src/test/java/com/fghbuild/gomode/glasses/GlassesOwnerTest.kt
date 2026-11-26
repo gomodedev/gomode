@@ -639,7 +639,7 @@ class GlassesOwnerTest {
         }
 
     @Test
-    fun evenG2EventsAndPressesAreListedNewestFirst() =
+    fun evenG2EventsAreListedNewestFirstWithoutThePressesTheyMake() =
         runOwnerTest {
             owner.connect(G2)
             owner.state.first { it.link is GlassesLink.Connected }
@@ -655,12 +655,10 @@ class GlassesOwnerTest {
                 )
             assertEquals(older, owner.inputs.value.map { it.event })
 
-            // A click is both an event and a press.
+            // A click is also a press, which is not listed.
             firmware.touch(G2Side.LEFT, type = G2InputEvent.CLICK)
             runCurrent()
-            val events = owner.inputs.value.map { it.event }
-            assertEquals(setOf(GlassesEvent(GlassesGesture.TAP), PRESS_EVENT), events.take(2).toSet())
-            assertEquals(older, events.drop(2))
+            assertEquals(listOf(GlassesEvent(GlassesGesture.TAP)) + older, owner.inputs.value.map { it.event })
         }
 
     @Test
@@ -687,8 +685,7 @@ class GlassesOwnerTest {
             runCurrent()
             assertEquals(0 to 0, offered to presses.size)
             val shown = checkNotNull(firmware.shownText()).lines()
-            assertEquals("Input events", shown.first())
-            assertEquals(setOf("Tap", "Press"), shown.drop(1).toSet())
+            assertEquals(listOf("Input events", "Tap"), shown)
 
             // A stopped screen, as when Go Mode goes to the background, gives the glasses and presses back.
             activity.pause().stop()
