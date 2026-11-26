@@ -78,9 +78,10 @@ enum class G2Head {
 /**
  * The latest sensor readings of one session; each is null until its first reading. [wearing] is whether
  * the glasses are on the head, [head] where it last went, and [acceleration] the latest accelerometer
- * sample while [G2Glasses.sensors] is collected. On Faceclaw firmware, also while collected: [light], the
- * ambient light sensor's reading in the stock driver's units, roughly tenths of a lux, and [heading], the
- * stock compass's heading in degrees, 0 to 359.
+ * sample while [G2Glasses.sensors] or [G2Glasses.motion] is collected. On Faceclaw firmware, also: [light],
+ * the ambient light sensor's reading in the stock driver's units, roughly tenths of a lux, while
+ * [G2Glasses.sensors] is collected, and [heading], the stock compass's heading in degrees, 0 to 359, while
+ * either is.
  */
 data class G2Sensors(
     val wearing: Boolean? = null,

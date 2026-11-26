@@ -78,7 +78,8 @@ class G2Glasses(
      */
     val events: SharedFlow<G2InputEvent> = mutableEvents.asSharedFlow()
 
-    private val streamers = MutableStateFlow(0)
+    private val motionReaders = MutableStateFlow(0)
+    private val lightReaders = MutableStateFlow(0)
     private val mutableSensors = MutableStateFlow(G2Sensors())
 
     /**
@@ -89,8 +90,24 @@ class G2Glasses(
      */
     val sensors: Flow<G2Sensors> =
         mutableSensors
-            .onSubscription { streamers.update { it + 1 } }
-            .onCompletion { streamers.update { it - 1 } }
+            .onSubscription {
+                motionReaders.update { it + 1 }
+                lightReaders.update { it + 1 }
+            }.onCompletion {
+                motionReaders.update { it - 1 }
+                lightReaders.update { it - 1 }
+            }
+
+    /**
+     * The same readings as [sensors], but collecting this flow runs only the motion sensors: the
+     * accelerometer, and on Faceclaw firmware the compass. The light sensor stays off unless [sensors]
+     * is collected too, since its polling stops the glasses' auto-brightness; [G2Sensors.light] is then
+     * null.
+     */
+    val motion: Flow<G2Sensors> =
+        mutableSensors
+            .onSubscription { motionReaders.update { it + 1 } }
+            .onCompletion { motionReaders.update { it - 1 } }
 
     private val listeners = MutableStateFlow(0)
     private val mutableAudio =
@@ -182,7 +199,8 @@ class G2Glasses(
                 ids,
                 desired,
                 listeners,
-                streamers,
+                motionReaders,
+                lightReaders,
                 onReady = { firmware, shown -> publish(current, G2State.Ready(pair, firmware, shown)) },
                 onGesture = { gesture(current, it) },
                 onEvent = { event(current, it) },

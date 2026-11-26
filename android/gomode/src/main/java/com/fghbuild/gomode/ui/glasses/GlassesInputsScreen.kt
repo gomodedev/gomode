@@ -44,6 +44,8 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.gomode.R
 import com.fghbuild.gomode.glasses.GLASSES_RECORDING_SECONDS
+import com.fghbuild.gomode.glasses.GlassesDirection
+import com.fghbuild.gomode.glasses.GlassesEvent
 import com.fghbuild.gomode.glasses.GlassesGesture
 import com.fghbuild.gomode.glasses.GlassesInput
 import com.fghbuild.gomode.glasses.GlassesOwner
@@ -326,7 +328,7 @@ private fun InputRow(input: GlassesInput) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(painterResource(input.event.gesture.icon()), contentDescription = null)
+        Icon(painterResource(input.event.icon()), contentDescription = null)
         Text(
             text = input.event.label,
             style = MaterialTheme.typography.bodyLarge,
@@ -343,6 +345,17 @@ private fun InputRow(input: GlassesInput) {
     }
 }
 
+// A head flick shows where it went, and each other input its gesture.
+@DrawableRes
+private fun GlassesEvent.icon(): Int =
+    when (direction) {
+        GlassesDirection.UP -> R.drawable.ic_north
+        GlassesDirection.DOWN -> R.drawable.ic_south
+        GlassesDirection.LEFT -> R.drawable.ic_west
+        GlassesDirection.RIGHT -> R.drawable.ic_east
+        null -> gesture.icon()
+    }
+
 @DrawableRes
 private fun GlassesGesture.icon(): Int =
     when (this) {
@@ -355,6 +368,7 @@ private fun GlassesGesture.icon(): Int =
         GlassesGesture.SCROLL_DOWN -> R.drawable.ic_swipe_down
         GlassesGesture.HEAD_UP -> R.drawable.ic_north
         GlassesGesture.HEAD_DOWN -> R.drawable.ic_south
+        GlassesGesture.HEAD_FLICK -> R.drawable.ic_gesture
         GlassesGesture.RING_TOUCH -> R.drawable.ic_adjust
         GlassesGesture.PAGE_SHOWN -> R.drawable.ic_visibility
         GlassesGesture.PAGE_HIDDEN -> R.drawable.ic_visibility_off

@@ -199,6 +199,11 @@ internal class CarDialVoiceOwner(
                 }
             }
         }
+        scope.launch {
+            session.collectLatest { voice ->
+                if (voice != null) glasses.detectHeadFlicks(voice.state.map { it.started })
+            }
+        }
     }
 
     val isBusy: Boolean get() = request != null

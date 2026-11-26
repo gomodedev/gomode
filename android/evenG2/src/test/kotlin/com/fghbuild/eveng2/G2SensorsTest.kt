@@ -135,6 +135,32 @@ class G2SensorsTest {
         }
 
     @Test
+    fun faceclawMotionRunsTheAccelerometerAndCompassWithoutTheLightSensor() =
+        runTest {
+            val firmware = FakeG2Firmware()
+            firmware.revision = "Faceclaw/45"
+            val glasses = G2Glasses(firmware.connector, backgroundScope)
+            glasses.connect(pair())
+            glasses.state.first { it is G2State.Ready }
+            runCurrent()
+            val seen = mutableListOf<G2Sensors>()
+            val collecting = UnconfinedTestDispatcher(testScheduler)
+            val reading = backgroundScope.launch(collecting) { glasses.motion.toList(seen) }
+            advanceTimeBy(G2Protocol.COMMAND_TIMEOUT_MS + 1)
+            assertTrue(firmware.imu)
+            assertTrue(firmware.compass)
+            assertFalse(firmware.light)
+            firmware.turn(359)
+            runCurrent()
+            assertEquals(359, seen.last().heading)
+
+            reading.cancel()
+            advanceTimeBy(G2Protocol.COMMAND_TIMEOUT_MS + 1)
+            assertFalse(firmware.compass)
+            assertTrue(firmware.requests.none { it.kind == "light" })
+        }
+
+    @Test
     fun stockFirmwareRunsNeitherTheLightSensorNorTheCompass() =
         runTest {
             val firmware = FakeG2Firmware()

@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.fghbuild.eveng2.G2ArmConnector
@@ -46,6 +47,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -57,6 +59,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.roundToInt
 
 internal const val RECONNECT_INITIAL_DELAY_MS = 2_000L
 internal const val RECONNECT_MAX_DELAY_MS = 60_000L
@@ -130,7 +133,8 @@ internal data class GlassesState(
  * settings, and when [updateAutoConnect] turns it on while no connection runs. Every connection
  * shows the latest [show] frame, or a [notify] notice over it, reports its [actions] and [scrolls], keeps its
  * battery readings in [state] for every screen that shows them, and offers its [microphone] and
- * [sensing], if it has them. While that frame is blank, a connection first plays a short greeting
+ * [sensing], if it has them, and turns head movements into [headFlicks] while a voice owner asks for
+ * them through [detectHeadFlicks]. While that frame is blank, a connection first plays a short greeting
  * that confirms it on the glasses; content that is not blank, or a notice, ends it. Callers hold
  * BLUETOOTH_SCAN before [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks
  * BLUETOOTH_CONNECT again before connecting on its own.
@@ -182,6 +186,7 @@ internal class GlassesOwner(
         MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val mutableActions = MutableSharedFlow<GlassesAction>(extraBufferCapacity = ACTION_BUFFER)
     private val mutableScrolls = MutableSharedFlow<GlassesScroll>(extraBufferCapacity = ACTION_BUFFER)
+    private val mutableHeadFlicks = MutableSharedFlow<HeadFlick>(extraBufferCapacity = ACTION_BUFFER)
     private var scanJob: Job? = null
     private var linkJob: Job? = null
     private var started = false
@@ -268,6 +273,46 @@ internal class GlassesOwner(
      * A scroll that nothing collects, as when no held text shows, is lost.
      */
     val scrolls: SharedFlow<GlassesScroll> = mutableScrolls.asSharedFlow()
+
+    /**
+     * Each head flick of the connected glasses while [detectHeadFlicks] runs, which [inputs] also lists.
+     * No action is bound to one yet. A flick that nothing collects is lost.
+     */
+    val headFlicks: SharedFlow<HeadFlick> = mutableHeadFlicks.asSharedFlow()
+
+    /**
+     * Until cancelled, runs the motion sensors of the connected glasses while [active] holds, a voice
+     * session's, and reports each head flick that [HeadFlickDetector] finds in [headFlicks] and [inputs].
+     * [GlassesSensing.motion] leaves the light sensor off, so the glasses keep their auto-brightness; the
+     * sensors stop when [active] turns false or the glasses disconnect. Readings while the glasses are
+     * off the head reset the detector. Main thread only.
+     */
+    suspend fun detectHeadFlicks(active: Flow<Boolean>) {
+        combine(active, sensing) { on, glasses -> glasses.takeIf { on } }
+            .distinctUntilChanged()
+            .collectLatest { glasses -> if (glasses != null) detectHeadFlicks(glasses) }
+    }
+
+    private suspend fun detectHeadFlicks(glasses: GlassesSensing) {
+        Log.i(TAG, "Head flicks: motion sensors on")
+        val detector = HeadFlickDetector { Log.i(TAG, it) }
+        try {
+            glasses.motion.collect { sensors ->
+                if (sensors.worn == false) {
+                    detector.reset()
+                    return@collect
+                }
+                val pitch = sensors.acceleration?.let(::pitchDegrees)
+                val flick = detector.accept(SystemClock.elapsedRealtime(), pitch, sensors.heading) ?: return@collect
+                val degrees = flick.degrees.roundToInt()
+                Log.i(TAG, "Head flick ${flick.direction.label}: $degrees° in ${flick.durationMs} ms")
+                mutableHeadFlicks.tryEmit(flick)
+                record(GlassesEvent(GlassesGesture.HEAD_FLICK, direction = flick.direction))
+            }
+        } finally {
+            Log.i(TAG, "Head flicks: motion sensors off")
+        }
+    }
 
     // Main thread only, like every action.
     private var firstActionHandler: ((GlassesAction) -> Boolean)? = null

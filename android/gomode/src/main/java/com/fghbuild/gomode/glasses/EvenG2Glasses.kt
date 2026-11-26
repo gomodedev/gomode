@@ -6,8 +6,8 @@
 // The page's text container captures the touchpads and an R1 ring, whose gestures g2Action maps to
 // actions and g2Scroll to scrolls.
 // The session polls the glasses' battery and the case's; batteries are G2Glasses.battery. The
-// microphone is G2Glasses.microphone and the sensors G2Glasses.sensors, which run while collected;
-// they outlive the connection, so a connection's flows complete when that connection ends. Head up
+// microphone is G2Glasses.microphone and the sensors G2Glasses.sensors, or G2Glasses.motion without the
+// light sensor, which run while collected; they outlive the connection, so a connection's flows complete when that connection ends. Head up
 // and down, ambient light, and the compass come only from Faceclaw firmware (see G2Sensors.kt), so
 // only its sensors list them.
 //
@@ -137,6 +137,7 @@ internal sealed class EvenG2Glasses(
     override val microphone: Flow<ShortArray> = whileConnected(glasses.microphone).buffer(Channel.RENDEZVOUS)
     override val sensors: Flow<GlassesSensors> =
         whileConnected(glasses.sensors).map { glassesSensors(it, firmware) }.conflate()
+    override val motion: Flow<GlassesSensors> = whileConnected(glasses.motion).map { glassesSensors(it, firmware) }
 
     // [flow] until the connection ends.
     private fun <T> whileConnected(flow: Flow<T>): Flow<T> =

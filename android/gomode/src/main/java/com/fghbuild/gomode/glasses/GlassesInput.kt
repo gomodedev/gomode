@@ -1,4 +1,4 @@
-// The glasses input Go Mode lists for the wearer: gestures and system events, with the temple each came from.
+// The glasses input Go Mode lists for the wearer: gestures, head flicks, and system events, with where each came from.
 package com.fghbuild.gomode.glasses
 
 /** What the wearer did, or what the glasses reported, as the input events screen names it. */
@@ -14,6 +14,7 @@ internal enum class GlassesGesture(
     SCROLL_DOWN("Scroll down"),
     HEAD_UP("Head up"),
     HEAD_DOWN("Head down"),
+    HEAD_FLICK("Head flick"),
     RING_TOUCH("Ring touch"),
     PAGE_SHOWN("Page shown"),
     PAGE_HIDDEN("Page hidden"),
@@ -30,17 +31,21 @@ internal enum class GlassesInputPlace(
     RING("ring"),
 }
 
-/** One input: [code] keeps the glasses' own value of an [GlassesGesture.OTHER] event. */
+/**
+ * One input: [code] keeps the glasses' own value of an [GlassesGesture.OTHER] event, and [direction]
+ * where a [GlassesGesture.HEAD_FLICK] went.
+ */
 internal data class GlassesEvent(
     val gesture: GlassesGesture,
     val place: GlassesInputPlace? = null,
     val code: Long? = null,
+    val direction: GlassesDirection? = null,
 ) {
-    /** One short line, such as "Double tap · left". */
+    /** One short line, such as "Double tap · left" or "Head flick · up". */
     val label: String
         get() {
             val name = if (gesture == GlassesGesture.OTHER) "${gesture.label} $code" else gesture.label
-            return place?.let { "$name · ${it.label}" } ?: name
+            return listOfNotNull(name, direction?.label, place?.label).joinToString(" · ")
         }
 }
 

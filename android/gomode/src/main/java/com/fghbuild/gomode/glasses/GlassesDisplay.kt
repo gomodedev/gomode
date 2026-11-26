@@ -96,6 +96,14 @@ internal interface GlassesSensing : GlassesDisplay {
      * flow completes when the connection ends.
      */
     val sensors: Flow<GlassesSensors>
+
+    /**
+     * The same readings as [sensors], but collecting this flow runs only the sensors that follow the
+     * head's motion, such as the accelerometer and a compass, and leaves those that change how the
+     * glasses behave off, such as a light sensor that stops auto-brightness. Readings of sensors it
+     * leaves off are null unless [sensors] is collected too. The flow completes when the connection ends.
+     */
+    val motion: Flow<GlassesSensors>
 }
 
 /**
