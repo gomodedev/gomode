@@ -5,7 +5,7 @@ import { expect } from "../tests/expect";
 
 import type { ResourcesReadParams, SubscriptionsListenParams } from "../../sdk/mcp/ts/v1/types.gen";
 
-import { configureMcpClient, mcpClient } from "./McpClient";
+import { configureMcpClient, McpHttpError, mcpClient, McpRetryBackoff } from "./McpClient";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -457,5 +457,30 @@ describe("subscribeResources", () => {
     expect(captured?.aborted).toBe(false);
     configureMcpClient("/api/v1/gomode/mcp", "second");
     expect(captured?.aborted).toBe(true);
+  });
+});
+
+describe("McpRetryBackoff", () => {
+  it("grows retries by half from 2 s, gives up after 8, and starts over after a success", () => {
+    const backoff = new McpRetryBackoff();
+    const error = new Error("offline");
+    const delays = Array.from({ length: 9 }, () => backoff.next(error));
+    expect(delays).toEqual([2000, 3000, 4500, 6750, 10125, 15187.5, 22781.25, 34171.875, null]);
+    expect(backoff.next(error)).toBe(null);
+    backoff.reset();
+    expect(backoff.next(error)).toBe(2000);
+  });
+
+  it("waits at least as long as Retry-After asks, in seconds or as a date", () => {
+    const throttled = (value: string) =>
+      new McpHttpError("tools/list", new Response(null, { status: 429, headers: { "Retry-After": value } }));
+    expect(throttled("60").retryAfterMs).toBe(60_000);
+    expect(new McpRetryBackoff().next(throttled("60"))).toBe(60_000);
+    // A shorter request keeps the exponential delay.
+    expect(new McpRetryBackoff().next(throttled("1"))).toBe(2000);
+    const date = throttled(new Date(Date.now() + 30_000).toUTCString()).retryAfterMs ?? 0;
+    ok(date > 28_000 && date <= 30_000, `date delay ${date}`);
+    expect(throttled("soon").retryAfterMs).toBe(null);
+    expect(new McpHttpError("tools/list", new Response(null, { status: 503 })).retryAfterMs).toBe(null);
   });
 });

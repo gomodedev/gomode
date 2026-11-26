@@ -60,6 +60,58 @@ export function configureMcpClient(
   _toolCache.clear();
 }
 
+/** An MCP request the server answered with an HTTP error status. */
+export class McpHttpError extends Error {
+  readonly status: number;
+  /** How long the server's Retry-After header asks to wait, or null without a valid one. */
+  readonly retryAfterMs: number | null;
+
+  constructor(method: string, resp: Response) {
+    super(`MCP ${method} returned HTTP ${resp.status}`);
+    this.name = "McpHttpError";
+    this.status = resp.status;
+    this.retryAfterMs = retryAfterMs(resp.headers.get("Retry-After"), Date.now());
+  }
+}
+
+// A Retry-After value of delay seconds or an HTTP date, as milliseconds from now.
+function retryAfterMs(value: string | null, now: number): number | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  const date = Date.parse(trimmed);
+  return Number.isNaN(date) ? null : Math.max(0, date - now);
+}
+
+/** The first retry waits this long; each later one MCP_RETRY_FACTOR times longer. */
+const MCP_RETRY_BASE_MS = 2000;
+const MCP_RETRY_FACTOR = 1.5;
+/** Retries after which a failing request gives up, about 100 s of backoff in all. */
+const MCP_MAX_RETRIES = 8;
+
+/**
+ * The delays between retries of one failing MCP request: exponential from MCP_RETRY_BASE_MS by
+ * MCP_RETRY_FACTOR, at least as long as a Retry-After the server sent, and none after MCP_MAX_RETRIES
+ * failures in a row, so a throttled or broken server stops receiving retries. A success resets it.
+ */
+export class McpRetryBackoff {
+  private failures = 0;
+
+  /** The delay before retrying after [error], or null when the request gives up. */
+  next(error: unknown): number | null {
+    if (this.failures >= MCP_MAX_RETRIES) return null;
+    const delay = MCP_RETRY_BASE_MS * MCP_RETRY_FACTOR ** this.failures;
+    this.failures++;
+    const requested = error instanceof McpHttpError ? (error.retryAfterMs ?? 0) : 0;
+    // setTimeout overflows past 2^31 - 1 ms and would fire at once.
+    return Math.min(Math.max(delay, requested), 2 ** 31 - 1);
+  }
+
+  reset(): void {
+    this.failures = 0;
+  }
+}
+
 async function authenticatedFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   const token = await bearerTokenProvider?.();
@@ -128,7 +180,7 @@ async function mcpRequest(
     }),
     signal: opts.signal,
   });
-  if (!resp.ok) throw new Error(`MCP ${method} returned HTTP ${resp.status}`);
+  if (!resp.ok) throw new McpHttpError(method, resp);
   let rpc: { result?: unknown; error?: { code: number; message: string } };
   try {
     const decoded: unknown = await resp.json();
@@ -425,7 +477,7 @@ export interface McpSubscribeOptions extends McpToolCallOptions {
   resourcesListChanged?: boolean;
   /** Called once after the server acknowledges the subscription. */
   onReady?: () => void;
-  /** Called when the stream fails; the client retries until closed. */
+  /** Called when the stream fails; the client retries with McpRetryBackoff until it gives up or closes. */
   onError?: (error: unknown) => void;
 }
 
@@ -434,13 +486,11 @@ export interface McpResourceSubscription {
   close(): void;
 }
 
-/** Delay before retrying a dropped subscription stream. */
-const MCP_SUBSCRIPTION_RETRY_MS = 2000;
-
 /**
  * Subscribes to resource changes so a host learns when a document it cares about
  * changes, instead of discovering it by overwriting a concurrent edit. The
- * server holds the stream open; a dropped stream is retried until close().
+ * server holds the stream open; a dropped stream is retried with McpRetryBackoff,
+ * which an acknowledged stream or a network change resets, until it gives up or close().
  */
 function subscribeMcpResources(
   options: McpSubscribeOptions,
@@ -455,6 +505,7 @@ function subscribeMcpResources(
   let closed = false;
   let controller: AbortController | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  const backoff = new McpRetryBackoff();
 
   const report = (notification: McpResourceNotification): void => {
     try {
@@ -468,7 +519,8 @@ function subscribeMcpResources(
     if (closed) return;
     options.onError?.(error);
     if (!navigator.onLine) return;
-    retryTimer = setTimeout(() => void run(), MCP_SUBSCRIPTION_RETRY_MS);
+    const delay = backoff.next(error);
+    if (delay !== null) retryTimer = setTimeout(() => void run(), delay);
   };
 
   const run = async (): Promise<void> => {
@@ -498,7 +550,7 @@ function subscribeMcpResources(
         return;
       }
       if (!resp.ok || resp.body === null) {
-        scheduleRetry(new Error(`MCP subscriptions/listen returned HTTP ${resp.status}`));
+        scheduleRetry(new McpHttpError("subscriptions/listen", resp));
         return;
       }
       let acknowledged = false;
@@ -507,6 +559,7 @@ function subscribeMcpResources(
         if (notification.method === "notifications/subscriptions/acknowledged") {
           if (!acknowledged) {
             acknowledged = true;
+            backoff.reset();
             options.onReady?.();
           }
           return;
@@ -532,6 +585,7 @@ function subscribeMcpResources(
     const previous = controller;
     controller = null;
     previous?.abort();
+    backoff.reset();
     if (!closed) void run();
   });
 

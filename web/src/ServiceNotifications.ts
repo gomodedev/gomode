@@ -3,6 +3,7 @@
 import { boundedModelText, modelContextText } from "./ModelContext";
 import {
   mcpClient,
+  McpRetryBackoff,
   type McpResourceSubscription,
   type McpToolCallOptions,
   type McpResourceNotification,
@@ -38,6 +39,7 @@ interface WatchedResource {
   refreshing: boolean;
   dirty: boolean;
   retry: ReturnType<typeof setTimeout> | null;
+  backoff: McpRetryBackoff;
 }
 
 /** Own this monitor with the conversation; replacing its identity retires every resource. */
@@ -54,6 +56,7 @@ export function monitorServiceNotifications(
   let discoveryRunning = false;
   let discoveryDirty = false;
   let discoveryRetry: ReturnType<typeof setTimeout> | null = null;
+  const discoveryBackoff = new McpRetryBackoff();
   let queued = false;
   let alerts: ServiceNotification[] | undefined;
   let alertsAvailable: boolean | undefined;
@@ -61,6 +64,7 @@ export function monitorServiceNotifications(
   let alertRunning = false;
   let alertDirty = false;
   let alertTimer: ReturnType<typeof setTimeout> | null = null;
+  const alertBackoff = new McpRetryBackoff();
   const resources = new Map<string, WatchedResource>();
   // TODO: This records "sent" when injectText queues the text, and VoiceSession
   // then accumulates queued changes. A resource changing twice during a turn is
@@ -155,11 +159,13 @@ export function monitorServiceNotifications(
           const text = await mcpClient.readTextResource(uri, record.controller.signal, options);
           if (closed || resources.get(uri) !== record) return;
           record.value = record.context?.content ?? text;
+          record.backoff.reset();
         } catch (error) {
           if (closed || resources.get(uri) !== record) return;
           record.value = new Error("Model resource read failed");
           onError(error);
-          record.retry = setTimeout(() => void refresh(uri, record), 2000);
+          const delay = record.backoff.next(error);
+          if (delay !== null) record.retry = setTimeout(() => void refresh(uri, record), delay);
           break;
         } finally {
           publish();
@@ -218,6 +224,7 @@ export function monitorServiceNotifications(
           for (const alert of fresh) unseen.add(alert.id);
           alerts = next;
           alertBaseline = false;
+          alertBackoff.reset();
           for (const alert of next) {
             observed.delete(alert.id);
             observed.add(alert.id);
@@ -238,7 +245,8 @@ export function monitorServiceNotifications(
         } catch (error) {
           if (closed) return;
           onError(error);
-          alertTimer = setTimeout(() => void refreshAlerts(), 2000);
+          const delay = alertBackoff.next(error);
+          if (delay !== null) alertTimer = setTimeout(() => void refreshAlerts(), delay);
           break;
         } finally {
           publish();
@@ -263,6 +271,7 @@ export function monitorServiceNotifications(
             ? { resources: [], notifications: false }
             : await mcpClient.listModelResources(controller.signal, options);
         if (closed) return;
+        discoveryBackoff.reset();
         const uris = new Set(advertised.resources.map((resource) => resource.uri));
         for (const [uri, record] of resources) {
           if (uris.has(uri)) continue;
@@ -280,6 +289,7 @@ export function monitorServiceNotifications(
             refreshing: false,
             dirty: false,
             retry: null,
+            backoff: new McpRetryBackoff(),
           });
         }
         if (advertised.notifications && alertsAvailable === false) alerts = undefined;
@@ -294,7 +304,8 @@ export function monitorServiceNotifications(
     } catch (error) {
       if (!closed) {
         onError(error);
-        discoveryRetry = setTimeout(() => void discover(), 2000);
+        const delay = discoveryBackoff.next(error);
+        if (delay !== null) discoveryRetry = setTimeout(() => void discover(), delay);
       }
     } finally {
       discoveryRunning = false;

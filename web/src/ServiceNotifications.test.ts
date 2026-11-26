@@ -373,7 +373,10 @@ it("rejects an entire malformed snapshot without consuming its occurrence IDs, t
   expect(error).toHaveBeenCalledTimes(5);
   expect(inject).not.toHaveBeenCalled();
   snapshot = JSON.stringify([alert("one")]);
-  await vi.advanceTimersByTimeAsync(2000);
+  // Five failures in a row back the retry off to 2 s × 1.5⁴.
+  await vi.advanceTimersByTimeAsync(10_124);
+  expect(inject).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
   expect(inject.mock.calls).toEqual([["New notification: Alert one: Body one", true]]);
 });
 
