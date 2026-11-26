@@ -81,13 +81,14 @@ class VoiceAudioSourceSessionTest {
             val low = SyntheticToneStream(600)
             val high = SyntheticToneStream(900)
             val messages = fixtureStats().getJSONArray("rtcUserMessages").length()
-            utter(session, low)
+            val lowUtteranceOpen = utter(session, low, "tone 600")
             awaitFixture { userMessages(it, messages) == listOf("tone 600") }
-            utter(session, high)
+            awaitRecognitionRestart(session, low, lowUtteranceOpen)
+            val highUtteranceOpen = utter(session, high, "tone 900")
             awaitFixture { userMessages(it, messages) == listOf("tone 600", "tone 900") }
             assertEquals("Switching must close the replaced stream", low.opens.get(), low.closes.get())
 
-            // Recognition closes its source while the gateway thinks, and opens it again for the next turn.
+            awaitRecognitionRestart(session, high, highUtteranceOpen)
             high.end()
             withTimeout(TIMEOUT_MS) { input.source.first { it == VoiceAudioSource.PhoneMicrophone } }
             awaitStream { high.closes.get() == high.opens.get() }
@@ -181,12 +182,35 @@ class VoiceAudioSourceSessionTest {
     private suspend fun utter(
         session: VoiceSession,
         stream: SyntheticToneStream,
-    ) {
-        awaitState(session) { it.listening && it.turnState == TurnState.Idle && !it.speaking }
+        expected: String,
+    ): Int {
+        awaitIdleRecognition(session)
         input.select(stream)
         stream.sounding = true
-        delay(600)
-        stream.sounding = false
+        return try {
+            // The partial confirms the recognizer heard the tone. Silence lets it finalize the utterance.
+            awaitState(session) {
+                it.transcript.lastOrNull()?.let { entry ->
+                    entry.speaker == TranscriptSpeaker.USER && !entry.final && entry.text == expected
+                } == true
+            }
+            stream.opens.get()
+        } finally {
+            stream.sounding = false
+        }
+    }
+
+    private suspend fun awaitIdleRecognition(session: VoiceSession) =
+        awaitState(session) { it.listening && it.turnState == TurnState.Idle && !it.speaking }
+
+    // The gateway can record the utterance before capture closes and reopens its stream for the reply.
+    private suspend fun awaitRecognitionRestart(
+        session: VoiceSession,
+        stream: SyntheticToneStream,
+        utteranceOpen: Int,
+    ) {
+        awaitIdleRecognition(session)
+        awaitStream { stream.opens.get() > utteranceOpen }
     }
 
     private fun userMessages(

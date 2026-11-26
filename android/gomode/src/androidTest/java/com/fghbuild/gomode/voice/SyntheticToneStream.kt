@@ -24,8 +24,8 @@ internal class SyntheticToneStream(
         sink: PcmSink,
         onEnd: () -> Unit,
     ): AutoCloseable {
-        opens.incrementAndGet()
         this.onEnd = onEnd
+        opens.incrementAndGet()
         val running = AtomicBoolean(true)
         val frames =
             thread(name = "synthetic-tone-$hz") {
