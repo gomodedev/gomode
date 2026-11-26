@@ -123,6 +123,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.pow
 
 private const val TAG = "GoModeVoiceSession"
 private const val MIC_LEVEL_POLL_MS = 100L
@@ -131,12 +132,14 @@ private const val ICE_GATHERING_TIMEOUT_MS = 10_000L
 private const val RENEGOTIATION_FAILED = "Could not apply the voice gateway's media renegotiation"
 private const val ICE_DISCONNECTED_GRACE_MS = 5_000L
 
-// A Wi-Fi to cellular handover can take tens of seconds. DNS, sockets, ICE gathering, and gateway
-// answers fail repeatedly until the new route settles, so recovery is bounded by time, not attempts.
-internal const val RECOVERY_BUDGET_MS = 120_000L
+// A Wi-Fi to cellular handover can take minutes. DNS, sockets, ICE gathering, and gateway answers
+// fail repeatedly until the new route settles, so recovery is bounded by time, not attempts.
+internal const val RECOVERY_BUDGET_MS = 5 * 60_000L
+internal const val RECOVERY_STABLE_MS = 30_000L
 private const val RECOVERY_INITIAL_DELAY_MS = 1_000L
-private const val RECOVERY_MAX_DELAY_MS = 8_000L
-internal const val RECOVERY_EXHAUSTED_ERROR = "Voice connection could not be restored within 2 minutes"
+private const val RECOVERY_BACKOFF_FACTOR = 1.5
+private const val RECOVERY_MAX_DELAY_MS = 30_000L
+internal const val RECOVERY_EXHAUSTED_ERROR = "Voice connection could not be restored within 5 minutes"
 
 /** Conservative data-channel/model-safe bound for a recovery context update. */
 internal const val MAX_RECOVERY_CONTEXT_CHARS = 8_000
@@ -225,26 +228,41 @@ internal fun recoveryDelayMs(state: PeerConnection.IceConnectionState): Long =
         else -> error("ICE state $state does not require recovery")
     }
 
-// Recovery lasts from the first loss until a replacement session is ready or RECOVERY_BUDGET_MS
-// has passed. A self-healed loss that never started a replacement does not consume the budget.
+// Recovery lasts from the first loss until a replacement session stays ready for
+// RECOVERY_STABLE_MS or RECOVERY_BUDGET_MS has passed. A session that drops sooner continues the
+// same recovery, so a gateway that accepts and then drops sessions cannot reconnect forever. A
+// self-healed loss that never started a replacement does not consume the budget. Waiting offline
+// sends no request, so recovery restarts when the network returns.
 internal class VoiceRecoveryPolicy {
     private var pending = false
     private var lostAtMillis: Long? = null
+    private var readyAtMillis: Long? = null
     private var attempts = 0
 
     val recovering: Boolean get() = lostAtMillis != null
 
     fun schedule(): Boolean {
         val now = SystemClock.elapsedRealtime()
+        readyAtMillis?.let { if (now - it >= RECOVERY_STABLE_MS) reset() }
+        readyAtMillis = null
         val lostAt = lostAtMillis ?: now.also { lostAtMillis = it }
         if (now - lostAt >= RECOVERY_BUDGET_MS) return false
         pending = true
         return true
     }
 
-    // Spacing after a failed replacement; doubles up to RECOVERY_MAX_DELAY_MS.
+    // Spacing after a failed replacement; grows by RECOVERY_BACKOFF_FACTOR up to RECOVERY_MAX_DELAY_MS.
     fun retryDelayMs(): Long =
-        (RECOVERY_INITIAL_DELAY_MS shl attempts.coerceAtMost(MAX_BACKOFF_SHIFT)).coerceAtMost(RECOVERY_MAX_DELAY_MS)
+        (RECOVERY_INITIAL_DELAY_MS * RECOVERY_BACKOFF_FACTOR.pow(attempts)).toLong().coerceAtMost(RECOVERY_MAX_DELAY_MS)
+
+    fun ready() {
+        readyAtMillis = SystemClock.elapsedRealtime()
+    }
+
+    fun networkReturned() {
+        lostAtMillis = SystemClock.elapsedRealtime()
+        attempts = 0
+    }
 
     fun cancelPending() {
         pending = false
@@ -261,11 +279,8 @@ internal class VoiceRecoveryPolicy {
     fun reset() {
         pending = false
         lostAtMillis = null
+        readyAtMillis = null
         attempts = 0
-    }
-
-    private companion object {
-        const val MAX_BACKOFF_SHIFT = 3
     }
 }
 
@@ -1030,7 +1045,10 @@ internal class VoiceSession(
                 _state.update {
                     it.copy(connected = false, listening = false, speaking = false, activeTool = null, micLevel = 0f)
                 }
-                networkMonitor.network.filterNotNull().first()
+                if (networkMonitor.network.value == null) {
+                    networkMonitor.network.filterNotNull().first()
+                    recoveryPolicy.networkReturned()
+                }
                 reconnectJob = null
                 if (ownsAttempt(recoveryAttempt) && recoveryPolicy.beginScheduledRecovery()) {
                     speakerActive = false
@@ -1515,7 +1533,7 @@ internal class VoiceSession(
 
                 MessageKind.SessionReady -> {
                     Log.i(TAG, "session.ready received")
-                    if (reconnectJob == null) recoveryPolicy.reset()
+                    if (reconnectJob == null) recoveryPolicy.ready()
                     setupTimeoutJob?.cancel()
                     setupTimeoutJob = null
                     _state.update {

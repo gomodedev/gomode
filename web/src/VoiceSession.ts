@@ -92,7 +92,20 @@ const SETUP_TIMEOUT_MS = 15000;
 const ICE_GATHERING_TIMEOUT_MS = 10000;
 const ICE_HOST_CANDIDATE_GRACE_MS = 1000;
 const ICE_DISCONNECTED_GRACE_MS = 5000;
-const MAX_RECONNECT_ATTEMPTS = 3;
+/**
+ * Recovery from a lost connection keeps reconnecting until a replacement session stays ready for
+ * RECOVERY_STABLE_MS, or until RECOVERY_WINDOW_MS has passed since the loss, long enough to ride out
+ * a slow switch between Wi-Fi and a mobile network. The first attempt waits the delay its loss asks
+ * for; each later one waits RECOVERY_BASE_MS, RECOVERY_FACTOR times longer each time, up to
+ * RECOVERY_MAX_DELAY_MS. A session that drops within RECOVERY_STABLE_MS of becoming ready continues
+ * the same recovery, so a gateway that accepts and then drops sessions cannot reconnect forever.
+ * Waiting offline sends no request, so recovery restarts when the network returns.
+ */
+const RECOVERY_WINDOW_MS = 5 * 60_000;
+const RECOVERY_STABLE_MS = 30_000;
+const RECOVERY_BASE_MS = 1000;
+const RECOVERY_FACTOR = 1.5;
+const RECOVERY_MAX_DELAY_MS = 30_000;
 /** Max time (ms) an idle browser-speech session may go without listening. */
 const BROWSER_LISTENING_STALL_MS = 10000;
 const HANG_UP_TOOL_NAME = "hang_up";
@@ -988,7 +1001,12 @@ export class VoiceSession {
   private _pendingNotifications: Array<{ text: string; generate: boolean }> = [];
   private _pendingServiceContext: string | null = null;
   private _reconnectEnabled = false;
+  /** Replacements started in the current recovery; see RECOVERY_WINDOW_MS. */
   private _reconnectAttempts = 0;
+  /** When the current recovery's connection loss happened, or null outside recovery. */
+  private _recoveryStartedAt: number | null = null;
+  /** When the current session became ready, or null before then. */
+  private _readyAt: number | null = null;
   private _recoveryContext = "";
   private readonly _audioRoutes: AudioRoutes;
   private _voiceModeActive = false;
@@ -1942,6 +1960,8 @@ export class VoiceSession {
         s.usage = null;
       });
       this._reconnectAttempts = 0;
+      this._recoveryStartedAt = null;
+      this._readyAt = null;
       this._recoveryContext = "";
       this._pendingNotifications = [];
       this._pendingServiceContext = null;
@@ -2119,6 +2139,8 @@ export class VoiceSession {
       this._pendingNotifications = [];
       this._pendingServiceContext = null;
       this._reconnectAttempts = 0;
+      this._recoveryStartedAt = null;
+      this._readyAt = null;
       this._recoveryContext = "";
       this._clearTranscript();
       this._update((s) => {
@@ -2515,10 +2537,22 @@ export class VoiceSession {
   private _scheduleReconnect(connection: VoiceConnection, reason: string, delay: number): void {
     if (connection !== this._connection) return;
     if (!this._reconnectEnabled) return;
-    if (this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      this._setError(`Voice connection lost after ${MAX_RECONNECT_ATTEMPTS} recovery attempts`);
+    const now = Date.now();
+    if (this._readyAt !== null && now - this._readyAt >= RECOVERY_STABLE_MS) {
+      this._reconnectAttempts = 0;
+      this._recoveryStartedAt = null;
+    }
+    this._readyAt = null;
+    this._recoveryStartedAt ??= now;
+    if (now - this._recoveryStartedAt >= RECOVERY_WINDOW_MS) {
+      this._setError(`Voice connection lost; stopped reconnecting after ${RECOVERY_WINDOW_MS / 60_000} minutes`);
       return;
     }
+    if (this._reconnectAttempts > 0)
+      delay = Math.max(
+        delay,
+        Math.min(RECOVERY_BASE_MS * RECOVERY_FACTOR ** (this._reconnectAttempts - 1), RECOVERY_MAX_DELAY_MS),
+      );
     if (connection.reconnectTimer !== null) {
       if (delay !== 0) return;
       clearTimeout(connection.reconnectTimer);
@@ -2534,6 +2568,8 @@ export class VoiceSession {
       this._pauseForRecovery(connection);
       if (connection !== this._connection) return;
       if (!navigator.onLine) {
+        this._reconnectAttempts = 0;
+        this._recoveryStartedAt = null;
         this._setStatus("reconnecting", "Waiting for network…");
         return;
       }
@@ -2881,7 +2917,7 @@ export class VoiceSession {
 
     if (env.kind === MessageKindSessionReady) {
       attempt.clearSetupTimer();
-      this._reconnectAttempts = 0;
+      this._readyAt = Date.now();
       this._update((s) => {
         s.connectStatus = null;
         s.connectPhase = null;

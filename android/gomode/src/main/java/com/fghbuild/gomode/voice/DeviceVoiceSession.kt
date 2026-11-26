@@ -659,7 +659,10 @@ internal class DeviceVoiceSession(
         reconnectJob =
             scope.launch {
                 delay(recoveryPolicy.retryDelayMs())
-                networkMonitor.network.filterNotNull().first()
+                if (networkMonitor.network.value == null) {
+                    networkMonitor.network.filterNotNull().first()
+                    recoveryPolicy.networkReturned()
+                }
                 reconnectJob = null
                 if (ownsAttempt(attempt) && recoveryPolicy.beginScheduledRecovery()) {
                     recoveryContext = buildNetworkRecoveryContext(_state.value.transcript)
@@ -710,7 +713,7 @@ internal class DeviceVoiceSession(
                 MessageKind.SessionReady -> {
                     Log.i(TAG, "session.ready received")
                     cancelReadinessTimeout()
-                    recoveryPolicy.reset()
+                    recoveryPolicy.ready()
                     _state.update {
                         it.copy(connectStatus = null, connected = true, error = null)
                     }

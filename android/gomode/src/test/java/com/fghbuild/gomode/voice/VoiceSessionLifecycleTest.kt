@@ -184,7 +184,12 @@ class VoiceSessionLifecycleTest {
                 assertTrue(policy.beginScheduledRecovery())
                 policy.retryDelayMs()
             }
-        assertEquals(listOf(2_000L, 4_000L, 8_000L, 8_000L, 8_000L), delays)
+        assertEquals(listOf(1_500L, 2_250L, 3_375L, 5_062L, 7_593L), delays)
+        repeat(5) {
+            assertTrue(policy.schedule())
+            assertTrue(policy.beginScheduledRecovery())
+        }
+        assertEquals(30_000L, policy.retryDelayMs())
         policy.cancelPending()
         assertTrue("a started replacement keeps the original loss time", policy.recovering)
 
@@ -195,6 +200,38 @@ class VoiceSessionLifecycleTest {
 
         policy.reset()
         assertFalse(policy.recovering)
+        assertEquals(1_000L, policy.retryDelayMs())
+        assertTrue(policy.schedule())
+    }
+
+    @Test
+    fun recoveryPolicyResetsOnlyAfterTheReplacementStaysReady() {
+        val policy = VoiceRecoveryPolicy()
+        assertTrue(policy.schedule())
+        assertTrue(policy.beginScheduledRecovery())
+
+        // A replacement that drops soon after it is ready keeps the loss time and backoff.
+        policy.ready()
+        ShadowSystemClock.advanceBy(Duration.ofMillis(RECOVERY_STABLE_MS - 1))
+        assertTrue(policy.schedule())
+        assertEquals(1_500L, policy.retryDelayMs())
+        ShadowSystemClock.advanceBy(Duration.ofMillis(RECOVERY_BUDGET_MS - RECOVERY_STABLE_MS + 1))
+        assertFalse(policy.schedule())
+
+        // A replacement that stays ready ends the recovery.
+        policy.ready()
+        ShadowSystemClock.advanceBy(Duration.ofMillis(RECOVERY_STABLE_MS))
+        assertTrue(policy.schedule())
+        assertEquals(1_000L, policy.retryDelayMs())
+    }
+
+    @Test
+    fun recoveryPolicyRestartsWhenTheNetworkReturns() {
+        val policy = VoiceRecoveryPolicy()
+        assertTrue(policy.schedule())
+        assertTrue(policy.beginScheduledRecovery())
+        ShadowSystemClock.advanceBy(Duration.ofMillis(RECOVERY_BUDGET_MS))
+        policy.networkReturned()
         assertEquals(1_000L, policy.retryDelayMs())
         assertTrue(policy.schedule())
     }

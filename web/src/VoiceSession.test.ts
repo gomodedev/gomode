@@ -4107,20 +4107,66 @@ describe("voice network recovery", () => {
     }
   });
 
-  it("recovers immediately after ICE failure and stops after three retries", async () => {
+  it("backs off recovery retries and stops five minutes after the loss", async () => {
     vi.useFakeTimers();
     const session = new VoiceSession();
     try {
       await session.connect();
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        triggerIceState("failed");
-        await vi.advanceTimersByTimeAsync(0);
-        await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(attempt + 1));
-      }
-
       triggerIceState("failed");
-      expect(session.state.error).toBe("Voice connection lost after 3 recovery attempts");
-      expect(FakePeerConnection.instances).toHaveLength(4);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(2));
+      triggerIceState("failed");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(FakePeerConnection.instances).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(3));
+      triggerIceState("failed");
+      await vi.advanceTimersByTimeAsync(1499);
+      expect(FakePeerConnection.instances).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(4));
+
+      for (let i = 0; i < 40 && session.state.error === null; i++) {
+        triggerIceState("failed");
+        await vi.advanceTimersByTimeAsync(30_000);
+      }
+      expect(session.state.error).toBe("Voice connection lost; stopped reconnecting after 5 minutes");
+      expect(FakePeerConnection.instances.length).toBeLessThan(25);
+    } finally {
+      session.disconnect();
+      vi.useRealTimers();
+    }
+  });
+
+  it("continues backing off when a replacement session drops soon after it is ready", async () => {
+    vi.useFakeTimers();
+    const session = new VoiceSession({ prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() });
+    const ready = () => {
+      const channel = FakePeerConnection.dataChannels.at(-1);
+      channel?.onopen?.();
+      channel?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: "session.ready" }) }));
+    };
+    try {
+      await session.connect();
+      triggerIceState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(2));
+      ready();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.state.error).toBeNull();
+      await vi.advanceTimersByTimeAsync(29_000);
+      triggerIceState("failed");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(FakePeerConnection.instances).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(3));
+
+      ready();
+      await vi.advanceTimersByTimeAsync(30_000);
+      triggerIceState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(4));
+      expect(session.state.error).toBeNull();
     } finally {
       session.disconnect();
       vi.useRealTimers();
