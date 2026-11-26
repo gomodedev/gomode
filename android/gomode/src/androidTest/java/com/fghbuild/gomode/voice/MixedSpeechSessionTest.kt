@@ -8,6 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.fghbuild.gomode.MainActivity
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -239,7 +240,7 @@ class MixedSpeechSessionTest {
                         it.preference.copy(
                             mode = VoiceSetupMode.SEPARATE_STAGES,
                             recognition = recognition,
-                            speech = speech,
+                            speech = SpeechOutput.at(speech),
                             languageModel = VoiceLanguageModel.GATEWAY,
                         ),
                 )

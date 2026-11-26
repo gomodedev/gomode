@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.fghbuild.eveng2.G2Arm
 import com.fghbuild.eveng2.G2Pair
 import com.fghbuild.eveng2.G2Side
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.testing.MemoryPreferences
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
@@ -748,7 +749,7 @@ class SettingsRepositoryTest {
                         it.preference.copy(
                             languageModel = VoiceLanguageModel.NEEDLE_WHISTLE,
                             recognition = SpeechStageLocation.GATEWAY,
-                            speech = SpeechStageLocation.GATEWAY,
+                            speech = SpeechOutput.GATEWAY,
                         ),
                 )
             }
@@ -757,7 +758,7 @@ class SettingsRepositoryTest {
                     it.voiceSetup.effectiveLanguageModel == VoiceLanguageModel.NEEDLE_WHISTLE
                 }
             assertTrue(needle.voiceSetup.deviceSpeech)
-            assertEquals(SpeechStageLocation.GATEWAY, needle.voiceSetup.speech)
+            assertEquals(SpeechOutput.GATEWAY, needle.voiceSetup.speech)
 
             // All-in-one keeps the separate-stages selections for a later switch back.
             repo.updateSavedVoiceSetup(

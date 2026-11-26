@@ -19,6 +19,7 @@ import com.fghbuild.gomode.MainActivity
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.service.ServiceSettingsClient
@@ -138,7 +139,7 @@ class GatewaySessionIntegrationTest {
                             it.preference.copy(
                                 mode = VoiceSetupMode.SEPARATE_STAGES,
                                 recognition = SpeechStageLocation.DEVICE,
-                                speech = SpeechStageLocation.DEVICE,
+                                speech = SpeechOutput.DEVICE,
                             ),
                     )
                 }

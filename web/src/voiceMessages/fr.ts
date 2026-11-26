@@ -17,6 +17,8 @@ export const voiceMessages: VoiceMessages = {
   browserSpeechPrivacy: "La reconnaissance du navigateur peut utiliser le service cloud de son fournisseur.",
   browserRecognitionUnavailable: "La reconnaissance du navigateur est indisponible. Choisissez un modèle.",
   browserSynthesisUnavailable: "La synthèse du navigateur est indisponible. Choisissez un modèle.",
+  speechOff: "Désactivée",
+  speechOffHint: "Les réponses s’affichent dans la transcription. Aucun son n’est joué.",
   endSessionToChange: "Terminez la session vocale pour modifier les paramètres vocaux.",
   speakingVoice: "Voix de synthèse",
   speakingSpeed: "Vitesse de parole",

@@ -15,6 +15,7 @@ import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.MainActivity
 import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -212,7 +213,7 @@ class VoiceAudioSourceSessionTest {
                         it.preference.copy(
                             mode = VoiceSetupMode.SEPARATE_STAGES,
                             recognition = recognition,
-                            speech = SpeechStageLocation.GATEWAY,
+                            speech = SpeechOutput.GATEWAY,
                             languageModel = VoiceLanguageModel.GATEWAY,
                         ),
                 )

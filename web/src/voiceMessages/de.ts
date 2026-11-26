@@ -17,6 +17,8 @@ export const voiceMessages: VoiceMessages = {
   browserSpeechPrivacy: "Die Browser-Spracherkennung kann den Cloud-Dienst Ihres Browseranbieters nutzen.",
   browserRecognitionUnavailable: "Browser-Spracherkennung ist nicht verfügbar. Wählen Sie ein Modell.",
   browserSynthesisUnavailable: "Browser-Sprachausgabe ist nicht verfügbar. Wählen Sie ein Modell.",
+  speechOff: "Aus",
+  speechOffHint: "Antworten erscheinen im Transkript. Es wird kein Ton abgespielt.",
   endSessionToChange: "Beenden Sie die Sprachsitzung, um die Spracheinstellungen zu ändern.",
   speakingVoice: "Sprechstimme",
   speakingSpeed: "Sprechgeschwindigkeit",

@@ -7,6 +7,7 @@ import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.SavedVoiceSetup
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -125,7 +126,11 @@ class VoiceChoicesTest {
     private val allInOne = VoiceSetupPreference(mode = VoiceSetupMode.ALL_IN_ONE)
     private val deviceStages = VoiceSetupPreference(mode = VoiceSetupMode.SEPARATE_STAGES)
     private val gatewayStages =
-        VoiceSetupPreference(mode = VoiceSetupMode.SEPARATE_STAGES, recognition = GATEWAY, speech = GATEWAY)
+        VoiceSetupPreference(
+            mode = VoiceSetupMode.SEPARATE_STAGES,
+            recognition = GATEWAY,
+            speech = SpeechOutput.GATEWAY,
+        )
 
     // A composable language model beside a fixed text preset and a native audio model.
     private val composable =
@@ -457,7 +462,11 @@ class VoiceChoicesTest {
             assertThrows(VoiceSetupException::class.java) {
                 choices.resolveSetup(
                     settings.with(
-                        allInOne.copy(mode = VoiceSetupMode.SEPARATE_STAGES, recognition = DEVICE, speech = GATEWAY),
+                        allInOne.copy(
+                            mode = VoiceSetupMode.SEPARATE_STAGES,
+                            recognition = DEVICE,
+                            speech = SpeechOutput.GATEWAY,
+                        ),
                     ),
                 )
             }
@@ -496,9 +505,21 @@ class VoiceChoicesTest {
     }
 
     @Test
+    fun `speech off pins device speech that plays nothing and exists only in separate stages`() {
+        val off = composable.resolve(settings.with(gatewayStages.withSpeechOff()), pinned = null)
+        assertEquals(GATEWAY to DEVICE, off.recognition to off.speech)
+        assertTrue(off.silent)
+        assertNull(off.synthesisModelID)
+        assertEquals(VoiceTransport.WebRTC, off.transport)
+        assertEquals(off, composable.resolve(settings.with(gatewayStages), off))
+        assertFalse(composable.resolve(settings.with(gatewayStages), pinned = null).silent)
+        assertFalse(allInOne.copy(speech = SpeechOutput.OFF).speechOff)
+    }
+
+    @Test
     fun `mixed stage owners and saved gateway models pin the session setup across recovery`() {
         val mixed =
-            settings.with(gatewayStages.copy(speech = DEVICE)).copy(
+            settings.with(gatewayStages.copy(speech = SpeechOutput.DEVICE)).copy(
                 gatewayVoiceSetups = mapOf(gateway to GatewayVoiceSetup(recognitionModelID = "parakeet")),
             )
         val pinned = composable.resolve(mixed, pinned = null)

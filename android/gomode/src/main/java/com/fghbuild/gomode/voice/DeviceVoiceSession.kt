@@ -5,7 +5,10 @@
 // assistant.text.delta, and executes tool.call through the service catalog; the gateway sends no
 // audio. The wire contract is voicegateway/api/v2/protocol.go. MicrophoneAudioSource owns capture
 // and keeps recognizing during assistant playback, so recognized speech interrupts the reply. Mode
-// and language changes are disabled while a session connects or stays active.
+// and language changes are disabled while a session connects or stays active. A session whose setup
+// has speech off (VoiceSetupPreference.speechOff) pins it when it starts: it speaks nothing, plays no
+// thinking music or chimes, and a reply finishes when its text ends; the transcript and glasses show
+// it.
 package com.fghbuild.gomode.voice
 
 import android.content.Context
@@ -211,7 +214,10 @@ internal class DeviceVoiceSession(
         languageJob = scope.launch { speech.downloadLanguage() }
     }
 
-    private val thinkingAudioJob = scope.launchThinkingAudio(state, thinkingEarcon) { it.needsThinkingAudio }
+    // Pinned when a session starts; recovery keeps it.
+    private var silent = false
+
+    private val thinkingAudioJob = scope.launchThinkingAudio(state, thinkingEarcon) { !silent && it.needsThinkingAudio }
 
     private var connectJob: Job? = null
     private val networkMonitor = DefaultNetworkMonitor(appContext)
@@ -285,7 +291,10 @@ internal class DeviceVoiceSession(
         preserveTranscript: Boolean,
         conversationID: String?,
     ) {
-        if (!preserveTranscript) startupTimingOwner = startupTiming()
+        if (!preserveTranscript) {
+            startupTimingOwner = startupTiming()
+            silent = settingsRepository.settings.value.voiceSetup.speechOff
+        }
         val timing = startupTimingOwner
         thinkingEarcon.setThinking(false)
         _state.update {
@@ -474,7 +483,7 @@ internal class DeviceVoiceSession(
             it.copy(connectStatus = null, connected = true, error = null)
         }
         callController.activate()
-        voiceModeChime.connected()
+        if (!silent) voiceModeChime.connected()
         val announcing = pendingNotifications.hasAlerts()
         flushPendingNotifications()
         if (!ownsAttempt(attempt)) return
@@ -706,7 +715,7 @@ internal class DeviceVoiceSession(
                         it.copy(connectStatus = null, connected = true, error = null)
                     }
                     callController.activate()
-                    voiceModeChime.connected()
+                    if (!silent) voiceModeChime.connected()
                     if (recoveryContext.isNotEmpty()) {
                         send(json.encodeToString(ContextUpdate.serializer(), gatewayContextUpdate(recoveryContext)))
                         recoveryContext = ""
@@ -821,7 +830,7 @@ internal class DeviceVoiceSession(
         _state.update {
             it.withTranscriptChunk(TranscriptSpeaker.ASSISTANT, delta, responseID = responseID)
         }
-        output.append(delta)
+        if (!silent) output.append(delta)
     }
 
     private fun appendToolDiagnostic(

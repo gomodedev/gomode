@@ -3,7 +3,8 @@
 // A segmented control selects All-in-one, one gateway native audio model, or Separate stages:
 // Recognition, Language model, and Speech pickers. Recognition and Speech offer Local, then the
 // gateway's models for a composable language model, or the language model's own gateway speech
-// otherwise. The Language model lists gateway choices, then a "Local" group with the
+// otherwise. Speech also offers Off, last: no sound plays, and the transcript and glasses show the
+// replies; it needs no speaking voice or speed, so those pickers hide. The Language model lists gateway choices, then a "Local" group with the
 // local model variants and Whistle + Needle. An on-device language model requires device
 // recognition and speech: those pickers show Local and disable gateway options while the saved
 // gateway selections stay, and the model's download, storage, and diagnostics follow the Language
@@ -63,6 +64,7 @@ import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeakingVoiceOwner
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStage
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -131,7 +133,7 @@ private fun explicitSetup(
                     preference.copy(
                         mode = VoiceSetupMode.SEPARATE_STAGES,
                         recognition = SpeechStageLocation.DEVICE,
-                        speech = SpeechStageLocation.DEVICE,
+                        speech = SpeechOutput.DEVICE,
                     ),
             )
         }
@@ -470,7 +472,7 @@ private fun SeparateStagesSetting(
                 editor.saveSpeakingVoice(choices, owner, name)
             }
         }
-    } else {
+    } else if (!shown.preference.speechOff) {
         DeviceSpeakingVoiceSetting(
             shown.preference.deviceSpeechVoice,
             editor.settings.voiceLanguageTag,
@@ -586,6 +588,7 @@ private fun StagePicker(
             SpeechStage.SYNTHESIS -> Triple("Speech", "speech", SetupControl.SPEECH)
         }
     val gateway = location == SpeechStageLocation.GATEWAY
+    val off = stage == SpeechStage.SYNTHESIS && preference.speechOff
     SettingsChips(
         label = label,
         enabled = editor.enabled,
@@ -593,7 +596,7 @@ private fun StagePicker(
         error = editor.failure(control) ?: editor.resolutionError(stage),
         errorTag = "gomode-$key-error",
     ) {
-        Item("Local", selected = !gateway, tag = "gomode-$key-device") {
+        Item("Local", selected = !gateway && !off, tag = "gomode-$key-device") {
             editor.edit(control) { it.copy(preference = it.preference.withStage(stage, SpeechStageLocation.DEVICE)) }
         }
         ownSpeech?.let { choice ->
@@ -619,6 +622,11 @@ private fun StagePicker(
                         }
                     }
                 }
+            }
+        }
+        if (stage == SpeechStage.SYNTHESIS) {
+            Item("Off", selected = off, tag = "gomode-$key-off") {
+                editor.edit(control) { it.copy(preference = it.preference.withSpeechOff()) }
             }
         }
     }

@@ -13,8 +13,8 @@
 // them. SettingsRepository documents the mode that follows the gateway's choice; explicit shows it
 // as the setup it resolves to, which settings save on the first explicit edit.
 //
-// Connecting pins the resolved choice, stage owners, speech models, and speaking voice per
-// session; recovery keeps them and fails when the gateway withdrew one. Speaking voices are saved
+// Connecting pins the resolved choice, stage owners, speech models, speaking voice, and whether
+// speech is off per session; recovery keeps them and fails when the gateway withdrew one. Speaking voices are saved
 // per gateway and choice when the gateway owns speech and the choice advertises voices. A composable
 // choice speaks through its synthesis model instead and saves the selection per gateway and model.
 // Settings offer the voices without a language and those of the voice language. The provider
@@ -29,6 +29,7 @@ import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeakingVoiceOwner
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStage
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
@@ -240,6 +241,7 @@ internal data class GatewayVoiceChoices(
                 speech = setup.speech,
                 recognitionModelID = setup.recognitionModelID,
                 synthesisModelID = setup.synthesisModelID,
+                silent = settings.voiceSetup.speechOff,
             )
         }
         requireLoadedVoiceSettings(settings)
@@ -372,7 +374,7 @@ internal data class GatewayVoiceChoices(
                     preference.copy(
                         mode = VoiceSetupMode.SEPARATE_STAGES,
                         recognition = SpeechStageLocation.GATEWAY,
-                        speech = SpeechStageLocation.GATEWAY,
+                        speech = SpeechOutput.GATEWAY,
                         languageModel = VoiceLanguageModel.GATEWAY,
                     )
                 }
@@ -593,6 +595,8 @@ internal data class GatewayVoiceSelection(
     val recognitionModelID: String?,
     /** Set only for a composable choice with gateway speech. */
     val synthesisModelID: String?,
+    /** Speech is off: [speech] is the device's, and nothing plays. */
+    val silent: Boolean = false,
 ) {
     val transport: VoiceTransport get() = transportFor(recognition, speech)
 }

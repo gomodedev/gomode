@@ -12,6 +12,13 @@
 // turn is idle. A recognized hypothesis during assistant output sends turn.cancel; output of the
 // cancelled turn is dropped until the gateway acknowledges with interrupted and the next user turn
 // starts thinking. Tool calls still receive results. Device speech survives WebRTC recovery.
+//
+// A session whose setup has speech off (VoiceSetupPreference.speechOff) pins it when it starts, so
+// a later settings change waits for the next session. It owns speech as device speech does, so the
+// gateway sends text alone and the remote track stays muted, but it creates no DeviceSpeechOutput,
+// plays no thinking music or chimes, and a client turn is idle as soon as the gateway is idle. The
+// transcript and glasses show the replies. With nothing playing, device recognition listens again
+// once the turn is idle; gateway recognition still cancels a turn the user talks over.
 package com.fghbuild.gomode.voice
 
 import android.content.BroadcastReceiver
@@ -358,9 +365,10 @@ internal class VoiceSession(
     private val clientRecognition: Boolean get() = pinnedVoice?.recognition == SpeechStageLocation.DEVICE
     private val clientSpeech: Boolean get() = pinnedVoice?.speech == SpeechStageLocation.DEVICE
     private val clientStages: Boolean get() = clientRecognition || clientSpeech
+    private val silent: Boolean get() = pinnedVoice?.silent == true
 
     private val thinkingAudioJob =
-        scope.launchThinkingAudio(state, thinkingEarcon) { clientSpeech && it.needsThinkingAudio }
+        scope.launchThinkingAudio(state, thinkingEarcon) { clientSpeech && !silent && it.needsThinkingAudio }
 
     private val audioStateJob =
         if (callController.isSupported()) {
@@ -1520,7 +1528,7 @@ internal class VoiceSession(
                         )
                     }
                     callController.activate()
-                    voiceModeChime.connected()
+                    if (!silent) voiceModeChime.connected()
                     if (recoveryContext.isNotEmpty()) {
                         send(json.encodeToString(ContextUpdate.serializer(), gatewayContextUpdate(recoveryContext)))
                         recoveryContext = ""
@@ -1688,26 +1696,31 @@ internal class VoiceSession(
     // Device speech stages
     // -----------------------------------------------------------------------
 
-    /** Creates the pinned setup's device stages once per conversation; false after reporting a failure. */
+    /**
+     * Creates the pinned setup's device stages once per conversation; false after reporting a failure.
+     * Speech that is off needs neither TextToSpeech nor its output.
+     */
     private suspend fun prepareDeviceSpeech(attempt: Long): Boolean {
-        if (!clientStages || deviceSpeech != null) return true
+        if (!(clientRecognition || (clientSpeech && !silent)) || deviceSpeech != null) return true
         val speech = createDeviceSpeech()
         deviceSpeech = speech
-        speechOutput =
-            DeviceSpeechOutput(
-                speech,
-                onSpeaking = {
-                    thinkingEarcon.setThinking(false)
-                    _state.update { it.copy(speaking = true) }
-                    applyMicrophoneMode()
-                },
-                onDrained = {
-                    _state.update { it.copy(speaking = false) }
-                    applyMicrophoneMode()
-                    drainClientTurn()
-                },
-                onError = ::setError,
-            )
+        if (!silent) {
+            speechOutput =
+                DeviceSpeechOutput(
+                    speech,
+                    onSpeaking = {
+                        thinkingEarcon.setThinking(false)
+                        _state.update { it.copy(speaking = true) }
+                        applyMicrophoneMode()
+                    },
+                    onDrained = {
+                        _state.update { it.copy(speaking = false) }
+                        applyMicrophoneMode()
+                        drainClientTurn()
+                    },
+                    onError = ::setError,
+                )
+        }
         if (!clientRecognition) return true
         deviceMicrophoneJob =
             scope.launch {

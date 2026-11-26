@@ -12,6 +12,8 @@ export const defaultVoiceSettingsMessages = {
   browserSpeechPrivacy: "Browser recognition may use your browser vendor's cloud service.",
   browserRecognitionUnavailable: "Browser recognition is unavailable. Choose a model.",
   browserSynthesisUnavailable: "Browser speech is unavailable. Choose a model.",
+  speechOff: "Off",
+  speechOffHint: "Replies show in the transcript. No sound plays.",
   endSessionToChange: "End the voice session to change voice settings.",
   speakingVoice: "Speaking voice",
   speakingSpeed: "Speaking speed",

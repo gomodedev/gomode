@@ -22,6 +22,7 @@ import com.fghbuild.gomode.data.GatewayVoiceSetup
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStage
 import com.fghbuild.gomode.data.SpeechStageLocation.DEVICE
 import com.fghbuild.gomode.data.SpeechStageLocation.GATEWAY
@@ -74,7 +75,11 @@ class VoiceChoicesSettingsTest {
         """.trimIndent()
 
     private val gatewayStages =
-        VoiceSetupPreference(mode = VoiceSetupMode.SEPARATE_STAGES, recognition = GATEWAY, speech = GATEWAY)
+        VoiceSetupPreference(
+            mode = VoiceSetupMode.SEPARATE_STAGES,
+            recognition = GATEWAY,
+            speech = SpeechOutput.GATEWAY,
+        )
 
     @Test
     fun followingTheGatewayShowsTheResolvedSetupUntilAnExplicitPick() =
@@ -198,7 +203,7 @@ class VoiceChoicesSettingsTest {
 
                 // Gateway recognition and speech.
                 pick("gomode-speech", "gomode-speech-model-piper")
-                composeRule.waitUntil { repository.settings.value.voiceSetup.speech == GATEWAY }
+                composeRule.waitUntil { repository.settings.value.voiceSetup.speech == SpeechOutput.GATEWAY }
                 assertEquals(
                     "piper",
                     repository.settings.value
@@ -207,6 +212,15 @@ class VoiceChoicesSettingsTest {
                 )
                 chosen("gomode-speech").assertTextContains("Piper")
                 composeRule.onNodeWithTag("gomode-device-speech-rate").assertDoesNotExist()
+
+                // Off speech plays nothing, so the speaking voice and speed pickers hide.
+                pick("gomode-speech", "gomode-speech-off")
+                composeRule.waitUntil { repository.settings.value.voiceSetup.speech == SpeechOutput.OFF }
+                chosen("gomode-speech").assertTextContains("Off")
+                composeRule.onNodeWithTag("gomode-speaking-voice").assertDoesNotExist()
+                composeRule.onNodeWithTag("gomode-device-speech-rate").assertDoesNotExist()
+                pick("gomode-speech", "gomode-speech-model-piper")
+                composeRule.waitUntil { repository.settings.value.voiceSetup.speech == SpeechOutput.GATEWAY }
 
                 // Device recognition with gateway speech.
                 composeRule.onNodeWithTag("gomode-recognition-model-parakeet").performScrollTo().assertIsSelected()
@@ -298,7 +312,7 @@ class VoiceChoicesSettingsTest {
                 assertEquals(VoiceLanguageModel.LOCAL_LLM, local.languageModel)
                 // The saved gateway stages stay for a later gateway language model.
                 assertEquals(GATEWAY, local.recognition)
-                assertEquals(GATEWAY, local.speech)
+                assertEquals(SpeechOutput.GATEWAY, local.speech)
 
                 chosen("gomode-language-model").assertTextContains("Gemma 4 E4B")
                 stage("gomode-model-download-status").assertExists()

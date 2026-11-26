@@ -335,6 +335,31 @@ describe("provider reasoning", () => {
   });
 });
 
+describe("speech off", () => {
+  it("shows replies without speech, thinking music, or chimes and ends the turn at gateway idle", async () => {
+    session.selectSpeechOutput("off");
+    expect(session.speech).toEqual({ input: "client", output: "client" });
+    session.prepareAudio();
+    const socket = await readySocket();
+    socket.message({ kind: "turn.status", state: "thinking" });
+    finishTurn(socket, "The first date is earlier.");
+    expect(session.state.transcript.at(-1)).toEqual({
+      kind: "transcript",
+      speaker: "assistant",
+      text: "The first date is earlier.",
+      final: true,
+    });
+    expect(fakeSynthesis.spoken).toHaveLength(0);
+    expect(session.state.speaking).toBe(false);
+    expect(earcon.setThinking).not.toHaveBeenCalledWith(true);
+    session.disconnect();
+    expect(chime.prepare).not.toHaveBeenCalled();
+    expect(earcon.prepare).not.toHaveBeenCalled();
+    expect(chime.playConnected).not.toHaveBeenCalled();
+    expect(chime.playDisconnected).not.toHaveBeenCalled();
+  });
+});
+
 describe("browser voice sessions", () => {
   it("completes the text session recorded from the gateway", async () => {
     const steps = JSON.parse(

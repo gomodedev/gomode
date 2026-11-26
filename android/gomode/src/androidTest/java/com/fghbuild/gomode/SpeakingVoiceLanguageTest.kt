@@ -15,6 +15,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation.GATEWAY
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.data.VoiceSetupPreference
@@ -58,7 +59,7 @@ class SpeakingVoiceLanguageTest {
                             VoiceSetupPreference(
                                 mode = VoiceSetupMode.SEPARATE_STAGES,
                                 recognition = GATEWAY,
-                                speech = GATEWAY,
+                                speech = SpeechOutput.GATEWAY,
                             ),
                     )
                 }

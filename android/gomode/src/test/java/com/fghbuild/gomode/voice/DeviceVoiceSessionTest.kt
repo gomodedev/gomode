@@ -9,6 +9,7 @@ import android.speech.SpeechRecognizer
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.data.LocalLlmModel
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -981,7 +982,7 @@ class DeviceVoiceSessionTest {
                             it.preference.copy(
                                 mode = VoiceSetupMode.SEPARATE_STAGES,
                                 recognition = SpeechStageLocation.DEVICE,
-                                speech = SpeechStageLocation.DEVICE,
+                                speech = SpeechOutput.DEVICE,
                             ),
                     )
                 }
@@ -1259,6 +1260,45 @@ class DeviceVoiceSessionTest {
         assertEquals(2, session.state.value.transcript.size)
         session.close()
     }
+
+    @Test
+    fun `speech off shows gateway replies without speaking or chimes`() =
+        runTest {
+            val repository = SettingsRepository(MemoryPreferences())
+            repository.updateSavedVoiceSetup(null) { it.copy(preference = it.preference.withSpeechOff()) }
+            repository.settings.first { it.voiceSetup.speechOff }
+            var connectedChimes = 0
+            val chime =
+                object : VoiceChimePlayer {
+                    override fun playConnected() {
+                        connectedChimes++
+                    }
+
+                    override fun playDisconnected(onComplete: () -> Unit) = onComplete()
+                }
+            val speech = FakeSpeech()
+            val socket = FakeWebSocket()
+            var listener: WebSocketListener? = null
+            val session =
+                createSession(speech, settingsRepo = repository, chime = chime) { _, captured ->
+                    listener = captured
+                    socket
+                }
+            session.connect()
+            val connected = requireNotNull(listener)
+            connected.onOpen(socket, upgradeResponse())
+            connected.onMessage(socket, """{"kind":"session.ready"}""")
+            connected.onMessage(socket, """{"kind":"assistant.text.delta","text":"Silent reply."}""")
+            connected.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
+            val reply =
+                session.state.value.transcript
+                    .single()
+            assertEquals("Silent reply.", reply.text)
+            assertTrue(reply.final)
+            assertTrue(speech.spoken.isEmpty())
+            assertEquals(0, connectedChimes)
+            session.close()
+        }
 
     @Test
     fun `gateway reply finalizes while playback and listening overlap`() {
@@ -3143,7 +3183,7 @@ class DeviceVoiceSessionTest {
                     it.preference.copy(
                         mode = VoiceSetupMode.SEPARATE_STAGES,
                         recognition = SpeechStageLocation.DEVICE,
-                        speech = SpeechStageLocation.DEVICE,
+                        speech = SpeechOutput.DEVICE,
                         languageModel = engine,
                     ),
             )

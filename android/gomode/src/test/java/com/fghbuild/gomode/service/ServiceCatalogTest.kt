@@ -4,6 +4,7 @@ package com.fghbuild.gomode.service
 import android.net.Uri
 import android.webkit.WebView
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.data.VoiceSetupMode
@@ -1707,7 +1708,7 @@ private suspend fun SettingsRepository.selectDeviceStages() =
                 it.preference.copy(
                     mode = VoiceSetupMode.SEPARATE_STAGES,
                     recognition = SpeechStageLocation.DEVICE,
-                    speech = SpeechStageLocation.DEVICE,
+                    speech = SpeechOutput.DEVICE,
                 ),
         )
     }

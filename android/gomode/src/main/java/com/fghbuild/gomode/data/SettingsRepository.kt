@@ -7,7 +7,8 @@
 // mode and the recognition and synthesis model IDs, so a mode switch restores the other mode's
 // selection. LOCAL_LLM_MODEL names the local model variant. SPEAKING_VOICES stays keyed by gateway
 // and choice, and SYNTHESIS_VOICES by gateway and synthesis model. SavedVoiceSetup edits the three
-// voice setup keys in one write.
+// voice setup keys in one write. The separate-stages speech selection may be OFF: nothing plays,
+// and the transcript and glasses show the replies; VoiceSession.kt documents the session it pins.
 //
 // The FOLLOW_GATEWAY mode runs gateway recognition and speech with the followed choice, or the
 // gateway's WebRTC default. GatewayVoiceChoices resolves it to all-in-one for a native audio choice
@@ -101,6 +102,33 @@ enum class SpeechStageLocation {
     GATEWAY,
 }
 
+/**
+ * SpeechOutput is the separate-stages speech selection: where speech runs, or OFF for no sound at
+ * all. OFF owns the stage as device speech does, so the gateway sends only text, and then speaks
+ * nothing.
+ */
+@Serializable
+enum class SpeechOutput {
+    @SerialName("device")
+    DEVICE,
+
+    @SerialName("gateway")
+    GATEWAY,
+
+    @SerialName("off")
+    OFF,
+    ;
+
+    /** Who owns the speech stage. */
+    val location: SpeechStageLocation
+        get() = if (this == GATEWAY) SpeechStageLocation.GATEWAY else SpeechStageLocation.DEVICE
+
+    companion object {
+        /** The speech that [location] owns and plays. */
+        fun at(location: SpeechStageLocation) = if (location == SpeechStageLocation.GATEWAY) GATEWAY else DEVICE
+    }
+}
+
 /** VoiceLanguageModel selects where the language model of separate stages runs. */
 @Serializable
 enum class VoiceLanguageModel {
@@ -131,7 +159,7 @@ val DEVICE_SPEECH_RATES: List<Float> = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75
 data class VoiceSetupPreference(
     val mode: VoiceSetupMode = VoiceSetupMode.FOLLOW_GATEWAY,
     val recognition: SpeechStageLocation = SpeechStageLocation.DEVICE,
-    val speech: SpeechStageLocation = SpeechStageLocation.DEVICE,
+    val speech: SpeechOutput = SpeechOutput.DEVICE,
     val languageModel: VoiceLanguageModel = VoiceLanguageModel.GATEWAY,
     /** The Android TextToSpeech voice name, or empty for the engine's default. */
     val deviceSpeechVoice: String = "",
@@ -155,7 +183,14 @@ data class VoiceSetupPreference(
 
     /** Where speech runs; on-device language models require device recognition and speech. */
     val effectiveSpeech: SpeechStageLocation
-        get() = effectiveLocation(speech)
+        get() = effectiveLocation(speech.location)
+
+    /** Separate stages play no sound; other modes always speak through the gateway. */
+    val speechOff: Boolean
+        get() = mode == VoiceSetupMode.SEPARATE_STAGES && speech == SpeechOutput.OFF
+
+    /** Separate stages that play no sound, keeping the other selections. */
+    fun withSpeechOff(): VoiceSetupPreference = copy(mode = VoiceSetupMode.SEPARATE_STAGES, speech = SpeechOutput.OFF)
 
     /** Separate stages with [model] as the language model, keeping the other selections. */
     fun withLanguageModel(model: VoiceLanguageModel): VoiceSetupPreference =
@@ -167,8 +202,13 @@ data class VoiceSetupPreference(
         location: SpeechStageLocation,
     ): VoiceSetupPreference =
         when (stage) {
-            SpeechStage.RECOGNITION -> copy(mode = VoiceSetupMode.SEPARATE_STAGES, recognition = location)
-            SpeechStage.SYNTHESIS -> copy(mode = VoiceSetupMode.SEPARATE_STAGES, speech = location)
+            SpeechStage.RECOGNITION -> {
+                copy(mode = VoiceSetupMode.SEPARATE_STAGES, recognition = location)
+            }
+
+            SpeechStage.SYNTHESIS -> {
+                copy(mode = VoiceSetupMode.SEPARATE_STAGES, speech = SpeechOutput.at(location))
+            }
         }
 
     /** Where [stage] runs; on-device language models require device recognition and speech. */

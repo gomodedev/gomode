@@ -31,6 +31,7 @@ import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.LocalEmulatorOnly
 import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.SettingsRepository
+import com.fghbuild.gomode.data.SpeechOutput
 import com.fghbuild.gomode.data.SpeechStageLocation
 import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.frontendPreparationFixtureScript
@@ -1284,7 +1285,7 @@ private suspend fun SettingsRepository.selectSpeech(owner: SpeechOwner) =
                         it.preference.copy(
                             mode = VoiceSetupMode.SEPARATE_STAGES,
                             recognition = SpeechStageLocation.DEVICE,
-                            speech = SpeechStageLocation.DEVICE,
+                            speech = SpeechOutput.DEVICE,
                         )
                     }
 

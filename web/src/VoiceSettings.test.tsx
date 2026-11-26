@@ -278,6 +278,21 @@ describe("VoiceSettings", () => {
     expect(allDisabled(output)).toBe(true);
   });
 
+  it("saves speech output off as client output that plays nothing", async () => {
+    const user = userEvent.setup();
+    render(() => <VoiceSettings />);
+    await user.click(chip(chips("Speech"), "off"));
+    expect(voiceSession.speech).toEqual({ input: "gateway", output: "client" });
+    expect(voiceSession.state.speechOff).toBe(true);
+    expect(chips("Speech")).toHaveAccessibleDescription("Replies show in the transcript. No sound plays.");
+    expect(JSON.parse(localStorage.getItem(`gomode.voiceSetup.${window.location.origin}`) ?? "null")).toMatchObject({
+      partsOutput: "off",
+    });
+    expect(new VoiceSession().state.speechOff).toBe(true);
+    await user.click(chip(chips("Speech"), "browser"));
+    expect(voiceSession.state.speechOff).toBe(false);
+  });
+
   it("migrates saved browser and cloud modes while preserving independent overrides", () => {
     for (const [mode, location] of [
       ["browser", "client"],

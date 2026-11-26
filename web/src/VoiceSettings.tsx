@@ -149,12 +149,19 @@ export default function VoiceSettings(props: {
   createEffect(() => props.onError?.(error()));
   createEffect(() => props.onLanguageError?.(languageError()));
   const browserDescriptionId = createUniqueId();
+  const speechOffHintId = createUniqueId();
   const active = () => voiceSession.state.connected || voiceSession.state.connectStatus !== null;
   const recognitionSupported = browserRecognitionAvailable();
   const synthesisSupported = browserSynthesisAvailable();
   const [browserVoices, setBrowserVoices] = createSignal<SpeechSynthesisVoice[]>([]);
   createEffect(() => {
-    if (voiceSession.state.speechOutput !== "client" || props.visible === false || !synthesisSupported) return;
+    if (
+      voiceSession.state.speechOutput !== "client" ||
+      voiceSession.state.speechOff ||
+      props.visible === false ||
+      !synthesisSupported
+    )
+      return;
     const synthesis = window.speechSynthesis;
     const refresh = () =>
       setBrowserVoices(
@@ -340,14 +347,23 @@ export default function VoiceSettings(props: {
                 stage="output"
                 label={messages().synthesisModel}
                 browser={messages().browserSpeech}
+                off={messages().speechOff}
                 supported={synthesisSupported}
                 disabled={active()}
                 error={saveFailure("output") ?? resolutionError("output")}
                 hint={
-                  <Show when={voiceSession.state.speechOutput === "client" && !synthesisSupported}>
-                    <p class={styles.hint}>{messages().browserSynthesisUnavailable}</p>
-                  </Show>
+                  <Switch>
+                    <Match when={voiceSession.state.speechOff}>
+                      <p id={speechOffHintId} class={styles.hint}>
+                        {messages().speechOffHint}
+                      </p>
+                    </Match>
+                    <Match when={voiceSession.state.speechOutput === "client" && !synthesisSupported}>
+                      <p class={styles.hint}>{messages().browserSynthesisUnavailable}</p>
+                    </Match>
+                  </Switch>
                 }
+                hintId={voiceSession.state.speechOff ? speechOffHintId : undefined}
                 onSave={onSetupSave("output")}
               />
             </Match>
@@ -400,6 +416,7 @@ export default function VoiceSettings(props: {
               pickersShown() &&
               voiceSession.state.setupMode === "parts" &&
               voiceSession.state.speechOutput === "client" &&
+              !voiceSession.state.speechOff &&
               synthesisSupported
             }
           >
@@ -766,6 +783,8 @@ function SpeechStageChips(props: {
   stage: SpeechStage;
   label: string;
   browser: string;
+  /** The label of the no-sound choice; only the output stage offers it. */
+  off?: string;
   supported: boolean;
   disabled: boolean;
   error: string | null;
@@ -774,11 +793,13 @@ function SpeechStageChips(props: {
   onSave: (error: string | null) => void;
 }) {
   const selected = () =>
-    voiceSession.speech[props.stage] === "client"
-      ? "browser"
-      : voiceSession.composableChoice
-        ? `model:${voiceSession.state.speechModelIDs[props.stage] ?? ""}`
-        : "gateway";
+    props.stage === "output" && voiceSession.state.speechOff
+      ? "off"
+      : voiceSession.speech[props.stage] === "client"
+        ? "browser"
+        : voiceSession.composableChoice
+          ? `model:${voiceSession.state.speechModelIDs[props.stage] ?? ""}`
+          : "gateway";
   const options = createMemo(() => {
     const models = voiceSession.state.speechModels[props.stage];
     const fixed = voiceSession.state.choices.find(
@@ -789,6 +810,7 @@ function SpeechStageChips(props: {
     if (fixedStage !== null) options.push({ value: "gateway", label: fixedStage.label, disabled: false });
     options.push({ value: "browser", label: props.browser, disabled: !props.supported });
     for (const model of models) options.push({ value: `model:${model.id}`, label: model.label, disabled: false });
+    if (props.off !== undefined) options.push({ value: "off", label: props.off, disabled: false });
     return options;
   });
   return (
@@ -803,7 +825,7 @@ function SpeechStageChips(props: {
       onSelect={(value) =>
         voiceSession.selectSpeechStage(
           props.stage,
-          value === "browser" ? "client" : "gateway",
+          value === "off" ? "off" : value === "browser" ? "client" : "gateway",
           value.startsWith("model:") ? value.slice(6) : null,
         )
       }
