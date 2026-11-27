@@ -174,7 +174,8 @@ class McpClient(
                 // Preserve authentication status without forwarding its raw body.
                 if (e.code != "UNKNOWN") throw e
                 Log.w("GoModeMcp", "Unreadable MCP HTTP error", e)
-                throw ApiException(e.statusCode, e.code, "MCP request failed (HTTP ${e.statusCode}).").apply {
+                val message = "MCP request failed (HTTP ${e.statusCode})."
+                throw ApiException(e.statusCode, e.code, message, retryAfter = e.retryAfter).apply {
                     initCause(e)
                 }
             }

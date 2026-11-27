@@ -6,6 +6,8 @@ export class APIError extends Error {
     public status: number,
     public code: string,
     public details?: Record<string, unknown>,
+    /** The response's raw Retry-After header: delay seconds or an HTTP date. */
+    public retryAfter: string | null = null,
   ) {
     super(code);
   }
@@ -23,7 +25,7 @@ function makeRequester(fetchFn: FetchFn) {
     const res = await fetchFn(path, init);
     if (!res.ok) {
       const err = (await res.json()) as JSONRPCResponse;
-      const e = new APIError(res.status, String(err.error?.code ?? "UNKNOWN"), undefined);
+      const e = new APIError(res.status, String(err.error?.code ?? "UNKNOWN"), undefined, res.headers.get("Retry-After"));
       e.message = err.error?.message ?? "";
       throw e;
     }

@@ -2,6 +2,7 @@
 package com.fghbuild.gomode.service
 
 import com.fghbuild.gomode.sdk.v1.Settings
+import com.fghbuild.mcp.sdk.v1.ApiException
 import com.fghbuild.mcp.sdk.v1.CacheScope
 import com.fghbuild.mcp.sdk.v1.JSONPresence
 import com.fghbuild.mcp.sdk.v1.JSONRPCNotification
@@ -37,7 +38,11 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import java.time.Duration
 import java.time.Instant
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 interface ServiceResourceClient {
     suspend fun serverDiscover(sessionID: String? = null): ServerDiscoverResult
@@ -148,26 +153,28 @@ class ServiceMonitor(
 
                     is MonitorRunResult.Retry -> {
                         _state.value = ServiceMonitorState(retryReason = "MCP subscription stream ended")
-                        retryDelayMs = awaitRetry(retryDelayMs, delivered = result.delivered)
+                        retryDelayMs = awaitRetry(retryDelayMs, delivered = result.delivered, retryAfterMs = null)
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.value = ServiceMonitorState(retryReason = e.message ?: "Service monitoring failed")
-                retryDelayMs = awaitRetry(retryDelayMs, delivered = false)
+                retryDelayMs = awaitRetry(retryDelayMs, delivered = false, retryAfterMs = e.retryAfterMs(Instant.now()))
             }
         }
     }
 
     // Only a stream that delivered updates restarts the backoff. A server that accepts and closes
     // streams immediately keeps escalating, so a flapping endpoint cannot spin at the base delay.
+    // A server's Retry-After lengthens the wait but leaves the backoff as it was.
     private suspend fun awaitRetry(
         previousDelayMs: Long,
         delivered: Boolean,
+        retryAfterMs: Long?,
     ): Long {
         val delayMs = if (delivered) INITIAL_RETRY_DELAY_MS else previousDelayMs
-        delay(delayMs)
+        delay(maxOf(delayMs, retryAfterMs ?: 0))
         return nextRetryDelay(delayMs)
     }
 
@@ -193,16 +200,23 @@ class ServiceMonitor(
                         var retryDelayMs = INITIAL_RETRY_DELAY_MS
                         do {
                             val publish = dirty.remove(uri) == true
-                            if (refreshResource(client, plan, uri, publish)) {
+                            val failure = refreshResource(client, plan, uri, publish)
+                            if (failure == null) {
                                 retryDelayMs = INITIAL_RETRY_DELAY_MS
                             } else {
                                 dirty[uri] = dirty[uri] == true || publish
-                                val wakeup = CompletableDeferred<Unit>()
-                                retryWakeups[uri] = wakeup
-                                try {
-                                    withTimeoutOrNull(retryDelayMs) { wakeup.await() }
-                                } finally {
-                                    if (retryWakeups[uri] === wakeup) retryWakeups.remove(uri)
+                                // An invalidation retries early, but never before the server's Retry-After.
+                                val retryAfterMs = failure.retryAfterMs(Instant.now())
+                                if (retryAfterMs != null) {
+                                    delay(maxOf(retryDelayMs, retryAfterMs))
+                                } else {
+                                    val wakeup = CompletableDeferred<Unit>()
+                                    retryWakeups[uri] = wakeup
+                                    try {
+                                        withTimeoutOrNull(retryDelayMs) { wakeup.await() }
+                                    } finally {
+                                        if (retryWakeups[uri] === wakeup) retryWakeups.remove(uri)
+                                    }
                                 }
                                 retryDelayMs = nextRetryDelay(retryDelayMs)
                             }
@@ -298,13 +312,13 @@ class ServiceMonitor(
         }
     }
 
-    // Each model resource fails independently; cancellation propagates.
+    // Each model resource fails independently; cancellation propagates. Returns the read failure.
     private suspend fun refreshResource(
         client: ServiceResourceClient,
         plan: ServiceMonitoringPlan,
         uri: String,
         publishEvents: Boolean,
-    ): Boolean {
+    ): Throwable? {
         val read =
             try {
                 Result.success(client.readResource(uri, sessionID).also { resourceText(it.result, uri) })
@@ -337,7 +351,7 @@ class ServiceMonitor(
                 )
             }
         }
-        return read.isSuccess
+        return read.exceptionOrNull()
     }
 
     private fun newerResource(
@@ -444,6 +458,26 @@ private fun JsonObject.requiredNotificationString(
         ?: throw IllegalArgumentException("resource $uri item $index is missing $field")
 
 private fun nextRetryDelay(delayMs: Long): Long = (delayMs * 2).coerceAtMost(MAX_RETRY_DELAY_MS)
+
+// How long the Retry-After of an HTTP error in this failure's causes asks to wait, from [now].
+// The header holds delay seconds or an HTTP date; an invalid or past value asks nothing.
+internal fun Throwable.retryAfterMs(now: Instant): Long? {
+    val value =
+        generateSequence(this) { it.cause }
+            .filterIsInstance<ApiException>()
+            .firstNotNullOfOrNull { it.retryAfter }
+            ?.trim() ?: return null
+    if (value.isNotEmpty() && value.all { it in '0'..'9' }) {
+        return value.toLongOrNull()?.takeIf { it <= Long.MAX_VALUE / 1_000 }?.times(1_000) ?: Long.MAX_VALUE
+    }
+    val at =
+        try {
+            ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()
+        } catch (_: DateTimeParseException) {
+            return null
+        }
+    return Duration.between(now, at).toMillis().takeIf { it > 0 }
+}
 
 private fun subscriptionFilter(
     plan: ServiceMonitoringPlan,

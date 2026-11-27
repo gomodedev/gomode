@@ -10,7 +10,7 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/joho/godotenv v1.5.1
 	github.com/lmittmann/tint v1.2.1
-	github.com/maruel/apisdkgen v0.3.2-0.20261127194345-55c02fe2657b
+	github.com/maruel/apisdkgen v0.3.2-0.20261127204941-f122cb09d543
 	github.com/maruel/genai v0.11.5
 	github.com/maruel/genaipy v0.2.1
 	github.com/maruel/roundtrippers v0.5.1

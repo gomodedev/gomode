@@ -4,6 +4,7 @@ package com.fghbuild.gomode.service
 import com.fghbuild.gomode.sdk.v1.Settings
 import com.fghbuild.gomode.sdk.v1.ToolGroup
 import com.fghbuild.gomode.sdk.v1.WebShellSettings
+import com.fghbuild.mcp.sdk.v1.ApiException
 import com.fghbuild.mcp.sdk.v1.CacheScope
 import com.fghbuild.mcp.sdk.v1.Capabilities
 import com.fghbuild.mcp.sdk.v1.Implementation
@@ -30,9 +31,11 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ServiceMonitorTest {
@@ -266,7 +269,7 @@ class ServiceMonitorTest {
     fun `discovery failures retry with bounded backoff and stop retires the retry owner`() =
         runTest {
             val client = Fixture()
-            client.listFailure = true
+            client.listFailure = IOException("offline")
             val monitor =
                 ServiceMonitor(
                     backgroundScope,
@@ -283,7 +286,7 @@ class ServiceMonitorTest {
             advanceTimeBy(1999)
             runCurrent()
             assertEquals(2, client.lists)
-            client.listFailure = false
+            client.listFailure = null
             advanceTimeBy(1)
             runCurrent()
             assertEquals("known", status(monitor, FIXTURE_CATALOG_URI))
@@ -487,6 +490,74 @@ class ServiceMonitorTest {
             assertEquals(stoppedReads, client.reads.size)
         }
 
+    @Test
+    fun `discovery waits for the server's Retry-After before it retries`() =
+        runTest {
+            val client = Fixture()
+            client.listFailure = ApiException(429, "UNKNOWN", "rate limited", retryAfter = "60")
+            val monitor =
+                ServiceMonitor(
+                    backgroundScope,
+                    "conversation",
+                    ServiceMonitorPurpose.CONVERSATION_CONTEXT,
+                ) { _, _ -> client }
+            monitor.start("https://service.test", settings())
+            runCurrent()
+            assertEquals(1, client.lists)
+            advanceTimeBy(59_999)
+            runCurrent()
+            assertEquals(1, client.lists)
+            client.listFailure = null
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(2, client.lists)
+            assertEquals("known", status(monitor, FIXTURE_CATALOG_URI))
+            monitor.stop()
+        }
+
+    @Test
+    fun `a rate-limited model read waits for Retry-After even when invalidated`() =
+        runTest {
+            val client = Fixture()
+            client.failures += FIXTURE_CONTEXT_URI
+            client.readFailure = ApiException(429, "UNKNOWN", "rate limited", retryAfter = "10")
+            val monitor =
+                ServiceMonitor(
+                    backgroundScope,
+                    "conversation",
+                    ServiceMonitorPurpose.CONVERSATION_CONTEXT,
+                ) { _, _ -> client }
+            monitor.start("https://service.test", settings())
+            runCurrent()
+            assertEquals(1, client.reads.count { it == FIXTURE_CONTEXT_URI })
+            client.changed(FIXTURE_CONTEXT_URI)
+            advanceTimeBy(9_999)
+            runCurrent()
+            assertEquals(1, client.reads.count { it == FIXTURE_CONTEXT_URI })
+            client.failures.clear()
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(2, client.reads.count { it == FIXTURE_CONTEXT_URI })
+            assertEquals("known", status(monitor, FIXTURE_CONTEXT_URI))
+            monitor.stop()
+        }
+
+    @Test
+    fun `Retry-After accepts delay seconds and future HTTP dates through wrapped causes`() {
+        val now = Instant.parse("2026-11-27T12:00:00Z")
+
+        fun after(value: String?) =
+            IllegalStateException(ApiException(429, "UNKNOWN", "limited", retryAfter = value)).retryAfterMs(now)
+        assertEquals(60_000L, after("60"))
+        assertEquals(0L, after("0"))
+        assertEquals(5_000L, after("Fri, 27 Nov 2026 12:00:05 GMT"))
+        assertNull(after("Fri, 27 Nov 2026 11:59:00 GMT"))
+        assertNull(after("-1"))
+        assertNull(after("soon"))
+        assertNull(after(null))
+        assertNull(IOException("offline").retryAfterMs(now))
+    }
+
     private class Fixture : ServiceResourceClient {
         var resources =
             listOf(
@@ -504,7 +575,8 @@ class ServiceMonitorTest {
         val events = MutableSharedFlow<JSONRPCNotification>(extraBufferCapacity = 16)
         var completedStreams = 0
         var lists = 0
-        var listFailure = false
+        var listFailure: Exception? = null
+        var readFailure: Exception = IOException("advisory")
         var epoch = "private-epoch"
         var version = 1L
 
@@ -526,7 +598,7 @@ class ServiceMonitorTest {
 
         override suspend fun listResources(sessionID: String?): List<ResourceDescriptor> {
             lists++
-            if (listFailure) throw IOException("offline")
+            listFailure?.let { throw it }
             return resources
         }
 
@@ -547,7 +619,7 @@ class ServiceMonitorTest {
                 if (uri !in uncancellable) throw error
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gates[uri]?.await() }
             }
-            if (uri in failures) throw IOException("advisory")
+            if (uri in failures) throw readFailure
             return ServiceResourceRead(
                 uri,
                 ResourcesReadResult(

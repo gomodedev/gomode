@@ -5,6 +5,8 @@ export class APIError extends Error {
     public status: number,
     public code: string,
     public details?: Record<string, unknown>,
+    /** The response's raw Retry-After header: delay seconds or an HTTP date. */
+    public retryAfter: string | null = null,
   ) {
     super(code);
   }

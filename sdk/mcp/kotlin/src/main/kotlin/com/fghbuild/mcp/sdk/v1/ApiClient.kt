@@ -34,6 +34,8 @@ class ApiException(
     val code: String,
     message: String,
     val details: Map<String, kotlinx.serialization.json.JsonElement>? = null,
+    // The response's raw Retry-After header: delay seconds or an HTTP date.
+    val retryAfter: String? = null,
 ) : Exception(message)
 
 class ApiClient(
@@ -77,9 +79,9 @@ class ApiClient(
                             if (!resp.isSuccessful) {
                                 val failure = try {
                                     val err = json.decodeFromString<JSONRPCResponse>(responseBody)
-                                    ApiException(resp.code, err.error?.code?.toString() ?: "UNKNOWN", err.error?.message ?: "", null)
+                                    ApiException(resp.code, err.error?.code?.toString() ?: "UNKNOWN", err.error?.message ?: "", null, resp.header("Retry-After"))
                                 } catch (_: Exception) {
-                                    ApiException(resp.code, "UNKNOWN", responseBody)
+                                    ApiException(resp.code, "UNKNOWN", responseBody, retryAfter = resp.header("Retry-After"))
                                 }
                                 throw failure
                             }
@@ -132,7 +134,7 @@ class ApiClient(
                 val failure = if (t is java.io.IOException && (response == null || response.isSuccessful)) {
                     SSETransportFailure(t)
                 } else {
-                    t ?: java.io.IOException("SSE connection failed: HTTP ${response?.code ?: "unknown"}")
+                    t ?: response?.let { sseHTTPFailure(it) } ?: java.io.IOException("SSE connection failed")
                 }
                 close(failure)
             }
@@ -144,6 +146,13 @@ class ApiClient(
     }
 
     private class SSETransportFailure(cause: java.io.IOException) : java.io.IOException(cause)
+
+    private fun sseHTTPFailure(response: Response) = ApiException(
+        response.code,
+        "HTTP_ERROR",
+        "SSE connection failed: HTTP ${response.code}",
+        retryAfter = response.header("Retry-After"),
+    )
 
     private inline fun <T> sseIO(read: () -> T): T = try {
         read()
@@ -218,7 +227,7 @@ class ApiClient(
         val reader = launch(Dispatchers.IO) {
             try {
                 sseIO { call.execute() }.use { response ->
-                    if (!response.isSuccessful) throw java.io.IOException("SSE connection failed: HTTP ${response.code}")
+                    if (!response.isSuccessful) throw sseHTTPFailure(response)
                     val source = response.body?.source() ?: throw java.io.IOException("Missing SSE body")
                     val parser = SSEFrameParser(maxSSEEventBytes)
                     while (!sseIO { source.exhausted() }) {
