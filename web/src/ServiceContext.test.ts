@@ -5,6 +5,7 @@ import { expect, vi } from "../tests/expect";
 import { deferred } from "../tests/deferred";
 import { mcpClient, type McpResourceNotification, type McpSubscribeOptions } from "./McpClient";
 import { monitorServiceNotifications, type ServiceNotificationMonitor } from "./ServiceNotifications";
+import { contextSink } from "../tests/context-sink";
 
 let monitor: ServiceNotificationMonitor | null = null;
 let context: string | null;
@@ -63,7 +64,7 @@ afterEach(() => {
 });
 
 it("keeps explicit offscreen focus independent of bounded items on one stream", async () => {
-  monitor = monitorServiceNotifications(inject, error, { sessionID: "conversation" });
+  monitor = monitorServiceNotifications(contextSink(inject), error, { sessionID: "conversation" });
   await settle();
   expect(latestContext()).toContain('"id":"offscreen"');
   expect(configuration.resourceSubscriptions).toEqual(["fixture://catalog", "fixture://context"]);
@@ -85,7 +86,7 @@ it("keeps explicit offscreen focus independent of bounded items on one stream", 
 });
 
 it("reconciles focus publication and reconnect through authoritative context reads", async () => {
-  monitor = monitorServiceNotifications(inject, error, { sessionID: "conversation" });
+  monitor = monitorServiceNotifications(contextSink(inject), error, { sessionID: "conversation" });
   await settle();
   context = focused("published", 2);
   monitor.refreshContext();
@@ -109,7 +110,7 @@ it("cancels a retired context read before its replacement and rejects its late r
   vi.mocked(mcpClient.readAdvertisedTextResource).mockImplementation(async (uri) =>
     uri === "fixture://context" ? pending.promise : null,
   );
-  monitor = monitorServiceNotifications(inject, error, { sessionID: "old" });
+  monitor = monitorServiceNotifications(contextSink(inject), error, { sessionID: "old" });
   await settle();
   const signal = vi
     .mocked(mcpClient.readAdvertisedTextResource)
@@ -119,7 +120,7 @@ it("cancels a retired context read before its replacement and rejects its late r
   vi.mocked(mcpClient.readAdvertisedTextResource).mockImplementation(async (uri) =>
     uri === "fixture://context" ? focused("new", 1) : null,
   );
-  monitor = monitorServiceNotifications(inject, error, { sessionID: "new" });
+  monitor = monitorServiceNotifications(contextSink(inject), error, { sessionID: "new" });
   await settle();
   const count = inject.mock.calls.length;
   pending.resolve(focused("retired", 1));
@@ -131,7 +132,7 @@ it("cancels a retired context read before its replacement and rejects its late r
 
 it("preserves verified context through malformed reads and retries without blocking alerts", async () => {
   alerts = "[]";
-  monitor = monitorServiceNotifications(inject, error, { sessionID: "conversation" });
+  monitor = monitorServiceNotifications(contextSink(inject), error, { sessionID: "conversation" });
   await settle();
   vi.mocked(mcpClient.readAdvertisedTextResource).mockImplementation(async (uri) => {
     if (uri === "fixture://context") throw new Error("advisory read failed");
@@ -159,7 +160,7 @@ it("preserves verified context through malformed reads and retries without block
 
 it("publishes alerts while an independent context read remains pending", async () => {
   alerts = "[]";
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   const pending = deferred<string | null>();
   vi.mocked(mcpClient.readAdvertisedTextResource).mockImplementation(async (uri) =>

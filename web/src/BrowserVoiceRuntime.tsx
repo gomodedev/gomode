@@ -92,10 +92,22 @@ export default function BrowserVoiceRuntime(props: BrowserVoiceRuntimeProps) {
           })
       : undefined;
     const monitor = monitorServiceNotifications(
-      (text, generate) => (generate ? voiceSession.injectText(text, true) : voiceSession.setServiceContext(text)),
+      {
+        setServiceContext: (changes) => voiceSession.setServiceContext(changes),
+        announce: (text) => voiceSession.injectText(text, true),
+      },
       props.onError,
       { sessionID: voiceSession.conversationID },
       source,
+    );
+    createEffect(
+      on(
+        () => voiceSession.state.connected,
+        (connected) => {
+          if (connected) monitor.resume();
+        },
+        { defer: true },
+      ),
     );
     createEffect(
       on(

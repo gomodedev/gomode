@@ -23,23 +23,23 @@ export function modelContextText(texts: Iterable<string>): string {
   return sections.join("\n\n");
 }
 
-// TODO: Unverified: session.setup carries this initial context, but the
-// conversation's resource monitor (ServiceNotifications.ts) keeps its own `sent`
-// map and may publish the same texts again through setServiceContext; if that
-// lands before session.ready it is queued and flushed right after setup, so the
-// model receives the baseline twice. Confirm from the data-channel frames of a
-// fresh connect (BrowserVoiceSession.test.ts or host e2e fixtures record them);
-// if confirmed, seed the monitor's delivered state from this read
-// so the first publish sends only later changes.
-/** Initial reads are advisory and fail independently of voice transport setup. */
-export async function readInitialModelContext(options: McpToolCallOptions): Promise<string> {
+/**
+ * The text of each advertised model resource, by URI, for a new session's setup. Reads are advisory and fail
+ * independently of voice transport setup; a resource that fails is absent.
+ */
+export async function readInitialModelContext(options: McpToolCallOptions): Promise<Map<string, string>> {
   try {
     const { resources } = await mcpClient.listModelResources(undefined, options);
     const texts = await Promise.all(
       resources.map(({ uri }) => mcpClient.readTextResource(uri, undefined, options).catch(() => null)),
     );
-    return modelContextText(texts.filter((text): text is string => typeof text === "string"));
+    return new Map(
+      resources.flatMap(({ uri }, index) => {
+        const text = texts[index];
+        return typeof text === "string" ? [[uri, text] as const] : [];
+      }),
+    );
   } catch {
-    return "";
+    return new Map();
   }
 }

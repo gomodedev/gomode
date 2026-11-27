@@ -558,7 +558,7 @@ internal fun GoModeApp(
                 voiceSession.endForSignInChange()
                 if (localSelection != null) localModelOwner.restartConversation()
             } else if (voiceSessionActive) {
-                voiceConversation.contextUpdate()?.let { voiceSession.injectText(it.text, it.generate) }
+                voiceSession.contextChanged()
             }
         }
     }

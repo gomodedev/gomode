@@ -339,13 +339,10 @@ internal class VoiceConversation(
         return modelContextText(sections.values, CATALOG_CONTEXT_BUDGET, CATALOG_CONTEXT_BUDGET)
     }
 
-    // TODO: This commits sentContext when called, not when the text reaches the model. Callers
-    // queue the result while a turn is active, so later calls diff against undelivered text and
-    // PendingVoiceContext accumulates superseded sections. See the TODO on PendingVoiceContext.
-
     /**
-     * Sections changed since the last send, or null. Removed sections are not model content. A switch
-     * the model did not request is a notification, so the model announces the new active server.
+     * Sections changed since the last send, or null. It records the result as sent, so call it only
+     * when the result goes to the model. Removed sections are not model content. A switch the model
+     * did not request is a notification, so the model announces the new active server.
      */
     fun contextUpdate(): VoiceContextUpdate? {
         // Hosts observe state before setup sends the baseline; that setup carries the full context.

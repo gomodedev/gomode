@@ -12,6 +12,7 @@ import {
   type McpSubscribeOptions,
 } from "./McpClient";
 import { monitorServiceNotifications } from "./ServiceNotifications";
+import { contextSink } from "../tests/context-sink";
 
 let snapshot: string | null;
 let monitor: McpResourceSubscription;
@@ -123,7 +124,7 @@ it("retires each discovered absence before gated MCP reads while independent qui
       return { close: () => {} };
     };
     monitor = monitorServiceNotifications(
-      (text, generate) => published.push({ text, generate }),
+      contextSink((text, generate) => published.push({ text, generate })),
       (failure) => failures.push(failure),
       { sessionID: "presence-conversation" },
       source,
@@ -271,7 +272,7 @@ it("measures 2,000-node focus changes, missing resources, bursts, idle, and reco
       published.length = 0;
     };
     monitor = monitorServiceNotifications(
-      (text, generate) => published.push({ text, generate }),
+      contextSink((text, generate) => published.push({ text, generate })),
       (failure) => failures.push(failure),
       { sessionID: "workload-conversation" },
     );
@@ -311,8 +312,42 @@ it("measures 2,000-node focus changes, missing resources, bursts, idle, and reco
   }
 });
 
+it("resumes only the parts that gave up retrying", async () => {
+  const capabilities = vi.mocked(mcpClient.resourceCapabilities);
+  capabilities.mockRejectedValue(new Error("unavailable"));
+  const resumable = monitorServiceNotifications(contextSink(inject), error);
+  monitor = resumable;
+  await settle();
+  for (let retry = 0; retry < 8; retry++) {
+    vi.advanceTimersByTime(Math.ceil(2000 * 1.5 ** retry));
+    await settle();
+  }
+  expect(capabilities).toHaveBeenCalledTimes(9);
+  vi.advanceTimersByTime(3_600_000);
+  await settle();
+  expect(capabilities).toHaveBeenCalledTimes(9);
+  expect(mcpClient.subscribeResources).not.toHaveBeenCalled();
+
+  capabilities.mockResolvedValue({ subscribe: true, listChanged: true });
+  resumable.resume();
+  await settle();
+  expect(capabilities).toHaveBeenCalledTimes(10);
+  expect(mcpClient.subscribeResources).toHaveBeenCalledOnce();
+  const reads = read.mock.calls.length;
+  resumable.resume();
+  await settle();
+  expect(capabilities).toHaveBeenCalledTimes(10);
+  expect(read.mock.calls.length).toBe(reads);
+
+  options.onStopped?.();
+  resumable.resume();
+  await settle();
+  expect(close).toHaveBeenCalledOnce();
+  expect(mcpClient.subscribeResources).toHaveBeenCalledTimes(2);
+});
+
 it("sends no baseline, announces each new alert once, and stays quiet on withdrawal", async () => {
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   expect(inject).not.toHaveBeenCalled();
   expect(options.resourceSubscriptions).toEqual(["gomode://notifications"]);
@@ -337,7 +372,7 @@ it("sends no baseline, announces each new alert once, and stays quiet on withdra
 });
 
 it("stays silent on alert withdrawal, empty reads, and read faults", async () => {
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   snapshot = null;
   changed({ listChanged: true });
@@ -357,7 +392,7 @@ it("stays silent on alert withdrawal, empty reads, and read faults", async () =>
 
 it("rejects an entire malformed snapshot without consuming its occurrence IDs, then recovers", async () => {
   snapshot = "[]";
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   for (const invalid of [
     [alert("one"), alert("one")],
@@ -382,7 +417,7 @@ it("rejects an entire malformed snapshot without consuming its occurrence IDs, t
 
 it("announces only live alerts and stays quiet when one expires", async () => {
   snapshot = "[]";
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   snapshot = JSON.stringify([
     alert("expired", { expiresAt: new Date(Date.now() - 1000).toISOString() }),
@@ -396,7 +431,7 @@ it("announces only live alerts and stays quiet when one expires", async () => {
 });
 
 it("coalesces concurrent invalidations and discards pending reads after close", async () => {
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   const pending = deferred<string | null>();
   read.mockReturnValueOnce(pending.promise);
@@ -424,13 +459,13 @@ it("coalesces concurrent invalidations and discards pending reads after close", 
 
 it("watches catalog changes without unadvertised resource subscriptions and bounds large alert text", async () => {
   snapshot = null;
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   expect(options.resourceSubscriptions).toBeUndefined();
   expect(options.resourcesListChanged).toBe(true);
   monitor.close();
   snapshot = "[]";
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   snapshot = JSON.stringify(Array.from({ length: 100 }, (_, i) => alert(String(i), { body: "x".repeat(10000) })));
   changed({ uri: "gomode://notifications" });
@@ -443,13 +478,13 @@ it("watches catalog changes without unadvertised resource subscriptions and boun
 
 it("skips unsupported resources and reads static resources without subscribing", async () => {
   vi.mocked(mcpClient.resourceCapabilities).mockResolvedValueOnce(null);
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   expect(read).not.toHaveBeenCalled();
   expect(mcpClient.subscribeResources).not.toHaveBeenCalled();
   monitor.close();
   vi.mocked(mcpClient.resourceCapabilities).mockResolvedValueOnce({});
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   expect(read).toHaveBeenCalled();
   expect(mcpClient.subscribeResources).not.toHaveBeenCalled();
@@ -465,7 +500,7 @@ it("delivers reference-only changes quietly before waking for a new alert", asyn
   read.mockImplementation(async (uri) =>
     uri === "fixture://catalog" ? items : uri === "gomode://notifications" ? snapshot : null,
   );
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   expect(options.resourceSubscriptions).toEqual(["fixture://catalog", "gomode://notifications"]);
   inject.mockClear();
@@ -497,7 +532,7 @@ it("publishes the whole replacing resource text after removing an item", async (
   read.mockImplementation(async (uri) =>
     uri === "fixture://catalog" ? items : uri === "gomode://notifications" ? snapshot : null,
   );
-  monitor = monitorServiceNotifications(inject, error);
+  monitor = monitorServiceNotifications(contextSink(inject), error);
   await settle();
   items = JSON.stringify({ items: [{ id: "two", title: "Beta" }] });
   changed({ uri: "fixture://catalog" });
@@ -506,7 +541,7 @@ it("publishes the whole replacing resource text after removing an item", async (
 });
 
 it("preserves supplementary notification title/body text at code-unit bounds", async () => {
-  monitor = monitorServiceNotifications(inject, error, {});
+  monitor = monitorServiceNotifications(contextSink(inject), error, {});
   await settle();
   snapshot = JSON.stringify([
     alert("unicode", { title: "t".repeat(255) + "😀suffix", body: "b".repeat(1999) + "𠮷suffix" }),

@@ -2774,23 +2774,61 @@ describe("VoiceSession", () => {
       const event = (state: string) =>
         channel.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: "turn.status", state }) }));
       event("thinking");
-      // Queued context changes accumulate in order, then the alert follows.
-      for (let index = 0; index < 3; index++) session.setServiceContext(`Change ${index}`);
+      // A resource that changes during the turn arrives once, newest, then the alert follows.
+      for (let index = 0; index < 3; index++)
+        session.setServiceContext(new Map([["fixture://focus", `Change ${index}`]]));
+      session.setServiceContext(new Map([["fixture://catalog", "Catalog"]]));
       session.injectText("Build is waiting", true);
       expect(channel.send.mock.calls.some(([text]) => text.includes("Build is waiting"))).toBe(false);
       event("idle");
       expect(channel.send).toHaveBeenLastCalledWith(
         JSON.stringify({
           kind: "context.update",
-          context: { text: "Change 0\n\nChange 1\n\nChange 2\n\nBuild is waiting" },
+          context: { text: "Change 2\n\nCatalog\n\nBuild is waiting" },
           generate: true,
         }),
       );
+      const sends = channel.send.mock.calls.length;
+      session.setServiceContext(new Map([["fixture://focus", "Change 2"]]));
+      expect(channel.send.mock.calls.length).toBe(sends);
       session.injectText("Review has a question", true);
       expect(channel.send.mock.calls.some(([text]) => text.includes("Review has a question"))).toBe(false);
       event("idle");
       expect(channel.send).toHaveBeenLastCalledWith(
         JSON.stringify({ kind: "context.update", context: { text: "Review has a question" }, generate: true }),
+      );
+    } finally {
+      session.disconnect();
+    }
+  });
+
+  it("sends only service context that the session setup did not carry", async () => {
+    mcpMocks.mcpReadTextResource.mockImplementation(async (uri) => (uri === "fixture://catalog" ? "Catalog" : "Focus"));
+    const session = new VoiceSession();
+    try {
+      await session.connect();
+      const channel = FakePeerConnection.dataChannels.at(-1);
+      if (!channel) throw new Error("Missing voice channel");
+      channel.onopen?.();
+      const setup = JSON.parse(channel.send.mock.calls[0]?.[0] as string) as { context: { text: string } };
+      expect(setup.context.text).toBe("Focus\n\nCatalog");
+      channel.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: "session.ready" }) }));
+      const sends = channel.send.mock.calls.length;
+      session.setServiceContext(
+        new Map([
+          ["fixture://context", "Focus"],
+          ["fixture://catalog", "Catalog"],
+        ]),
+      );
+      expect(channel.send.mock.calls.length).toBe(sends);
+      session.setServiceContext(
+        new Map([
+          ["fixture://context", "Focus moved"],
+          ["fixture://catalog", "Catalog"],
+        ]),
+      );
+      expect(channel.send).toHaveBeenLastCalledWith(
+        JSON.stringify({ kind: "context.update", context: { text: "Focus moved" } }),
       );
     } finally {
       session.disconnect();
@@ -4140,7 +4178,7 @@ describe("voice network recovery", () => {
 
   it("continues backing off when a replacement session drops soon after it is ready", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession({ prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() });
+    const session = new VoiceSession();
     const ready = () => {
       const channel = FakePeerConnection.dataChannels.at(-1);
       channel?.onopen?.();

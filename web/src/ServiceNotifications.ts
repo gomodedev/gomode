@@ -1,6 +1,6 @@
 // Monitors advertised opaque model resources and separate actionable alerts for one conversation.
 
-import { boundedModelText, modelContextText } from "./ModelContext";
+import { boundedModelText } from "./ModelContext";
 import {
   mcpClient,
   McpRetryBackoff,
@@ -28,8 +28,21 @@ export type ServiceResourceSource = (
   options: McpSubscribeOptions,
   receive: (event: McpResourceNotification) => void,
 ) => McpResourceSubscription;
+/** Where a monitor delivers what it observes. */
+export interface ServiceContextSink {
+  /** The latest text of each model resource that changed since the last call, by URI. */
+  setServiceContext(changes: ReadonlyMap<string, string>): void;
+  /** New actionable alerts for the model to announce. */
+  announce(text: string): void;
+}
+
 export interface ServiceNotificationMonitor extends McpResourceSubscription {
   refreshContext(): void;
+  /**
+   * Restart, with fresh backoff, each part that gave up retrying: discovery, a resource or alerts read, or the
+   * subscription. Call it when the conversation's voice session becomes ready; parts still running are untouched.
+   */
+  resume(): void;
 }
 
 interface WatchedResource {
@@ -40,11 +53,13 @@ interface WatchedResource {
   dirty: boolean;
   retry: ReturnType<typeof setTimeout> | null;
   backoff: McpRetryBackoff;
+  /** The read failed and its backoff gave up. */
+  stopped: boolean;
 }
 
 /** Own this monitor with the conversation; replacing its identity retires every resource. */
 export function monitorServiceNotifications(
-  injectText: (text: string, generate: boolean) => void,
+  sink: ServiceContextSink,
   onError: (error: unknown) => void,
   options?: McpToolCallOptions,
   source?: ServiceResourceSource,
@@ -57,6 +72,9 @@ export function monitorServiceNotifications(
   let discoveryDirty = false;
   let discoveryRetry: ReturnType<typeof setTimeout> | null = null;
   const discoveryBackoff = new McpRetryBackoff();
+  let discoveryStopped = false;
+  let subscriptionStopped = false;
+  let alertsStopped = false;
   let queued = false;
   let alerts: ServiceNotification[] | undefined;
   let alertsAvailable: boolean | undefined;
@@ -66,12 +84,8 @@ export function monitorServiceNotifications(
   let alertTimer: ReturnType<typeof setTimeout> | null = null;
   const alertBackoff = new McpRetryBackoff();
   const resources = new Map<string, WatchedResource>();
-  // TODO: This records "sent" when injectText queues the text, and VoiceSession
-  // then accumulates queued changes. A resource changing twice during a turn is
-  // sent twice. Track delivery instead; see the TODO on
-  // VoiceSession.setServiceContext.
-  // Last text sent per resource; the model only receives changes.
-  const sent = new Map<string, string>();
+  // Last text reported per resource; the sink diffs it against what the model has.
+  const reported = new Map<string, string>();
   const observed = new Set<string>();
   const unseen = new Set<string>();
   const controller = new AbortController();
@@ -97,10 +111,14 @@ export function monitorServiceNotifications(
               resourceSubscriptions: uris.length > 0 ? uris : undefined,
               resourcesListChanged: capabilities?.listChanged,
               onReady: () => {
+                subscriptionStopped = false;
                 for (const [uri, record] of resources) void refresh(uri, record);
                 void refreshAlerts();
               },
               onError,
+              onStopped: () => {
+                subscriptionStopped = true;
+              },
             },
             (event) => {
               if (event.listChanged) {
@@ -124,20 +142,19 @@ export function monitorServiceNotifications(
             },
           );
         }
-        const changed: string[] = [];
+        const changed = new Map<string, string>();
         for (const [uri, record] of resources) {
-          if (typeof record.value !== "string" || sent.get(uri) === record.value) continue;
-          sent.set(uri, record.value);
-          changed.push(record.value);
+          if (typeof record.value !== "string" || reported.get(uri) === record.value) continue;
+          reported.set(uri, record.value);
+          changed.set(uri, record.value);
         }
-        const context = modelContextText(changed);
-        if (context) injectText(context, false);
+        if (changed.size > 0) sink.setServiceContext(changed);
         if (closed) return;
         const now = Date.now();
         const fresh = (alerts ?? []).filter(
           (alert) => unseen.has(alert.id) && (alert.expiresAt === null || alert.expiresAt > now),
         );
-        if (fresh.length) injectText(alertText(fresh), true);
+        if (fresh.length) sink.announce(alertText(fresh));
         unseen.clear();
       } catch (error) {
         if (!closed) onError(error);
@@ -148,6 +165,7 @@ export function monitorServiceNotifications(
   async function refresh(uri: string, record: WatchedResource) {
     if (closed || resources.get(uri) !== record) return;
     record.dirty = true;
+    record.stopped = false;
     if (record.retry !== null) clearTimeout(record.retry);
     record.retry = null;
     if (record.refreshing) return;
@@ -166,6 +184,7 @@ export function monitorServiceNotifications(
           onError(error);
           const delay = record.backoff.next(error);
           if (delay !== null) record.retry = setTimeout(() => void refresh(uri, record), delay);
+          else record.stopped = true;
           break;
         } finally {
           publish();
@@ -206,6 +225,7 @@ export function monitorServiceNotifications(
 
   async function refreshAlerts() {
     alertDirty = true;
+    alertsStopped = false;
     if (closed || alertRunning) return;
     alertRunning = true;
     if (alertTimer !== null) clearTimeout(alertTimer);
@@ -247,6 +267,7 @@ export function monitorServiceNotifications(
           onError(error);
           const delay = alertBackoff.next(error);
           if (delay !== null) alertTimer = setTimeout(() => void refreshAlerts(), delay);
+          else alertsStopped = true;
           break;
         } finally {
           publish();
@@ -259,6 +280,7 @@ export function monitorServiceNotifications(
 
   async function discover() {
     discoveryDirty = true;
+    discoveryStopped = false;
     if (closed || discoveryRunning) return;
     discoveryRunning = true;
     if (discoveryRetry !== null) clearTimeout(discoveryRetry);
@@ -278,7 +300,7 @@ export function monitorServiceNotifications(
           if (record.retry !== null) clearTimeout(record.retry);
           record.controller.abort();
           resources.delete(uri);
-          sent.delete(uri);
+          reported.delete(uri);
         }
         for (const uri of uris) {
           if (resources.has(uri)) continue;
@@ -290,6 +312,7 @@ export function monitorServiceNotifications(
             dirty: false,
             retry: null,
             backoff: new McpRetryBackoff(),
+            stopped: false,
           });
         }
         if (advertised.notifications && alertsAvailable === false) alerts = undefined;
@@ -306,6 +329,7 @@ export function monitorServiceNotifications(
         onError(error);
         const delay = discoveryBackoff.next(error);
         if (delay !== null) discoveryRetry = setTimeout(() => void discover(), delay);
+        else discoveryStopped = true;
       }
     } finally {
       discoveryRunning = false;
@@ -315,6 +339,30 @@ export function monitorServiceNotifications(
   return {
     refreshContext() {
       for (const [uri, record] of resources) void refresh(uri, record);
+    },
+    resume() {
+      if (closed) return;
+      if (subscriptionStopped) {
+        // A new stream's acknowledgement rereads every resource and the alerts.
+        subscriptionStopped = false;
+        subscription?.close();
+        subscription = null;
+        publish();
+      }
+      if (discoveryStopped) {
+        discoveryBackoff.reset();
+        void discover();
+        return;
+      }
+      for (const [uri, record] of resources) {
+        if (!record.stopped) continue;
+        record.backoff.reset();
+        void refresh(uri, record);
+      }
+      if (alertsStopped) {
+        alertBackoff.reset();
+        void refreshAlerts();
+      }
     },
     close() {
       if (closed) return;
@@ -329,7 +377,7 @@ export function monitorServiceNotifications(
       observation?.close();
       subscription?.close();
       resources.clear();
-      sent.clear();
+      reported.clear();
       observed.clear();
       unseen.clear();
     },

@@ -361,7 +361,8 @@ internal class VoiceSession(
     private var speakerActive = false
 
     /** Text notifications buffered while the model is speaking; flushed on turn end. */
-    private val pendingNotifications = PendingVoiceContext()
+    private val pendingNotifications =
+        PendingVoiceContext { voiceConversation.takeIf { it.isCurrent() }?.contextUpdate() }
 
     private var lastIceConnectionState: String? = null
     private var lastIceGatheringState: String? = null
@@ -1468,6 +1469,12 @@ internal class VoiceSession(
             }
         }
         send(json.encodeToString(ContextUpdate.serializer(), gatewayContextUpdate(text, generate)))
+    }
+
+    override fun contextChanged() {
+        if (_state.value.error != null) return
+        pendingNotifications.markContextChanged()
+        flushPendingNotifications()
     }
 
     private fun contextUpdateBlocked(): Boolean =

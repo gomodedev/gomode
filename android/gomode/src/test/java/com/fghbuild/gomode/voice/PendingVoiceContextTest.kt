@@ -1,4 +1,4 @@
-// Tests accumulated context changes, alert retention, and explicit native model wake-up.
+// Tests delivery-time context diffs, alert retention, and explicit native model wake-up.
 package com.fghbuild.gomode.voice
 
 import kotlinx.serialization.json.Json
@@ -10,19 +10,31 @@ import org.junit.Test
 
 class PendingVoiceContextTest {
     @Test
-    fun contextChangesAccumulateAheadOfAlerts() {
-        val pending = PendingVoiceContext()
-        pending.add("Old references", false)
+    fun contextIsDiffedOnceWhenDrainedAheadOfQueuedTexts() {
+        var updates = 0
+        var context: VoiceContextUpdate? = VoiceContextUpdate("Current references", false)
+        val pending =
+            PendingVoiceContext {
+                updates++
+                context
+            }
+        pending.markContextChanged()
         pending.add("First alert", true)
-        pending.add("Current references", false)
+        pending.markContextChanged()
         pending.add("Second alert", true)
+        assertEquals(0, updates)
         assertEquals(
-            VoiceContextUpdate("Old references\n\nCurrent references\n\nFirst alert\n\nSecond alert", true),
+            VoiceContextUpdate("Current references\n\nFirst alert\n\nSecond alert", true),
             pending.drain(),
         )
+        assertEquals("two changes during a turn send the context once", 1, updates)
         assertNull(pending.drain())
-        pending.add("Quiet references", false)
-        assertEquals(VoiceContextUpdate("Quiet references", false), pending.drain())
+        assertEquals(1, updates)
+
+        context = null
+        pending.markContextChanged()
+        assertTrue(pending.isNotEmpty())
+        assertNull("a change the model already has sends nothing", pending.drain())
     }
 
     @Test
@@ -39,7 +51,7 @@ class PendingVoiceContextTest {
 
     @Test
     fun alertBufferRejectsOverflowWithoutDroppingEarlierOccurrences() {
-        val pending = PendingVoiceContext()
+        val pending = PendingVoiceContext { null }
         repeat(64) { assertTrue(pending.add("Alert $it", true)) }
         assertFalse(pending.add("Overflow", true))
         assertEquals(
@@ -53,17 +65,10 @@ class PendingVoiceContextTest {
     }
 
     @Test
-    fun overBudgetContextKeepsTheNewestChangeWhole() {
-        val pending = PendingVoiceContext()
-        pending.add("a".repeat(10_000), false)
-        pending.add("b".repeat(5_000), false)
-        assertEquals(VoiceContextUpdate("b".repeat(5_000), false), pending.drain())
-    }
-
-    @Test
     fun clearingAConversationDropsItsPendingAlerts() {
-        val pending = PendingVoiceContext()
+        val pending = PendingVoiceContext { null }
         pending.add("Retired alert", true)
+        pending.markContextChanged()
         pending.clear()
         assertNull(pending.drain())
     }

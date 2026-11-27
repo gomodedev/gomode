@@ -479,6 +479,8 @@ export interface McpSubscribeOptions extends McpToolCallOptions {
   onReady?: () => void;
   /** Called when the stream fails; the client retries with McpRetryBackoff until it gives up or closes. */
   onError?: (error: unknown) => void;
+  /** Called when the client gives up retrying; a network change still restarts the stream. */
+  onStopped?: () => void;
 }
 
 /** A live MCP resource subscription. Close it to stop listening. */
@@ -521,6 +523,7 @@ function subscribeMcpResources(
     if (!navigator.onLine) return;
     const delay = backoff.next(error);
     if (delay !== null) retryTimer = setTimeout(() => void run(), delay);
+    else options.onStopped?.();
   };
 
   const run = async (): Promise<void> => {

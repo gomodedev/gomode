@@ -265,7 +265,8 @@ internal class DeviceVoiceSession(
     private var awaitingReply = false
     private var pendingCancellations = 0
     private var remoteTurnActive = false
-    private val pendingNotifications = PendingVoiceContext()
+    private val pendingNotifications =
+        PendingVoiceContext { voiceConversation?.takeIf { it.isCurrent() }?.contextUpdate() }
 
     private val audioStateJob =
         scope.launch {
@@ -1486,6 +1487,12 @@ internal class DeviceVoiceSession(
         } else {
             sendContextUpdate(text, generate)
         }
+    }
+
+    override fun contextChanged() {
+        if (_state.value.error != null) return
+        pendingNotifications.markContextChanged()
+        flushPendingNotifications()
     }
 
     override fun close() {

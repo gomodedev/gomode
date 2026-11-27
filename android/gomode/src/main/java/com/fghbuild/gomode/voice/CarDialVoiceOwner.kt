@@ -504,15 +504,9 @@ internal class CarDialVoiceOwner(
                         _,
                         _,
                         ->
-                        if (voiceState.connected &&
-                            voiceConversation.isCurrent()
-                        ) {
-                            voiceConversation.contextUpdate()
-                        } else {
-                            null
-                        }
-                    }.collect { update ->
-                        if (update != null) voice.injectText(update.text, update.generate)
+                        voiceState.connected && voiceConversation.isCurrent()
+                    }.collect { changed ->
+                        if (changed) voice.contextChanged()
                     }
                 }
         }

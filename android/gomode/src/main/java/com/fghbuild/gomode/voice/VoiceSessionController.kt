@@ -8,7 +8,6 @@
 // stops monitoring.
 package com.fghbuild.gomode.voice
 
-import com.fghbuild.gomode.service.boundModelContext
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -41,6 +40,13 @@ internal interface VoiceSessionController {
         generate: Boolean = false,
     )
 
+    /**
+     * contextChanged reports that the conversation's service context changed. The session sends
+     * VoiceConversation.contextUpdate() once the model can take it, so the diff is computed at
+     * delivery.
+     */
+    fun contextChanged()
+
     fun setError(message: String)
 
     /** dismissError hides the current failure; [VoiceErrorLog] keeps it reviewable in settings. */
@@ -55,47 +61,47 @@ internal data class VoiceContextUpdate(
     val generate: Boolean,
 )
 
-// TODO: Accumulated changes can carry a superseded version of the same section: two "Active
-// server:" lines arrive in one update when focus changes twice during a tool call
-// (ServerVoiceSwitchTest#spokenTextSwitchKeepsOneConversationAcrossBothDirections). The model
-// reads the newest last, so behavior is correct, but the stale copy wastes tokens. The cause is
-// VoiceConversation.contextUpdate() committing its sent map when GoModeApp/CarDialVoiceOwner call
-// it, before delivery. Compute the diff when this buffer drains instead, so it holds no text and
-// the over-budget fallback disappears. The browser has the same shape (web/src/VoiceSession.ts).
-// Retain every context change and actionable occurrence until the active turn ends. Context updates
-// carry changes only, so they accumulate; an over-budget total keeps the newest whole.
-internal class PendingVoiceContext {
-    private var context: String? = null
-    private val alerts = mutableListOf<String>()
+// Holds what reaches the model once the active turn ends. The conversation's context is diffed
+// when this drains, against what the model already received, so each changed section arrives
+// once, newest. Injected texts and alerts keep their order.
+internal class PendingVoiceContext(
+    private val contextUpdate: () -> VoiceContextUpdate?,
+) {
+    private var contextChanged = false
+    private val texts = mutableListOf<VoiceContextUpdate>()
+
+    fun markContextChanged() {
+        contextChanged = true
+    }
 
     fun add(
         text: String,
         generate: Boolean,
     ): Boolean {
-        if (generate) {
-            if (alerts.size >= 64) return false
-            alerts.add(text)
-        } else {
-            context =
-                boundModelContext(listOfNotNull(context, text).joinToString("\n\n")).ifEmpty { text }
-        }
+        if (texts.size >= MAX_PENDING_TEXTS) return false
+        texts.add(VoiceContextUpdate(text, generate))
         return true
     }
 
-    fun isNotEmpty() = context != null || alerts.isNotEmpty()
+    fun isNotEmpty() = contextChanged || texts.isNotEmpty()
 
-    fun hasAlerts() = alerts.isNotEmpty()
+    fun hasAlerts() = texts.any { it.generate }
 
     fun clear() {
-        context = null
-        alerts.clear()
+        contextChanged = false
+        texts.clear()
     }
 
     fun drain(): VoiceContextUpdate? {
-        if (!isNotEmpty()) return null
-        val update = VoiceContextUpdate((listOfNotNull(context) + alerts).joinToString("\n\n"), alerts.isNotEmpty())
+        val context = if (contextChanged) contextUpdate() else null
+        val parts = listOfNotNull(context) + texts
         clear()
-        return update
+        if (parts.isEmpty()) return null
+        return VoiceContextUpdate(parts.joinToString("\n\n") { it.text }, parts.any { it.generate })
+    }
+
+    private companion object {
+        const val MAX_PENDING_TEXTS = 64
     }
 }
 

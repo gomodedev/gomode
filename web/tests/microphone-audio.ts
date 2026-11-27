@@ -1,4 +1,4 @@
-// Web Audio capture doubles expose real sample windows, activation, and retired graphs to voice tests.
+// Web Audio doubles expose capture sample windows, activation, retired graphs, and chime notes to voice tests.
 
 import { vi } from "./expect";
 
@@ -48,6 +48,21 @@ export class FakeMicrophoneContext {
     };
     this.gains.push(gain);
     return gain;
+  }
+  // The voice chime plays through the same context: one oscillator per note.
+  oscillators: Array<{ start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
+  destination = {};
+  createOscillator() {
+    const oscillator = {
+      type: "sine",
+      frequency: { setValueAtTime: vi.fn() },
+      connect: vi.fn(<T>(node: T) => node),
+      disconnect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    this.oscillators.push(oscillator);
+    return oscillator;
   }
   createMediaStreamDestination() {
     const track = { kind: "audio", enabled: true, stop: vi.fn() };

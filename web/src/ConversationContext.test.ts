@@ -3,6 +3,7 @@ import { afterEach, it } from "node:test";
 import { expect, vi } from "../tests/expect";
 import { configureMcpClient, mcpClient, type McpResourceNotification } from "./McpClient";
 import { monitorServiceNotifications } from "./ServiceNotifications";
+import { contextSink } from "../tests/context-sink";
 afterEach(() => vi.restoreAllMocks());
 
 it("does not deliver a tool response from a retired login configuration to its replacement", async () => {
@@ -94,7 +95,7 @@ it("routes one warm dependency read, rejects stale tools, and never exposes priv
   const inject = vi.fn<(text: string, generate: boolean) => void>();
   const errors = vi.fn<(error: unknown) => void>();
   const monitor = monitorServiceNotifications(
-    inject,
+    contextSink(inject),
     errors,
     { sessionID: "same-conversation" },
     (_options, changed) => {
@@ -202,10 +203,15 @@ it("faults malformed private authority on context reads while tool and other res
   let receive: ((event: McpResourceNotification) => void) | undefined;
   const inject = vi.fn<(text: string, generate: boolean) => void>();
   const errors = vi.fn<(error: unknown) => void>();
-  const monitor = monitorServiceNotifications(inject, errors, { sessionID: "same-session" }, (_options, changed) => {
-    receive = changed;
-    return { close() {} };
-  });
+  const monitor = monitorServiceNotifications(
+    contextSink(inject),
+    errors,
+    { sessionID: "same-session" },
+    (_options, changed) => {
+      receive = changed;
+      return { close() {} };
+    },
+  );
   t.after(() => monitor.close());
   const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
   await settle();

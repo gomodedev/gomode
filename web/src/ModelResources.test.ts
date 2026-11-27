@@ -4,6 +4,7 @@ import { expect, vi } from "../tests/expect";
 import { deferred } from "../tests/deferred";
 import { configureMcpClient, mcpClient, type McpResourceNotification } from "./McpClient";
 import { monitorServiceNotifications } from "./ServiceNotifications";
+import { contextSink } from "../tests/context-sink";
 
 afterEach(() => vi.restoreAllMocks());
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -76,10 +77,15 @@ it("retiring an advertised identity aborts its read and rejects late authority a
   let changed: ((event: McpResourceNotification) => void) | undefined;
   const inject = vi.fn<(text: string, generate: boolean) => void>();
   const error = vi.fn();
-  const monitor = monitorServiceNotifications(inject, error, { sessionID: "same" }, (_options, receive) => {
-    changed = receive;
-    return { close() {} };
-  });
+  const monitor = monitorServiceNotifications(
+    contextSink(inject),
+    error,
+    { sessionID: "same" },
+    (_options, receive) => {
+      changed = receive;
+      return { close() {} };
+    },
+  );
   t.after(() => monitor.close());
   await settle();
   block = true;
@@ -147,7 +153,7 @@ it("offscreen reads reconcile an admitted model resource without establishing a 
   });
   const inject = vi.fn<(text: string, generate: boolean) => void>();
   const monitor = monitorServiceNotifications(
-    inject,
+    contextSink(inject),
     () => {},
     { sessionID: "conversation" },
     () => ({ close() {} }),

@@ -1,7 +1,7 @@
 // Tests browser MCP requests, opaque result metadata, and subscription ownership.
 import { afterEach, describe, it } from "node:test";
 import { ok, rejects } from "node:assert/strict";
-import { expect } from "../tests/expect";
+import { expect, vi } from "../tests/expect";
 
 import type { ResourcesReadParams, SubscriptionsListenParams } from "../../sdk/mcp/ts/v1/types.gen";
 
@@ -333,6 +333,33 @@ describe("subscribeResources", () => {
     await reconnected;
     subscription.close();
     expect(sessions).toEqual(["conversation-one", "conversation-one"]);
+  });
+
+  it("reports when it stops retrying a stream the server keeps rejecting", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    configureMcpClient("/mcp", "host");
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts++;
+      return new Response("unavailable", { status: 503 });
+    };
+    const stopped = vi.fn();
+    const subscription = mcpClient.subscribeResources({ resourcesListChanged: true, onStopped: stopped }, () => {});
+    t.after(() => subscription.close());
+    const flush = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    await flush();
+    for (let retry = 0; retry < 8; retry++) {
+      expect(stopped).not.toHaveBeenCalled();
+      t.mock.timers.tick(Math.ceil(2000 * 1.5 ** retry));
+      await flush();
+    }
+    expect(attempts).toBe(9);
+    expect(stopped).toHaveBeenCalledOnce();
+    t.mock.timers.tick(3_600_000);
+    await flush();
+    expect(attempts).toBe(9);
   });
 
   it("streams resource notifications to the host", async () => {

@@ -73,8 +73,7 @@ import {
   type FrontendVoiceToolsSnapshot,
   type FrontendSessionPreparation,
 } from "./FrontendVoiceTools";
-import { readInitialModelContext } from "./ModelContext";
-import { MODEL_CONTEXT_BUDGET } from "./ConversationContext";
+import { modelContextText, readInitialModelContext } from "./ModelContext";
 import { WebAudioVoiceChime, type VoiceChimePlayer } from "./VoiceChime";
 import { WebAudioThinkingEarcon, type ThinkingEarcon } from "./ThinkingEarcon";
 import {
@@ -1004,7 +1003,10 @@ export class VoiceSession {
   private _listeningWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
   private _pendingNotifications: Array<{ text: string; generate: boolean }> = [];
-  private _pendingServiceContext: string | null = null;
+  /** Latest undelivered text per service resource URI. */
+  private readonly _pendingServiceContext = new Map<string, string>();
+  /** Text per service resource URI that the current gateway session has, from its setup and later updates. */
+  private _deliveredServiceContext = new Map<string, string>();
   private _reconnectEnabled = false;
   /** Replacements started in the current recovery; see RECOVERY_WINDOW_MS. */
   private _reconnectAttempts = 0;
@@ -1969,7 +1971,7 @@ export class VoiceSession {
       this._readyAt = null;
       this._recoveryContext = "";
       this._pendingNotifications = [];
-      this._pendingServiceContext = null;
+      this._pendingServiceContext.clear();
       this._clearTranscript();
     }
     this._setStatus("setup", "Setting up WebRTC…");
@@ -2142,7 +2144,7 @@ export class VoiceSession {
     this._speakerActive = false;
     if (!preserveTranscript) {
       this._pendingNotifications = [];
-      this._pendingServiceContext = null;
+      this._pendingServiceContext.clear();
       this._reconnectAttempts = 0;
       this._recoveryStartedAt = null;
       this._readyAt = null;
@@ -2407,25 +2409,13 @@ export class VoiceSession {
     }
   }
 
-  // TODO: Queued changes are concatenated, so a resource that changes twice during
-  // one turn reaches the model twice, the stale text first. Observed: two
-  // "focus" blocks for the same context resource in one context.update (mddb
-  // e2e voice-focus-context.spec.ts). Behavior is correct (newest last) but
-  // wastes tokens. The root cause is in ServiceNotifications.ts: its `sent` map
-  // records a resource as delivered when it is queued here, not when it reaches
-  // the gateway. Fix by computing the diff at delivery (flush time), so one
-  // pending text per resource exists; then this accumulation and its budget
-  // fallback go away. Android has the same shape: PendingVoiceContext and
-  // VoiceConversation.contextUpdate().
-  /** Send changed service context; changes queued during a turn accumulate, newest last. */
-  setServiceContext(text: string): void {
-    if (this._contextUpdateBlocked()) {
-      const pending = this._pendingServiceContext === null ? text : `${this._pendingServiceContext}\n\n${text}`;
-      // An over-budget total keeps the newest change whole.
-      this._pendingServiceContext = pending.length <= MODEL_CONTEXT_BUDGET ? pending : text;
-      return;
-    }
-    this._sendContextUpdate(text, false);
+  /**
+   * Record the latest text of changed service resources, by URI. The session sends what the gateway session does
+   * not already have once the model can take it, so a resource that changes twice during a turn arrives once.
+   */
+  setServiceContext(changes: ReadonlyMap<string, string>): void {
+    for (const [uri, text] of changes) this._pendingServiceContext.set(uri, text);
+    this._flushPendingNotifications(true);
   }
 
   injectText(text: string, generate?: boolean): void {
@@ -2461,13 +2451,18 @@ export class VoiceSession {
 
   private _flushPendingNotifications(allowResponse: boolean): void {
     if (this._contextUpdateBlocked()) return;
-    if (this._pendingNotifications.length === 0 && this._pendingServiceContext === null) return;
-    const text = [this._pendingServiceContext, ...this._pendingNotifications.map((update) => update.text)]
+    const changed = [...this._pendingServiceContext].filter(
+      ([uri, text]) => this._deliveredServiceContext.get(uri) !== text,
+    );
+    this._pendingServiceContext.clear();
+    for (const [uri, text] of changed) this._deliveredServiceContext.set(uri, text);
+    const context = modelContextText(changed.map(([, text]) => text)) || null;
+    if (this._pendingNotifications.length === 0 && context === null) return;
+    const text = [context, ...this._pendingNotifications.map((update) => update.text)]
       .filter((value): value is string => value !== null)
       .join("\n\n");
     const generate = allowResponse && this._pendingNotifications.some((update) => update.generate);
     this._pendingNotifications = [];
-    this._pendingServiceContext = null;
     this._sendContextUpdate(text, generate);
   }
 
@@ -2523,7 +2518,7 @@ export class VoiceSession {
       this._speakerActive = false;
       if (next === null) {
         this._pendingNotifications = [];
-        this._pendingServiceContext = null;
+        this._pendingServiceContext.clear();
       }
       this._update((s) => {
         s.audioPlaybackError = null;
@@ -2809,11 +2804,16 @@ export class VoiceSession {
   // Gateway setup message
   // -----------------------------------------------------------------------
 
-  private _sendSetup(tools: McpToolDescriptor[], systemInstruction: string, serviceContext: string): void {
+  private _sendSetup(
+    tools: McpToolDescriptor[],
+    systemInstruction: string,
+    serviceContext: ReadonlyMap<string, string>,
+  ): void {
+    this._deliveredServiceContext = new Map(serviceContext);
     const setup = gatewaySessionSetup(
       voiceToolDeclarations(tools, this._frontendTools?.declarations ?? []),
       systemInstruction,
-      serviceContext,
+      modelContextText(serviceContext.values()),
       this.state.languageTag,
       this._sessionVoiceName ?? "",
       this.state.showReasoning,

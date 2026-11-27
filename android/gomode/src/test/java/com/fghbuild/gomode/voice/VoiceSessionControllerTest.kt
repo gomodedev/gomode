@@ -46,6 +46,8 @@ class VoiceSessionControllerTest {
             generate: Boolean,
         ) = Unit
 
+        override fun contextChanged() = Unit
+
         override fun setError(message: String) {
             calls += "error: $message"
         }

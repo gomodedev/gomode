@@ -201,6 +201,8 @@ class PendingMicrophoneVoiceStartTest {
             generate: Boolean,
         ) = Unit
 
+        override fun contextChanged() = Unit
+
         override fun setError(message: String) = Unit
 
         override fun dismissError() = Unit
