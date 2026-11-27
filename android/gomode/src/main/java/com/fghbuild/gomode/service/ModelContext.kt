@@ -45,5 +45,8 @@ internal fun String.boundedModelText(limit: Int): String {
     return substring(0, end)
 }
 
+/** The largest assembled model context, in UTF-16 code units. */
+internal const val MODEL_CONTEXT_LIMIT = 13_000
+
 // Final bound on assembled model data; components already bound themselves.
-internal fun boundModelContext(text: String): String = if (text.length <= 13_000) text else ""
+internal fun boundModelContext(text: String): String = if (text.length <= MODEL_CONTEXT_LIMIT) text else ""

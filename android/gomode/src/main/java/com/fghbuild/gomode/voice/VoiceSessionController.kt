@@ -89,12 +89,29 @@ internal class PendingVoiceContext(
         alerts.clear()
     }
 
-    fun drain(): VoiceContextUpdate? {
+    /**
+     * drain takes the context diff, then alerts in order while the text fits [limit]; the rest stay
+     * pending for the next drain. [announce] takes the first alert regardless, so a turn that must
+     * respond has an alert to respond to.
+     */
+    fun drain(
+        limit: Int = Int.MAX_VALUE,
+        announce: Boolean = false,
+    ): VoiceContextUpdate? {
         val context = if (contextChanged) conversation()?.contextUpdate() else null
-        val texts = listOfNotNull(context?.text) + alerts
-        val generate = context?.generate == true || alerts.isNotEmpty()
-        clear()
+        contextChanged = false
+        val texts = listOfNotNull(context?.text).toMutableList()
+        var length = context?.text?.length ?: 0
+        var taken = 0
+        while (alerts.isNotEmpty()) {
+            val next = alerts.first().length + if (texts.isEmpty()) 0 else 2
+            if (length + next > limit && !(announce && taken == 0)) break
+            texts += alerts.removeAt(0)
+            length += next
+            taken++
+        }
         if (texts.isEmpty()) return null
+        val generate = context?.generate == true || taken > 0
         return VoiceContextUpdate(texts.joinToString("\n\n"), generate)
     }
 

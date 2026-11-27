@@ -19,6 +19,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.service.DefaultNetworkMonitor
+import com.fghbuild.gomode.service.MODEL_CONTEXT_LIMIT
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.isTransientHTTPStatus
 import com.fghbuild.gomode.ui.web.FrontendVoiceTools
@@ -1049,7 +1050,9 @@ internal class DeviceVoiceSession(
                 var lastDelta: Job? = null
                 try {
                     // The diff is taken as the turn starts, so it holds each changed section once.
-                    val context = if (serviceUpdate) null else pendingNotifications.drain()?.text
+                    // Alerts that do not fit stay pending and get their own turn after this one.
+                    val context =
+                        if (serviceUpdate) null else pendingNotifications.drain(MODEL_CONTEXT_LIMIT)?.text
                     activeEngine.processTurn(
                         input = UserTurnInput(text = text, serviceUpdate = serviceUpdate, context = context),
                         onDelta = { delta ->
@@ -1469,7 +1472,7 @@ internal class DeviceVoiceSession(
         if (currentEngine != null && currentEngine.engineType != VoiceLanguageModel.GATEWAY) {
             // A local model takes context only with a turn, so quiet changes wait for the next one.
             if (pendingNotifications.announces()) {
-                pendingNotifications.drain()?.let {
+                pendingNotifications.drain(MODEL_CONTEXT_LIMIT, announce = true)?.let {
                     executeLocalTurn(attempt, it.text, currentEngine, serviceUpdate = true)
                 }
             }

@@ -1,4 +1,4 @@
-// Tests alert retention and explicit native model wake-up.
+// Tests alert retention, size limits, and explicit native model wake-up.
 package com.fghbuild.gomode.voice
 
 import kotlinx.serialization.json.Json
@@ -34,6 +34,32 @@ class PendingVoiceContextTest {
                 ?.split("\n\n")
                 ?.size,
         )
+    }
+
+    @Test
+    fun alertsPastTheLimitWaitForTheNextDrain() {
+        val pending = PendingVoiceContext { null }
+        repeat(3) { pending.addAlert("x".repeat(10)) }
+        assertEquals(
+            "two alerts and their separator fit",
+            2,
+            pending
+                .drain(limit = 22)
+                ?.text
+                ?.split("\n\n")
+                ?.size,
+        )
+        assertTrue(pending.announces())
+        assertNull(
+            "an alert longer than the limit waits",
+            PendingVoiceContext { null }.also { it.addAlert("long") }.drain(3),
+        )
+        assertEquals(
+            "a turn that must respond takes the first alert regardless",
+            VoiceContextUpdate("x".repeat(10), true),
+            pending.drain(limit = 1, announce = true),
+        )
+        assertFalse(pending.announces())
     }
 
     @Test
