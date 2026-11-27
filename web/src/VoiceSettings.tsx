@@ -124,18 +124,19 @@ export default function VoiceSettings(props: {
   };
   const onSetupSave = (owner: SetupControl) => (error: string | null) =>
     setSetupSaveError(error === null ? null : { owner, message: error });
-  const catalogError = () => (voiceSession.state.choicesStatus === "error" ? voiceSession.state.choicesError : null);
+  const issues = voiceSession.issues;
   const resolutionError = (stage: SpeechStage | null) =>
-    voiceSession.state.choicesStatus !== "error" && voiceSession.state.choicesErrorStage === stage
-      ? voiceSession.state.choicesError
-      : null;
+    voiceSession.state.choicesStatus === "error"
+      ? null
+      : issues.message(stage === null ? "choices" : `choices.${stage}`);
   const speakingVoicesShown = () => voiceSession.speakingVoices.length > 0;
-  // Loading and catalog failures replace the pickers with their status line.
-  const pickersShown = () => voiceSession.state.choicesStatus !== "loading" && catalogError() === null;
+  // Loading and catalog failures replace the pickers with their status line; a dismissed failure keeps its retry.
+  const pickersShown = () =>
+    voiceSession.state.choicesStatus !== "loading" && voiceSession.state.choicesStatus !== "error";
   // Without a speaking-voice picker, the model picker owns the session's voice failure.
-  const unplacedVoiceError = () => (speakingVoicesShown() ? null : voiceSession.state.voiceError);
+  const unplacedVoiceError = () => (speakingVoicesShown() ? null : issues.message("voiceName"));
   const modelError = () => saveFailure("model") ?? resolutionError(null) ?? unplacedVoiceError();
-  const speakingVoiceError = () => voiceSaveError() ?? voiceSession.state.voiceError;
+  const speakingVoiceError = () => voiceSaveError() ?? issues.message("voiceName");
   const error = () =>
     shownLanguageError() ??
     usageError() ??
@@ -143,9 +144,7 @@ export default function VoiceSettings(props: {
     setupSaveError()?.message ??
     voiceSaveError() ??
     browserVoiceError() ??
-    speedSaveError() ??
-    voiceSession.state.choicesError ??
-    voiceSession.state.voiceError;
+    speedSaveError();
   createEffect(() => props.onError?.(error()));
   createEffect(() => props.onLanguageError?.(languageError()));
   const browserDescriptionId = createUniqueId();
@@ -304,15 +303,17 @@ export default function VoiceSettings(props: {
                 {messages().choicesLoading}
               </p>
             </Match>
-            <Match when={catalogError()}>
-              {(message) => (
-                <div class={styles.statusLine}>
-                  <p class={styles.error} role="alert">
-                    {message()}
-                  </p>
-                  {retry()}
-                </div>
-              )}
+            <Match when={voiceSession.state.choicesStatus === "error"}>
+              <div class={styles.statusLine}>
+                <Show when={issues.message("choices")}>
+                  {(message) => (
+                    <p class={styles.error} role="alert">
+                      {message()}
+                    </p>
+                  )}
+                </Show>
+                {retry()}
+              </div>
             </Match>
             <Match when={voiceSession.state.setupMode === "parts"}>
               <SpeechStageChips

@@ -10,6 +10,7 @@ import { fakeSynthesis, installBrowserSpeech } from "../tests/browser-speech";
 import { allDisabled, checkedValue, chip, chips } from "../tests/chips";
 import VoiceSettings from "./VoiceSettings";
 import { VoiceSession, voiceSession } from "./VoiceSession";
+import { VoiceIssues } from "./VoiceIssues";
 
 vi.spyOn(voiceSession, "loadVoiceChoices").mockResolvedValue();
 
@@ -17,6 +18,7 @@ let restore: () => void;
 beforeEach(() => {
   localStorage.clear();
   restore = installBrowserSpeech("Chrome desktop");
+  voiceSession.issues.resolve(...voiceSession.issues.list().map((issue) => issue.key));
   voiceSession.setState((s) => ({
     ...s,
     setupMode: "parts",
@@ -41,11 +43,9 @@ beforeEach(() => {
     },
     speechModelIDs: { input: "whisper", output: "kokoro" },
     choicesStatus: "ready",
-    choicesError: null,
     voiceName: null,
     browserVoiceURI: "",
     browserSpeechRate: 1,
-    voiceError: null,
     voiceStatus: "idle",
     speechInput: "gateway",
     speechOutput: "gateway",
@@ -71,7 +71,7 @@ describe("VoiceSettings", () => {
     expect(speed).toHaveValue("1");
     await user.selectOptions(speed, "1.5");
     expect(localStorage.getItem("gomode.browserSpeechRate")).toBe("1.5");
-    expect(new VoiceSession().state.browserSpeechRate).toBe(1.5);
+    expect(new VoiceSession(new VoiceIssues()).state.browserSpeechRate).toBe(1.5);
     voiceSession.setState((s) => ({ ...s, connectStatus: "Connecting…" }));
     expect(speed).toBeDisabled();
     expect(() => voiceSession.selectBrowserSpeechRate(2)).toThrow("End the session");
@@ -102,7 +102,7 @@ describe("VoiceSettings", () => {
     localStorage.setItem("gomode.browserSpeechRate", "NaN");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      expect(new VoiceSession().state.browserSpeechRate).toBe(1);
+      expect(new VoiceSession(new VoiceIssues()).state.browserSpeechRate).toBe(1);
       expect(warn).toHaveBeenCalledOnce();
     } finally {
       warn.mockRestore();
@@ -121,7 +121,7 @@ describe("VoiceSettings", () => {
     await user.selectOptions(select, "samantha");
     expect(localStorage.getItem("gomode.browserVoiceURI")).toBe("samantha");
     expect(voiceSession.state.browserVoiceURI).toBe("samantha");
-    expect(new VoiceSession().state.browserVoiceURI).toBe("samantha");
+    expect(new VoiceSession(new VoiceIssues()).state.browserVoiceURI).toBe("samantha");
     view.unmount();
     render(() => <VoiceSettings />);
     expect(screen.getByRole("combobox", { name: "Speaking voice" })).toHaveValue("samantha");
@@ -288,7 +288,7 @@ describe("VoiceSettings", () => {
     expect(JSON.parse(localStorage.getItem(`gomode.voiceSetup.${window.location.origin}`) ?? "null")).toMatchObject({
       partsOutput: "off",
     });
-    expect(new VoiceSession().state.speechOff).toBe(true);
+    expect(new VoiceSession(new VoiceIssues()).state.speechOff).toBe(true);
     await user.click(chip(chips("Speech"), "browser"));
     expect(voiceSession.state.speechOff).toBe(false);
   });
@@ -299,11 +299,11 @@ describe("VoiceSettings", () => {
       ["cloud", "gateway"],
     ]) {
       localStorage.setItem("gomode.voiceMode", mode!);
-      expect(new VoiceSession().speech).toEqual({ input: location, output: location });
+      expect(new VoiceSession(new VoiceIssues()).speech).toEqual({ input: location, output: location });
     }
     localStorage.setItem("gomode.voiceMode", "browser");
     localStorage.setItem("gomode.voiceInput", "gateway");
-    expect(new VoiceSession().speech).toEqual({ input: "gateway", output: "client" });
+    expect(new VoiceSession(new VoiceIssues()).speech).toEqual({ input: "gateway", output: "client" });
   });
 
   it("explains locked voice controls once while display switches stay editable", () => {

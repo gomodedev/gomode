@@ -5,6 +5,7 @@ import { voiceGatewayBaseURL } from "./BrowserVoiceManifest";
 import { BrowserSpeechBuffer } from "./BrowserSpeechBuffer";
 import { MicrophoneLevel } from "./MicrophoneLevel";
 import { MicrophoneInput } from "./MicrophoneInput";
+import { VoiceIssues, type VoiceIssueKey, type VoiceSettingsIssueKey } from "./VoiceIssues";
 import { NetworkRequestError, observeNetworkChanges } from "./NetworkChanges";
 import { mergeVoiceUsage, type VoiceUsage } from "./VoiceUsage";
 import { batch, createSignal, untrack } from "solid-js";
@@ -393,24 +394,9 @@ function voiceChannelOpen(channel: VoiceChannel): boolean {
 
 export type MicrophoneMode = "listening" | "muteOnce" | "muted";
 
-/** VoiceErrorEntry is one retained failure with the moment it happened. */
-export interface VoiceErrorEntry {
-  at: number;
-  message: string;
-}
-
-/** Count of retained failures the overlay keeps reviewable. */
-export const MAX_VOICE_ERRORS = 5;
 const VOICE_MESSAGE_DELIVERY_ERROR = "Couldn't send a voice message. Reconnect voice.";
 const VOICE_TOOL_RESULT_DELIVERY_ERROR =
   "Couldn't deliver the action's result. Reconnect voice. The action may have completed; check before repeating it.";
-
-/** Failures before the one the panel shows, newest first. */
-export function previousErrors(state: VoiceState): VoiceErrorEntry[] {
-  const [newest, ...rest] = state.errorHistory;
-  if (newest === undefined) return [];
-  return state.error !== null && newest.message === state.error ? rest : state.errorHistory;
-}
 
 export function microphoneMuted(state: Pick<VoiceState, "microphoneMode">): boolean {
   return state.microphoneMode !== "listening";
@@ -437,11 +423,7 @@ export interface VoiceState extends AudioRouteState {
   /** The gateway's advertised default choice per family. */
   defaultChoiceIDs: Record<VoiceTransport, string | null>;
   choicesStatus: "idle" | "loading" | "ready" | "error";
-  choicesError: string | null;
-  /** Speech stage whose model resolution produced choicesError; null when the model choice or catalog owns it. */
-  choicesErrorStage: SpeechStage | null;
   voiceName: string | null;
-  voiceError: string | null;
   voiceStatus: "idle" | "ready" | "error";
   connectStatus: string | null;
   connectPhase: "setup" | "waiting" | "signaling" | "reconnecting" | null;
@@ -472,14 +454,9 @@ export interface VoiceState extends AudioRouteState {
   /** Shows reported token counts in the voice overlay. Off by default. */
   showUsageStats: boolean;
   micLevel: number;
-  micLevelError: string | null;
-  error: string | null;
-  /** Retained failures, newest first; the panel shows the newest one. */
-  errorHistory: VoiceErrorEntry[];
   /** Browser permission, null when the browser cannot report it yet. */
   microphoneAccess: PermissionState | null;
   microphoneAccessPending: boolean;
-  audioPlaybackError: string | null;
   /** Available audio input devices (microphones). */
   /** Available audio output devices (speakers, headsets). */
   /** Currently selected input device ID, empty string for system default. */
@@ -685,6 +662,18 @@ function speechModelStorageKey(origin: string, stage: SpeechStage): string {
 const SESSION_CHOICE_UNAVAILABLE = "Session voice choice is unavailable. Start a new voice session.";
 const SESSION_MODEL_UNAVAILABLE = "Session speech model is unavailable. Start a new voice session.";
 const SESSION_VOICE_UNAVAILABLE = "Session speaking voice is unavailable. Start a new voice session.";
+
+/** A session setup failure that a settings field owns, reported there instead of as a connection failure. */
+class SettingsFailure extends Error {
+  constructor(
+    readonly key: VoiceSettingsIssueKey,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const CHOICES_ISSUE_KEYS = ["choices", "choices.input", "choices.output"] as const;
 
 // A saved model the gateway no longer lists falls back to its first model.
 function resolveSpeechModel(modelIDs: string[], selected: string | null, stage: SpeechStage): string {
@@ -991,10 +980,14 @@ export class VoiceSession {
       this._update((s) => {
         s.micLevel = level;
       }),
-    (error) =>
-      this._update((s) => {
-        s.micLevelError = error;
-      }),
+    (error) => {
+      if (error === null) this.issues.resolve("micLevel");
+      else
+        this.issues.raise("micLevel", error, {
+          label: "enableMicrophoneMeter",
+          run: () => this.enableMicrophoneMeter(),
+        });
+    },
   );
   /** The <audio> element playing remote RTP audio, stored so we can call setSinkId(). */
   /** True while the model is speaking — injected text is buffered and flushed after the turn ends. */
@@ -1020,7 +1013,11 @@ export class VoiceSession {
   private readonly _chime: VoiceChimePlayer;
   private readonly _thinkingEarcon: ThinkingEarcon;
 
-  constructor(chime?: VoiceChimePlayer, thinkingEarcon?: ThinkingEarcon) {
+  /** Problems this session reports; its sources raise and resolve them. */
+  readonly issues: VoiceIssues;
+
+  constructor(issues: VoiceIssues, chime?: VoiceChimePlayer, thinkingEarcon?: ThinkingEarcon) {
+    this.issues = issues;
     let setup: VoiceSetupPreference | null = null;
     try {
       setup = savedSetup(gatewaySnapshot().url.origin);
@@ -1045,10 +1042,7 @@ export class VoiceSession {
         webrtc: setup?.mode === "all-in-one" ? setup.nativeChoiceID : (setup?.partsChoiceID ?? null),
       },
       choicesStatus: "idle",
-      choicesError: null,
-      choicesErrorStage: null,
       voiceName: null,
-      voiceError: null,
       voiceStatus: "idle",
       connectStatus: null,
       connectPhase: null,
@@ -1066,16 +1060,9 @@ export class VoiceSession {
       showReasoning: savedReasoning(),
       showUsageStats: savedUsageStats(),
       micLevel: 0,
-      micLevelError: null,
-      error: null,
-      errorHistory: [],
       audioInputs: [],
-      audioDevicesError: null,
-      audioInputError: null,
       microphoneAccess: null,
       microphoneAccessPending: false,
-      audioPlaybackError: null,
-      audioOutputError: null,
       audioSwitching: null,
       audioOutputs: [],
       selectedInputId: "",
@@ -1088,6 +1075,7 @@ export class VoiceSession {
     this._audioRoutes = new AudioRoutes({
       state,
       update: (change) => this._update(change),
+      issues,
       connection: () => (this._connection?.recovering ? null : this._connection),
       input: this._microphoneInput,
       microphoneActive: () => this._microphoneActive(),
@@ -1221,7 +1209,7 @@ export class VoiceSession {
     }
     const origin = gatewaySnapshot().url.origin;
     let name: string | null = null;
-    let voiceError: string | null = null;
+    let voiceFailure: string | null = null;
     let voiceStatus: VoiceState["voiceStatus"] = "ready";
     try {
       name = choice
@@ -1239,10 +1227,14 @@ export class VoiceSession {
     } catch (error) {
       // Storage reads can fail; the speaking voice picker reports it and offers a retry.
       if (persist) throw error;
-      voiceError = error instanceof Error ? error.message : String(error);
+      voiceFailure = error instanceof Error ? error.message : String(error);
       voiceStatus = "error";
     }
     if (persist) localStorage.setItem(setupStorageKey(origin), JSON.stringify(preference));
+    batch(() => {
+      this._reportChoices(failure, failureStage);
+      this._reportVoiceName(voiceFailure);
+    });
     this.setState((s) => ({
       ...s,
       setupMode: preference.mode,
@@ -1254,12 +1246,10 @@ export class VoiceSession {
         webrtc: preference.mode === "all-in-one" ? preference.nativeChoiceID : preference.partsChoiceID,
       },
       speechModelIDs: models,
-      choicesError: failure,
-      choicesErrorStage: failureStage,
       voiceName: name,
-      voiceError,
       voiceStatus,
     }));
+    this._audioRoutes.releaseUnownedIssues();
   }
 
   /** Switch the effective setup while remembering the other setup's selections. */
@@ -1351,8 +1341,8 @@ export class VoiceSession {
     localStorage.setItem(voices.key, name);
     this._update((s) => {
       s.voiceName = name;
-      s.voiceError = null;
     });
+    this._reportVoiceName(null);
   }
 
   /** Discover settings choices on demand, keeping obsolete responses out of the current gateway. */
@@ -1376,11 +1366,10 @@ export class VoiceSession {
     try {
       this._update((s) => {
         s.choicesStatus = "loading";
-        s.choicesError = null;
-        s.choicesErrorStage = null;
         s.voiceStatus = "idle";
-        s.voiceError = null;
       });
+      this._reportChoices(null, null);
+      this._reportVoiceName(null);
       const setup = savedSetup(snapshot.url.origin);
       const speechModelIDs = {
         input: setup?.recognitionModelID ?? localStorage.getItem(speechModelStorageKey(snapshot.url.origin, "input")),
@@ -1408,6 +1397,7 @@ export class VoiceSession {
           s.speechModelIDs = speechModelIDs;
           s.choiceIDs = choiceIDs;
         });
+        this._audioRoutes.releaseUnownedIssues();
       }
       const metadata = validateVoiceChoices(await snapshot.api.voiceChoices());
       if (snapshot.version !== untrack(gatewayVersion) || attempt !== this._choicesAttempt) return;
@@ -1431,9 +1421,8 @@ export class VoiceSession {
       if (snapshot.version !== untrack(gatewayVersion) || attempt !== this._choicesAttempt) return;
       this._update((s) => {
         s.choicesStatus = "error";
-        s.choicesError = error instanceof Error ? error.message : String(error);
-        s.choicesErrorStage = null;
       });
+      this._reportChoices(error instanceof Error ? error.message : String(error), null);
     }
   }
 
@@ -1522,9 +1511,8 @@ export class VoiceSession {
         s.choiceIDs = { ...s.choiceIDs, [transport]: this._sessionChoiceID };
         s.speechModelIDs = { ...this._sessionSpeechModelIDs };
         s.choicesStatus = "ready";
-        s.choicesError = null;
-        s.choicesErrorStage = null;
       });
+      this._reportChoices(null, null);
     }
     // A new session falls back from withdrawn selections; a recovering session keeps its own or fails.
     const pinned = this._sessionPinned;
@@ -1566,12 +1554,8 @@ export class VoiceSession {
         );
       }
     } catch (error) {
-      if (snapshot.version === untrack(gatewayVersion))
-        this._update((s) => {
-          s.choicesError = error instanceof Error ? error.message : String(error);
-          s.choicesErrorStage = null;
-        });
-      throw error;
+      if (snapshot.version !== untrack(gatewayVersion)) throw error;
+      throw new SettingsFailure("choices", error instanceof Error ? error.message : String(error));
     }
     const choiceID = choice.id;
     const output = this.state.speechOutput;
@@ -1597,13 +1581,12 @@ export class VoiceSession {
             ? this._sessionVoiceName
             : savedSpeakingVoice(voices);
     } catch (error) {
-      if (snapshot.version === untrack(gatewayVersion))
-        this._update((s) => {
-          s.voiceName = null;
-          s.voiceError = error instanceof Error ? error.message : String(error);
-          s.voiceStatus = "error";
-        });
-      throw error;
+      if (snapshot.version !== untrack(gatewayVersion)) throw error;
+      this._update((s) => {
+        s.voiceName = null;
+        s.voiceStatus = "error";
+      });
+      throw new SettingsFailure("voiceName", error instanceof Error ? error.message : String(error));
     }
     this._sessionVoiceName = name;
     this._sessionPinned = true;
@@ -1614,9 +1597,9 @@ export class VoiceSession {
           if (this._sessionSpeechModelIDs[stage] !== null) s.speechModelIDs[stage] = this._sessionSpeechModelIDs[stage];
         }
         s.voiceName = name;
-        s.voiceError = null;
         s.voiceStatus = "ready";
       });
+    if (snapshot.version === untrack(gatewayVersion)) this._reportVoiceName(null);
     return { choiceID, stunServers: metadata.stunServers ?? [] };
   }
 
@@ -1713,12 +1696,19 @@ export class VoiceSession {
     const activation = this._microphoneMeter.prepare();
     const processing =
       this.state.speechInput === "gateway"
-        ? this._microphoneInput.prepare().catch((error: unknown) => {
-            if (!signal.aborted)
-              this._update((s) => {
-                s.error = `Could not activate microphone processing: ${String(error)}`;
-              });
-          })
+        ? this._microphoneInput.prepare().then(
+            () => {
+              if (!signal.aborted) this.issues.resolve("microphoneProcessing");
+            },
+            (error: unknown) => {
+              if (!signal.aborted)
+                this.issues.raise(
+                  "microphoneProcessing",
+                  `Could not activate microphone processing: ${String(error)}`,
+                  null,
+                );
+            },
+          )
         : Promise.resolve();
     const microphone = this._connection?.microphone;
     if (microphone) this._monitorMicrophone(microphone);
@@ -1745,6 +1735,7 @@ export class VoiceSession {
         webrtc: setup?.mode === "all-in-one" ? setup.nativeChoiceID : (setup?.partsChoiceID ?? null),
       },
     }));
+    this._audioRoutes.releaseUnownedIssues();
     return setup;
   }
 
@@ -1828,16 +1819,13 @@ export class VoiceSession {
       if (signal.aborted) return;
       this._update((s) => {
         s.microphoneAccess = "granted";
-        s.error = null;
       });
+      this.issues.resolve("microphone");
       await this.enumerateDevices();
     } catch (error) {
       if (signal.aborted) return;
       if (error instanceof DOMException && error.name === "NotAllowedError") this._microphoneDenied();
-      else
-        this._update((s) => {
-          s.error = `Could not enable microphone: ${String(error)}`;
-        });
+      else this.issues.raise("microphone", `Could not enable microphone: ${String(error)}`, null);
     } finally {
       this._update((s) => {
         s.microphoneAccessPending = false;
@@ -1849,8 +1837,9 @@ export class VoiceSession {
     this.disconnect();
     this._update((s) => {
       s.microphoneAccess = "denied";
-      s.error = null;
     });
+    // The denied microphone control owns this failure and its recovery.
+    this.issues.resolve("connection", "microphone", "microphoneProcessing");
   }
 
   /** Retry playback directly from a user gesture after browser autoplay restrictions. */
@@ -1861,14 +1850,12 @@ export class VoiceSession {
     if (audio === null) return;
     try {
       await audio.play();
-      if (this._ownsConnection(connection) && connection.speaker === audio)
-        this._update((s) => {
-          s.audioPlaybackError = null;
-        });
+      if (this._ownsConnection(connection) && connection.speaker === audio) this.issues.resolve("playback");
     } catch (error) {
       if (this._ownsConnection(connection) && connection.speaker === audio)
-        this._update((s) => {
-          s.audioPlaybackError = `Sound could not start: ${String(error)}`;
+        this.issues.raise("playback", `Sound could not start: ${String(error)}`, {
+          label: "enableSound",
+          run: () => this.resumeAudio(),
         });
     }
   }
@@ -1911,13 +1898,11 @@ export class VoiceSession {
           this._sessionVoiceName = savedSpeakingVoice(voices ?? null);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       this._update((s) => {
         s.voiceName = null;
-        s.voiceError = message;
         s.voiceStatus = "error";
       });
-      this._setError(message);
+      this._failSession("voiceName", error instanceof Error ? error.message : String(error));
       return;
     }
     this._reconnectEnabled = true;
@@ -1999,7 +1984,10 @@ export class VoiceSession {
       });
       attempt.pc = pc;
 
-      if (this.state.speechInput === "gateway") await this._microphoneInput.prepare();
+      if (this.state.speechInput === "gateway") {
+        await this._microphoneInput.prepare();
+        this.issues.resolve("microphoneProcessing");
+      }
       if (!this._ownsConnection(attempt)) return;
       // Browser AEC precedes outgoing attenuation and Opus encoding.
       const inputId = this.state.selectedInputId;
@@ -2127,6 +2115,7 @@ export class VoiceSession {
         if (e instanceof DOMException && e.name === "NotAllowedError") this._microphoneDenied();
         else if (e instanceof NetworkRequestError && (preserveTranscript || !navigator.onLine))
           this._scheduleReconnect(attempt, "Network connection failed", 1000);
+        else if (e instanceof SettingsFailure) this._failSession(e.key, e.message);
         else this._setError(e instanceof Error ? e.message : "WebRTC connection failed");
       }
     }
@@ -2234,6 +2223,7 @@ export class VoiceSession {
         if (error instanceof DOMException && error.name === "NotAllowedError") this._microphoneDenied();
         else if (error instanceof NetworkRequestError && (preserveTranscript || !navigator.onLine))
           this._scheduleReconnect(attempt, "Network connection failed", 1000);
+        else if (error instanceof SettingsFailure) this._failSession(error.key, error.message);
         else this._setError(error instanceof Error ? error.message : "Text voice connection failed");
       }
     }
@@ -2382,20 +2372,16 @@ export class VoiceSession {
         s.activeTool = null;
         s.turnState = TurnStateIdle;
         s.micLevel = 0;
-        s.audioDevicesError = null;
-        s.audioInputError = null;
-        s.audioOutputError = null;
         s.transcript = s.transcript.map((e) => ({ ...e, final: true }));
         s.transcriptDraft = null;
       });
+      this._releaseSessionIssues();
     });
   }
 
-  /** Dismiss the current failure while keeping the retained error history. */
-  dismissError(): void {
-    this._update((s) => {
-      s.error = null;
-    });
+  /** Routes and gateway warnings belong to the session that ends. */
+  private _releaseSessionIssues(): void {
+    this.issues.resolve("audioDevices", "audioInput", "audioOutput", "gateway");
   }
 
   setMicrophoneMode(mode: MicrophoneMode): void {
@@ -2520,9 +2506,7 @@ export class VoiceSession {
         this._pendingNotifications = [];
         this._pendingServiceContext.clear();
       }
-      this._update((s) => {
-        s.audioPlaybackError = null;
-      });
+      this.issues.resolve("playback");
     });
   }
 
@@ -2530,7 +2514,6 @@ export class VoiceSession {
     this._update((s) => {
       s.connectStatus = status;
       s.connectPhase = phase;
-      s.error = null;
     });
   }
 
@@ -2591,7 +2574,7 @@ export class VoiceSession {
     const connection = this._connection;
     if (connection === null || !this._ownsConnection(connection) || connection.pc !== pc) return;
     connection.setSetupTimer(() => {
-      if (this._ownsConnection(connection) && connection.pc === pc && !this.state.connected && !this.state.error) {
+      if (this._ownsConnection(connection) && connection.pc === pc && !this.state.connected) {
         void this._setConnectionTimeoutError(pc);
       }
     });
@@ -2628,7 +2611,6 @@ export class VoiceSession {
   private async _setDiagnosticError(pc: RTCPeerConnection, fallback: string): Promise<void> {
     const connection = this._connection;
     if (connection === null || !this._ownsConnection(connection) || connection.pc !== pc) return;
-    if (this.state.error) return;
     const sessionID = connection.rtc?.sessionID;
     const snapshot = connection.gateway;
     if (!sessionID) {
@@ -2645,12 +2627,12 @@ export class VoiceSession {
       );
       if (!this._ownsConnection(connection) || connection.pc !== pc) return;
       logVoiceRTCDiagnostics(diagnostics, connection.offerSDP, connection.answerSDP);
-      if (this._ownsConnection(connection) && connection.pc === pc && !this.state.connected && !this.state.error) {
+      if (this._ownsConnection(connection) && connection.pc === pc && !this.state.connected) {
         this._setError(formatVoiceRTCDiagnostics(diagnostics));
       }
     } catch (e: unknown) {
       const detail = e instanceof Error ? ` (${e.message})` : "";
-      if (this._ownsConnection(connection) && connection.pc === pc && !this.state.connected && !this.state.error) {
+      if (this._ownsConnection(connection) && connection.pc === pc && !this.state.connected) {
         this._setError(`${fallback}${detail}`);
       }
     }
@@ -2667,18 +2649,31 @@ export class VoiceSession {
     };
   }
 
-  /** Retains a failure for the overlay's error history. */
-  private _recordError(message: string): void {
-    this._update((s) => {
-      s.errorHistory = [{ at: Date.now(), message }, ...s.errorHistory].slice(0, MAX_VOICE_ERRORS);
+  /** Report the setup's choice failure, null when it resolves; stage names the speech field that owns it. */
+  private _reportChoices(message: string | null, stage: SpeechStage | null): void {
+    const key = stage === null ? "choices" : (`choices.${stage}` as const);
+    batch(() => {
+      this.issues.resolve(...CHOICES_ISSUE_KEYS.filter((other) => message === null || other !== key));
+      if (message !== null) this.issues.raise(key, message, null);
     });
   }
 
+  private _reportVoiceName(message: string | null): void {
+    if (message === null) this.issues.resolve("voiceName");
+    else this.issues.raise("voiceName", message, null);
+  }
+
   private _setError(message: string): void {
+    this._failSession("connection", message);
+  }
+
+  /** End the session, reporting why under key; a settings field reports its own failure. */
+  private _failSession(key: VoiceIssueKey, message: string): void {
     batch(() => {
       this._sessionGateway?.preparation?.retireSession(this.conversationID);
       this._reconnectEnabled = false;
-      this._recordError(message);
+      this._releaseSessionIssues();
+      this.issues.raise(key, message, null);
       this._leaveVoiceMode();
       this._replaceConnection(null, false);
       this._update((s) => {
@@ -2689,7 +2684,6 @@ export class VoiceSession {
         s.speaking = false;
         s.turnState = TurnStateIdle;
         s.activeTool = null;
-        s.error = message;
       });
     });
   }
@@ -2929,8 +2923,8 @@ export class VoiceSession {
         s.connectStatus = null;
         s.connectPhase = null;
         s.connected = true;
-        s.error = null;
       });
+      this.issues.resolve("connection", "gateway");
       if (!this.state.conversationActive) {
         this._update((s) => {
           s.conversationActive = true;
@@ -3087,15 +3081,8 @@ export class VoiceSession {
     if (env.kind === MessageKindError) {
       const msg = JSON.parse(text) as GatewayError;
       if (msg.recoverable) {
-        // Keep the connection and outstanding tool deliveries alive. Diagnostics
-        // use the same transcript presentation as tool errors, not fatal state.
-        this._recordError(msg.message);
-        this._update((s) => {
-          s.transcript = [
-            ...s.transcript,
-            { kind: "transcript", speaker: "assistant", text: `[Voice] ${msg.message}`, final: true },
-          ];
-        });
+        // Keep the connection and outstanding tool deliveries alive; the latest warning replaces the previous one.
+        this.issues.raise("gateway", msg.message, null);
         return;
       }
       this._setError(msg.message);
@@ -3439,7 +3426,7 @@ function appendChunk(
 }
 
 // Singleton — lives at module level so the WebRTC connection survives component remounts.
-export const voiceSession = new VoiceSession();
+export const voiceSession = new VoiceSession(new VoiceIssues());
 
 // Disconnect on actual page unload (browser close/refresh).
 if (typeof window !== "undefined") {

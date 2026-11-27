@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "../tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { createSignal } from "solid-js";
+import { batch, createSignal } from "solid-js";
 import { allDisabled, checkedValue, chip, chips } from "../tests/chips";
 import { deferred } from "../tests/deferred";
 import { installBrowserSpeech } from "../tests/browser-speech";
@@ -32,18 +32,15 @@ beforeEach(() => {
   });
   vi.clearAllMocks();
   localStorage.clear();
+  voiceSession.issues.resolve(...voiceSession.issues.list().map((issue) => issue.key));
   voiceSession.setState((s) => ({
     ...s,
     connected: false,
     showUsageStats: false,
     connectStatus: null,
     connectPhase: null,
-    error: null,
-    errorHistory: [],
     microphoneAccess: null,
     microphoneAccessPending: false,
-    audioPlaybackError: null,
-    micLevelError: null,
     listening: false,
     speaking: false,
     microphoneMode: "listening",
@@ -78,18 +75,13 @@ beforeEach(() => {
     speechModelIDs: { input: "whisper", output: "kokoro" },
     choiceIDs: { text: "chat", webrtc: "chat" },
     choicesStatus: "ready",
-    choicesError: null,
     voiceName: null,
-    voiceError: null,
     voiceStatus: "idle",
     audioInputs: [],
     audioOutputs: [],
     selectedInputId: "",
     selectedOutputId: "",
     audioSwitching: null,
-    audioDevicesError: null,
-    audioInputError: null,
-    audioOutputError: null,
   }));
 });
 
@@ -155,91 +147,91 @@ describe("VoiceOverlay status", () => {
   it("shows a delivery failure with the existing reconnect action", async () => {
     const message =
       "Couldn't deliver the action's result. Reconnect voice. The action may have completed; check before repeating it.";
-    voiceSession.setState((state) => ({ ...state, error: message }));
+    voiceSession.issues.raise("connection", message, null);
     render(() => <VoiceOverlay />);
     expect(screen.getByRole("alert")).toHaveTextContent(message);
     await userEvent.setup().click(screen.getByRole("button", { name: "Connect voice assistant" }));
     expect(connectMock).toHaveBeenCalledOnce();
   });
-  it("offers a gesture retry for a paused level meter while keeping voice connected", async () => {
-    const enable = vi.spyOn(voiceSession, "enableMicrophoneMeter").mockImplementation(async () => {
-      voiceSession.setState((s) => ({ ...s, micLevelError: null }));
-    });
-    try {
-      voiceSession.setState((s) => ({ ...s, connected: true, micLevelError: "Microphone level meter is paused." }));
-      render(() => <VoiceOverlay />);
-      await userEvent.setup().click(screen.getByRole("button", { name: "Enable level meter" }));
-      expect(enable).toHaveBeenCalledOnce();
-      expect(screen.queryByText("Microphone level meter is paused.")).toBeNull();
-      expect(screen.getByRole("button", { name: "End voice session" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "End voice session" })).toHaveFocus();
-    } finally {
-      enable.mockRestore();
-    }
-  });
-
-  it("keeps previous failures reviewable after a reconnect", () => {
-    voiceSession.setState((s) => ({
-      ...s,
-      connected: true,
-      error: null,
-      errorHistory: [{ at: 1_760_000_000_000, message: "Voice turn failed (llm): out of memory" }],
-    }));
+  it("performs a problem's recovery and returns focus to the connect control once it resolves", async () => {
+    const run = vi.fn(async () => voiceSession.issues.resolve("micLevel"));
+    voiceSession.setState((s) => ({ ...s, connected: true }));
+    voiceSession.issues.raise("micLevel", "Microphone level meter is paused.", { label: "enableMicrophoneMeter", run });
     render(() => <VoiceOverlay />);
-    const summary = screen.getByText("Previous errors (1)");
-    const details = summary.closest("details");
-    expect(details?.open).toBe(false);
-    fireEvent.click(summary);
-    expect(details?.open).toBe(true);
-    const message = screen.getByText("Voice turn failed (llm): out of memory");
-    const entry = message.closest("li");
-    expect(entry?.querySelector("time")?.getAttribute("datetime")).toBe(new Date(1_760_000_000_000).toISOString());
+    await userEvent.setup().click(screen.getByRole("button", { name: "Enable level meter" }));
+    expect(run).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "End voice session" })).toHaveFocus();
   });
 
-  it("dismisses a timeout by keyboard, keeps it in history, and shows a later timeout", async () => {
-    const message = "Voice connection timed out.";
-    const failure = { at: 1_760_000_000_000, message };
-    voiceSession.setState((s) => ({ ...s, error: message, errorHistory: [failure] }));
+  it("keeps the recovery button when its problem persists", async () => {
+    const run = vi.fn(async () => {});
+    voiceSession.setState((s) => ({ ...s, connected: true }));
+    voiceSession.issues.raise("playback", "Sound could not start: NotAllowedError", { label: "enableSound", run });
+    render(() => <VoiceOverlay />);
+    const enable = screen.getByRole("button", { name: "Enable sound" });
+    await userEvent.setup().click(enable);
+    expect(run).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Enable sound" })).toHaveFocus();
+  });
+
+  it("shows one problem as a line without a bullet", () => {
+    voiceSession.issues.raise("connection", "Voice gateway unreachable.", null);
+    render(() => <VoiceOverlay />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Voice gateway unreachable.");
+    expect(within(screen.getByRole("alert")).queryByRole("list")).toBeNull();
+  });
+
+  it("lists several problems oldest first, newest few only, with long messages cut", () => {
+    const long = `Could not switch speaker: ${"NotAllowedError ".repeat(20)}denied`;
+    voiceSession.issues.raise("audioDevices", "Could not list audio devices", null);
+    voiceSession.issues.raise("connection", "Voice gateway unreachable.", null);
+    voiceSession.issues.raise("audioOutput", long, null);
+    render(() => <VoiceOverlay />);
+    const items = () => within(screen.getByRole("alert")).getAllByRole("listitem");
+    expect(items().map((item) => item.textContent)).toEqual([
+      "Could not list audio devices",
+      "Voice gateway unreachable.",
+      expect.stringMatching(/^Could not switch speaker: .*…$/),
+    ]);
+    expect(items()[2]!.textContent!.length).toBeLessThan(long.length);
+    expect(within(items()[2]!).getByTitle(long)).toBeInTheDocument();
+
+    // Raising a listed key replaces its bullet in place; a fourth problem pushes out the oldest.
+    voiceSession.issues.raise("connection", "Voice connection timed out.", null);
+    expect(items().map((item) => item.textContent)[1]).toBe("Voice connection timed out.");
+    expect(items()).toHaveLength(3);
+    voiceSession.issues.raise("playback", "Sound could not start", null);
+    expect(items().map((item) => item.textContent)).toEqual([
+      "Voice connection timed out.",
+      expect.stringMatching(/^Could not switch speaker/),
+      "Sound could not start",
+    ]);
+
+    // A source that resolves removes only its bullet; one remaining problem drops the list.
+    voiceSession.issues.resolve("audioDevices", "audioOutput", "playback");
+    expect(within(screen.getByRole("alert")).queryByRole("list")).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent("Voice connection timed out.");
+  });
+
+  it("dismisses every listed problem with one X and focuses the connect control", async () => {
+    voiceSession.issues.raise("connection", "Voice connection timed out.", null);
+    voiceSession.issues.raise("playback", "Sound could not start", { label: "enableSound", run: async () => {} });
     render(() => <VoiceOverlay />);
     const user = userEvent.setup();
     const connect = screen.getByRole("button", { name: "Connect voice assistant" });
-    const dismiss = screen.getByRole("button", { name: "Dismiss voice error" });
-    connect.focus();
-    await user.tab();
-    expect(dismiss).toHaveFocus();
+    screen.getByRole("button", { name: "Dismiss errors" }).focus();
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(voiceSession.issues.list()).toEqual([]);
     expect(connect).toHaveFocus();
     expect(connectMock).not.toHaveBeenCalled();
     expect(disconnectMock).not.toHaveBeenCalled();
-
-    await user.click(screen.getByText("Previous errors (1)"));
-    expect(within(screen.getByRole("list")).getByText(message)).toBeVisible();
-    await user.click(connect);
-    expect(connectMock).toHaveBeenCalledOnce();
-    voiceSession.setState((s) => ({
-      ...s,
-      error: message,
-      errorHistory: [{ ...failure, at: failure.at + 1 }, failure],
-    }));
-    expect(screen.getByRole("alert")).toHaveTextContent(message);
-  });
-
-  it("does not repeat the failure the panel already shows", () => {
-    voiceSession.setState((s) => ({
-      ...s,
-      error: "Voice gateway unreachable.",
-      errorHistory: [{ at: 1_760_000_000_000, message: "Voice gateway unreachable." }],
-    }));
-    render(() => <VoiceOverlay />);
-    expect(screen.getByText("Voice gateway unreachable.")).toBeInTheDocument();
-    expect(screen.queryByText("Previous errors (1)")).toBeNull();
-  });
-
-  it("shows no error history without a retained failure", () => {
-    voiceSession.setState((s) => ({ ...s, error: null, errorHistory: [] }));
-    render(() => <VoiceOverlay />);
     expect(screen.queryByText(/Previous errors/)).toBeNull();
+
+    // A condition that still holds returns when its source meets it again.
+    voiceSession.issues.raise("connection", "Voice connection timed out.", null);
+    expect(screen.getByRole("alert")).toHaveTextContent("Voice connection timed out.");
   });
 
   it("retains keyboard focus after an access request is denied and prevents duplicate requests", async () => {
@@ -378,7 +370,10 @@ describe("VoiceOverlay status", () => {
     voiceSession.setState((state) => ({ ...state, connectStatus: "Connecting" }));
     expect(screen.getByRole("region", { name: "Transcript" })).toBeVisible();
     screen.getByRole("region", { name: "Transcript" }).focus();
-    voiceSession.setState((state) => ({ ...state, connectStatus: null, error: "Connection lost" }));
+    batch(() => {
+      voiceSession.setState((state) => ({ ...state, connectStatus: null }));
+      voiceSession.issues.raise("connection", "Connection lost", null);
+    });
     expect(screen.queryByRole("region", { name: "Transcript" })).toBeNull();
     await waitFor(() => expect(screen.getByRole("button", { name: "Show transcript" })).toHaveFocus());
   });
@@ -522,7 +517,7 @@ describe("VoiceOverlay status", () => {
   });
 
   it("keeps the normal start control available with an abnormal disconnect error", async () => {
-    voiceSession.setState((s) => ({ ...s, error: "Voice gateway unavailable (HTTP 502)." }));
+    voiceSession.issues.raise("connection", "Voice gateway unavailable (HTTP 502).", null);
     render(() => <VoiceOverlay />);
     expect(screen.getByRole("alert")).toHaveTextContent("Voice gateway unavailable (HTTP 502).");
     await userEvent.setup().click(screen.getByRole("button", { name: "Connect voice assistant" }));
@@ -539,10 +534,12 @@ describe("VoiceOverlay status", () => {
     expect(select).toHaveBeenCalledWith("");
     expect(enumerateDevicesMock).toHaveBeenCalledOnce();
     for (const state of [
-      { connectStatus: "Connecting…", connected: false, error: null },
-      { connectStatus: null, connected: true, error: null },
-      { connectStatus: null, connected: false, error: "Speech failed" },
+      { connectStatus: "Connecting…", connected: false },
+      { connectStatus: null, connected: true },
+      { connectStatus: null, connected: false },
     ]) {
+      if (!state.connected && state.connectStatus === null)
+        voiceSession.issues.raise("connection", "Speech failed", null);
       voiceSession.setState((s) => ({ ...s, ...state }));
       expect(screen.getByRole("button", { name: "Voice settings" })).toBe(settings);
       expect(screen.getByRole("button", { name: "Next server: Project Atlas" })).toBe(next);
@@ -551,54 +548,32 @@ describe("VoiceOverlay status", () => {
     select.mockRestore();
   });
 
-  it("shows a shared connection and settings error once, including when settings are open", async () => {
+  it("shows a settings field problem in the list while settings are closed and at its control while open", async () => {
     const error = "The selected voice choice is unavailable";
-    voiceSession.setState((s) => ({ ...s, error, choicesError: error }));
+    voiceSession.issues.raise("choices", error, null);
     render(() => <VoiceOverlay />);
-    expect(screen.getAllByText(error).filter((el) => !el.closest("[hidden]"))).toHaveLength(1);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Voice settings" }));
-    expect(screen.getAllByText(error).filter((el) => !el.closest("[hidden]"))).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Close voice settings" })).toBeInTheDocument();
-  });
-
-  it("keeps a dismissed shared failure in its settings field without repeating the notice", async () => {
-    const error = "The selected voice choice is unavailable";
-    voiceSession.setState((s) => ({ ...s, error, choicesError: error }));
-    render(() => <VoiceOverlay />);
+    const shown = () => screen.getAllByText(error).filter((el) => !el.closest("[hidden]"));
+    expect(shown()).toHaveLength(1);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Dismiss voice error" }));
-    expect(screen.queryByRole("alert")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Voice settings" }));
-    const settings = screen.getByRole("region", { name: "Voice settings" });
-    expect(within(settings).getByText(error)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Close voice settings" }));
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(shown()).toHaveLength(1);
+    expect(within(screen.getByRole("region", { name: "Voice settings" })).getByText(error)).toBeVisible();
 
-    voiceSession.setState((s) => ({ ...s, choicesError: "Voice gateway unavailable." }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Voice gateway unavailable.");
-    await user.click(screen.getByRole("button", { name: "Dismiss voice error" }));
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("does not show cloud audio-device errors during browser speech", () => {
-    voiceSession.setState((s) => ({
-      ...s,
-      connected: true,
-      speechInput: "client",
-      speechOutput: "client",
-      audioDevicesError: "Could not list audio devices: permission denied",
-    }));
-    render(() => <VoiceOverlay />);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // With settings open, the X clears only the listed problems.
+    voiceSession.issues.raise("connection", "Voice gateway unreachable.", null);
+    expect(screen.getByRole("button", { name: "Dismiss errors" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss errors" }));
+    expect(voiceSession.issues.list().map((issue) => issue.key)).toEqual(["choices"]);
+    expect(shown()).toHaveLength(1);
   });
 
   it("restores both dropdowns to the confirmed route after a failed switch", async () => {
     Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", { configurable: true, value: vi.fn() });
     const input = vi.spyOn(voiceSession, "selectInputDevice").mockImplementation(async () => {
-      voiceSession.setState((s) => ({ ...s, audioInputError: "Microphone permission denied" }));
+      voiceSession.issues.raise("audioInput", "Microphone permission denied", null);
     });
     const output = vi.spyOn(voiceSession, "selectOutputDevice").mockImplementation(async () => {
-      voiceSession.setState((s) => ({ ...s, audioOutputError: "Speaker permission denied" }));
+      voiceSession.issues.raise("audioOutput", "Speaker permission denied", null);
     });
     try {
       voiceSession.setState((s) => ({
@@ -667,7 +642,8 @@ describe("VoiceOverlay status", () => {
     expect(speaker.querySelector('[data-icon="volumeUp"]')).not.toBeNull();
     await userEvent.setup().click(speaker);
     expect(screen.getByText("Use your device’s sound settings to change the speaker.")).toBeInTheDocument();
-    voiceSession.setState((s) => ({ ...s, audioSwitching: "input", audioInputError: "Microphone permission denied" }));
+    voiceSession.setState((s) => ({ ...s, audioSwitching: "input" }));
+    voiceSession.issues.raise("audioInput", "Microphone permission denied", null);
     expect(screen.getByRole("combobox", { name: "Microphone" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("Microphone permission denied");
   });
@@ -813,7 +789,7 @@ describe("VoiceOverlay settings", () => {
   });
 
   it("allows correcting the language after a failed connection", async () => {
-    voiceSession.setState((s) => ({ ...s, error: "invalid voice.language" }));
+    voiceSession.issues.raise("connection", "invalid voice.language", null);
     const user = userEvent.setup();
     render(() => <VoiceOverlay />);
     await user.click(screen.getByRole("button", { name: "Voice settings" }));
@@ -1046,7 +1022,7 @@ describe("VoiceOverlay connection", () => {
       settingUpWebRTC: "Configuration WebRTC…",
       cancelConnection: "Annuler la connexion",
     };
-    voiceSession.setState((s) => ({ ...s, connectStatus: "Setting up WebRTC…", connectPhase: "setup", error: null }));
+    voiceSession.setState((s) => ({ ...s, connectStatus: "Setting up WebRTC…", connectPhase: "setup" }));
     render(() => <VoiceOverlay messages={() => messages} />);
 
     expect(screen.getByText("Configuration WebRTC…")).toBeInTheDocument();
@@ -1065,33 +1041,24 @@ describe("VoiceOverlay connection", () => {
       ...s,
       connectStatus: "ICE failed; reconnecting…",
       connectPhase: "reconnecting",
-      error: null,
     }));
     render(() => <VoiceOverlay messages={() => messages} />);
     expect(screen.getByText("Reconnexion…")).toBeInTheDocument();
     expect(screen.queryByText(/ICE failed/)).toBeNull();
 
-    voiceSession.setState((s) => ({
-      ...s,
-      connectStatus: null,
-      connectPhase: null,
-      error: "HTTP 401 Bearer secret-token",
-    }));
+    voiceSession.setState((s) => ({ ...s, connectStatus: null, connectPhase: null }));
+    voiceSession.issues.raise("connection", "HTTP 401 Bearer secret-token", null);
     expect(screen.queryByText("Connexion vocale échouée")).toBeNull();
     expect(screen.getByText("HTTP 401 Bearer secret-token")).toBeInTheDocument();
 
-    voiceSession.setState((s) => ({ ...s, error: "" }));
+    voiceSession.issues.raise("connection", "", null);
     expect(screen.getByRole("alert")).toHaveTextContent("Connexion vocale échouée");
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss voice error" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss errors" }));
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("keeps detailed transport errors for the default English overlay", () => {
-    voiceSession.setState((s) => ({
-      ...s,
-      connectStatus: null,
-      error: "Backend-specific failure Bearer secret-token",
-    }));
+    voiceSession.issues.raise("connection", "Backend-specific failure Bearer secret-token", null);
     render(() => <VoiceOverlay />);
     expect(screen.getByText("Backend-specific failure Bearer secret-token")).toBeInTheDocument();
   });
@@ -1133,9 +1100,9 @@ describe("VoiceOverlay notifications", () => {
 });
 
 it("discloses reported usage after disconnect with zero distinct from unavailable", async () => {
+  voiceSession.issues.raise("connection", "Gateway offline", null);
   voiceSession.setState((state) => ({
     ...state,
-    error: "Gateway offline",
     transcript: [
       { kind: "transcript", speaker: "user", text: "Hello", final: true },
       { kind: "reasoning", speaker: "assistant", text: "Consider the request", final: true, responseID: "a" },
@@ -1231,7 +1198,8 @@ it("discloses reported usage after disconnect with zero distinct from unavailabl
   await user.click(toggle);
   await user.keyboard("{Escape}");
   expect(within(screen.getByRole("region", { name: "Usage" })).getByText("1,234")).toBeVisible();
-  voiceSession.setState((state) => ({ ...state, error: null, usage: null, connected: true }));
+  voiceSession.issues.resolve("connection");
+  voiceSession.setState((state) => ({ ...state, usage: null, connected: true }));
   expect(within(screen.getByRole("region", { name: "Usage" })).getByText("Not reported")).toBeVisible();
 });
 

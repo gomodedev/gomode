@@ -7,6 +7,7 @@ import { expect, vi } from "../tests/expect";
 import { FakeMicrophoneContext, microphoneFrames } from "../tests/microphone-audio";
 import { FakeRecognition, fakeSynthesis, installBrowserSpeech } from "../tests/browser-speech";
 import { configureVoiceGateway, VoiceSession } from "./VoiceSession";
+import { VoiceIssues } from "./VoiceIssues";
 import { deferred } from "../tests/deferred";
 import { resolveBrowserVoiceEndpoints } from "./BrowserVoiceManifest";
 import { mcpClient } from "./McpClient";
@@ -90,7 +91,7 @@ beforeEach(() => {
   });
   vi.spyOn(mcpClient, "readTextResource").mockResolvedValue("[]");
   configureVoiceGateway("https://gateway.example", null);
-  session = new VoiceSession(chime, earcon);
+  session = new VoiceSession(new VoiceIssues(), chime, earcon);
   session.selectSpeechInput("client");
   session.selectSpeechOutput("client");
 });
@@ -114,7 +115,7 @@ it("recovers a browser-speech call when the network returns", async (t) => {
   window.dispatchEvent(new window.Event("offline"));
   await vi.advanceTimersByTimeAsync(60_000);
   expect(FakeWebSocket.instances).toHaveLength(1);
-  expect(session.state.error).toBeNull();
+  expect(session.issues.message("connection")).toBeNull();
   session.injectText("Alert received during handoff", true);
   const preparing = deferred<string>();
   vi.mocked(mcpClient.serverInstructions).mockReturnValueOnce(preparing.promise);
@@ -137,7 +138,7 @@ it("keeps a gateway policy rejection terminal instead of reconnecting", async ()
   const socket = await readySocket();
   socket.onclose?.(new window.CloseEvent("close", { code: 1008 }));
   await vi.advanceTimersByTimeAsync(60_000);
-  expect(session.state.error).toBe("Text voice connection closed (1008)");
+  expect(session.issues.message("connection")).toBe("Text voice connection closed (1008)");
   expect(FakeWebSocket.instances).toHaveLength(1);
 });
 
@@ -147,7 +148,7 @@ it("keeps an HTTP authentication rejection terminal even when the browser report
   globalThis.fetch = async () => new Response(null, { status: 401 });
   await session.connect();
   await vi.advanceTimersByTimeAsync(60_000);
-  expect(session.state.error).toBe("Voice authorization failed (HTTP 401).");
+  expect(session.issues.message("connection")).toBe("Voice authorization failed (HTTP 401).");
   expect(FakeWebSocket.instances).toHaveLength(0);
 });
 
@@ -167,13 +168,13 @@ it("retries a failed gateway fetch but preserves a programming error during reco
   ok(replacement);
   replacement.open();
   replacement.message({ kind: "session.ready" });
-  expect(session.state.error).toBeNull();
+  expect(session.issues.message("connection")).toBeNull();
   vi.mocked(mcpClient.serverInstructions).mockImplementationOnce(() => {
     throw new TypeError("Broken application invariant");
   });
   replacement.onerror?.();
   await vi.advanceTimersByTimeAsync(60_000);
-  expect(session.state.error).toBe("Broken application invariant");
+  expect(session.issues.message("connection")).toBe("Broken application invariant");
   expect(FakeWebSocket.instances).toHaveLength(2);
 });
 
@@ -201,7 +202,7 @@ it("explains a text gateway connection failure and releases the session", async 
   const socket = FakeWebSocket.instances[0];
   ok(socket);
   socket.onerror?.();
-  expect(session.state.error).toBe("Voice gateway unreachable.");
+  expect(session.issues.message("connection")).toBe("Voice gateway unreachable.");
   expect(session.state.connected).toBe(false);
   expect(socket.readyState).toBe(3);
 });
@@ -216,11 +217,11 @@ it("shows model startup progress and times out when progress stops", async () =>
     vi.advanceTimersByTime(10000);
     socket.message({ kind: "session.status", message: "Server is starting voice models…" });
     expect(session.state.connectStatus).toBe("Server is starting voice models…");
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
     expect(session.state.connected).toBe(false);
   }
   vi.advanceTimersByTime(15000);
-  expect(session.state.error).toContain("timed out");
+  expect(session.issues.message("connection")).toContain("timed out");
 });
 
 it("clears startup progress only when ready and ignores late progress", async () => {
@@ -279,7 +280,7 @@ it("ends text voice visibly when a tool result cannot be sent", async () => {
   });
   socket.message({ kind: "tool.call", id: "delivery", name: "save", args: {} });
   await vi.waitFor(() =>
-    expect(session.state.error).toBe(
+    expect(session.issues.message("connection")).toBe(
       "Couldn't deliver the action's result. Reconnect voice. The action may have completed; check before repeating it.",
     ),
   );
@@ -392,7 +393,7 @@ describe("browser voice sessions", () => {
       expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toEqual(message);
     }
     fakeSynthesis.complete();
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
     expect(session.state.listening).toBe(true);
     expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual(
       steps.flatMap(({ message }) => (message.kind === "assistant.text.delta" ? [message.text] : [])),
@@ -406,7 +407,7 @@ describe("browser voice sessions", () => {
     // clock: one long advance skips timers that recognition callbacks schedule.
     for (let i = 0; i < 60; i++) await vi.advanceTimersByTimeAsync(1_000);
     expect(FakeRecognition.instances).toHaveLength(2);
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
     expect(session.state.listening).toBe(true);
     const recognition = FakeRecognition.instances.at(-1);
     ok(recognition);
@@ -417,7 +418,9 @@ describe("browser voice sessions", () => {
     expect(session.state.connected).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
     expect(session.state.connected).toBe(false);
-    expect(session.state.error).toBe("Browser speech stopped listening. Retry or use gateway recognition.");
+    expect(session.issues.message("connection")).toBe(
+      "Browser speech stopped listening. Retry or use gateway recognition.",
+    );
   });
 
   it("listens once ready unless the ready flush asks for a reply", async () => {
@@ -512,7 +515,7 @@ describe("browser voice sessions", () => {
       "Actually, stop",
       "Okay.",
     ]);
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
   });
 
   it("can interrupt queued playback after generation has finished and preserves interim text across the acknowledgement", async () => {
@@ -576,7 +579,7 @@ describe("browser voice sessions", () => {
     socket.message({ kind: "assistant.text.delta", text: "Hello. " });
     await Promise.resolve();
     expect(session.state.connected).toBe(false);
-    expect(session.state.error).toBe("Recognition unavailable");
+    expect(session.issues.message("connection")).toBe("Recognition unavailable");
     expect(fakeSynthesis.spoken).toHaveLength(0);
   });
 
@@ -754,7 +757,7 @@ describe("browser voice sessions", () => {
     ok(fresh);
     old.onend?.call(old, new Event("end") as SpeechSynthesisEvent);
     old.onerror?.call(old, { error: "synthesis-failed" } as SpeechSynthesisErrorEvent);
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
     expect(session.state.speaking).toBe(true);
     expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual(["Old.", "Fresh."]);
     socket.message({ kind: "turn.status", state: "idle" });
@@ -771,7 +774,7 @@ describe("browser voice sessions", () => {
     const old = fakeSynthesis.spoken[0];
     ok(old);
     old.onerror?.call(old, { error: "audio-busy" } as SpeechSynthesisErrorEvent);
-    expect(session.state.error).toContain("audio-busy");
+    expect(session.issues.message("connection")).toContain("audio-busy");
     expect(session.state.connected).toBe(false);
     expect(socket.readyState).toBe(3);
     finishTurn(await readySocket(), "Replacement");
@@ -788,7 +791,7 @@ describe("browser voice sessions", () => {
       throw new Error("engine unavailable");
     });
     fakeSynthesis.complete();
-    expect(session.state.error).toContain("engine unavailable");
+    expect(session.issues.message("connection")).toContain("engine unavailable");
     expect(session.state.connected).toBe(false);
     finishTurn(await readySocket(), "Fresh");
     expect(fakeSynthesis.spoken.at(-1)?.text).toBe("Fresh");
@@ -803,7 +806,7 @@ describe("browser voice sessions", () => {
     });
     socket.message({ kind: "assistant.text.delta", text: "One. Old tail" });
     await Promise.resolve();
-    expect(session.state.error).toContain("startup failed");
+    expect(session.issues.message("connection")).toContain("startup failed");
     expect(session.state.transcript.at(-1)?.text).toBe("One. Old tail");
     finishTurn(await readySocket(), "Fresh");
     expect(fakeSynthesis.spoken.at(-1)?.text).toBe("Fresh");
@@ -818,7 +821,7 @@ describe("browser voice sessions", () => {
     const text = sentences.join(" ") + " ";
     socket.message({ kind: "assistant.text.delta", text });
     await Promise.resolve();
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
     expect(session.state.connected).toBe(true);
     expect(fakeSynthesis.cancel).not.toHaveBeenCalled();
     expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual([sentences[0]]);
@@ -837,7 +840,7 @@ describe("browser voice sessions", () => {
     expect(fakeSynthesis.spoken.at(-1)?.text).toBe("Final tail");
     fakeSynthesis.complete();
     expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual([...sentences, "Final tail"]);
-    expect(session.state.errorHistory).toHaveLength(0);
+    expect(session.issues.list()).toEqual([]);
     expect(session.state.microphoneMode).toBe("listening");
     expect(session.state.listening).toBe(true);
     expect(socket.sent.some((message) => message.includes("Notification"))).toBe(true);
@@ -861,7 +864,7 @@ describe("browser voice sessions", () => {
     old.onend?.call(old, new Event("end") as SpeechSynthesisEvent);
     expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual(["Sentence.", "Fresh reply."]);
     expect(session.state.speaking).toBe(true);
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
     fakeSynthesis.complete();
     expect(session.state.listening).toBe(true);
   });
@@ -880,7 +883,7 @@ describe("browser voice sessions", () => {
     expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual(["First.", "Second.", "Third.", "Final tail"]);
     expect(session.state.transcript).toHaveLength(0);
     expect(session.state.connected).toBe(true);
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
     expect(session.state.listening).toBe(true);
   });
 
@@ -893,10 +896,10 @@ describe("browser voice sessions", () => {
     });
     fakeSynthesis.complete();
     expect(session.state.connected).toBe(false);
-    expect(session.state.error).toContain("Synthesis unavailable");
+    expect(session.issues.message("connection")).toContain("Synthesis unavailable");
     finishTurn(await readySocket(), "Fresh reply");
     expect(fakeSynthesis.spoken.at(-1)?.text).toBe("Fresh reply");
-    expect(session.state.error).toBeNull();
+    expect(session.issues.message("connection")).toBeNull();
   });
 
   it("cancels queued fragments on disconnect without reviving capture", async () => {
@@ -1173,7 +1176,7 @@ describe("browser voice sessions", () => {
     expect(JSON.parse(socket.sent[0] ?? "{}")).not.toHaveProperty("recognitionModelID");
     expect(JSON.parse(socket.sent[0] ?? "{}")).not.toHaveProperty("synthesisModelID");
     expect(JSON.parse(socket.sent[0] ?? "{}").voice).not.toHaveProperty("name");
-    expect(new VoiceSession(chime).state.speechInput).toBe("client");
+    expect(new VoiceSession(new VoiceIssues(), chime).state.speechInput).toBe("client");
     expect(localStorage.getItem("gomode.voiceLanguage")).toBe("fr-CA");
   });
 
@@ -1335,7 +1338,7 @@ describe("browser voice sessions", () => {
     socket.message({ kind: "error", message: "OutOfOrder support is unavailable", recoverable: true });
     expect(session.state.connected).toBe(true);
     expect(session.state.activeTool).toBe("items_list");
-    expect(session.state.transcript.at(-1)?.text).toBe("[Voice] OutOfOrder support is unavailable");
+    expect(session.issues.message("gateway")).toBe("OutOfOrder support is unavailable");
     expect(socket.readyState).toBe(1);
     finish({ isError: false, structuredContent: { items: ["late"] } });
     await Promise.resolve();
@@ -1355,9 +1358,8 @@ describe("browser voice sessions", () => {
     ok(first);
     socket.message({ kind: "error", message: "LLM failed: provider unavailable", recoverable: true });
     expect(session.state.connected).toBe(true);
-    expect(session.state.error).toBeNull();
-    expect(session.state.errorHistory.map((entry) => entry.message)).toEqual(["LLM failed: provider unavailable"]);
-    expect(session.state.transcript.at(-1)?.text).toBe("[Voice] LLM failed: provider unavailable");
+    expect(session.issues.message("connection")).toBeNull();
+    expect(session.issues.message("gateway")).toBe("LLM failed: provider unavailable");
     expect(fakeSynthesis.cancel).not.toHaveBeenCalled();
     expect(fakeSynthesis.spoken.map((entry) => entry.text)).toEqual(["First."]);
 
@@ -1381,8 +1383,8 @@ describe("browser voice sessions", () => {
     first.onend?.call(first, new Event("end") as SpeechSynthesisEvent);
     first.onerror?.call(first, { error: "synthesis-failed" } as SpeechSynthesisErrorEvent);
     expect(session.state.connected).toBe(true);
-    expect(session.state.error).toBeNull();
-    expect(session.state.errorHistory).toHaveLength(1);
+    expect(session.issues.message("connection")).toBeNull();
+    expect(session.issues.list().map((issue) => issue.key)).toEqual(["gateway"]);
     expect(session.state.speaking).toBe(true);
     expect(fakeSynthesis.spoken.at(-1)?.text).toBe("Fresh.");
     fakeSynthesis.complete();
@@ -1443,7 +1445,7 @@ describe("browser voice sessions", () => {
     expect(chime.playDisconnected).not.toHaveBeenCalled();
     await session.connect();
     vi.advanceTimersByTime(15000);
-    expect(session.state.error).toContain("timed out");
+    expect(session.issues.message("connection")).toContain("timed out");
   });
 });
 

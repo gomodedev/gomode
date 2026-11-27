@@ -10,6 +10,7 @@ import VoiceSettings from "./VoiceSettings";
 import { allDisabled, checkedValue, chip, chips } from "../tests/chips";
 import { deferred } from "../tests/deferred";
 import { configureVoiceGateway, voiceSession, VoiceSession } from "./VoiceSession";
+import { VoiceIssues } from "./VoiceIssues";
 
 const metadata = {
   choices: [
@@ -33,6 +34,7 @@ beforeEach(() => {
   localStorage.clear();
   restore = installBrowserSpeech("Chrome desktop");
   voiceSession.disconnect();
+  voiceSession.issues.resolve(...voiceSession.issues.list().map((issue) => issue.key));
   voiceSession.setState((s) => ({
     ...s,
     setupMode: "parts",
@@ -211,7 +213,7 @@ describe("voice choices", () => {
         await waitFor(() => expect(requests).toBe(2));
         settings.resolve(new Response(JSON.stringify(independent)));
         await waitFor(() => expect(voiceSession.state.choicesStatus).toBe("idle"));
-        expect(voiceSession.state.choicesError).toBeNull();
+        expect(voiceSession.issues.message("choices")).toBeNull();
         if (outcome === "cancel") voiceSession.disconnect();
         connection.resolve(
           outcome === "failure" ? new Response(null, { status: 503 }) : new Response(JSON.stringify(independent)),
@@ -222,7 +224,7 @@ describe("voice choices", () => {
         expect(checkedValue(await readyModel())).toBe("first");
         expect(screen.getByRole("radio", { name: "All-in-one" })).toBeEnabled();
         expect(allDisabled(chips("Recognition"))).toBe(false);
-        expect(voiceSession.state.choicesError).toBeNull();
+        expect(voiceSession.issues.message("choices")).toBeNull();
         expect(screen.queryByRole("status")).toBeNull();
       } finally {
         audio.mockRestore();
@@ -369,14 +371,14 @@ describe("voice choices", () => {
   });
 
   it("rejects choices without valid transports", async () => {
-    const session = new VoiceSession();
+    const session = new VoiceSession(new VoiceIssues());
     try {
       for (const transports of [null, [], ["invalid"]]) {
         globalThis.fetch = async () =>
           new Response(JSON.stringify({ ...independent, choices: [{ id: "a", label: "A", transports }] }));
         await session.loadVoiceChoices();
         expect(session.state.choicesStatus).toBe("error");
-        expect(session.state.choicesError).toContain("invalid choices");
+        expect(session.issues.message("choices")).toContain("invalid choices");
       }
     } finally {
       session.disconnect();
@@ -384,7 +386,7 @@ describe("voice choices", () => {
   });
 
   it("rejects malformed and duplicate stage catalogs", async () => {
-    const session = new VoiceSession();
+    const session = new VoiceSession(new VoiceIssues());
     try {
       for (const recognitionModels of [
         [
@@ -397,7 +399,7 @@ describe("voice choices", () => {
       ]) {
         globalThis.fetch = async () => new Response(JSON.stringify({ ...independent, recognitionModels }));
         await session.loadVoiceChoices();
-        expect(session.state.choicesError).toContain("invalid choices");
+        expect(session.issues.message("choices")).toContain("invalid choices");
       }
     } finally {
       session.disconnect();
@@ -437,7 +439,7 @@ describe("voice choices", () => {
       await voiceSession.loadVoiceChoices();
       expect(voiceSession.state.choicesStatus).toBe(row.error === "catalog" ? "error" : "ready");
       if (row.error === "catalog") return;
-      expect(voiceSession.state.voiceError).toBeNull();
+      expect(voiceSession.issues.message("voiceName")).toBeNull();
       expect(voiceSession.state.voiceName).toBe(row.voice);
     });
   }
@@ -474,7 +476,9 @@ describe("voice choices", () => {
     await voiceSession.loadVoiceChoices();
     voiceSession.selectSpeechOutput("client");
     expect(voiceSession.compatibleChoices).toEqual([]);
-    expect(voiceSession.state.choicesError).toContain("does not support the selected recognition and speech output");
+    expect(voiceSession.issues.message("choices")).toContain(
+      "does not support the selected recognition and speech output",
+    );
   });
 
   it("persists the provider-default selection across catalog updates", async () => {
@@ -501,10 +505,10 @@ describe("voice choices", () => {
     await user.selectOptions(speaking, "Aoede");
     await user.selectOptions(speaking, "");
     globalThis.fetch = async () => new Response(JSON.stringify(metadata));
-    const restored = new VoiceSession();
+    const restored = new VoiceSession(new VoiceIssues());
     await restored.loadVoiceChoices();
     expect(restored.state.voiceName).toBe("");
-    expect(restored.state.voiceError).toBeNull();
+    expect(restored.issues.message("voiceName")).toBeNull();
   });
 
   it("restores each setup and its parts model after reload and gateway replacement", async () => {
@@ -515,7 +519,7 @@ describe("voice choices", () => {
     await user.click(chip(chips("Recognition"), "browser"));
     await user.click(chip(chips("Speech"), "browser"));
     await user.click(chip(chips("Language model"), "local"));
-    const restored = new VoiceSession();
+    const restored = new VoiceSession(new VoiceIssues());
     await restored.loadVoiceChoices();
     expect(restored.state.setupMode).toBe("parts");
     expect(restored.state.choiceIDs.text).toBe("local");
@@ -563,7 +567,7 @@ describe("voice choices", () => {
     const user = userEvent.setup();
     const speaking = () => screen.getByRole("combobox", { name: "Speaking voice" });
     await user.selectOptions(speaking(), "Aoede");
-    const restored = new VoiceSession();
+    const restored = new VoiceSession(new VoiceIssues());
     await restored.loadVoiceChoices();
     expect(restored.state.voiceName).toBe("Aoede");
     await user.click(screen.getByRole("radio", { name: "Separate stages" }));
@@ -660,7 +664,7 @@ describe("voice choices", () => {
         "Voice storage unavailable",
       );
       await voiceSession.connect();
-      expect(voiceSession.state.error).toBe("Voice storage unavailable");
+      expect(voiceSession.issues.message("voiceName")).toBe("Voice storage unavailable");
       load.mockRestore();
       await userEvent.setup().click(screen.getByRole("button", { name: "Retry loading voice choices" }));
       await waitFor(() => expect(screen.getByRole("combobox", { name: "Speaking voice" })).toBeEnabled());
@@ -730,7 +734,7 @@ describe("voice choices", () => {
       globalThis.fetch = async () => new Response(JSON.stringify({ choices: metadata.choices, defaults }));
       await voiceSession.loadVoiceChoices();
       expect(voiceSession.state.choicesStatus).toBe("error");
-      expect(voiceSession.state.choicesError).toBe("The voice gateway returned invalid choices");
+      expect(voiceSession.issues.message("choices")).toBe("The voice gateway returned invalid choices");
     }
   });
 
@@ -820,7 +824,7 @@ describe("voice choices", () => {
       expect(screen.queryByRole("radiogroup", { name: "Language model" })).toBeNull();
       expect(screen.getByRole("button", { name: "Retry loading voice choices" })).toBeEnabled();
       await voiceSession.connect();
-      expect(voiceSession.state.error).toBe("Storage unavailable");
+      expect(voiceSession.issues.message("voiceName")).toBe("Storage unavailable");
       load.mockRestore();
       await userEvent.setup().click(screen.getByRole("button", { name: "Retry loading voice choices" }));
       const select = await readyModel();
@@ -835,7 +839,7 @@ describe("voice choices", () => {
 
   it("defers replacement-gateway settings until the active setup is released", async () => {
     globalThis.fetch = async () => new Response(JSON.stringify(independent));
-    const session = new VoiceSession();
+    const session = new VoiceSession(new VoiceIssues());
     await session.loadVoiceChoices();
     session.selectSpeechStage("output", "client", null);
     session.setState((s) => ({ ...s, connected: true }));

@@ -61,10 +61,10 @@ from the emulator. They cover normal text, 2× text at the full portrait width,
 and long-press help. `gomode-voice-panel-usage-narrow-large-text.png` separately
 covers 2× text at 320 dp.
 
-Each client retains the five newest failures. A collapsed list below the error
-panel shows them with their time, so a failure stays readable after the error
-line clears or a reconnect succeeds. Android discloses the same record, with its
-engine and session phase, in voice settings.
+The browser lists its current problems below the controls: one line, or bullets
+when there are several, with one X that clears them all. A problem leaves the
+list when its cause clears. Android retains the five newest failures, with
+their engine and session phase, in voice settings.
 
 X hides the transcript without clearing it. A Material subtitles icon shows it
 again. Hidden transcripts keep receiving text but show no drafts. Keyboard focus

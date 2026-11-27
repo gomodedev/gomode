@@ -68,7 +68,7 @@ export const defaultVoiceMessages = {
   showTranscript: "Show transcript",
   connect: "Connect voice assistant",
   connectionFailed: "Voice connection failed",
-  dismissError: "Dismiss voice error",
+  dismissErrors: "Dismiss errors",
   endSession: "End voice session",
   listening: "Listening…",
   microphone: "Microphone",
@@ -87,7 +87,6 @@ export const defaultVoiceMessages = {
   microphoneMuteOnceHelp: "Muted until this reply ends.",
   microphoneMutedHelp: "Stays muted until you unmute.",
   muted: "Muted",
-  previousErrors: "Previous errors",
   reasoning: "Reasoning:",
   reconnecting: "Reconnecting…",
   signaling: "Signaling…",
@@ -110,4 +109,4 @@ export const defaultVoiceMessages = {
 };
 
 export type VoiceSettingsMessages = typeof defaultVoiceSettingsMessages;
-export type VoiceMessages = Omit<typeof defaultVoiceMessages, "dismissError"> & { dismissError?: string };
+export type VoiceMessages = typeof defaultVoiceMessages;

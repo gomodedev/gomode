@@ -1,6 +1,7 @@
 // Owns audio device discovery, desired routes, and cancellation-bound route replacement.
 
 import type { MicrophoneInput } from "./MicrophoneInput";
+import type { VoiceIssues } from "./VoiceIssues";
 import type { SpeechLocation } from "../../sdk/voicegateway/ts/v2/types.gen";
 
 /** One browser audio input or output device. */
@@ -16,9 +17,6 @@ export interface AudioRouteState {
   audioOutputs: AudioDevice[];
   selectedInputId: string;
   selectedOutputId: string;
-  audioDevicesError: string | null;
-  audioInputError: string | null;
-  audioOutputError: string | null;
   audioSwitching: "input" | "output" | null;
   speechInput: SpeechLocation;
   speechOutput: SpeechLocation;
@@ -35,6 +33,8 @@ interface AudioRouteConnection {
 interface AudioRouteHost {
   state: AudioRouteState;
   update(change: (state: AudioRouteState) => void): void;
+  /** Receives the route problems; see AudioRoutes.releaseUnownedIssues. The session resolves them when it ends. */
+  issues: VoiceIssues;
   connection(): AudioRouteConnection | null;
   input: MicrophoneInput;
   microphoneActive(): boolean;
@@ -75,6 +75,15 @@ function bluetoothAudioDevice(device: AudioDevice, rememberedId: string | null):
   );
 }
 
+type RouteIssueKey = "audioDevices" | "audioInput" | "audioOutput";
+
+/** Only a gateway speech stage routes through a chosen device; browser speech uses the system route. */
+function routeIssueOwned(key: RouteIssueKey, state: AudioRouteState): boolean {
+  if (key === "audioInput") return state.speechInput === "gateway";
+  if (key === "audioOutput") return state.speechOutput === "gateway";
+  return state.speechInput === "gateway" || state.speechOutput === "gateway";
+}
+
 type AudioDevicePreference = "BluetoothInput" | "BluetoothOutput" | "Input" | "Output";
 
 function savedAudioDevice(kind: AudioDevicePreference): string | null {
@@ -105,6 +114,18 @@ export class AudioRoutes {
   private enumeration: object | null = null;
 
   constructor(private readonly host: AudioRouteHost) {}
+
+  /** Resolve route problems whose speech stage no longer uses a gateway route; call after the stages change. */
+  releaseUnownedIssues(): void {
+    const keys = (["audioDevices", "audioInput", "audioOutput"] as const).filter(
+      (key) => !routeIssueOwned(key, this.host.state),
+    );
+    if (keys.length > 0) this.host.issues.resolve(...keys);
+  }
+
+  private raise(key: RouteIssueKey, message: string): void {
+    if (routeIssueOwned(key, this.host.state)) this.host.issues.raise(key, message, null);
+  }
 
   /** Reserve routing while the transport installs its first microphone stream. */
   beginCapture(): (deviceId: string) => void {
@@ -230,8 +251,8 @@ export class AudioRoutes {
       this.host.update((s) => {
         s.audioInputs = inputs;
         s.audioOutputs = outputs;
-        s.audioDevicesError = null;
       });
+      this.host.issues.resolve("audioDevices");
       for (const kind of ["input", "output"] as const) {
         const queued = this.routes[kind].queued;
         const available = kind === "input" ? inputs : outputs;
@@ -271,9 +292,7 @@ export class AudioRoutes {
         if (this.operation !== null) {
           // An output switch already owns recovery and will report its outcome.
           if (this.operation.kind !== "output")
-            this.host.update((s) => {
-              s.audioOutputError = "Speaker disconnected. Choose another speaker.";
-            });
+            this.raise("audioOutput", "Speaker disconnected. Choose another speaker.");
         } else {
           await this._selectOutputDevice("", "recovery");
         }
@@ -284,9 +303,7 @@ export class AudioRoutes {
         if (this.operation !== null) {
           // Preserve warnings about the other route while this switch completes.
           if (this.operation.kind !== "input")
-            this.host.update((s) => {
-              s.audioInputError = "Microphone disconnected. Choose another microphone.";
-            });
+            this.raise("audioInput", "Microphone disconnected. Choose another microphone.");
         } else {
           // Keep the displayed choice until a replacement track is working.
           await this._selectInputDevice("", "recovery");
@@ -296,9 +313,7 @@ export class AudioRoutes {
       await this.applyPending();
     } catch (error) {
       if (attempt !== this.enumeration) return;
-      this.host.update((s) => {
-        s.audioDevicesError = `Could not list audio devices: ${String(error)}`;
-      });
+      this.raise("audioDevices", `Could not list audio devices: ${String(error)}`);
     }
   }
 
@@ -310,9 +325,6 @@ export class AudioRoutes {
     const pc = connection?.pc;
     const oldStream = connection?.microphone;
     if (connection && pc && oldStream) {
-      this.host.update((s) => {
-        s.audioInputError = null;
-      });
       let pending: PendingMicrophoneCapture | null = null;
       const releasePending = () => {
         const capture = pending;
@@ -370,8 +382,8 @@ export class AudioRoutes {
         oldStream.getTracks().forEach((track) => track.stop());
         this.host.update((s) => {
           s.selectedInputId = deviceId;
-          s.audioInputError = null;
         });
+        this.host.issues.resolve("audioInput");
         if (!this.current(selection, connection)) return;
         if (source !== "recovery") rememberAudioDevice("Input", deviceId);
         this.routes.input.provisional = false;
@@ -383,9 +395,7 @@ export class AudioRoutes {
           return;
         }
         if (this.current(selection, connection))
-          this.host.update((s) => {
-            s.audioInputError = `Could not switch microphone: ${String(error)}`;
-          });
+          this.raise("audioInput", `Could not switch microphone: ${String(error)}`);
       } finally {
         signal.removeEventListener("abort", releasePending);
         this.finish(selection);
@@ -393,8 +403,8 @@ export class AudioRoutes {
     } else {
       this.host.update((s) => {
         s.selectedInputId = deviceId;
-        s.audioInputError = null;
       });
+      this.host.issues.resolve("audioInput");
       this.routes.input.provisional = source !== "recovery";
       this.finish(selection);
     }
@@ -405,9 +415,6 @@ export class AudioRoutes {
     const selection = this.begin("output", { deviceId, source });
     if (selection === null) return;
     const audio = this.host.connection()?.speaker ?? null;
-    this.host.update((s) => {
-      s.audioOutputError = null;
-    });
     try {
       if (!("setSinkId" in HTMLMediaElement.prototype))
         throw new Error("Use your device's sound settings to change the speaker");
@@ -415,8 +422,8 @@ export class AudioRoutes {
       if ((this.host.connection()?.speaker ?? null) !== audio || selection !== this.operation) return;
       this.host.update((s) => {
         s.selectedOutputId = deviceId;
-        s.audioOutputError = null;
       });
+      this.host.issues.resolve("audioOutput");
       // Before remote audio exists, this is a provisional route selection.
       if (audio) {
         if (source !== "recovery") rememberAudioDevice("Output", deviceId);
@@ -426,9 +433,7 @@ export class AudioRoutes {
       }
     } catch (error) {
       if ((this.host.connection()?.speaker ?? null) === audio && selection === this.operation)
-        this.host.update((s) => {
-          s.audioOutputError = `Could not switch speaker: ${String(error)}`;
-        });
+        this.raise("audioOutput", `Could not switch speaker: ${String(error)}`);
     } finally {
       this.finish(selection);
     }

@@ -19,7 +19,8 @@ import { Portal } from "solid-js/web";
 
 import { TurnStateThinking, TurnStateTranscribing } from "../../sdk/voicegateway/ts/v2/types.gen";
 import { bluetoothAudioDeviceLabel } from "./AudioRoutes";
-import { microphoneMuted, previousErrors, voiceSession } from "./VoiceSession";
+import { microphoneMuted, voiceSession } from "./VoiceSession";
+import { voiceSettingsIssue, type VoiceIssue, type VoiceIssueKey } from "./VoiceIssues";
 import type { MicrophoneMode, VoiceState, TranscriptEntry, ToolInvocation } from "./VoiceSession";
 import { notifications } from "./notifications";
 import VoiceSettings from "./VoiceSettings";
@@ -67,9 +68,13 @@ function localizedStatus(
   }
 }
 
-/** Short local time for a retained failure. */
-function formatErrorTime(at: number): string {
-  return new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+/** The list shows the newest problems up to this count. */
+const MAX_SHOWN_ISSUES = 3;
+/** Longer problem messages are cut with "…"; the full text stays in the tooltip. */
+const MAX_ISSUE_CHARS = 160;
+
+function cutIssueMessage(message: string): string {
+  return message.length <= MAX_ISSUE_CHARS ? message : `${message.slice(0, MAX_ISSUE_CHARS - 1).trimEnd()}…`;
 }
 
 export default function VoiceOverlay(props: {
@@ -80,7 +85,6 @@ export default function VoiceOverlay(props: {
   nextServer?: { name: string; onSelect: () => void };
 }) {
   const session = voiceSession;
-  const priorErrors = () => previousErrors(session.state);
   let disposed = false;
   let startAttempt = 0;
   const canStart = () => !disposed && (props.canStart?.() ?? true);
@@ -127,13 +131,20 @@ export default function VoiceOverlay(props: {
     setDismissedSettingsError(error);
     connectButtonRef?.focus();
   };
-  const dismissConnectionError = () => {
-    // Keep a matching settings diagnostic at its control without repeating it in the overlay.
-    if (settingsError() === session.state.error) setDismissedSettingsError(settingsError());
-    session.dismissError();
+  // Open settings show their field problems at the controls instead.
+  const listedIssues = () =>
+    session.issues.list().filter((issue) => !(settingsOpen() && voiceSettingsIssue(issue.key)));
+  const dismissIssues = () => {
+    session.issues.resolve(...listedIssues().map((issue) => issue.key));
     connectButtonRef?.focus();
   };
-  const dismissErrorLabel = () => messages().dismissError ?? defaultVoiceMessages.dismissError;
+  const recoverIssue = async (key: VoiceIssueKey) => {
+    await session.issues.recover(key);
+    // The recovered entry's button is gone; keep focus in the panel unless the user moved it.
+    const focused = document.activeElement;
+    if (!session.issues.list().some((issue) => issue.key === key) && (focused === null || focused === document.body))
+      connectButtonRef?.focus();
+  };
   const SettingsButton = () => (
     <button
       type="button"
@@ -427,49 +438,15 @@ export default function VoiceOverlay(props: {
               {microphoneAccessHelp()}
             </p>
           </Show>
-          <Show when={session.state.micLevelError}>
-            {(error) => (
-              <div role="status" class={styles.accessNotice}>
-                <span>{error()}</span>
-                <button
-                  type="button"
-                  class={styles.accessAction}
-                  onClick={async () => {
-                    await session.enableMicrophoneMeter();
-                    if (session.state.micLevelError === null) connectButtonRef?.focus();
-                  }}
-                >
-                  {messages().enableMicrophoneMeter}
-                </button>
-              </div>
-            )}
+          <Show when={listedIssues().length > 0}>
+            <IssueList
+              issues={listedIssues()}
+              messages={messages}
+              onRecover={(key) => void recoverIssue(key)}
+              onDismiss={dismissIssues}
+            />
           </Show>
-          <Show when={session.state.audioPlaybackError}>
-            {(error) => (
-              <div role="status" class={styles.accessNotice}>
-                <span>{error()}</span>
-                <button type="button" class={styles.accessAction} onClick={() => session.resumeAudio()}>
-                  {messages().enableSound}
-                </button>
-              </div>
-            )}
-          </Show>
-          <Show
-            when={
-              session.state.error !== null &&
-              !(settingsOpen() && settingsError() === session.state.error) &&
-              (session.state.error || messages().connectionFailed)
-            }
-            keyed
-          >
-            {(err) => (
-              <ErrorNotice message={err} dismissLabel={dismissErrorLabel()} onDismiss={dismissConnectionError} />
-            )}
-          </Show>
-          <Show
-            when={session.state.error === null && session.state.connectStatus !== null && session.state.connectStatus}
-            keyed
-          >
+          <Show when={session.state.connectStatus} keyed>
             {(status) => (
               <ConnectingPanel
                 status={status}
@@ -487,36 +464,11 @@ export default function VoiceOverlay(props: {
             closeControl={hasDiscussion() && transcriptExpanded() ? TranscriptToggle : null}
             messages={messages}
           />
-          <Show when={session.transport === "webrtc"}>
-            <AudioErrors state={session.state} />
-          </Show>
-          <Show when={!settingsOpen() && priorErrors().length > 0}>
-            <details class={styles.errorHistory}>
-              <summary>{`${messages().previousErrors} (${priorErrors().length})`}</summary>
-              <ul class={styles.errorList}>
-                <For each={priorErrors()}>
-                  {(entry) => (
-                    <li>
-                      <time dateTime={new Date(entry.at).toISOString()}>{formatErrorTime(entry.at)}</time>
-                      <span>{entry.message || messages().connectionFailed}</span>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </details>
-          </Show>
-          <Show
-            when={
-              !settingsOpen() &&
-              settingsError() !== session.state.error &&
-              settingsError() !== dismissedSettingsError() &&
-              settingsError()
-            }
-          >
+          <Show when={!settingsOpen() && settingsError() !== dismissedSettingsError() && settingsError()}>
             {(error) => (
               <ErrorNotice
                 message={error()}
-                dismissLabel={dismissErrorLabel()}
+                dismissLabel={messages().dismissErrors}
                 onDismiss={() => dismissSettingsError(error())}
               />
             )}
@@ -588,6 +540,57 @@ function UsagePanel(props: { usage: VoiceUsage | null; messages: Accessor<VoiceM
         </Show>
       </div>
     </>
+  );
+}
+
+/** One problem renders as a line; several as a bulleted list, oldest first. */
+function IssueList(props: {
+  issues: readonly VoiceIssue[];
+  messages: Accessor<VoiceMessages>;
+  onRecover: (key: VoiceIssueKey) => void;
+  onDismiss: () => void;
+}) {
+  const shown = () => props.issues.slice(-MAX_SHOWN_ISSUES);
+  const Issue = (issue: VoiceIssue) => {
+    const message = () => issue.message || props.messages().connectionFailed;
+    const cut = () => cutIssueMessage(message());
+    return (
+      <>
+        <span class={styles.issueMessage} title={cut() === message() ? undefined : message()}>
+          {cut()}
+        </span>
+        <Show when={issue.recovery}>
+          {(recovery) => (
+            <button type="button" class={styles.accessAction} onClick={() => props.onRecover(issue.key)}>
+              {props.messages()[recovery().label]}
+            </button>
+          )}
+        </Show>
+      </>
+    );
+  };
+  return (
+    <div class={styles.errorPanel}>
+      <div role="alert" class={styles.issues}>
+        <Show
+          when={shown().length > 1}
+          fallback={<For each={shown()}>{(issue) => <p class={styles.issueLine}>{Issue(issue)}</p>}</For>}
+        >
+          <ul class={styles.issueList}>
+            <For each={shown()}>{(issue) => <li>{Issue(issue)}</li>}</For>
+          </ul>
+        </Show>
+      </div>
+      <button
+        type="button"
+        class={controls.control}
+        aria-label={props.messages().dismissErrors}
+        title={props.messages().dismissErrors}
+        onClick={() => props.onDismiss()}
+      >
+        <VoiceIcon name="close" />
+      </button>
+    </div>
   );
 }
 
@@ -689,9 +692,7 @@ function ConversationPanel(props: {
   messages: Accessor<VoiceMessages>;
 }) {
   const showStatus = () =>
-    props.state.error === null &&
-    props.state.connectStatus === null &&
-    (props.state.connected || props.state.listening || props.state.speaking);
+    props.state.connectStatus === null && (props.state.connected || props.state.listening || props.state.speaking);
   // Gateway work outranks muting: a muted user still waits for the reply.
   const busyText = () => {
     if (props.state.turnState === TurnStateTranscribing) return props.messages().transcribing;
@@ -812,22 +813,6 @@ function ToolHistory(props: { entries: ToolInvocation[]; label: string; active: 
 }
 
 // Audio device picker
-
-function AudioErrors(props: { state: VoiceState }) {
-  const message = () =>
-    [props.state.audioDevicesError, props.state.audioInputError, props.state.audioOutputError]
-      .filter((error) => error !== null)
-      .join(" ");
-  return (
-    <Show when={message()}>
-      {(error) => (
-        <p role="alert" class={styles.audioError}>
-          {error()}
-        </p>
-      )}
-    </Show>
-  );
-}
 
 function AudioDevicePicker(props: {
   gatewayInput: boolean;
