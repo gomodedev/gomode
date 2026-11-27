@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gomodedev/gomode/httpserver/ratelimit"
+
 	"github.com/gomodedev/gomode"
 	"github.com/gomodedev/gomode/oauth/oauthverify"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
@@ -405,13 +407,18 @@ func (h *handler) handleTextTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	h.textTicketMu.Lock()
+	// The earliest remaining expiry frees the next slot when the table is full.
+	var wait time.Duration
 	for ticket, entry := range h.textTickets {
-		if !now.Before(entry.expires) {
+		if d := entry.expires.Sub(now); d <= 0 {
 			delete(h.textTickets, ticket)
+		} else if wait == 0 || d < wait {
+			wait = d
 		}
 	}
 	if len(h.textTickets) >= 1024 {
 		h.textTicketMu.Unlock()
+		ratelimit.SetRetryAfter(w.Header(), wait)
 		voiceapi.WriteError(h.log, w, http.StatusTooManyRequests, voiceapi.CodeBadRequest, "too many pending voice tickets")
 		return
 	}

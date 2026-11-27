@@ -326,6 +326,10 @@ func TestServer(t *testing.T) {
 		if w.Code != 429 {
 			t.Fatal(w.Body.String())
 		}
+		// The lockout began with the twentieth guess, so the wait rounds up to its full ten minutes.
+		if got := w.Header().Get("Retry-After"); got != "600" {
+			t.Errorf("Retry-After = %q, want the lockout's remaining 600 seconds", got)
+		}
 	})
 	t.Run("start limits", func(t *testing.T) {
 		s, _, _ := fixture(t)

@@ -13,6 +13,8 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/gomodedev/gomode/httpserver/ratelimit"
 )
 
 // Host supplies host policy without sharing account or session types. Identity must be
@@ -357,6 +359,7 @@ func (s *Server) failProtocol(ctx context.Context, w http.ResponseWriter, err *p
 	switch err.code {
 	case errRateLimited:
 		status = http.StatusTooManyRequests
+		ratelimit.SetRetryAfter(w.Header(), err.retryAfter)
 	case errAlreadyDecided:
 		status = http.StatusConflict
 	case errCSRF:

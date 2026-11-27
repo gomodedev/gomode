@@ -30,6 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/httpserver/ratelimit"
+
 	"github.com/gomodedev/gomode/internal/pairing"
 	"github.com/gomodedev/gomode/internal/rsatest"
 	"github.com/gomodedev/gomode/internal/testlog"
@@ -5775,9 +5777,9 @@ type inspectRateLimiter struct {
 	keys []string
 }
 
-func (l *inspectRateLimiter) Allow(key string) (time.Duration, bool) {
+func (l *inspectRateLimiter) Allow(key string) ratelimit.Result {
 	l.keys = append(l.keys, key)
-	return 0, true
+	return ratelimit.Result{Allowed: true}
 }
 
 func (l *inspectRateLimiter) sawKey(key string) bool {
@@ -5787,8 +5789,8 @@ func (l *inspectRateLimiter) sawKey(key string) bool {
 // denyRateLimiter always denies requests for the next 42.5 s.
 type denyRateLimiter struct{}
 
-func (denyRateLimiter) Allow(key string) (time.Duration, bool) {
-	return 42500 * time.Millisecond, false
+func (denyRateLimiter) Allow(key string) ratelimit.Result {
+	return ratelimit.Result{RetryAfter: 42500 * time.Millisecond}
 }
 
 // countRateLimiter allows up to max requests per key.
@@ -5798,14 +5800,14 @@ type countRateLimiter struct {
 	counts map[string]int
 }
 
-func (l *countRateLimiter) Allow(key string) (time.Duration, bool) {
+func (l *countRateLimiter) Allow(key string) ratelimit.Result {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.counts == nil {
 		l.counts = map[string]int{}
 	}
 	l.counts[key]++
-	return time.Minute, l.counts[key] <= l.max
+	return countResult(l.counts[key] <= l.max)
 }
 
 // tieredCountRateLimiter gives aggregate IP and per-IP-client keys independent
@@ -5817,7 +5819,7 @@ type tieredCountRateLimiter struct {
 	counts    map[string]int
 }
 
-func (l *tieredCountRateLimiter) Allow(key string) (time.Duration, bool) {
+func (l *tieredCountRateLimiter) Allow(key string) ratelimit.Result {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.counts == nil {
@@ -5828,7 +5830,14 @@ func (l *tieredCountRateLimiter) Allow(key string) (time.Duration, bool) {
 	if strings.HasPrefix(key, "ip:") {
 		limit = l.ipMax
 	}
-	return time.Minute, l.counts[key] <= limit
+	return countResult(l.counts[key] <= limit)
+}
+
+func countResult(allowed bool) ratelimit.Result {
+	if allowed {
+		return ratelimit.Result{Allowed: true}
+	}
+	return ratelimit.Result{RetryAfter: time.Minute}
 }
 
 // testFlowServerConfig returns a ServerConfig pre-populated with test defaults,

@@ -1,0 +1,90 @@
+// Tests token-bucket admission, retry waits, bucket bounds, and Retry-After rounding.
+
+package ratelimit
+
+import (
+	"net/http"
+	"strconv"
+	"testing"
+	"testing/synctest"
+	"time"
+)
+
+func TestLimiter(t *testing.T) {
+	t.Run("a rejection waits for the next token", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := New(60, time.Minute, 2)
+			for range 2 {
+				if r := l.Allow("k"); !r.Allowed {
+					t.Fatalf("burst request rejected: %+v", r)
+				}
+			}
+			r := l.Allow("k")
+			if r.Allowed || r.RetryAfter <= 0 || r.RetryAfter > time.Second {
+				t.Fatalf("got %+v, want a rejection waiting at most one second", r)
+			}
+			if other := l.Allow("other"); !other.Allowed {
+				t.Fatal("keys share a bucket")
+			}
+			time.Sleep(r.RetryAfter)
+			if r := l.Allow("k"); !r.Allowed {
+				t.Fatalf("rejected after waiting RetryAfter: %+v", r)
+			}
+			if got := l.Count(); got != 5 {
+				t.Errorf("Count = %d, want 5", got)
+			}
+		})
+	})
+
+	t.Run("update applies to existing buckets and zero is unlimited", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := New(1, time.Hour, 1)
+			l.Allow("k")
+			l.Update(3600, time.Hour, 1)
+			time.Sleep(time.Second)
+			if r := l.Allow("k"); !r.Allowed {
+				t.Fatalf("existing bucket kept the old rate: %+v", r)
+			}
+			l.Update(0, time.Hour, 1)
+			for range 10 {
+				if r := l.Allow("k"); !r.Allowed {
+					t.Fatal("unlimited limiter rejected")
+				}
+			}
+		})
+	})
+
+	t.Run("a full bucket table rejects new keys until a prune frees one", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := New(1, time.Hour, 1)
+			for i := range maxBuckets {
+				l.Allow(strconv.Itoa(i))
+			}
+			r := l.Allow("new")
+			if r.Allowed || r.RetryAfter != pruneInterval {
+				t.Fatalf("got %+v, want a rejection until the next prune", r)
+			}
+			if r := l.Allow("0"); r.Allowed || r.RetryAfter <= pruneInterval {
+				t.Fatalf("existing key not limited by its own bucket: %+v", r)
+			}
+		})
+	})
+}
+
+func TestSetRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		wait time.Duration
+		want string
+	}{
+		{0, "1"},
+		{time.Millisecond, "1"},
+		{time.Second, "1"},
+		{42500 * time.Millisecond, "43"},
+	} {
+		h := http.Header{}
+		SetRetryAfter(h, tc.wait)
+		if got := h.Get("Retry-After"); got != tc.want {
+			t.Errorf("SetRetryAfter(%v) = %q, want %q", tc.wait, got, tc.want)
+		}
+	}
+}

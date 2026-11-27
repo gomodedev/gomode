@@ -52,6 +52,12 @@ const (
 type protocolError struct {
 	code     errorCode
 	interval int
+	// retryAfter is how long an errRateLimited caller waits until its budget allows it again.
+	retryAfter time.Duration
+}
+
+func rateLimited(wait time.Duration) *protocolError {
+	return &protocolError{code: errRateLimited, retryAfter: wait}
 }
 
 func (e *protocolError) Error() string { return string(e.code) }
@@ -78,8 +84,21 @@ func (s *engine) start(ip netip.Addr, agent string) (StartResponse, *protocolErr
 	defer s.mu.Unlock()
 	now := time.Now()
 	s.cleanupLocked(now)
-	if !s.allowLocked("start:"+ip.String(), 10, now) || !s.allowLocked("start", 300, now) || len(s.requests) >= 1000 {
-		return StartResponse{}, &protocolError{code: errRateLimited}
+	if wait, ok := s.allowLocked("start:"+ip.String(), 10, now); !ok {
+		return StartResponse{}, rateLimited(wait)
+	}
+	if wait, ok := s.allowLocked("start", 300, now); !ok {
+		return StartResponse{}, rateLimited(wait)
+	}
+	if len(s.requests) >= 1000 {
+		// cleanupLocked removed expired requests, so the earliest expiry frees the next slot.
+		wait := time.Duration(0)
+		for _, p := range s.requests {
+			if d := p.ExpiresAt.Sub(now); wait == 0 || d < wait {
+				wait = d
+			}
+		}
+		return StartResponse{}, rateLimited(wait)
 	}
 	secret := pairing.Secret()
 	hash := sha256.Sum256([]byte(secret))
@@ -169,8 +188,11 @@ func (s *engine) lookupLocked(ip netip.Addr, code string) (*request, *protocolEr
 		return nil, &protocolError{code: errInvalid}
 	}
 	// Every lookup/action consumes a budget. Exhaustion locks guesses for ten minutes.
-	if !s.allowLocked("lookup:"+ip.String(), 20, now) || !s.allowLocked("lookup", 1000, now) {
-		return nil, &protocolError{code: errRateLimited}
+	if wait, ok := s.allowLocked("lookup:"+ip.String(), 20, now); !ok {
+		return nil, rateLimited(wait)
+	}
+	if wait, ok := s.allowLocked("lookup", 1000, now); !ok {
+		return nil, rateLimited(wait)
 	}
 	p := s.codes[normalize(code)]
 	if p == nil {
@@ -181,24 +203,31 @@ func (s *engine) lookupLocked(ip netip.Addr, code string) (*request, *protocolEr
 	}
 	return p, nil
 }
-func (s *engine) allowLocked(key string, max int, now time.Time) bool {
+
+// allowLocked consumes one unit of key's budget. A rejection reports how long until the key's
+// lockout ends, or, when the budget table is full, until cleanup can free an entry.
+func (s *engine) allowLocked(key string, max int, now time.Time) (time.Duration, bool) {
 	b := s.limits[key]
 	if now.Before(b.lockedUntil) {
-		return false
+		return b.lockedUntil.Sub(now), false
 	}
 	if !now.Before(b.until) {
 		b = limit{until: now.Add(10 * time.Minute)}
 	}
 	// Bound attacker-controlled IP state even under a distributed attack.
 	if len(s.limits) >= 4096 && b.count == 0 {
-		return false
+		wait := 10 * time.Minute
+		for _, other := range s.limits {
+			wait = min(wait, other.until.Sub(now), other.lockedUntil.Sub(now))
+		}
+		return wait, false
 	}
 	b.count++
 	if b.count >= max {
 		b.lockedUntil = now.Add(10 * time.Minute)
 	}
 	s.limits[key] = b
-	return true
+	return 0, true
 }
 func (s *engine) cleanupLocked(now time.Time) {
 	for _, p := range s.requests {
