@@ -64,6 +64,8 @@ class G2FaceclawSessionTest {
                     "RIGHT settings",
                     "RIGHT lease acquire",
                     "LEFT lease acquire",
+                    "RIGHT wear query",
+                    "LEFT wear query",
                     "RIGHT create ",
                     "LEFT root",
                     "LEFT draw",
