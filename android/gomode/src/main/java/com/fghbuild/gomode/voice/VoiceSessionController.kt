@@ -1,4 +1,4 @@
-// Shared voice controller and ordered quiet-context/actionable-alert buffering.
+// Shared voice controller and buffering of service context changes and actionable alerts.
 //
 // Connected voice also reads gomode://notifications. The opening snapshot, repeated occurrence IDs,
 // withdrawals, and expiry send nothing. Each new alert reaches the model as one "New notification:
@@ -35,10 +35,8 @@ internal interface VoiceSessionController {
 
     fun clearTranscript()
 
-    fun injectText(
-        text: String,
-        generate: Boolean = false,
-    )
+    /** announce sends an actionable service alert; the model responds to it once its turn ends. */
+    fun announce(text: String)
 
     /**
      * contextChanged reports that the conversation's service context changed. The session sends
@@ -63,45 +61,44 @@ internal data class VoiceContextUpdate(
 
 // Holds what reaches the model once the active turn ends. The conversation's context is diffed
 // when this drains, against what the model already received, so each changed section arrives
-// once, newest. Injected texts and alerts keep their order.
+// once, newest. Alerts keep their order after it.
 internal class PendingVoiceContext(
-    private val contextUpdate: () -> VoiceContextUpdate?,
+    private val conversation: () -> VoiceConversation?,
 ) {
     private var contextChanged = false
-    private val texts = mutableListOf<VoiceContextUpdate>()
+    private val alerts = mutableListOf<String>()
 
     fun markContextChanged() {
         contextChanged = true
     }
 
-    fun add(
-        text: String,
-        generate: Boolean,
-    ): Boolean {
-        if (texts.size >= MAX_PENDING_TEXTS) return false
-        texts.add(VoiceContextUpdate(text, generate))
+    fun addAlert(text: String): Boolean {
+        if (alerts.size >= MAX_PENDING_ALERTS) return false
+        alerts.add(text)
         return true
     }
 
-    fun isNotEmpty() = contextChanged || texts.isNotEmpty()
+    fun isNotEmpty() = contextChanged || alerts.isNotEmpty()
 
-    fun hasAlerts() = texts.any { it.generate }
+    /** Whether drain() would ask the model to respond: an alert or an unrequested server switch. */
+    fun announces() = alerts.isNotEmpty() || (contextChanged && conversation()?.announcesSwitch() == true)
 
     fun clear() {
         contextChanged = false
-        texts.clear()
+        alerts.clear()
     }
 
     fun drain(): VoiceContextUpdate? {
-        val context = if (contextChanged) contextUpdate() else null
-        val parts = listOfNotNull(context) + texts
+        val context = if (contextChanged) conversation()?.contextUpdate() else null
+        val texts = listOfNotNull(context?.text) + alerts
+        val generate = context?.generate == true || alerts.isNotEmpty()
         clear()
-        if (parts.isEmpty()) return null
-        return VoiceContextUpdate(parts.joinToString("\n\n") { it.text }, parts.any { it.generate })
+        if (texts.isEmpty()) return null
+        return VoiceContextUpdate(texts.joinToString("\n\n"), generate)
     }
 
     private companion object {
-        const val MAX_PENDING_TEXTS = 64
+        const val MAX_PENDING_ALERTS = 64
     }
 }
 

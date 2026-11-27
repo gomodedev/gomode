@@ -311,10 +311,10 @@ class VoiceSessionLifecycleTest {
             }
             channel.accepted = false
             try {
-                session.injectText("Private context")
+                session.announce("Private alert")
                 assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.error)
                 assertFalse(session.state.value.connected)
-                session.injectText("Late context")
+                session.announce("Late alert")
                 assertEquals(1, channel.sendAttempts)
                 assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.error)
             } finally {
@@ -1222,14 +1222,14 @@ class VoiceSessionLifecycleTest {
                     channel,
                 )
                 settings.settings.first { it.activeServiceId == first }
-                session.injectText("Focus is First")
+                session.announce("Focus is First")
                 assertEquals(1, channel.sent.size) // The switch result precedes deferred focus metadata.
                 invokeHandleServerMessage(session, """{"kind":"turn.status","state":"idle"}""", channel)
                 assertEquals(2, channel.sent.size)
                 assertTrue(channel.sent.last().contains("Focus is First"))
 
                 invokeHandleServerMessage(session, """{"kind":"speech.started"}""", channel)
-                session.injectText("Participant context during playback")
+                session.announce("Participant context during playback")
                 invokeHandleServerMessage(session, """{"kind":"turn.status","state":"idle"}""", channel)
                 assertEquals(2, channel.sent.size)
                 invokeHandleServerMessage(session, """{"kind":"speech.ended"}""", channel)
@@ -1237,7 +1237,7 @@ class VoiceSessionLifecycleTest {
                 assertTrue(channel.sent.last().contains("Participant context during playback"))
 
                 invokeHandleServerMessage(session, """{"kind":"turn.status","state":"thinking"}""", channel)
-                session.injectText("Alert during microphone turn", generate = true)
+                session.announce("Alert during microphone turn")
                 assertEquals(3, channel.sent.size)
                 invokeHandleServerMessage(session, """{"kind":"turn.status","state":"idle"}""", channel)
                 assertEquals(4, channel.sent.size)

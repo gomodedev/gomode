@@ -995,7 +995,7 @@ export class VoiceSession {
   /** Ends a browser-speech session that stays idle without listening; see _browserListeningStalled. */
   private _listeningWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
-  private _pendingNotifications: Array<{ text: string; generate: boolean }> = [];
+  private _pendingAlerts: string[] = [];
   /** Latest undelivered text per service resource URI. */
   private readonly _pendingServiceContext = new Map<string, string>();
   /** Text per service resource URI that the current gateway session has, from its setup and later updates. */
@@ -1955,7 +1955,7 @@ export class VoiceSession {
       this._recoveryStartedAt = null;
       this._readyAt = null;
       this._recoveryContext = "";
-      this._pendingNotifications = [];
+      this._pendingAlerts = [];
       this._pendingServiceContext.clear();
       this._clearTranscript();
     }
@@ -2132,7 +2132,7 @@ export class VoiceSession {
     this._reconnectEnabled = true;
     this._speakerActive = false;
     if (!preserveTranscript) {
-      this._pendingNotifications = [];
+      this._pendingAlerts = [];
       this._pendingServiceContext.clear();
       this._reconnectAttempts = 0;
       this._recoveryStartedAt = null;
@@ -2404,16 +2404,14 @@ export class VoiceSession {
     this._flushPendingNotifications(true);
   }
 
-  injectText(text: string, generate?: boolean): void {
-    if (this._contextUpdateBlocked()) {
-      if (this._pendingNotifications.length >= 64) {
-        this._setError("Too many pending service updates. Reconnect voice.");
-        return;
-      }
-      this._pendingNotifications.push({ text, generate: generate === true });
+  /** Send an actionable service alert; the model responds to it once its turn ends. */
+  announce(text: string): void {
+    if (this._pendingAlerts.length >= 64) {
+      this._setError("Too many pending service alerts. Reconnect voice.");
       return;
     }
-    this._sendContextUpdate(text, generate === true);
+    this._pendingAlerts.push(text);
+    this._flushPendingNotifications(true);
   }
 
   private _contextUpdateBlocked(): boolean {
@@ -2443,12 +2441,10 @@ export class VoiceSession {
     this._pendingServiceContext.clear();
     for (const [uri, text] of changed) this._deliveredServiceContext.set(uri, text);
     const context = modelContextText(changed.map(([, text]) => text)) || null;
-    if (this._pendingNotifications.length === 0 && context === null) return;
-    const text = [context, ...this._pendingNotifications.map((update) => update.text)]
-      .filter((value): value is string => value !== null)
-      .join("\n\n");
-    const generate = allowResponse && this._pendingNotifications.some((update) => update.generate);
-    this._pendingNotifications = [];
+    if (this._pendingAlerts.length === 0 && context === null) return;
+    const text = [context, ...this._pendingAlerts].filter((value): value is string => value !== null).join("\n\n");
+    const generate = allowResponse && this._pendingAlerts.length > 0;
+    this._pendingAlerts = [];
     this._sendContextUpdate(text, generate);
   }
 
@@ -2503,7 +2499,7 @@ export class VoiceSession {
       this._microphoneMeter.stop(keepMeterContext);
       this._speakerActive = false;
       if (next === null) {
-        this._pendingNotifications = [];
+        this._pendingAlerts = [];
         this._pendingServiceContext.clear();
       }
       this.issues.resolve("playback");

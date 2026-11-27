@@ -580,7 +580,7 @@ internal fun GoModeApp(
             val notification = event.notification
             val label = serviceCatalog.state.value[event.source]?.label ?: event.source.url
             val line = alertLine(notification.title, notification.text, notification.itemId)
-            voiceSession.injectText(serverSection(label, event.source.serviceID, line), generate = true)
+            voiceSession.announce(serverSection(label, event.source.serviceID, line))
         },
     )
     val configuredVoiceAvailable =

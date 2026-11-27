@@ -17,10 +17,14 @@ val VoiceLanguageModel.label: String
             VoiceLanguageModel.GATEWAY -> "Remote LLM"
         }
 
-/** UserTurnInput provides recognized user text or an explicit service update to respond to. */
+/**
+ * UserTurnInput provides recognized user text or an explicit service update to respond to. context
+ * holds the service context changes since the previous turn; it precedes the text.
+ */
 data class UserTurnInput(
     val text: String,
     val serviceUpdate: Boolean = false,
+    val context: String? = null,
 )
 
 /** EngineSessionContext encapsulates active tools and system instructions for a voice session. */
@@ -67,9 +71,6 @@ interface OnDeviceVoiceEngine {
         onToolCall: suspend (ToolCall) -> JsonElement?,
     )
 
-    /** Injects external context into the engine memory. */
-    suspend fun injectContext(text: String)
-
     /** Releases native resources and active sessions. */
     fun close()
 }
@@ -98,8 +99,6 @@ internal class RemoteGatewayEngine : OnDeviceVoiceEngine {
         onUsage: suspend (EngineUsage) -> Unit,
         onToolCall: suspend (ToolCall) -> JsonElement?,
     ) = Unit
-
-    override suspend fun injectContext(text: String) = Unit
 
     override fun close() = Unit
 }

@@ -94,7 +94,7 @@ export default function BrowserVoiceRuntime(props: BrowserVoiceRuntimeProps) {
     const monitor = monitorServiceNotifications(
       {
         setServiceContext: (changes) => voiceSession.setServiceContext(changes),
-        announce: (text) => voiceSession.injectText(text, true),
+        announce: (text) => voiceSession.announce(text),
       },
       props.onError,
       { sessionID: voiceSession.conversationID },

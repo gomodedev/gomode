@@ -191,7 +191,7 @@ it("owns service context reads with the connected runtime and rejects retired re
     .spyOn(mcpClient, "listModelResources")
     .mockResolvedValue({ resources: [{ uri: "fixture://catalog", name: "catalog" }], notifications: true });
   const subscribe = vi.spyOn(mcpClient, "subscribeResources");
-  const inject = vi.spyOn(voiceSession, "injectText").mockImplementation(() => {});
+  const announce = vi.spyOn(voiceSession, "announce").mockImplementation(() => {});
   const close = vi.fn();
   const pending = deferred<string>();
   read.mockImplementation(() => pending.promise);
@@ -218,14 +218,14 @@ it("owns service context reads with the connected runtime and rejects retired re
     expect(read.mock.calls.every(([, signal]) => signal?.aborted)).toBe(true);
     pending.resolve(JSON.stringify([{ id: "old", title: "Retired alert", body: "Other account" }]));
     await pending.promise;
-    expect(inject).not.toHaveBeenCalled();
+    expect(announce).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
   } finally {
     discovery.mockRestore();
     capabilities.mockRestore();
     read.mockRestore();
     subscribe.mockRestore();
-    inject.mockRestore();
+    announce.mockRestore();
   }
 });
 

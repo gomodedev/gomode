@@ -266,7 +266,7 @@ internal class DeviceVoiceSession(
     private var pendingCancellations = 0
     private var remoteTurnActive = false
     private val pendingNotifications =
-        PendingVoiceContext { voiceConversation?.takeIf { it.isCurrent() }?.contextUpdate() }
+        PendingVoiceContext { voiceConversation?.takeIf { it.isCurrent() } }
 
     private val audioStateJob =
         scope.launch {
@@ -478,14 +478,15 @@ internal class DeviceVoiceSession(
             withContext(ioDispatcher) { localEngine.initialize(context) }
         }
         if (!ownsAttempt(attempt)) return
-        voiceConversation?.contextUpdate()?.let { localEngine.injectContext(it.text) }
+        // Changes since setup reach the model with its next turn.
+        pendingNotifications.markContextChanged()
         frontendToolNames = frontendTools.declarations.map { it.name }.toSet()
         _state.update {
             it.copy(connectStatus = null, connected = true, error = null)
         }
         callController.activate()
         if (!silent) voiceModeChime.connected()
-        val announcing = pendingNotifications.hasAlerts()
+        val announcing = pendingNotifications.announces()
         flushPendingNotifications()
         if (!ownsAttempt(attempt)) return
         if (!announcing) {
@@ -724,7 +725,7 @@ internal class DeviceVoiceSession(
                         send(json.encodeToString(ContextUpdate.serializer(), gatewayContextUpdate(recoveryContext)))
                         recoveryContext = ""
                     }
-                    val announcing = pendingNotifications.hasAlerts()
+                    val announcing = pendingNotifications.announces()
                     flushPendingNotifications()
                     if (!ownsAttempt(attempt) || webSocket !== origin) return
                     if (!announcing) turnIdle = true
@@ -1045,11 +1046,10 @@ internal class DeviceVoiceSession(
                 // tools or completion so finalization cannot overtake a queued text delta.
                 var lastDelta: Job? = null
                 try {
-                    if (!serviceUpdate) {
-                        pendingNotifications.drain()?.let { activeEngine.injectContext(it.text) }
-                    }
+                    // The diff is taken as the turn starts, so it holds each changed section once.
+                    val context = if (serviceUpdate) null else pendingNotifications.drain()?.text
                     activeEngine.processTurn(
-                        input = UserTurnInput(text = text, serviceUpdate = serviceUpdate),
+                        input = UserTurnInput(text = text, serviceUpdate = serviceUpdate, context = context),
                         onDelta = { delta ->
                             lastDelta =
                                 scope.launch {
@@ -1455,38 +1455,13 @@ internal class DeviceVoiceSession(
         _state.update { it.copy(transcript = emptyList(), userContent = null) }
     }
 
-    override fun injectText(
-        text: String,
-        generate: Boolean,
-    ) {
+    override fun announce(text: String) {
         if (_state.value.error != null) return
-        if (endIfConversationChanged(voiceConversation)) return
-        if (userSpeechActive ||
-            output.active ||
-            awaitingModelTurn ||
-            !_state.value.connected ||
-            (voiceConversation != null && pendingGatewayTools.containsKey(attemptGeneration.get()))
-        ) {
-            if (!pendingNotifications.add(text, generate)) {
-                setError("Too many pending service alerts. Reconnect voice.")
-            }
+        if (!pendingNotifications.addAlert(text)) {
+            setError("Too many pending service alerts. Reconnect voice.")
             return
         }
-        val currentEngine = engine
-        if (currentEngine != null && currentEngine.engineType != VoiceLanguageModel.GATEWAY) {
-            val attempt = attemptGeneration.get()
-            if (generate) {
-                executeLocalTurn(attempt, text, currentEngine, serviceUpdate = true)
-            } else {
-                scope.launch {
-                    localTurnLock.withLock {
-                        if (ownsAttempt(attempt)) currentEngine.injectContext(text)
-                    }
-                }
-            }
-        } else {
-            sendContextUpdate(text, generate)
-        }
+        flushPendingNotifications()
     }
 
     override fun contextChanged() {
@@ -1512,25 +1487,19 @@ internal class DeviceVoiceSession(
         ) {
             return
         }
-        val update = pendingNotifications.drain()
-        if (update != null) {
-            // A queued user utterance already requests the next response. Deliver
-            // its service alerts as context before that request, without a competing turn.
-            val generate = update.generate && allowResponse && pendingUserUtterance == null
-            val currentEngine = engine
-            if (currentEngine != null && currentEngine.engineType != VoiceLanguageModel.GATEWAY) {
-                val attempt = attemptGeneration.get()
-                if (generate) {
-                    executeLocalTurn(attempt, update.text, currentEngine, serviceUpdate = true)
-                } else {
-                    scope.launch {
-                        localTurnLock.withLock {
-                            if (ownsAttempt(attempt)) currentEngine.injectContext(update.text)
-                        }
-                    }
+        val currentEngine = engine
+        if (currentEngine != null && currentEngine.engineType != VoiceLanguageModel.GATEWAY) {
+            // A local model takes context only with a turn, so quiet changes wait for the next one.
+            if (pendingNotifications.announces()) {
+                pendingNotifications.drain()?.let {
+                    executeLocalTurn(attempt, it.text, currentEngine, serviceUpdate = true)
                 }
-            } else {
-                sendContextUpdate(update.text, generate)
+            }
+        } else {
+            pendingNotifications.drain()?.let { update ->
+                // A queued user utterance already requests the next response. Deliver
+                // its service alerts as context before that request, without a competing turn.
+                sendContextUpdate(update.text, update.generate && allowResponse && pendingUserUtterance == null)
             }
         }
         if (!ownsAttempt(attempt)) return

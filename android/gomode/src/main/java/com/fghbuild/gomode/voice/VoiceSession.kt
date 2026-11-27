@@ -362,7 +362,7 @@ internal class VoiceSession(
 
     /** Text notifications buffered while the model is speaking; flushed on turn end. */
     private val pendingNotifications =
-        PendingVoiceContext { voiceConversation.takeIf { it.isCurrent() }?.contextUpdate() }
+        PendingVoiceContext { voiceConversation.takeIf { it.isCurrent() } }
 
     private var lastIceConnectionState: String? = null
     private var lastIceGatheringState: String? = null
@@ -1404,19 +1404,13 @@ internal class VoiceSession(
         _state.update { it.copy(transcript = emptyList(), transcriptDraft = null, userContent = null) }
     }
 
-    override fun injectText(
-        text: String,
-        generate: Boolean,
-    ) {
+    override fun announce(text: String) {
         if (_state.value.error != null) return
-        if (endIfConversationChanged(voiceConversation)) return
-        if (contextUpdateBlocked()) {
-            if (!pendingNotifications.add(text, generate)) {
-                setError("Too many pending service alerts. Reconnect voice.")
-            }
+        if (!pendingNotifications.addAlert(text)) {
+            setError("Too many pending service alerts. Reconnect voice.")
             return
         }
-        sendClientContent(text, generate)
+        flushPendingNotifications()
     }
 
     override fun close() {

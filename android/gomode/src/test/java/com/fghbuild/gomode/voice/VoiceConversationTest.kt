@@ -83,18 +83,26 @@ class VoiceConversationTest {
                 // The line names the bounded label, not the URL.
                 assertEquals("Active server: Server [$id]", owner.contextText())
                 assertNull(owner.contextUpdate())
+                val pending = PendingVoiceContext { owner }
+                pending.markContextChanged()
                 repository.switchService(other)
                 repository.settings.first { it.activeServiceId == other }
+                pending.markContextChanged()
+                assertTrue("a pending switch announces before any alert", pending.announces())
                 assertEquals(
                     VoiceContextUpdate(
                         "New notification: active server changed.\n\nActive server: Other [$other]",
                         generate = true,
                     ),
-                    owner.contextUpdate(),
+                    pending.drain(),
                 )
+                pending.markContextChanged()
+                assertFalse(pending.announces())
+                assertNull("the diff at delivery sent each change once", pending.drain())
                 owner.noteRequestedSwitch(id)
                 repository.switchService(id)
                 repository.settings.first { it.activeServiceId == id }
+                assertFalse(owner.announcesSwitch())
                 assertEquals(VoiceContextUpdate("Active server: Server [$id]", generate = false), owner.contextUpdate())
                 repository.switchService(other)
                 repository.settings.first { it.activeServiceId == other }

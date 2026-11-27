@@ -683,7 +683,7 @@ describe("VoiceSession", () => {
       message({ kind: "session.ready" });
       message({ kind: "turn.status", state: "thinking" });
       session.setMicrophoneMode("muteOnce");
-      session.injectText("Deferred notice");
+      session.setServiceContext(new Map([["test://context", "Deferred notice"]]));
       const sentences = Array.from({ length: 200 }, (_, index) => `Sentence ${index} ${"word ".repeat(20)}ends.`);
       message({ kind: "assistant.text.delta", text: sentences.join(" ") + " " });
       message({ kind: "turn.status", state: "idle" });
@@ -724,7 +724,7 @@ describe("VoiceSession", () => {
       session.setMicrophoneMode("muteOnce");
       message({ kind: "assistant.text.delta", text: "Waiting for voices." });
       expect(fakeSynthesis.spoken).toHaveLength(0);
-      session.injectText("Deferred notification");
+      session.setServiceContext(new Map([["test://context", "Deferred notification"]]));
       message({ kind: "turn.status", state: "idle" });
       expect(session.state.microphoneMode).toBe("muteOnce");
       expect(session.state.speaking).toBe(true);
@@ -794,7 +794,7 @@ describe("VoiceSession", () => {
       expect(audio!.muted).toBe(true);
       expect(channel.send.mock.calls.some(([text]) => JSON.parse(text as string).kind === "turn.cancel")).toBe(true);
       const beforeAlert = channel.send.mock.calls.length;
-      session.injectText("Deferred until recognition commits", true);
+      session.announce("Deferred until recognition commits");
       expect(channel.send).toHaveBeenCalledTimes(beforeAlert);
       message({ kind: "speech.started", speaker: "assistant" });
       expect(session.state.speaking).toBe(false);
@@ -2860,7 +2860,7 @@ describe("VoiceSession", () => {
       for (let index = 0; index < 3; index++)
         session.setServiceContext(new Map([["fixture://focus", `Change ${index}`]]));
       session.setServiceContext(new Map([["fixture://catalog", "Catalog"]]));
-      session.injectText("Build is waiting", true);
+      session.announce("Build is waiting");
       expect(channel.send.mock.calls.some(([text]) => text.includes("Build is waiting"))).toBe(false);
       event("idle");
       expect(channel.send).toHaveBeenLastCalledWith(
@@ -2873,7 +2873,7 @@ describe("VoiceSession", () => {
       const sends = channel.send.mock.calls.length;
       session.setServiceContext(new Map([["fixture://focus", "Change 2"]]));
       expect(channel.send.mock.calls.length).toBe(sends);
-      session.injectText("Review has a question", true);
+      session.announce("Review has a question");
       expect(channel.send.mock.calls.some(([text]) => text.includes("Review has a question"))).toBe(false);
       event("idle");
       expect(channel.send).toHaveBeenLastCalledWith(
@@ -2923,7 +2923,7 @@ describe("VoiceSession", () => {
     const channel = FakePeerConnection.dataChannels.at(-1);
     if (!channel) throw new Error("Missing voice channel");
     channel.readyState = "closed";
-    session.injectText("private context");
+    session.setServiceContext(new Map([["test://context", "private context"]]));
     expect(session.issues.message("connection")).toBe("Couldn't send a voice message. Reconnect voice.");
     expect(session.state.connected).toBe(false);
     session.disconnect();
@@ -4122,7 +4122,7 @@ describe("voice network recovery", () => {
       channel.send.mockImplementation(() => {
         throw new Error("private context");
       });
-      session.injectText("context");
+      session.setServiceContext(new Map([["test://context", "context"]]));
       const failure = session.issues.message("connection");
       expect(failure).toContain("Reconnect voice");
       await vi.advanceTimersByTimeAsync(5_000);

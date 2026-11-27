@@ -381,7 +381,6 @@ internal class LocalLlmEngine(
 
     // Successful native messages only. Retry replays these without repeating tool dispatch.
     private val conversationHistory = mutableListOf<Message>()
-    private var pendingContext: String? = null
 
     override suspend fun initialize(context: EngineSessionContext) {
         val boundedContext = context.copy(serviceContextText = boundModelContext(context.serviceContextText))
@@ -405,7 +404,6 @@ internal class LocalLlmEngine(
                 check(!closed.get()) { "Local model engine was closed during initialization" }
                 runner = preparedRunner
                 sessionContext = boundedContext
-                pendingContext = null
                 toolValidator = preparedValidator
                 Log.i(TAG, "Initialized LocalLlmEngine with ${context.tools.size} tools")
             } finally {
@@ -434,7 +432,6 @@ internal class LocalLlmEngine(
             NonCancellable + ioDispatcher,
         ) { activeRunner.replaceConversation(conversationConfig(boundedContext)) }
         sessionContext = boundedContext
-        pendingContext = null
         toolValidator = preparedValidator
         conversationHistory.clear()
     }
@@ -475,10 +472,9 @@ internal class LocalLlmEngine(
                         usage = total
                         onUsage(total)
                     }
-                    val contextUpdate = pendingContext
-                    pendingContext = null
+                    val context = input.context?.let(::boundModelContext)?.ifEmpty { null }
                     // Context changes precede the request; the request is always last.
-                    var message = Message.user(listOfNotNull(contextUpdate, query).joinToString("\n\n"))
+                    var message = Message.user(listOfNotNull(context, query).joinToString("\n\n"))
                     while (true) {
                         if (!validateTurn()) return@withContext
                         val round = StringBuilder()
@@ -678,17 +674,6 @@ internal class LocalLlmEngine(
             throw e
         } finally {
             if (retried) Log.i(TAG, "local_retry ${diagnostics.metadata()} outcome=${retryOutcome.name.lowercase()}")
-        }
-    }
-
-    override suspend fun injectContext(text: String) {
-        val generation = turnGeneration.get()
-        nativeOperation.withLock {
-            // Updates are changes only, so queued ones accumulate; an over-budget total keeps the newest whole.
-            val context = boundModelContext(text)
-            if (closed.get() || generation != turnGeneration.get() || context.isEmpty()) return
-            pendingContext =
-                boundModelContext(listOfNotNull(pendingContext, context).joinToString("\n\n")).ifEmpty { context }
         }
     }
 

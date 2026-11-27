@@ -227,7 +227,7 @@ class DeviceVoiceSessionTest {
                 assertNull(session.state.value.error)
                 assertFalse(session.state.value.connected)
                 frontendReady = false
-                session.injectText("Alert received during handoff", generate = true)
+                session.announce("Alert received during handoff")
                 callback.onBlockedStatusChanged(ShadowNetwork.newInstance(42), false)
                 runCurrent()
                 assertEquals(2, sockets.size)
@@ -1029,7 +1029,7 @@ class DeviceVoiceSessionTest {
                         switchServer = { id ->
                             repository.switchService(id)
                             repository.settings.first { it.activeServiceId == id }
-                            session.injectText(owner.contextText())
+                            session.contextChanged()
                             pendingSwitch?.let {
                                 switchBlocked.send(Unit)
                                 it.await()
@@ -1046,7 +1046,7 @@ class DeviceVoiceSessionTest {
                     val backend = listener.await()
                     backend.onOpen(socket, upgradeResponse())
                     val beforeReady = socket.sent.size
-                    session.injectText("Startup alert", generate = true)
+                    session.announce("Startup alert")
                     backend.onMessage(socket, """{"kind":"session.ready"}""")
                     val startup = socket.sent.drop(beforeReady)
                     assertEquals(1, startup.size)
@@ -1059,8 +1059,8 @@ class DeviceVoiceSessionTest {
                     assertTrue(session.state.value.speaking)
                     repository.switchService(second)
                     repository.settings.first { it.activeServiceId == second }
-                    session.injectText("Build is waiting", generate = true)
-                    session.injectText(owner.contextText())
+                    session.announce("Build is waiting")
+                    session.contextChanged()
                     val queuedAt = socket.sent.size
                     requireNotNull(speech.partialCallback)("Continue")
                     requireNotNull(speech.resultCallback)("Continue")
@@ -1080,7 +1080,7 @@ class DeviceVoiceSessionTest {
                     backend.onMessage(socket, """{"kind":"interrupted","source":"user"}""")
                     backend.onMessage(socket, """{"kind":"turn.status","state":"thinking"}""")
                     backend.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
-                    for (target in listOf(second, first)) {
+                    for (target in listOf(first, second)) {
                         val finishSwitch = CompletableDeferred<Unit>()
                         pendingSwitch = finishSwitch
                         backend.onMessage(
@@ -1125,7 +1125,7 @@ class DeviceVoiceSessionTest {
                     pendingSwitch = finishSwitch
                     backend.onMessage(
                         socket,
-                        """{"kind":"tool.call","id":"delayed","name":"switch_server","args":{"server_id":"$second"}}""",
+                        """{"kind":"tool.call","id":"delayed","name":"switch_server","args":{"server_id":"$first"}}""",
                     )
                     switchBlocked.receive()
                     val usersBefore = socket.sent.count { it.contains("user.message") }
@@ -1156,7 +1156,7 @@ class DeviceVoiceSessionTest {
                         frames.any { it.contains("tool.result") && it.contains("final-list") }
                     }
                     backend.onMessage(socket, """{"kind":"assistant.text.delta","text":"Buffered tail"}""")
-                    session.injectText("Queued context")
+                    session.announce("Queued alert")
                     val spokenBefore = speech.spoken.toList()
                     socket.accepted = false
                     backend.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
@@ -1407,8 +1407,6 @@ class DeviceVoiceSessionTest {
                                     )
                                     onDelta("Second sentence.")
                                 }
-
-                                override suspend fun injectContext(text: String) = Unit
 
                                 override fun close() = Unit
                             }
@@ -1889,6 +1887,7 @@ class DeviceVoiceSessionTest {
                                 onToolCall: suspend (com.fghbuild.voicegateway.sdk.v2.ToolCall) ->
                                 kotlinx.serialization.json.JsonElement?,
                             ) {
+                                input.context?.let { turns.add("context:$it") }
                                 turns.add(input.text)
                                 if (input.text == "First") {
                                     onDelta("First reply.")
@@ -1917,10 +1916,6 @@ class DeviceVoiceSessionTest {
                                 }
                             }
 
-                            override suspend fun injectContext(text: String) {
-                                turns.add("context:$text")
-                            }
-
                             override fun close() = Unit
                         }
                     },
@@ -1928,7 +1923,7 @@ class DeviceVoiceSessionTest {
             session.connect()
             requireNotNull(speech.resultCallback)("First")
             requireNotNull(speech.partialCallback)("Second")
-            session.injectText("Focus while canceling", generate = true)
+            session.announce("Focus while canceling")
             requireNotNull(speech.resultCallback)("Second")
             assertEquals(listOf("First"), turns)
             release.complete(Unit)
@@ -1941,11 +1936,6 @@ class DeviceVoiceSessionTest {
                 session.state.value.transcript
                     .none { it.text.contains("Stale") },
             )
-            session.injectText("New focus")
-            assertFalse(turns.contains("context:New focus"))
-            requireNotNull(speech.partialCallback)("Third")
-            requireNotNull(speech.resultCallback)("Third")
-            assertEquals(listOf("context:New focus", "Third"), turns.takeLast(2))
             session.close()
         }
 
@@ -1967,8 +1957,6 @@ class DeviceVoiceSessionTest {
 
                             override suspend fun initialize(context: EngineSessionContext) = Unit
 
-                            override suspend fun injectContext(text: String) = Unit
-
                             override fun close() = Unit
 
                             override suspend fun processTurn(
@@ -1988,12 +1976,12 @@ class DeviceVoiceSessionTest {
             session.connect()
             requireNotNull(speech.resultCallback)("First")
             requireNotNull(speech.partialCallback)("Unfinished")
-            session.injectText("Alert after cancellation", generate = true)
+            session.announce("Alert after cancellation")
             requireNotNull(speech.idle)()
             assertEquals(listOf("First"), turns)
             release.complete(Unit)
             assertEquals(listOf("First", "Alert after cancellation"), turns)
-            session.injectText("Next alert", generate = true)
+            session.announce("Next alert")
             assertEquals("Next alert", turns.last())
             session.close()
         }
@@ -2524,7 +2512,7 @@ class DeviceVoiceSessionTest {
                     .last()
             assertEquals(usage.totals, reply.responseUsage)
             assertEquals(usage.latest.responseID, reply.responseID)
-            session.injectText("Build needs attention", generate = true)
+            session.announce("Build needs attention")
             testScheduler.runCurrent()
             val alertUsage = requireNotNull(session.state.value.usage)
             assertEquals(24L, alertUsage.totals.inputTokens)
@@ -2955,8 +2943,6 @@ class DeviceVoiceSessionTest {
                                 throw AssertionError("Hang-up must cancel remaining tool work")
                             }
 
-                            override suspend fun injectContext(text: String) = Unit
-
                             override fun close() = Unit
                         }
                     },
@@ -3016,7 +3002,7 @@ class DeviceVoiceSessionTest {
                 testScheduler.runCurrent()
                 assertTrue(session.state.value.connected)
                 conversation.finish()
-                session.injectText("Build is waiting", generate = true)
+                session.announce("Build is waiting")
                 assertEquals(VOICE_CONVERSATION_ENDED_ERROR, session.state.value.error)
             } finally {
                 session.close()
@@ -3064,8 +3050,6 @@ class DeviceVoiceSessionTest {
                                         com.fghbuild.voicegateway.sdk.v2.ToolCall,
                                     ) -> kotlinx.serialization.json.JsonElement?,
                                 ) = Unit
-
-                                override suspend fun injectContext(text: String) = Unit
 
                                 override fun close() = Unit
                             }
@@ -3282,8 +3266,6 @@ class DeviceVoiceSessionTest {
                             override val engineType = type
 
                             override suspend fun initialize(context: EngineSessionContext) = Unit
-
-                            override suspend fun injectContext(text: String) = Unit
 
                             override fun close() = Unit
 

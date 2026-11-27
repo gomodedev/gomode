@@ -314,11 +314,16 @@ internal class VoiceConversation(
         admitParticipants()
         requireCurrent()
         val active = activeKey()
-        val settings = settingsRepository.settings.value
-        val label = settings.services.firstOrNull { it.id == active.serviceID }?.label ?: active.url
-        val selected = "Active server: ${label.boundedModelText(256)} [${active.serviceID}]"
         val context = catalog.contextSection(active, conversation?.contextSnapshots?.value.orEmpty())
-        return listOfNotNull(ACTIVE_SECTION to selected, context?.let { active to it }).toMap()
+        return listOfNotNull(ACTIVE_SECTION to activeSection(active), context?.let { active to it }).toMap()
+    }
+
+    private fun activeSection(active: ServiceShellKey): String {
+        val label =
+            settingsRepository.settings.value.services
+                .firstOrNull { it.id == active.serviceID }
+                ?.label ?: active.url
+        return "Active server: ${label.boundedModelText(256)} [${active.serviceID}]"
     }
 
     private fun activeKey(): ServiceShellKey {
@@ -337,6 +342,13 @@ internal class VoiceConversation(
         sentContext = sections
         requestedSwitch = null
         return modelContextText(sections.values, CATALOG_CONTEXT_BUDGET, CATALOG_CONTEXT_BUDGET)
+    }
+
+    /** Whether the next contextUpdate() announces a server switch, without recording anything as sent. */
+    fun announcesSwitch(): Boolean {
+        if (sentContext.isEmpty()) return false
+        val active = activeKey()
+        return sentContext[ACTIVE_SECTION] != activeSection(active) && requestedSwitch != active.serviceID
     }
 
     /**

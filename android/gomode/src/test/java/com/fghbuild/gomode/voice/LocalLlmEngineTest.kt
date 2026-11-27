@@ -999,7 +999,7 @@ class LocalLlmEngineTest {
         }
 
     @Test
-    fun `oversized quiet context is omitted as a complete update without an extra turn`() =
+    fun `oversized turn context is omitted whole`() =
         runTest {
             val messages = mutableListOf<Message>()
             val engine =
@@ -1009,9 +1009,7 @@ class LocalLlmEngineTest {
                 }
             try {
                 engine.initialize(sessionContext)
-                engine.injectContext("😀".repeat(7000))
-                assertTrue(messages.isEmpty())
-                engine.processTurn(UserTurnInput("Continue"), {}, {}) { error("No tool") }
+                engine.processTurn(UserTurnInput("Continue", context = "😀".repeat(7000)), {}, {}) { error("No tool") }
                 val text =
                     messages
                         .single()
@@ -1025,7 +1023,7 @@ class LocalLlmEngineTest {
         }
 
     @Test
-    fun `context updates preserve native prefill and enter the next user turn`() =
+    fun `turn context preserves native prefill and precedes only its own request`() =
         runTest {
             val configs = mutableListOf<ConversationConfig>()
             val messages = mutableListOf<Message>()
@@ -1036,8 +1034,7 @@ class LocalLlmEngineTest {
                 }
             engine.initialize(sessionContext.copy(serviceContextText = "Current item: alpha"))
             engine.processTurn(UserTurnInput("Remember cedar"), {}, {}) { error("No tool") }
-            engine.injectContext("Current item: beta")
-            engine.processTurn(UserTurnInput("Recall it"), {}, {}) { error("No tool") }
+            engine.processTurn(UserTurnInput("Recall it", context = "Current item: beta"), {}, {}) { error("No tool") }
             assertEquals(1, configs.size)
             assertTrue(messages.last().toString().contains("beta"))
             assertTrue(messages.last().toString().contains("Recall it"))
@@ -1059,87 +1056,6 @@ class LocalLlmEngineTest {
             engine.processTurn(UserTurnInput("Build is waiting", serviceUpdate = true), {}, {}) { error("No tool") }
             assertTrue(messages.single().toString().contains("Build is waiting"))
             assertFalse(messages.single().toString().contains("serviceEvent"))
-            engine.closeAndJoin()
-        }
-
-    @Test
-    fun `focus context waits for the original tool result and preserves native history`() =
-        runTest {
-            val configs = mutableListOf<ConversationConfig>()
-            val messages = mutableListOf<Message>()
-            val toolStarted = CompletableDeferred<Unit>()
-            val finishTool = CompletableDeferred<Unit>()
-            var first = true
-            val engine =
-                engine(configs) { message ->
-                    messages += message
-                    if (first) {
-                        first = false
-                        flowOf(callMessage())
-                    } else {
-                        flowOf(Message.model("cedar"))
-                    }
-                }
-            engine.initialize(sessionContext)
-            val turn =
-                launch {
-                    engine.processTurn(UserTurnInput("Remember cedar and call A"), {}, {}) {
-                        toolStarted.complete(Unit)
-                        finishTool.await()
-                        Json.parseToJsonElement("""{"source":"A","fact":"cedar"}""")
-                    }
-                }
-            toolStarted.await()
-            val update = launch { engine.injectContext("Selected server B; original call remains on A") }
-            finishTool.complete(Unit)
-            turn.join()
-            update.join()
-            engine.processTurn(UserTurnInput("Recall cedar on B"), {}, {}) { error("No new tool") }
-            assertEquals(listOf(Role.USER, Role.TOOL, Role.USER), messages.map { it.role })
-            assertTrue(messages[1].toString().contains("cedar"))
-            assertFalse(messages[1].toString().contains("Selected server B"))
-            assertTrue(messages[2].toString().contains("Selected server B"))
-            assertEquals(1, configs.size)
-            engine.closeAndJoin()
-        }
-
-    @Test
-    fun `context queued behind a retired turn cannot reach the retained engine`() =
-        runTest {
-            val messages = mutableListOf<Message>()
-            val entered = CompletableDeferred<Unit>()
-            val release = CompletableDeferred<Unit>()
-            var first = true
-            val engine =
-                engine { message ->
-                    messages += message
-                    if (first) {
-                        first = false
-                        flowOf(callMessage())
-                    } else {
-                        flowOf(Message.model("Fresh turn"))
-                    }
-                }
-            engine.initialize(sessionContext)
-            val turn =
-                launch {
-                    engine.processTurn(UserTurnInput("Hold the old turn"), {}, {}) {
-                        entered.complete(Unit)
-                        release.await()
-                        null
-                    }
-                }
-            entered.await()
-            val update =
-                launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
-                    engine.injectContext("retired-account-context")
-                }
-            engine.invalidateTurns()
-            release.complete(Unit)
-            turn.join()
-            update.join()
-            engine.processTurn(UserTurnInput("Fresh user turn"), {}, {}) { error("No fresh tool") }
-            assertFalse(messages.last().toString().contains("retired-account-context"))
             engine.closeAndJoin()
         }
 
@@ -1191,7 +1107,7 @@ class LocalLlmEngineTest {
     }
 
     @Test
-    fun `close is immediate and cleanup waits for turn and ignores queued context updates`() =
+    fun `close is immediate and cleanup waits for the turn`() =
         runTest {
             val entered = CompletableDeferred<Unit>()
             val finish = CompletableDeferred<Unit>()
@@ -1207,7 +1123,6 @@ class LocalLlmEngineTest {
             engine.initialize(sessionContext)
             val turn = launch { engine.processTurn(UserTurnInput("Hello"), {}, {}, { null }) }
             entered.await()
-            val update = launch { engine.injectContext("Late context") }
             val disposal = launch { engine.closeAndJoin() }
             testScheduler.runCurrent()
             assertFalse(engine.isModelLoaded)
@@ -1215,9 +1130,7 @@ class LocalLlmEngineTest {
             assertEquals(0, closes)
             finish.complete(Unit)
             turn.join()
-            update.join()
             disposal.join()
-            engine.injectContext("Closed context")
             assertEquals(1, closes)
         }
 

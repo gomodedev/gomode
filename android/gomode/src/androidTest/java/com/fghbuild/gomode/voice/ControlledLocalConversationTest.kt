@@ -234,7 +234,7 @@ class ControlledLocalConversationTest {
                     val settings by repository.settings.collectAsState()
                     val catalogState by catalog.state.collectAsState()
                     LaunchedEffect(settings.activeServiceId, catalogState) {
-                        if (session.state.value.connected) session.injectText(conversation.contextText())
+                        if (session.state.value.connected) session.contextChanged()
                     }
                     DisposableEffect(session) {
                         onDispose {

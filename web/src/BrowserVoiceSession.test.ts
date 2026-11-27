@@ -116,13 +116,13 @@ it("recovers a browser-speech call when the network returns", async (t) => {
   await vi.advanceTimersByTimeAsync(60_000);
   expect(FakeWebSocket.instances).toHaveLength(1);
   expect(session.issues.message("connection")).toBeNull();
-  session.injectText("Alert received during handoff", true);
+  session.announce("Alert received during handoff");
   const preparing = deferred<string>();
   vi.mocked(mcpClient.serverInstructions).mockReturnValueOnce(preparing.promise);
   online = true;
   window.dispatchEvent(new window.Event("online"));
   await vi.advanceTimersByTimeAsync(0);
-  session.injectText("Alert received while preparing the new connection", true);
+  session.announce("Alert received while preparing the new connection");
   preparing.resolve("Host instructions");
   await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
   expect(socket.readyState).toBe(3);
@@ -388,7 +388,7 @@ describe("browser voice sessions", () => {
         ok(recognition);
         recognition.result([[message.text ?? "", true]]);
         recognition.end();
-      } else if (message.kind === "context.update") session.injectText(message.context?.text ?? "", true);
+      } else if (message.kind === "context.update") session.announce(message.context?.text ?? "");
       else throw new Error(`Unhandled recorded client message ${message.kind}`);
       expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toEqual(message);
     }
@@ -432,7 +432,7 @@ describe("browser voice sessions", () => {
     const socket = FakeWebSocket.instances.at(-1);
     ok(socket);
     socket.open();
-    session.injectText("Build is waiting", true);
+    session.announce("Build is waiting");
     socket.message({ kind: "session.ready" });
     expect(socket.sent.map((text) => JSON.parse(text))).toContainEqual({
       kind: "context.update",
@@ -453,7 +453,7 @@ describe("browser voice sessions", () => {
     ok(recognition);
     recognition.result([["Please", false]]);
     const before = socket.sent.length;
-    session.injectText("Task needs attention", true);
+    session.announce("Task needs attention");
     socket.message({ kind: "interrupted", source: "user" });
     socket.message({ kind: "turn.status", state: "idle" });
     expect(socket.sent).toHaveLength(before);
@@ -470,7 +470,7 @@ describe("browser voice sessions", () => {
     const recognition = FakeRecognition.instances.at(-1);
     ok(recognition);
     recognition.result([["Unfinished", false]]);
-    session.injectText("Task needs attention", true);
+    session.announce("Task needs attention");
     const before = socket.sent.length;
     recognition.end();
     await Promise.resolve();
@@ -698,7 +698,7 @@ describe("browser voice sessions", () => {
 
   it("delivers an alert right after ready because no greeting turn is in flight", async () => {
     const socket = await readySocket();
-    session.injectText("Build is waiting", true);
+    session.announce("Build is waiting");
     expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toEqual({
       kind: "context.update",
       context: { text: "Build is waiting" },
@@ -709,7 +709,7 @@ describe("browser voice sessions", () => {
   it("keeps capture through playback gaps, pauses for tool waits, and buffers notifications until playback drains", async () => {
     const socket = await readySocket();
     await startTurn(socket);
-    session.injectText("Notification", true);
+    session.announce("Notification");
     expect(socket.sent.some((text) => text.includes("Notification"))).toBe(false);
     socket.message({ kind: "assistant.text.delta", text: "One. " });
     fakeSynthesis.complete();
@@ -816,7 +816,7 @@ describe("browser voice sessions", () => {
     const socket = await readySocket();
     await startTurn(socket);
     session.setMicrophoneMode("muteOnce");
-    session.injectText("Notification");
+    session.setServiceContext(new Map([["test://context", "Notification"]]));
     const sentences = Array.from({ length: 200 }, (_, index) => `Sentence ${index} ${"word ".repeat(20)}ends.`);
     const text = sentences.join(" ") + " ";
     socket.message({ kind: "assistant.text.delta", text });

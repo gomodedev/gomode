@@ -92,10 +92,6 @@ internal class NeedleWhistleEngine(
         onDelta(conversationalResponse)
     }
 
-    override suspend fun injectContext(text: String) {
-        Log.d(TAG, "Injected context into NeedleWhistleEngine: ${text.take(50)}")
-    }
-
     override fun close() {
         biasedKeywords.clear()
         toolMap.clear()
