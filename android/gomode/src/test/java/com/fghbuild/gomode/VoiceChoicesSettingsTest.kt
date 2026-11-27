@@ -33,6 +33,8 @@ import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.settings.rememberSettingsEdits
 import com.fghbuild.gomode.voice.GatewayVoiceChoices
+import com.fghbuild.gomode.voice.VoiceIssue
+import com.fghbuild.gomode.voice.VoiceIssueKey
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -44,6 +46,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
@@ -94,7 +97,7 @@ class VoiceChoicesSettingsTest {
                 val active = mutableStateOf(false)
                 server.enqueue(MockResponse().setBody(manifest))
                 server.enqueue(MockResponse().setResponseCode(503))
-                show(repository) { active.value }
+                show(repository, active = { active.value })
                 waitForTag("gomode-voice-choices-retry")
                 // A followed setup is unknown without the catalog: neither option is selected or selectable.
                 for (tag in listOf("gomode-voice-setup-all-in-one", "gomode-voice-setup-separate-stages")) {
@@ -416,7 +419,8 @@ class VoiceChoicesSettingsTest {
                 }
                 server.enqueue(MockResponse().setBody(manifest))
                 server.enqueue(MockResponse().setResponseCode(503))
-                show(repository)
+                val shown = mutableStateOf(true)
+                show(repository, shown = { shown.value })
                 waitForTag("gomode-voice-choices-retry")
                 chosen("gomode-language-model").assertTextContains("Whistle + Needle")
                 chosen("gomode-recognition").assertTextContains("Local")
@@ -458,6 +462,26 @@ class VoiceChoicesSettingsTest {
                 waitForTag("gomode-recognition-error")
                 stage("gomode-recognition-error").assertTextContains("Unable to save recognition", substring = true)
                 composeRule.onNodeWithTag("gomode-speech-error").assertDoesNotExist()
+                // The voice panel lists the field's problem only while settings are closed.
+                val issues = (RuntimeEnvironment.getApplication() as GoModeApplication).voiceIssues
+                assertEquals(
+                    listOf(VoiceIssueKey.SAVE_RECOGNITION),
+                    issues.state.value.entries
+                        .map { it.key },
+                )
+                assertEquals(emptyList<VoiceIssue>(), issues.state.value.listed)
+                composeRule.runOnIdle { shown.value = false }
+                composeRule.waitForIdle()
+                assertEquals(
+                    listOf(VoiceIssueKey.SAVE_RECOGNITION),
+                    issues.state.value.listed
+                        .map { it.key },
+                )
+                server.enqueue(MockResponse().setBody(manifest))
+                server.enqueue(MockResponse().setBody(catalog))
+                composeRule.runOnIdle { shown.value = true }
+                waitForTag("gomode-recognition-error")
+                assertEquals(emptyList<VoiceIssue>(), issues.state.value.listed)
                 composeRule.onNodeWithTag("gomode-voice-setup-all-in-one").performScrollTo().performClick()
                 waitForTag("gomode-voice-setup-error")
                 composeRule.onNodeWithTag("gomode-recognition-error").assertDoesNotExist()
@@ -468,22 +492,77 @@ class VoiceChoicesSettingsTest {
             }
         }
 
+    // A save failure belongs to the service it saved to; another service's settings never show it.
+    @Test
+    fun aSaveFailureResolvesWhenTheActiveServiceChanges() =
+        runTest {
+            MockWebServer().use { server ->
+                server.start()
+                val base = server.url("/").toString().trimEnd('/')
+                val store = MemoryPreferences()
+                val repository = SettingsRepository(store)
+                val other = repository.addService("Other fixture", "http://127.0.0.1:9")
+                repository.addService("Choices fixture", base)
+                repository.settings.first { it.activeServiceURL == base }
+                server.enqueue(MockResponse().setBody(manifest))
+                server.enqueue(MockResponse().setBody(catalog))
+                val token = mutableStateOf<String?>("first")
+                show(repository, bearerToken = { token.value })
+                waitForTag("gomode-voice-model")
+                composeRule.runOnIdle { store.beforeWrite = { throw IOException("Fixture write failure") } }
+                composeRule.onNodeWithTag("gomode-speaking-voice").performScrollTo().performClick()
+                composeRule.onNodeWithTag("gomode-speaking-voice-Kore").performClick()
+                waitForTag("gomode-speaking-voice-save-error")
+                composeRule.onNodeWithTag("gomode-voice-setup-separate-stages").performScrollTo().performClick()
+                waitForTag("gomode-voice-setup-error")
+                val issues = (RuntimeEnvironment.getApplication() as GoModeApplication).voiceIssues
+                assertEquals(
+                    setOf(VoiceIssueKey.SAVE_SPEAKING_VOICE, VoiceIssueKey.SAVE_SETUP_MODE),
+                    issues.state.value.entries
+                        .map { it.key }
+                        .toSet(),
+                )
+                composeRule.runOnIdle { store.beforeWrite = {} }
+                // Saves do not use the token, so a rotated one keeps both failures at their controls.
+                server.enqueue(MockResponse().setBody(manifest))
+                server.enqueue(MockResponse().setBody(catalog))
+                composeRule.runOnIdle { token.value = "rotated" }
+                composeRule.waitUntil(10_000) { server.requestCount >= 4 }
+                waitForTag("gomode-speaking-voice-save-error")
+                waitForTag("gomode-voice-setup-error")
+                assertEquals(2, issues.state.value.entries.size)
+                repository.switchService(other)
+                // The other service lists no voices, so its settings never compose the speaking voice picker.
+                composeRule.waitUntil(10_000) {
+                    issues.state.value.entries
+                        .isEmpty()
+                }
+                composeRule.onNodeWithTag("gomode-voice-setup-error").assertDoesNotExist()
+            }
+        }
+
     private fun show(
         repository: SettingsRepository,
+        shown: () -> Boolean = { true },
         active: () -> Boolean = { false },
+        bearerToken: () -> String? = { null },
     ) {
         composeRule.setContent {
             val settings by repository.settings.collectAsState()
+            val edits = rememberSettingsEdits(repository, settings)
             MaterialTheme {
-                SettingsScreen(
-                    settings,
-                    repository,
-                    active(),
-                    false,
-                    {},
-                    {},
-                    edits = rememberSettingsEdits(repository, settings),
-                )
+                if (shown()) {
+                    SettingsScreen(
+                        settings,
+                        repository,
+                        active(),
+                        false,
+                        {},
+                        {},
+                        edits = edits,
+                        bearerToken = bearerToken(),
+                    )
+                }
             }
         }
     }

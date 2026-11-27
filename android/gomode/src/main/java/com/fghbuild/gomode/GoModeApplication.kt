@@ -3,6 +3,7 @@ package com.fghbuild.gomode
 
 import android.app.Application
 import android.content.Context
+import android.util.AtomicFile
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.work.Configuration
 import com.fghbuild.eveng2.G2GattConnector
@@ -18,7 +19,7 @@ import com.fghbuild.gomode.voice.LocalModelDownloads
 import com.fghbuild.gomode.voice.LocalModelLoadDiagnostics
 import com.fghbuild.gomode.voice.LocalModelOwner
 import com.fghbuild.gomode.voice.VoiceAudioInput
-import com.fghbuild.gomode.voice.VoiceErrorLog
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.halo.ble.HaloConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,7 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.io.File
 
 internal val Context.goModeSettingsDataStore by preferencesDataStore(name = "gomode_settings")
 
@@ -53,8 +55,9 @@ class GoModeApplication :
     internal val modelDownloads by modelDownloadsDelegate
     private val modelLoadDiagnosticsDelegate = lazy { LocalModelLoadDiagnostics(this) }
     internal val modelLoadDiagnostics by modelLoadDiagnosticsDelegate
-    private val voiceErrorsDelegate = lazy { VoiceErrorLog(this) }
-    internal val voiceErrors by voiceErrorsDelegate
+
+    // The shell's voice problems, across sessions and Activities; see VoiceIssues.
+    internal val voiceIssues = VoiceIssues()
 
     // The source every voice session hears, across sessions and Activities.
     internal val voiceAudioInput = VoiceAudioInput()
@@ -63,6 +66,9 @@ class GoModeApplication :
         super.onCreate()
         // Recover the last load before settings can initiate another preparation.
         modelLoadDiagnostics
+        // TODO(2026-12-04): delete this cleanup once this date has passed and two release tags contain it.
+        // Releases before it kept the five newest voice failures in this file; nothing reads or writes it now.
+        scope.launch(Dispatchers.IO) { AtomicFile(File(noBackupFilesDir, "voice-errors.json")).delete() }
     }
 
     internal suspend fun removeLocalModel(model: LocalLlmModel) {
@@ -74,20 +80,27 @@ class GoModeApplication :
     internal val serviceShellOwner by serviceShellOwnerDelegate
     private val carDialVoiceOwnerDelegate =
         lazy {
-            CarDialVoiceOwner(this, settingsRepository, localModelOwner, serviceShellOwner, glassesOwner)
+            CarDialVoiceOwner(this, settingsRepository, localModelOwner, serviceShellOwner, glassesOwner, voiceIssues)
         }
     internal val carDialVoiceOwner by carDialVoiceOwnerDelegate
 
     // Voice follows the owner's microphone from its creation: no glasses connect before then.
     private val glassesOwnerDelegate =
         lazy {
-            GlassesOwner(scope, this, settingsRepository, HaloConnection(this), G2Scanner(this), G2GattConnector(this))
-                .also { owner ->
-                    val enabled = settingsRepository.settings.map { it.glassesMicrophoneForVoice }
-                    // Sinks meter, duck, and buffer each block off the main thread.
-                    val streams = CoroutineScope(scope.coroutineContext + Dispatchers.Default)
-                    scope.launch { followGlassesMicrophone(voiceAudioInput, enabled, owner.microphone, streams) }
-                }
+            GlassesOwner(
+                scope,
+                this,
+                settingsRepository,
+                HaloConnection(this),
+                G2Scanner(this),
+                G2GattConnector(this),
+                voiceIssues,
+            ).also { owner ->
+                val enabled = settingsRepository.settings.map { it.glassesMicrophoneForVoice }
+                // Sinks meter, duck, and buffer each block off the main thread.
+                val streams = CoroutineScope(scope.coroutineContext + Dispatchers.Default)
+                scope.launch { followGlassesMicrophone(voiceAudioInput, enabled, owner.microphone, streams) }
+            }
         }
     internal val glassesOwner by glassesOwnerDelegate
 
@@ -97,7 +110,6 @@ class GoModeApplication :
 
     override fun onTerminate() {
         if (modelLoadDiagnosticsDelegate.isInitialized()) modelLoadDiagnostics.close()
-        if (voiceErrorsDelegate.isInitialized()) voiceErrors.close()
         if (carDialVoiceOwnerDelegate.isInitialized()) carDialVoiceOwner.close()
         if (serviceShellOwnerDelegate.isInitialized()) serviceShellOwner.close()
         if (modelDownloadsDelegate.isInitialized()) modelDownloads.close()

@@ -55,6 +55,7 @@ import com.fghbuild.gomode.voice.AudioDevicePicker
 import com.fghbuild.gomode.voice.CarDialStatus
 import com.fghbuild.gomode.voice.CarDialVoiceState
 import com.fghbuild.gomode.voice.TranscriptLog
+import com.fghbuild.gomode.voice.VoiceIssueKey
 import com.fghbuild.gomode.voice.VoiceState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -89,9 +90,17 @@ class MainActivity : ComponentActivity() {
                         val state by carVoiceOwner.state.collectAsStateWithLifecycle()
                         val session by carVoiceOwner.session.collectAsStateWithLifecycle()
                         val voiceState = session?.state?.collectAsStateWithLifecycle()?.value ?: VoiceState()
+                        // The call's own list: its route problems are Go Mode's fixed text.
+                        val issues =
+                            session
+                                ?.issues
+                                ?.state
+                                ?.collectAsStateWithLifecycle()
+                                ?.value
                         LockedCarCall(
                             state = state,
                             voiceState = voiceState,
+                            audioProblem = issues?.message(VoiceIssueKey.AUDIO_ROUTE),
                             onSelectDevice = rememberVoiceAudioSelection(session, shellOwner.settingsRepository),
                             onEnd = { carVoiceOwner.cancel(state.identity) },
                         )
@@ -251,6 +260,7 @@ class MainActivity : ComponentActivity() {
 internal fun LockedCarCall(
     state: CarDialVoiceState,
     voiceState: VoiceState,
+    audioProblem: String?,
     onSelectDevice: (Int) -> Unit,
     onEnd: () -> Unit,
 ) {
@@ -283,7 +293,7 @@ internal fun LockedCarCall(
                     )
                     if (voiceState.availableDevices.isNotEmpty() ||
                         voiceState.transcript.isNotEmpty() ||
-                        voiceState.audioError != null
+                        audioProblem != null
                     ) {
                         Column(
                             Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()),
@@ -298,7 +308,7 @@ internal fun LockedCarCall(
                                     onSelect = onSelectDevice,
                                 )
                             }
-                            voiceState.audioError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                            audioProblem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                             if (voiceState.transcript.isNotEmpty() || voiceState.transcriptDraft != null) {
                                 Text("Transcript", style = MaterialTheme.typography.labelLarge)
                                 TranscriptLog(

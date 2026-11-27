@@ -8,6 +8,8 @@ import com.fghbuild.gomode.voice.TranscriptEntry
 import com.fghbuild.gomode.voice.TranscriptKind
 import com.fghbuild.gomode.voice.TranscriptSpeaker
 import com.fghbuild.gomode.voice.UserContent
+import com.fghbuild.gomode.voice.VoiceIssueKey
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.gomode.voice.VoiceState
 import com.fghbuild.gomode.voice.withDeviceUserText
 import com.fghbuild.gomode.voice.withUserContent
@@ -417,35 +419,92 @@ class GlassesTranscriptTest {
         }
 
     @Test
-    fun eachVoiceErrorIsShownOnceAndItsDismissalShowsNothing() =
+    fun eachProblemTheListGainsIsShownOnceAndItsResolutionShowsNothing() =
         runTest {
-            val voice = MutableStateFlow(VoiceState(error = "Gateway unavailable", errorId = 1))
+            val issues = VoiceIssues()
+            issues.raise(VoiceIssueKey.CONNECTION, "Gateway unavailable")
             val shown = mutableListOf<String>()
-            backgroundScope.launch { showVoiceErrors(voice) { shown += it } }
+            backgroundScope.launch { showVoiceIssues(issues.state) { shown += it } }
             runCurrent()
-            voice.value = voice.value.copy(micLevel = 0.5f)
+            issues.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
             runCurrent()
-            voice.value = voice.value.copy(error = null)
+            issues.resolve(VoiceIssueKey.CONNECTION, VoiceIssueKey.AUDIO_ROUTE)
             runCurrent()
-            voice.value = voice.value.copy(error = "Gateway unavailable", errorId = 2)
-            runCurrent()
-            assertEquals(listOf("Gateway unavailable", "Gateway unavailable"), shown)
+            assertEquals(listOf("Gateway unavailable", "Could not switch audio device"), shown)
         }
 
     @Test
-    fun eachAudioErrorIsShownOnceAndItsClearingShowsNothing() =
+    fun aRetryThatFailsAgainIsShownAgainWhileThePhoneKeepsOneEntry() =
         runTest {
-            val voice = MutableStateFlow(VoiceState(audioError = "Could not list audio devices"))
+            val issues = VoiceIssues()
             val shown = mutableListOf<String>()
-            backgroundScope.launch { showAudioErrors(voice) { shown += it } }
+            backgroundScope.launch { showVoiceIssues(issues.state) { shown += it } }
+            issues.raise(VoiceIssueKey.CONNECTION, "Gateway unavailable")
             runCurrent()
-            voice.value = voice.value.copy(micLevel = 0.5f)
+            issues.raise(VoiceIssueKey.CONNECTION, "Gateway unavailable")
             runCurrent()
-            voice.value = voice.value.copy(audioError = null)
+            assertEquals(listOf("Gateway unavailable", "Gateway unavailable"), shown)
+            assertEquals(1, issues.state.value.entries.size)
+        }
+
+    @Test
+    fun aSettingsFieldProblemIsShownOnceSettingsClose() =
+        runTest {
+            val issues = VoiceIssues()
+            val shown = mutableListOf<String>()
+            backgroundScope.launch { showVoiceIssues(issues.state) { shown += it } }
+            val hide = issues.showSettings()
+            issues.raise(VoiceIssueKey.SAVE_SPEECH, "Unable to save speech: disk full")
             runCurrent()
-            voice.value = voice.value.copy(audioError = "Could not switch audio device")
+            assertEquals(emptyList<String>(), shown)
+            hide()
             runCurrent()
-            assertEquals(listOf("Could not list audio devices", "Could not switch audio device"), shown)
+            assertEquals(listOf("Unable to save speech: disk full"), shown)
+        }
+
+    // A notice replaces the one before it, so problems gained in one change share one.
+    @Test
+    fun problemsGainedTogetherShowInOneNotice() =
+        runTest {
+            val issues = VoiceIssues()
+            val hide = issues.showSettings()
+            issues.raise(VoiceIssueKey.SAVE_SPEECH, "Unable to save speech: disk full")
+            issues.raise(VoiceIssueKey.SAVE_RECOGNITION, "Unable to save recognition: disk full")
+            val shown = mutableListOf<String>()
+            backgroundScope.launch { showVoiceIssues(issues.state) { shown += it } }
+            runCurrent()
+            hide()
+            runCurrent()
+            assertEquals(listOf("Unable to save speech: disk full\nUnable to save recognition: disk full"), shown)
+        }
+
+    @Test
+    fun openingAndClosingSettingsDoesNotRedrawAProblem() =
+        runTest {
+            val issues = VoiceIssues()
+            issues.raise(VoiceIssueKey.SAVE_SPEECH, "Unable to save speech: disk full")
+            val shown = mutableListOf<String>()
+            backgroundScope.launch { showVoiceIssues(issues.state) { shown += it } }
+            runCurrent()
+            val hide = issues.showSettings()
+            runCurrent()
+            hide()
+            runCurrent()
+            assertEquals(listOf("Unable to save speech: disk full"), shown)
+        }
+
+    @Test
+    fun aCarCallShowsOnlyItsFixedMessages() =
+        runTest {
+            val issues = VoiceIssues()
+            val shown = mutableListOf<String>()
+            backgroundScope.launch { showVoiceIssues(issues.state) { shown += it } }
+            issues.raise(VoiceIssueKey.CAR_GATEWAY, "provider detail")
+            issues.raise(VoiceIssueKey.CAR_CONNECTION, "provider failure")
+            runCurrent()
+            issues.raise(VoiceIssueKey.CAR_AUDIO_ROUTE, "Could not switch audio device")
+            runCurrent()
+            assertEquals(listOf("Could not switch audio device"), shown)
         }
 
     // Records the text a fake display is told to show until the test ends.

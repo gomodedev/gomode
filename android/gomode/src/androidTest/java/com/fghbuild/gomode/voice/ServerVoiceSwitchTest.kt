@@ -319,6 +319,15 @@ class ServerVoiceSwitchTest {
                         )
                         conversation.send(catalogCommand("metadata-b", bearerID, "mcp", "echo"))
                         composeRule.waitUntil(30_000) { cookie.toolResults.any { it.optString("id") == "metadata-b" } }
+                        // Context waits for speech output to end. Switching back before the bearer focus
+                        // reaches the model would leave no change to send.
+                        composeRule.waitUntil(30_000) {
+                            cookie.messages.any {
+                                it.optString("kind") == "context.update" &&
+                                    activeServer(it.getJSONObject("context").getString("text"))
+                                        ?.contains(bearerID) == true
+                            }
+                        }
                         val beforeManualFocus = cookie.messages.size
                         composeRule.onNodeWithTag("gomode-next-app").performClick()
                         repository.settings.first { it.activeServiceId == cookieID }

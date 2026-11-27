@@ -25,7 +25,8 @@
 //
 // Choice discovery shows progress or its failure with a retry in place of pickers that need the
 // gateway; an on-device language model keeps its pickers and shows it below the Language model.
-// A failed save shows under the control that made it until the next successful save.
+// A failed save shows under the control that made it until the next successful save; the voice panel
+// lists it once settings close (see VoiceIssues).
 package com.fghbuild.gomode.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.gomode.R
 import com.fghbuild.gomode.data.GatewayVoiceSetup
 import com.fghbuild.gomode.data.LocalLlmModel
@@ -72,6 +74,9 @@ import com.fghbuild.gomode.data.VoiceSetupMode
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.voice.GatewayVoiceChoices
 import com.fghbuild.gomode.voice.ResolvedVoiceSetup
+import com.fghbuild.gomode.voice.VoiceIssueKey
+import com.fghbuild.gomode.voice.VoiceIssueOrigin
+import com.fghbuild.gomode.voice.VoiceIssuesState
 import com.fghbuild.gomode.voice.VoiceSetupException
 import com.fghbuild.gomode.voice.VoiceSetupKind
 import com.fghbuild.gomode.voice.discoverVoiceChoices
@@ -97,20 +102,16 @@ private sealed interface ChoiceDiscovery {
     ) : ChoiceDiscovery
 }
 
-/** The setup controls that own a save failure. */
+/** The setup controls that own a save failure, each a settings field of the voice issue list. */
 private enum class SetupControl(
     val noun: String,
+    val key: VoiceIssueKey,
 ) {
-    SETUP("voice setup"),
-    RECOGNITION("recognition"),
-    MODEL("model"),
-    SPEECH("speech"),
+    SETUP("voice setup", VoiceIssueKey.SAVE_SETUP_MODE),
+    RECOGNITION("recognition", VoiceIssueKey.SAVE_RECOGNITION),
+    MODEL("model", VoiceIssueKey.SAVE_LANGUAGE_MODEL),
+    SPEECH("speech", VoiceIssueKey.SAVE_SPEECH),
 }
-
-private data class SaveFailure(
-    val control: SetupControl,
-    val message: String,
-)
 
 /**
  * The explicit setup [saved] runs: the catalog resolves a followed setup, and without a service only
@@ -156,10 +157,12 @@ private class SetupEditor(
     /** The gateway choice the setup runs, even when the gateway lists no model for one of its stages. */
     val choice: VoiceChoice?,
     val enabled: Boolean,
-    private val saveFailure: SaveFailure?,
+    private val issues: VoiceIssuesState,
+    /** The voice issue origin of this setup's save failures: the service and sign-in they belong to. */
+    val origin: VoiceIssueOrigin.Setup,
     val save: (SetupControl, suspend () -> Unit) -> Unit,
 ) {
-    fun failure(control: SetupControl): String? = saveFailure?.takeIf { it.control == control }?.message
+    fun failure(control: SetupControl): String? = issues.message(control.key, origin)
 
     /** The resolution failure that belongs to [stage], or to the model when null. */
     fun resolutionError(stage: SpeechStage?): String? =
@@ -201,7 +204,15 @@ internal fun VoiceSetupSetting(
         mutableStateOf(if (noService) ChoiceDiscovery.Unavailable else ChoiceDiscovery.Loading)
     }
     var retry by remember(identity) { mutableStateOf(0) }
-    var saveFailure by remember(identity) { mutableStateOf<SaveFailure?>(null) }
+    val issues = rememberVoiceIssues()
+    val issueState by issues.state.collectAsStateWithLifecycle()
+    // A save failure belongs to the service and sign-in it saved to.
+    val origin = VoiceIssueOrigin.Setup(settings.activeServiceId, settings.activeServiceURL, authEpoch)
+    LaunchedEffect(issues, origin) {
+        SetupControl.entries.forEach { issues.resolveStale(it.key, origin) }
+        // The speaking voice picker composes only while the gateway lists voices, so its setup resolves it.
+        issues.resolveIf(VoiceIssueKey.SAVE_SPEAKING_VOICE) { it?.setup != origin }
+    }
     var saving by remember(identity) { mutableStateOf(false) }
     val tokenProvider by rememberUpdatedState(bearerTokenFor)
     val scope = rememberCoroutineScope()
@@ -260,18 +271,22 @@ internal fun VoiceSetupSetting(
             resolution = resolution,
             choice = choice,
             enabled = enabled && !saving && settings.loadState == SettingsLoadState.Ready,
-            saveFailure = saveFailure,
+            issues = issueState,
+            origin = origin,
             save = { control, write ->
                 scope.launch {
                     saving = true
+                    // The setup controls share one failure at a time.
+                    val others = SetupControl.entries.filter { it != control }.map { it.key }
                     try {
                         write()
-                        saveFailure = null
+                        issues.resolve(control.key, *others.toTypedArray())
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
                         // Display failed persistence under the control that made it.
-                        saveFailure = SaveFailure(control, "Unable to save ${control.noun}: ${e.message}")
+                        issues.resolve(*others.toTypedArray())
+                        issues.raise(control.key, "Unable to save ${control.noun}: ${e.message}", origin)
                     } finally {
                         saving = false
                     }
@@ -439,7 +454,7 @@ private fun AllInOneSetting(
     }
     languageSetting()
     resolved?.let { setup ->
-        SpeakingVoiceSetting(choices, setup, editor.settings, editor.enabled) { owner, name ->
+        SpeakingVoiceSetting(choices, setup, editor.settings, editor.enabled, editor.origin) { owner, name ->
             editor.saveSpeakingVoice(choices, owner, name)
         }
     }
@@ -468,7 +483,7 @@ private fun SeparateStagesSetting(
         val choices = editor.choices
         val setup = editor.resolution?.getOrNull()
         if (choices != null && setup != null) {
-            SpeakingVoiceSetting(choices, setup, editor.settings, editor.enabled) { owner, name ->
+            SpeakingVoiceSetting(choices, setup, editor.settings, editor.enabled, editor.origin) { owner, name ->
                 editor.saveSpeakingVoice(choices, owner, name)
             }
         }

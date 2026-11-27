@@ -70,7 +70,7 @@ class MixedSpeechSessionTest {
             val interrupted = awaitState(session) { !it.speaking }
             assertEquals(TurnState.Idle, interrupted.turnState)
             assertTrue("Barge-in did not stop device playback", speech.stops > 0)
-            assertNull(interrupted.error)
+            assertNull(interrupted.failure)
         }
 
     @Test
@@ -110,7 +110,7 @@ class MixedSpeechSessionTest {
             listener = awaitListener(speech, listener)
             withContext(Dispatchers.Main) { listener.onPartial("wait") }
             val cancelled = awaitState(session) { !it.speaking && it.turnState == TurnState.Idle }
-            assertNull(cancelled.error)
+            assertNull(cancelled.failure)
             awaitFixture { it.getInt("rtcTurnCancels") == cancels + 1 }
             withContext(Dispatchers.Main) { listener.onResult("wait") }
             val resumed =
@@ -205,7 +205,7 @@ class MixedSpeechSessionTest {
             service = productionBaseUrl,
         ) { session, _ ->
             awaitFixture { it.getInt("productionRenegotiations") > 0 }
-            assertNull(session.state.value.error)
+            assertNull(session.state.value.failure)
         }
 
     @Test
@@ -261,6 +261,7 @@ class MixedSpeechSessionTest {
                     repository,
                     conversation,
                     "en-US",
+                    VoiceIssues(),
                     thinkingEarcon =
                         object : ThinkingEarcon {
                             override fun setThinking(active: Boolean) = Unit
@@ -275,8 +276,8 @@ class MixedSpeechSessionTest {
                     withContext(Dispatchers.Main) { pages.prepareCall(repository.settings.value) {} }
                 }
                 activity.onActivity { session.connect() }
-                val ready = awaitState(session) { it.connected || it.error != null }
-                assertNull(ready.error)
+                val ready = awaitState(session) { it.connected || it.failure != null }
+                assertNull(ready.failure)
                 block(session, deviceSpeech)
             } finally {
                 withContext(Dispatchers.Main) {
@@ -293,7 +294,7 @@ class MixedSpeechSessionTest {
     ): VoiceState =
         withTimeout(TIMEOUT_MS) {
             session.state.first {
-                check(it.error == null) { "Voice session failed: ${it.error}" }
+                check(it.failure == null) { "Voice session failed: ${it.failure}" }
                 predicate(it)
             }
         }

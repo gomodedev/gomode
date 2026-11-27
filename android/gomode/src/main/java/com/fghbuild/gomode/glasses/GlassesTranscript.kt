@@ -21,14 +21,14 @@
 //
 // A voice owner calls showVoiceTranscript for the session it owns; the shell and car-dial owners never
 // run active sessions at once. An idle session sends nothing, so it cannot clear the glasses while the
-// other owner's session runs. The shell also calls showVoiceErrors, so the wearer reads each voice error
-// that the phone shows; every such error ends the session, so the transcript leaves the display to it.
-// Both owners call showAudioErrors, whose fixed messages their phone screens show.
+// other owner's session runs. GlassesOwner calls showVoiceIssues on the shell's problem list, so the
+// wearer reads each problem the phone lists, of a car call only its fixed messages.
 package com.fghbuild.gomode.glasses
 
 import com.fghbuild.gomode.voice.TranscriptKind
 import com.fghbuild.gomode.voice.TranscriptSpeaker
 import com.fghbuild.gomode.voice.UserContent
+import com.fghbuild.gomode.voice.VoiceIssuesState
 import com.fghbuild.gomode.voice.VoiceState
 import com.fghbuild.gomode.voice.heldUserContent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -39,12 +39,8 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 
 // A Halo page costs one 1-bpp image per line over BLE; recognition drafts change several times a second.
@@ -313,30 +309,22 @@ internal suspend fun showVoiceTranscript(
 }
 
 /**
- * Passes each new [VoiceState.error] of [voice] to [notify] once, the current one included, so the glasses
- * show the error the phone shows. Dismissing it on the phone sends nothing. Returns only when cancelled.
+ * Passes the problems that the list of [issues] gains to [notify] as one notice, the current ones
+ * included, so the glasses show what the phone lists; a notice replaces the one before it, so problems
+ * gained together share it, one per line. A car call's problem shows only in a fixed message. A
+ * problem raised again is a new occurrence and shows again; one that resolves, is dismissed, or is
+ * only hidden while settings show it at its control sends nothing. Returns only when cancelled.
  */
-internal suspend fun showVoiceErrors(
-    voice: Flow<VoiceState>,
+internal suspend fun showVoiceIssues(
+    issues: Flow<VoiceIssuesState>,
     notify: (String) -> Unit,
 ) {
-    voice
-        .mapNotNull { state -> state.error?.let { state.errorId to it } }
-        .distinctUntilChangedBy { (id, _) -> id }
-        .collect { (_, error) -> notify(error) }
-}
-
-/**
- * Passes each new [VoiceState.audioError] of [voice] to [notify], the current one included, such as a
- * route that a switch could not reach. Its clearing sends nothing. Returns only when cancelled.
- */
-internal suspend fun showAudioErrors(
-    voice: Flow<VoiceState>,
-    notify: (String) -> Unit,
-) {
-    voice
-        .map { it.audioError }
-        .distinctUntilChanged()
-        .filterNotNull()
-        .collect(notify)
+    // Ids of drawn problems that still exist, whether listed or not.
+    var drawn = emptySet<Long>()
+    issues.collect { state ->
+        val gained = state.listed.filter { it.id !in drawn && (!it.key.carCall || it.key.fixedMessage) }
+        if (gained.isNotEmpty()) notify(gained.joinToString("\n") { it.message })
+        val current = drawn + gained.map { it.id }
+        drawn = state.entries.mapNotNullTo(mutableSetOf()) { entry -> entry.id.takeIf { it in current } }
+    }
 }

@@ -40,7 +40,6 @@ import android.util.Log
 import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SpeechStageLocation
-import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.service.DefaultNetworkMonitor
 import com.fghbuild.gomode.service.VoiceTokenClient
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
@@ -289,6 +288,7 @@ internal class VoiceSession(
     private val settingsRepository: SettingsRepository,
     private val voiceConversation: VoiceConversation,
     private val languageTag: String,
+    override val issues: VoiceIssues,
     private val callController: VoiceCallController = NoopVoiceCallController(),
     private val switchServer: suspend (String) -> Unit = { id -> settingsRepository.switchService(id) },
     private val startupTiming: () -> VoiceStartupTiming? = { null },
@@ -333,7 +333,6 @@ internal class VoiceSession(
     private var awaitingGatewayTurn = false
     private val recoveryPolicy = VoiceRecoveryPolicy()
     private val voiceModeChime = VoiceModeChime(AndroidVoiceChime())
-    private val errorLog = (appContext.applicationContext as GoModeApplication).voiceErrors
     private val audioInput = (appContext.applicationContext as GoModeApplication).voiceAudioInput
     private var streamCaptureJob: Job? = null
     private var disconnectAudioAttempt: Long? = null
@@ -389,6 +388,7 @@ internal class VoiceSession(
     private val audioStateJob =
         if (callController.isSupported()) {
             scope.launch {
+                launch { issues.followAudioRoute(callController.audioState) }
                 callController.audioState.collect { audio ->
                     _state.update {
                         it.withCallAudio(audio)
@@ -401,7 +401,8 @@ internal class VoiceSession(
 
     override fun setError(message: String) {
         stopNetworkMonitoring()
-        recordFailure(message)
+        issues.resolve(VoiceIssueKey.AUDIO_ROUTE, VoiceIssueKey.GATEWAY)
+        issues.raise(VoiceIssueKey.CONNECTION, message)
         voiceConversation.finish()
         val attempt = invalidateAttempt()
         awaitingGatewayTurn = false
@@ -431,28 +432,14 @@ internal class VoiceSession(
                 speaking = false,
                 turnState = TurnState.Idle,
                 activeTool = null,
-                error = message,
-                errorId = it.errorId + 1,
+                failure = message,
             )
         }
     }
 
-    override fun dismissError() {
-        _state.update { it.copy(error = null) }
-    }
-
-    /** Retains a failure next to the engine and phase that produced it. */
-    private fun recordFailure(message: String) {
-        errorLog.record(
-            engine = VoiceLanguageModel.GATEWAY.label,
-            phase = state.value.failurePhase(),
-            message = message,
-        )
-    }
-
     private fun setStatus(status: String) {
         Log.i(TAG, status)
-        _state.update { it.copy(connectStatus = status, error = null) }
+        _state.update { it.copy(connectStatus = status, failure = null) }
     }
 
     private fun invalidateAttempt(): Long {
@@ -1088,7 +1075,7 @@ internal class VoiceSession(
                     SystemClock.elapsedRealtime() - (_state.value.startupProgressAtMillis ?: startedAt) <
                     SETUP_TIMEOUT_MS
                 )
-                if (peerConnection !== pc || _state.value.connected || _state.value.error != null) return@launch
+                if (peerConnection !== pc || _state.value.connected || _state.value.failure != null) return@launch
                 if (recoveryPolicy.recovering) {
                     retryRecovery("Voice gateway did not respond")
                     return@launch
@@ -1125,7 +1112,7 @@ internal class VoiceSession(
     ) {
         scope.launch {
             val message = diagnosticErrorMessage(gatewayClient, headers, fallback)
-            if (peerConnection === pc && !_state.value.connected && _state.value.error == null) {
+            if (peerConnection === pc && !_state.value.connected && _state.value.failure == null) {
                 onFailure()
                 setError(message)
             }
@@ -1366,12 +1353,12 @@ internal class VoiceSession(
         rtcSessionID = null
         voiceTokenEndpointURL = null
         sessionTools = emptyList()
-        // Preserve transcript so the user can review it after disconnecting. A failure stays
-        // until the user dismisses it or starts again, whatever ends the session.
+        // Preserve transcript so the user can review it after disconnecting. The failure stays
+        // until the next attempt starts, whatever ends the session; its issue stays listed.
+        issues.resolve(VoiceIssueKey.AUDIO_ROUTE, VoiceIssueKey.GATEWAY)
         _state.value =
             VoiceState(
-                error = _state.value.error,
-                errorId = _state.value.errorId,
+                failure = _state.value.failure,
                 transcript =
                     _state.value.transcript.map {
                         it.copy(final = true)
@@ -1405,7 +1392,7 @@ internal class VoiceSession(
     }
 
     override fun announce(text: String) {
-        if (_state.value.error != null) return
+        if (_state.value.failure != null) return
         if (!pendingNotifications.addAlert(text)) {
             setError("Too many pending service alerts. Reconnect voice.")
             return
@@ -1466,7 +1453,7 @@ internal class VoiceSession(
     }
 
     override fun contextChanged() {
-        if (_state.value.error != null) return
+        if (_state.value.failure != null) return
         pendingNotifications.markContextChanged()
         flushPendingNotifications()
     }
@@ -1543,9 +1530,10 @@ internal class VoiceSession(
                             connected = true,
                             // Device recognition reports its own listening.
                             listening = !clientRecognition,
-                            error = null,
+                            failure = null,
                         )
                     }
+                    issues.resolve(VoiceIssueKey.CONNECTION, VoiceIssueKey.GATEWAY)
                     callController.activate()
                     if (!silent) voiceModeChime.connected()
                     if (recoveryContext.isNotEmpty()) {
@@ -1669,8 +1657,7 @@ internal class VoiceSession(
                     val msg = json.decodeFromString(Error.serializer(), text)
                     if (msg.recoverable) {
                         Log.w(TAG, "Recoverable gateway error: ${msg.message}")
-                        recordFailure(msg.message)
-                        _state.update { it.withGatewayError(msg.message) }
+                        issues.raise(VoiceIssueKey.GATEWAY, msg.message)
                     } else {
                         setError(msg.message)
                     }
@@ -2090,13 +2077,14 @@ internal class VoiceSession(
             audioManager.availableCommunicationDevices.firstOrNull { it.id == deviceId }
         if (info == null) {
             refreshAvailableDevices()
-            _state.update { it.copy(audioError = "Audio device is no longer available. Choose another device.") }
+            issues.raise(VoiceIssueKey.AUDIO_ROUTE, "Audio device is no longer available. Choose another device.")
             return
         }
         if (audioManager.setCommunicationDevice(info)) {
-            _state.update { it.copy(selectedDeviceId = deviceId, audioError = null) }
+            _state.update { it.copy(selectedDeviceId = deviceId) }
+            issues.resolve(VoiceIssueKey.AUDIO_ROUTE)
         } else {
-            _state.update { it.copy(audioError = "Could not switch audio device") }
+            issues.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
         }
     }
 
@@ -2242,12 +2230,6 @@ data class TranscriptEntry(
     val responseUsage: TokenUsage? = null,
 )
 
-/** Appends a gateway-reported turn failure without ending the call. */
-internal fun VoiceState.withGatewayError(message: String): VoiceState =
-    copy(
-        transcript = transcript + TranscriptEntry(TranscriptSpeaker.ASSISTANT, "[Voice] $message", final = true),
-    )
-
 data class AudioDevice(
     val id: Int,
     val type: Int,
@@ -2283,8 +2265,12 @@ data class VoiceState(
     val toolHistory: List<ToolInvocation> = emptyList(),
     /** Gateway work before assistant output; idle when the gateway does not report any. */
     val turnState: TurnState = TurnState.Idle,
-    val error: String? = null,
-    val errorId: Long = 0,
+    /**
+     * Why the last attempt ended, set by setError and cleared when the next attempt starts or the
+     * session becomes ready. Startup timing and car calls read it as the attempt's outcome. No screen
+     * shows it: the session raises the same text as the CONNECTION issue, which the list owns.
+     */
+    val failure: String? = null,
     /** Conversation transcript log; each entry is one speaker turn. */
     val transcript: List<TranscriptEntry> = emptyList(),
     /** Ephemeral gateway hypothesis; excluded from transcript history and recovery. */
@@ -2305,7 +2291,6 @@ data class VoiceState(
     val availableDevices: List<AudioDevice> = emptyList(),
     /** Currently selected audio device ID, or null for system default. */
     val selectedDeviceId: Int? = null,
-    val audioError: String? = null,
     val audioSwitching: Boolean = false,
 ) {
     val muted: Boolean

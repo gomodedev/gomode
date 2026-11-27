@@ -93,6 +93,12 @@ internal fun SettingsScreen(
     DisposableEffect(edits) {
         onDispose { edits.discardDrafts() }
     }
+    // Voice field problems show at their controls here, and in the voice panel once this screen closes.
+    val voiceIssues = rememberVoiceIssues()
+    DisposableEffect(voiceIssues) {
+        val hide = voiceIssues.showSettings()
+        onDispose { hide() }
+    }
     LaunchedEffect(edits) {
         snapshotFlow { listOf(edits.service, edits.language, active, currentSettings.loadState) }
             .debounce(1000)
@@ -160,7 +166,6 @@ internal fun SettingsScreen(
                         enabled = !voiceSessionActive && settings.loadState == SettingsLoadState.Ready,
                     )
                 }
-                Column(Modifier.fullSpan()) { VoiceErrorDiagnosticsSetting() }
             }
             HorizontalDivider()
             SettingsGrid {

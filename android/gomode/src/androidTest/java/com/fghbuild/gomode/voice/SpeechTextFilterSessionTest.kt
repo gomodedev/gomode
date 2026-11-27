@@ -55,6 +55,7 @@ class SpeechTextFilterSessionTest {
                             standaloneVoiceSetup().copy(gatewayEndpointURL = "https://gateway.example")
                         },
                     languageTag = "en-US",
+                    issues = VoiceIssues(),
                     speech = speech,
                     voiceChimePlayer = SilentChime(),
                     thinkingEarcon =

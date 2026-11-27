@@ -127,7 +127,7 @@ data class ServiceReconnectDetail(
 )
 
 @Composable
-fun VoicePanel(
+internal fun VoicePanel(
     voiceState: VoiceState,
     voiceEnabled: Boolean,
     onConnect: () -> Unit,
@@ -138,7 +138,8 @@ fun VoicePanel(
     serviceReconnect: ServiceReconnectDetail?,
     onCycleApp: () -> Unit,
     canCycleApps: Boolean,
-    onDismissError: () -> Unit,
+    issues: List<VoiceIssue>,
+    onDismissIssues: () -> Unit,
     modifier: Modifier = Modifier,
     microphoneRecovery: MicrophonePermissionRecovery? = null,
     speechRecovery: (@Composable () -> Unit)? = null,
@@ -233,22 +234,8 @@ fun VoicePanel(
                 }
             }
             speechRecovery?.invoke()
-            voiceState.audioError?.let { message ->
-                Text(
-                    text = message,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = contentInset, vertical = 8.dp),
-                )
-            }
-            when {
-                voiceState.error != null -> {
-                    VoiceError(voiceState.error, onDismissError, contentInset)
-                }
-
-                voiceState.connectStatus != null -> {
-                    ConnectingStatus(voiceState.connectStatus, contentInset)
-                }
-            }
+            VoiceIssueList(issues, onDismissIssues, contentInset)
+            voiceState.connectStatus?.let { ConnectingStatus(it, contentInset) }
             if (active || transcriptExpanded) {
                 ConversationPanel(
                     voiceState,
@@ -264,30 +251,6 @@ fun VoicePanel(
             if (showUsage && showUsageStats && (active || transcriptExpanded)) {
                 UsagePanel(voiceState.usage)
             }
-        }
-    }
-}
-
-// A failure stays until dismissed or replaced by a new start; the dismiss target
-// shares the toolbar's trailing column.
-@Composable
-private fun VoiceError(
-    message: String,
-    onDismiss: () -> Unit,
-    contentInset: Dp,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = contentInset).testTag("gomode-voice-error"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f).padding(vertical = 8.dp).testTag("gomode-voice-error-message"),
-        )
-        IconButton(onClick = onDismiss, modifier = Modifier.testTag("gomode-voice-error-dismiss")) {
-            Icon(painterResource(R.drawable.ic_close), contentDescription = "Dismiss error")
         }
     }
 }
@@ -642,7 +605,6 @@ private fun ConversationPanel(
     val focusColor = MaterialTheme.colorScheme.primary
     val showStatus =
         voiceState.connected &&
-            voiceState.error == null &&
             voiceState.connectStatus == null &&
             voiceState.activeTool == null
     val showTranscript =

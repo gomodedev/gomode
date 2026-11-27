@@ -12,6 +12,8 @@ import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.SpeakingVoiceOwner
 import com.fghbuild.gomode.voice.GatewayVoiceChoices
 import com.fghbuild.gomode.voice.ResolvedVoiceSetup
+import com.fghbuild.gomode.voice.VoiceIssueKey
+import com.fghbuild.gomode.voice.VoiceIssueOrigin
 
 @Composable
 internal fun SpeakingVoiceSetting(
@@ -19,10 +21,17 @@ internal fun SpeakingVoiceSetting(
     setup: ResolvedVoiceSetup,
     settings: SettingsState,
     enabled: Boolean,
+    /** The origin of the voice setup this picker belongs to, which resolves its failure when it changes. */
+    setupOrigin: VoiceIssueOrigin.Setup,
     save: suspend (owner: SpeakingVoiceOwner, voiceName: String) -> Unit,
 ) {
     val voices = choices.speakingVoices(settings, setup)
-    val saver = rememberPickerSave("speaking voice", choices.gatewayURL, voices?.owner)
+    val saver =
+        rememberPickerSave(
+            "speaking voice",
+            VoiceIssueKey.SAVE_SPEAKING_VOICE,
+            VoiceIssueOrigin.SpeakingVoice(setupOrigin, choices.gatewayURL, voices?.owner),
+        )
     if (voices == null || voices.names.isEmpty()) return
     val selected = choices.speakingVoice(settings, voices)
     val defaultLabel = if (voices.defaultName.isEmpty()) "Provider default" else "Default (${voices.defaultName})"

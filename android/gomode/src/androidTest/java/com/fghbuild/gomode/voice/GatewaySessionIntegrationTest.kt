@@ -84,7 +84,8 @@ class GatewaySessionIntegrationTest {
                 val conversation =
                     VoiceConversation(repository, ServiceSettingsClient(), pages.catalog) { pages.entries }
                 val calls = TelecomCallController(context, onTelecomEnded = {})
-                val session = VoiceSession(context, repository, conversation, "en-US", callController = calls)
+                val session =
+                    VoiceSession(context, repository, conversation, "en-US", VoiceIssues(), callController = calls)
                 try {
                     withTimeout(TIMEOUT_MS) {
                         withContext(Dispatchers.Main) { pages.prepareCall(repository.settings.value) {} }
@@ -154,6 +155,7 @@ class GatewaySessionIntegrationTest {
                     DeviceVoiceSession(
                         appContext = context,
                         settingsRepository = repository,
+                        issues = VoiceIssues(),
                         setupSource =
                             DeviceVoiceSetupSource.SelectedService {
                                 finishSetup.await()
@@ -177,9 +179,9 @@ class GatewaySessionIntegrationTest {
                     finishSetup.complete(Unit)
                     awaitCallerName(notifications, expectedName)
                     withTimeout(TIMEOUT_MS) {
-                        session.state.first { it.connected || it.error != null }
+                        session.state.first { it.connected || it.failure != null }
                     }
-                    assertNull("device session reported ${session.state.value.error}", session.state.value.error)
+                    assertNull("device session reported ${session.state.value.failure}", session.state.value.failure)
                     assertTrue("device session did not connect", session.state.value.connected)
 
                     exerciseNetworkChanges(session, calls)
@@ -229,7 +231,7 @@ class GatewaySessionIntegrationTest {
                     }
                 setWifiEnabled(device, false)
                 withTimeout(TIMEOUT_MS) { recovering.await() }
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
                 assertTrue("Telecom call ended while offline", calls.isStarted)
                 setWifiEnabled(device, true)
                 // Ask for the stock AP explicitly. CI has reported a completed scan
@@ -301,8 +303,8 @@ class GatewaySessionIntegrationTest {
     }
 
     private suspend fun awaitConnected(session: VoiceSessionController) {
-        val ready = withTimeout(TIMEOUT_MS) { session.state.first { it.connected || it.error != null } }
-        assertNull(ready.error)
+        val ready = withTimeout(TIMEOUT_MS) { session.state.first { it.connected || it.failure != null } }
+        assertNull(ready.failure)
         assertTrue(ready.connected)
     }
 

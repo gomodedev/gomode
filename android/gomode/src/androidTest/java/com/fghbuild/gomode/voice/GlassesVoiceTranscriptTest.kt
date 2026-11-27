@@ -112,6 +112,7 @@ class GlassesVoiceTranscriptTest {
                         transport,
                         fakeG2Scanner(),
                         FakeG2Firmware().connector,
+                        VoiceIssues(),
                     )
                 val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
                 val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
@@ -188,6 +189,7 @@ class GlassesVoiceTranscriptTest {
                         transport,
                         fakeG2Scanner(),
                         FakeG2Firmware().connector,
+                        VoiceIssues(),
                     )
                 val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
                 val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
@@ -296,6 +298,7 @@ class GlassesVoiceTranscriptTest {
                         FakeHaloTransport(context),
                         fakeG2Scanner(),
                         firmware.connector,
+                        VoiceIssues(),
                     )
                 val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
                 val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
@@ -479,7 +482,15 @@ class GlassesVoiceTranscriptTest {
             val firmware = FakeG2Firmware().apply { this.revision = revision }
             val glassesScope = MainScope()
             val glasses =
-                GlassesOwner(glassesScope, context, repository, transport, fakeG2Scanner(), firmware.connector)
+                GlassesOwner(
+                    glassesScope,
+                    context,
+                    repository,
+                    transport,
+                    fakeG2Scanner(),
+                    firmware.connector,
+                    VoiceIssues(),
+                )
             val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
             val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
             try {
@@ -624,10 +635,11 @@ class GlassesVoiceTranscriptTest {
                     FakeHaloTransport(context),
                     fakeG2Scanner(),
                     firmware.connector,
+                    VoiceIssues(),
                 )
             val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
             val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
-            val carDial = CarDialVoiceOwner(context, repository, models, shellOwner, glasses)
+            val carDial = CarDialVoiceOwner(context, repository, models, shellOwner, glasses, VoiceIssues())
             val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
             val role = RoleManager.ROLE_CALL_REDIRECTION
             val previousHolders =

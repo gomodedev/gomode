@@ -30,6 +30,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.glasses.GlassesInputsScreen
 import com.fghbuild.gomode.ui.glasses.GlassesScreen
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloScannedDevice
 import com.fghbuild.halo.msg.ClickType
@@ -1090,7 +1091,15 @@ class GlassesOwnerTest {
     private fun runOwnerTest(body: suspend TestScope.() -> Unit) =
         runTest {
             owner =
-                GlassesOwner(backgroundScope, context, repository, transport, G2Scanner(context), firmware.connector)
+                GlassesOwner(
+                    backgroundScope,
+                    context,
+                    repository,
+                    transport,
+                    G2Scanner(context),
+                    firmware.connector,
+                    VoiceIssues(),
+                )
             body()
         }
 

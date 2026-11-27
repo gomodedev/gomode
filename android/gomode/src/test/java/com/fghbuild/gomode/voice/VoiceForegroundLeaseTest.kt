@@ -57,6 +57,7 @@ class VoiceForegroundLeaseTest {
                         ),
                     ) { emptyMap() },
                 languageTag = "en-US",
+                issues = VoiceIssues(),
             )
         val dial = VoiceForegroundLease(context)
         dial.start("Dial server")

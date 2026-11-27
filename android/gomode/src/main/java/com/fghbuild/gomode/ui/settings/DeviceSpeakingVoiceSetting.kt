@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
+import com.fghbuild.gomode.voice.VoiceIssueKey
 import com.fghbuild.gomode.voice.deviceVoiceMatchesLanguage
 import com.fghbuild.gomode.voice.installedDeviceVoices
 
@@ -30,7 +31,7 @@ internal fun DeviceSpeakingVoiceSetting(
     val voices = installed?.filter { deviceVoiceMatchesLanguage(it, languageTag) }
     // Until the engine lists its voices, the saved name stands for itself.
     val effective = if (voices == null) voiceName else voices.firstOrNull { it.name == voiceName }?.name.orEmpty()
-    val saver = rememberPickerSave("speaking voice")
+    val saver = rememberPickerSave("speaking voice", VoiceIssueKey.SAVE_DEVICE_SPEAKING_VOICE)
     SettingsPicker(
         label = "Speaking voice",
         value =

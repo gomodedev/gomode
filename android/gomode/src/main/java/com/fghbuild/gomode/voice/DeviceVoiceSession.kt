@@ -154,6 +154,7 @@ internal class DeviceVoiceSession(
     private val frontendTools: FrontendVoiceTools = FrontendVoiceTools(),
     private val isAuthorityCurrent: () -> Boolean = { true },
     private val languageTag: String,
+    override val issues: VoiceIssues,
     private val localModelOwner: LocalModelOwner = (appContext.applicationContext as GoModeApplication).localModelOwner,
     private val speech: DeviceSpeech =
         settingsRepository.settings.value.voiceSetup.let {
@@ -197,7 +198,6 @@ internal class DeviceVoiceSession(
     private var userSpeechActive = false
     private var listeningGeneration = 0L
     private val voiceModeChime = VoiceModeChime(voiceChimePlayer)
-    private val errorLog = (appContext.applicationContext as GoModeApplication).voiceErrors
 
     private val _state = MutableStateFlow(VoiceState())
     override val state: StateFlow<VoiceState> = _state.asStateFlow()
@@ -270,6 +270,7 @@ internal class DeviceVoiceSession(
 
     private val audioStateJob =
         scope.launch {
+            launch { issues.followAudioRoute(callController.audioState) }
             callController.audioState.collect { audio ->
                 _state.update {
                     it.withCallAudio(audio)
@@ -482,8 +483,9 @@ internal class DeviceVoiceSession(
         pendingNotifications.markContextChanged()
         frontendToolNames = frontendTools.declarations.map { it.name }.toSet()
         _state.update {
-            it.copy(connectStatus = null, connected = true, error = null)
+            it.copy(connectStatus = null, connected = true, failure = null)
         }
+        issues.resolve(VoiceIssueKey.CONNECTION, VoiceIssueKey.GATEWAY)
         callController.activate()
         if (!silent) voiceModeChime.connected()
         val announcing = pendingNotifications.announces()
@@ -717,8 +719,9 @@ internal class DeviceVoiceSession(
                     cancelReadinessTimeout()
                     recoveryPolicy.ready()
                     _state.update {
-                        it.copy(connectStatus = null, connected = true, error = null)
+                        it.copy(connectStatus = null, connected = true, failure = null)
                     }
+                    issues.resolve(VoiceIssueKey.CONNECTION, VoiceIssueKey.GATEWAY)
                     callController.activate()
                     if (!silent) voiceModeChime.connected()
                     if (recoveryContext.isNotEmpty()) {
@@ -806,8 +809,7 @@ internal class DeviceVoiceSession(
                     val msg = json.decodeFromString(Error.serializer(), text)
                     if (msg.recoverable) {
                         Log.w(TAG, "Recoverable gateway error: ${msg.message}")
-                        recordFailure(msg.message)
-                        _state.update { it.withGatewayError(msg.message) }
+                        issues.raise(VoiceIssueKey.GATEWAY, msg.message)
                     } else {
                         setError(msg.message)
                     }
@@ -1356,12 +1358,12 @@ internal class DeviceVoiceSession(
         callController.endLocal()
         foreground.stop()
         otherSetup = null
-        // Preserve transcript so the user can review it after disconnecting. A failure stays
-        // until the user dismisses it or starts again, whatever ends the session.
+        // Preserve transcript so the user can review it after disconnecting. The failure stays
+        // until the next attempt starts, whatever ends the session; its issue stays listed.
+        issues.resolve(VoiceIssueKey.AUDIO_ROUTE, VoiceIssueKey.GATEWAY)
         _state.value =
             VoiceState(
-                error = _state.value.error,
-                errorId = _state.value.errorId,
+                failure = _state.value.failure,
                 usage = _state.value.usage,
                 toolHistory = _state.value.toolHistory,
                 transcript =
@@ -1371,13 +1373,10 @@ internal class DeviceVoiceSession(
             ).withCallAudio(callController.audioState.value)
     }
 
-    override fun dismissError() {
-        _state.update { it.copy(error = null) }
-    }
-
     override fun setError(message: String) {
         stopNetworkMonitoring()
-        recordFailure(message)
+        issues.resolve(VoiceIssueKey.AUDIO_ROUTE, VoiceIssueKey.GATEWAY)
+        issues.raise(VoiceIssueKey.CONNECTION, message)
         voiceConversation?.finish()
         thinkingEarcon.setThinking(false)
         invalidateAttempt()
@@ -1400,31 +1399,10 @@ internal class DeviceVoiceSession(
                 speaking = false,
                 turnState = TurnState.Idle,
                 activeTool = null,
-                error = message,
+                failure = message,
                 micLevel = 0f,
-                errorId = it.errorId + 1,
                 transcript = it.transcript.withoutUserDraft(),
             )
-        }
-    }
-
-    /** Retains a failure next to the engine and phase that produced it. */
-    private fun recordFailure(message: String) {
-        errorLog.record(
-            engine = engineLabel(),
-            phase = state.value.failurePhase(),
-            message = message,
-        )
-    }
-
-    /** Names the configured engine even when a failure precedes engine construction. */
-    private fun engineLabel(): String {
-        engine?.modelName?.let { return it }
-        val settings = settingsRepository.settings.value
-        val languageModel = settings.voiceSetup.effectiveLanguageModel
-        return when (languageModel) {
-            VoiceLanguageModel.LOCAL_LLM -> settings.localLlmModel.label
-            VoiceLanguageModel.NEEDLE_WHISTLE, VoiceLanguageModel.GATEWAY -> languageModel.label
         }
     }
 
@@ -1456,7 +1434,7 @@ internal class DeviceVoiceSession(
     }
 
     override fun announce(text: String) {
-        if (_state.value.error != null) return
+        if (_state.value.failure != null) return
         if (!pendingNotifications.addAlert(text)) {
             setError("Too many pending service alerts. Reconnect voice.")
             return
@@ -1465,7 +1443,7 @@ internal class DeviceVoiceSession(
     }
 
     override fun contextChanged() {
-        if (_state.value.error != null) return
+        if (_state.value.failure != null) return
         pendingNotifications.markContextChanged()
         flushPendingNotifications()
     }
@@ -1525,7 +1503,7 @@ internal class DeviceVoiceSession(
 
     private fun setStatus(status: String) {
         Log.i(TAG, status)
-        _state.update { it.copy(connectStatus = status, error = null) }
+        _state.update { it.copy(connectStatus = status, failure = null) }
     }
 
     private fun send(text: String) {

@@ -15,6 +15,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.voice.VoiceAudioInput
 import com.fghbuild.gomode.voice.VoiceAudioSource
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.halo.testing.FakeHaloTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -216,6 +217,7 @@ class GlassesVoiceMicrophoneTest {
                     FakeHaloTransport(context),
                     G2Scanner(context),
                     firmware.connector,
+                    VoiceIssues(),
                 )
             val enabled = repository.settings.map { it.glassesMicrophoneForVoice }
             backgroundScope.launch { followGlassesMicrophone(input, enabled, owner.microphone, backgroundScope) }

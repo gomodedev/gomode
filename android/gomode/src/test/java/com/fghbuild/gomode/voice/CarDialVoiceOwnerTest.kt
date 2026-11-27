@@ -91,6 +91,7 @@ class CarDialVoiceOwnerTest {
     private val glassesScope = CoroutineScope(SupervisorJob())
     private lateinit var glasses: GlassesOwner
     private lateinit var repository: SettingsRepository
+    private val shellIssues = VoiceIssues()
     private val server = ServiceInstance("saved-server", "Saved server", url = "https://example.test")
 
     @Before
@@ -114,8 +115,9 @@ class CarDialVoiceOwnerTest {
                 HaloConnection(context),
                 G2Scanner(context),
                 G2GattConnector(context),
+                VoiceIssues(),
             )
-        owner = CarDialVoiceOwner(context, repository, model, pages, glasses)
+        owner = CarDialVoiceOwner(context, repository, model, pages, glasses, shellIssues)
     }
 
     @After
@@ -192,6 +194,15 @@ class CarDialVoiceOwnerTest {
             assertFalse("Idle would finish the native failure surface: $statuses", CarDialStatus.IDLE in statuses)
             assertFalse(owner.isBusy)
             assertNull(owner.session.value)
+            // The shell lists the fixed message, never the session's own, until the failure is dismissed.
+            assertEquals(
+                listOf(VoiceIssueKey.CAR_CALL to context.getString(CarDialFailure.CALL.message)),
+                shellIssues.state.value.entries
+                    .map { it.key to it.message },
+            )
+            owner.cancel(identity)
+            runCurrent()
+            assertEquals(emptyList<VoiceIssue>(), shellIssues.state.value.entries)
         }
 
     @Test
@@ -305,6 +316,7 @@ class CarDialVoiceOwnerTest {
                             ),
                         ) { emptyMap() },
                     languageTag = "en-US",
+                    issues = VoiceIssues(),
                 )
             val active =
                 object : VoiceSessionController by idle {
@@ -404,6 +416,68 @@ class CarDialVoiceOwnerTest {
             }
         }
 
+    // The panel's X resolves a car call's problem in the call's own list, which the shell list follows.
+    @Test
+    @Config(
+        shadows = [ShadowTransactionalTelecomManager::class, HostedWebViewFeatures::class, HostedWebViewCompat::class],
+    )
+    fun dismissingACarCallsProblemResolvesItInTheCallsList() =
+        runTest {
+            shadowOf(context.packageManager).setSystemFeature(PackageManager.FEATURE_TELECOM, true)
+            val manifest =
+                """{"service":"fixture","apiVersion":1,"webShell":{"bridgeVersion":3,"toolGroups":[],
+                "voiceGateway":{"required":false,"url":"/"}}}"""
+            val server = MockWebServer()
+            server.dispatcher =
+                object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest) = MockResponse().setBody(manifest)
+                }
+            server.start()
+            var identity: String? = null
+            try {
+                val id = repository.addService("Saved server", server.url("/").toString())
+                val settings = repository.settings.first { it.activeServiceId == id }
+                pages.start()
+                val key = ServiceShellKey(id, settings.activeServiceURL)
+                val page =
+                    pages.state
+                        .first { key in it.entries }
+                        .entries
+                        .getValue(key)
+                page.bearerStore.onNavigation(key.url)
+                assertTrue(page.bearerStore.receive(Uri.parse(key.url), true, key.url, """{"bearerToken":"fixture"}"""))
+                page.updateLoad(WebShellLoadState.Ready)
+                identity = owner.request(settings.services.single { it.id == id })
+                val activity = Any()
+                assertTrue(owner.attach(identity, activity))
+                owner.start(identity, activity)
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+                while (startupRecords().none { "event=stage_started stage=FRONTEND" in it }) {
+                    check(System.nanoTime() < deadline) { "Startup never waited on the frontend: ${startupRecords()}" }
+                    runCurrent()
+                    Thread.sleep(10)
+                }
+                completeFrontendPreparation(page)
+                while (owner.session.value == null) {
+                    check(System.nanoTime() < deadline) { "The call never built its session: ${owner.state.value}" }
+                    runCurrent()
+                    Thread.sleep(10)
+                }
+                val call = checkNotNull(owner.session.value).issues
+                call.raise(VoiceIssueKey.GATEWAY, "provider detail")
+                runCurrent()
+                assertEquals("provider detail", shellIssues.state.value.message(VoiceIssueKey.CAR_GATEWAY))
+
+                owner.dismissIssues(listOf(VoiceIssueKey.CAR_GATEWAY))
+                runCurrent()
+                assertNull(call.state.value.message(VoiceIssueKey.GATEWAY))
+                assertNull(shellIssues.state.value.message(VoiceIssueKey.CAR_GATEWAY))
+            } finally {
+                owner.cancel(identity)
+                server.shutdown()
+            }
+        }
+
     // A mute before the call's session exists acts on nothing: the shell would say voice is off.
     @Test
     fun aMuteWhileACallWaitsForItsSessionActsOnNothing() =
@@ -419,8 +493,9 @@ class CarDialVoiceOwnerTest {
                     FakeHaloTransport(context),
                     G2Scanner(context),
                     firmware.connector,
+                    VoiceIssues(),
                 )
-            val carDial = CarDialVoiceOwner(context, repository, model, pages, fakeGlasses)
+            val carDial = CarDialVoiceOwner(context, repository, model, pages, fakeGlasses, VoiceIssues())
             try {
                 val shell = mutableListOf<GlassesAction>()
                 backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -443,6 +518,51 @@ class CarDialVoiceOwnerTest {
             } finally {
                 carDial.close()
             }
+        }
+
+    // The shell's sessions write AUDIO_ROUTE and GATEWAY; only the car call writes its CAR_ keys.
+    @Test
+    fun aCarCallsProblemsStayListedUntilTheCallResolvesThem() =
+        runTest {
+            val call = VoiceIssues()
+            val sessions = MutableStateFlow<VoiceIssues?>(call)
+            val shell = VoiceIssues()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { forwardCarIssues(sessions, shell) }
+            call.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
+            call.raise(VoiceIssueKey.GATEWAY, "provider detail")
+            // A shell session that starts or ends resolves its own keys.
+            shell.resolve(VoiceIssueKey.AUDIO_ROUTE, VoiceIssueKey.GATEWAY, VoiceIssueKey.CONNECTION)
+            assertEquals(
+                listOf(
+                    VoiceIssueKey.CAR_AUDIO_ROUTE to "Could not switch audio device",
+                    VoiceIssueKey.CAR_GATEWAY to "provider detail",
+                ),
+                shell.state.value.entries
+                    .map { it.key to it.message },
+            )
+            // The call resolving its own entry resolves the shell's.
+            call.resolve(VoiceIssueKey.GATEWAY)
+            assertEquals(
+                listOf(VoiceIssueKey.CAR_AUDIO_ROUTE),
+                shell.state.value.entries
+                    .map { it.key },
+            )
+            call.resolve(VoiceIssueKey.AUDIO_ROUTE)
+            assertEquals(emptyList<VoiceIssue>(), shell.state.value.entries)
+            // Each raise is a new occurrence, and an ended call takes its problems with it.
+            call.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
+            val first =
+                shell.state.value.entries
+                    .single()
+                    .id
+            call.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
+            assertTrue(
+                shell.state.value.entries
+                    .single()
+                    .id != first,
+            )
+            sessions.value = null
+            assertEquals(emptyList<VoiceIssue>(), shell.state.value.entries)
         }
 
     private fun startupRecords(): List<String> =

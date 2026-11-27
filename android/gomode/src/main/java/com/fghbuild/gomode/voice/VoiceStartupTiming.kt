@@ -65,12 +65,12 @@ internal class VoiceStartupTiming(
                 withTimeout(timeoutMillis) {
                     state.first {
                         it.connected ||
-                            it.error != null ||
+                            it.failure != null ||
                             it.connectStatus == null ||
                             it.startupProgressAtMillis != progress
                     }
                 }
-            if (next.connected || next.error != null || next.connectStatus == null) return next
+            if (next.connected || next.failure != null || next.connectStatus == null) return next
             progress = next.startupProgressAtMillis
         }
     }

@@ -1,9 +1,12 @@
 // Android Telecom self-managed call boundary for a voice session.
 package com.fghbuild.gomode.voice
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 internal data class CallAudioState(
     val devices: List<AudioDevice> = emptyList(),
@@ -73,6 +76,12 @@ internal fun VoiceState.withCallAudio(audio: CallAudioState): VoiceState =
     copy(
         availableDevices = audio.devices,
         selectedDeviceId = audio.selectedDeviceId,
-        audioError = audio.error,
         audioSwitching = audio.switching,
     )
+
+/** Raises the controller's route problem as AUDIO_ROUTE each time it changes, and resolves it once it clears. */
+internal suspend fun VoiceIssues.followAudioRoute(audio: Flow<CallAudioState>) {
+    audio.map { it.error }.distinctUntilChanged().collect { error ->
+        if (error == null) resolve(VoiceIssueKey.AUDIO_ROUTE) else raise(VoiceIssueKey.AUDIO_ROUTE, error)
+    }
+}

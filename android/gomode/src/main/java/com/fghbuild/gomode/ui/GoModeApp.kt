@@ -69,8 +69,6 @@ import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.glasses.GlassesAction
 import com.fghbuild.gomode.glasses.GlassesMicrophoneStream
 import com.fghbuild.gomode.glasses.GlassesOwner
-import com.fghbuild.gomode.glasses.showAudioErrors
-import com.fghbuild.gomode.glasses.showVoiceErrors
 import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.glasses.toggleMute
 import com.fghbuild.gomode.service.CatalogNotification
@@ -112,6 +110,8 @@ import com.fghbuild.gomode.voice.SpeechLanguageRecovery
 import com.fghbuild.gomode.voice.TelecomCallController
 import com.fghbuild.gomode.voice.VoiceAudioInput
 import com.fghbuild.gomode.voice.VoiceConversation
+import com.fghbuild.gomode.voice.VoiceIssueKey
+import com.fghbuild.gomode.voice.VoiceIssuesState
 import com.fghbuild.gomode.voice.VoicePanel
 import com.fghbuild.gomode.voice.VoiceService
 import com.fghbuild.gomode.voice.VoiceSession
@@ -128,6 +128,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
@@ -182,11 +183,11 @@ internal fun observeVoiceStartup(
 ) {
     scope.launch {
         try {
-            val result = session.state.first { it.connected || it.error != null || it.connectStatus == null }
+            val result = session.state.first { it.connected || it.failure != null || it.connectStatus == null }
             timing.finish(
                 when {
                     result.connected -> VoiceStartupOutcome.CONNECTED
-                    result.error != null -> VoiceStartupOutcome.FAILED
+                    result.failure != null -> VoiceStartupOutcome.FAILED
                     else -> VoiceStartupOutcome.CANCELED
                 },
             )
@@ -232,6 +233,7 @@ internal fun GoModeApp(
     val shellSnapshot by shellOwner.state.collectAsStateWithLifecycle()
     val carVoiceOwner = (context.applicationContext as GoModeApplication).carDialVoiceOwner
     val voiceAudioInput = (context.applicationContext as GoModeApplication).voiceAudioInput
+    val voiceIssues = (context.applicationContext as GoModeApplication).voiceIssues
     val carVoiceState by carVoiceOwner.state.collectAsStateWithLifecycle()
     val carVoiceSession by carVoiceOwner.session.collectAsStateWithLifecycle()
     val carVoiceBusy = carVoiceState.status.busy
@@ -374,6 +376,7 @@ internal fun GoModeApp(
                     },
                     frontendTools = if (sharedConversation) FrontendVoiceTools() else serviceSession.frontendTools,
                     languageTag = settings.voiceLanguageTag,
+                    issues = voiceIssues,
                     localModelOwner = localModelOwner,
                     callController = voiceCallController,
                     switchServer = switchVoiceServer,
@@ -385,6 +388,7 @@ internal fun GoModeApp(
                     settingsRepository,
                     voiceConversation = voiceConversation,
                     languageTag = settings.voiceLanguageTag,
+                    issues = voiceIssues,
                     callController = voiceCallController,
                     switchServer = switchVoiceServer,
                     startupTiming = { manualStartup },
@@ -400,12 +404,6 @@ internal fun GoModeApp(
             glassesOwner.scrolls,
             glassesOwner::show,
         )
-    }
-    LaunchedEffect(manualVoiceSession, glassesOwner) {
-        showVoiceErrors(manualVoiceSession.state, glassesOwner::notify)
-    }
-    LaunchedEffect(manualVoiceSession, glassesOwner) {
-        showAudioErrors(manualVoiceSession.state, glassesOwner::notify)
     }
     LaunchedEffect(manualVoiceSession, glassesOwner) {
         glassesOwner.detectHeadGestures(manualVoiceSession.state.map { it.started })
@@ -457,14 +455,13 @@ internal fun GoModeApp(
                 controllerState.copy(connectStatus = "Connecting voice…")
             }
 
-            carVoiceState.status == CarDialStatus.FAILED -> {
-                controllerState.copy(error = stringResource(carVoiceState.failure.message))
-            }
-
             else -> {
                 controllerState
             }
         }
+    val voiceIssuesState by voiceIssues.state.collectAsStateWithLifecycle()
+    // Above keyguard, only Go Mode's own messages show; provider text, a car call's included, waits for the unlock.
+    val shownIssues = voiceIssuesState.listed.filter { !keyguardLocked || it.key.fixedMessage }
     LaunchedEffect(voiceState.connected) { shellOwner.setVoiceConnected(voiceState.connected) }
     val selectAudioDevice = rememberVoiceAudioSelection(voiceSession, settingsRepository)
     var knownAudioDevices by remember(voiceSession) { mutableStateOf(emptySet<Int>()) }
@@ -477,7 +474,9 @@ internal fun GoModeApp(
             voiceState.availableDevices.firstOrNull {
                 it.isBluetooth() && it.id !in previousIds && (id == null || it.id == id)
             }
-        if (bluetooth != null && awaitVoiceAudioSelection(voiceSession.state, bluetooth.id)) {
+        if (bluetooth != null &&
+            awaitVoiceAudioSelection(voiceSession.state, voiceSession.issues.state, bluetooth.id)
+        ) {
             settingsRepository.updateVoiceAudioDeviceType(bluetooth.type)
         }
     }
@@ -788,7 +787,7 @@ internal fun GoModeApp(
             // Settings owns the full screen; elsewhere, keep failures visible even with the keyboard open.
             if (activeURL.isNotBlank() &&
                 activeNativeScreen != NativeScreen.Settings &&
-                (voiceState.error != null || (!keyboardOpen && (shellRecovery == null || voiceSessionActive)))
+                (shownIssues.isNotEmpty() || (!keyboardOpen && (shellRecovery == null || voiceSessionActive)))
             ) {
                 VoicePanel(
                     speechRecovery = {
@@ -859,9 +858,12 @@ internal fun GoModeApp(
                         }
                     },
                     canCycleApps = settings.services.size > 1,
-                    onDismissError = {
+                    issues = shownIssues,
+                    onDismissIssues = {
+                        val keys = shownIssues.map { it.key }
+                        carVoiceOwner.dismissIssues(keys)
                         if (carVoiceState.status == CarDialStatus.FAILED) carVoiceOwner.cancel()
-                        voiceSession.dismissError()
+                        voiceIssues.resolve(*keys.toTypedArray())
                     },
                     serviceReconnect =
                         serviceMonitorState.retryReason?.let {
@@ -896,28 +898,31 @@ internal fun rememberVoiceAudioSelection(
         current.selectAudioDevice(id)
         selectionJob =
             scope.launch {
-                if (awaitVoiceAudioSelection(current.state, id)) {
+                if (awaitVoiceAudioSelection(current.state, current.issues.state, id)) {
                     settingsRepository.updateVoiceAudioDeviceType(device.type)
                 }
             }
     }
 }
 
-// Save only confirmed user choices. A failed request leaves both the saved preference and route error intact.
+// Save only confirmed user choices. A failed request leaves both the saved preference and route problem intact.
 internal suspend fun awaitVoiceAudioSelection(
     states: StateFlow<VoiceState>,
+    issues: StateFlow<VoiceIssuesState>,
     deviceId: Int,
 ): Boolean {
-    val state =
-        states.first {
-            !it.audioSwitching &&
+    val (state, routeFailed) =
+        combine(states, issues) { state, issues ->
+            state to (issues.message(VoiceIssueKey.AUDIO_ROUTE) != null)
+        }.first { (state, routeFailed) ->
+            !state.audioSwitching &&
                 (
-                    it.selectedDeviceId == deviceId ||
-                        it.audioError != null ||
-                        it.availableDevices.none { device -> device.id == deviceId }
+                    state.selectedDeviceId == deviceId ||
+                        routeFailed ||
+                        state.availableDevices.none { device -> device.id == deviceId }
                 )
         }
-    return state.selectedDeviceId == deviceId && state.audioError == null
+    return state.selectedDeviceId == deviceId && !routeFailed
 }
 
 // Restore a saved output type against the currently available pre-call or live endpoints.

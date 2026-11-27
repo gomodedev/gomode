@@ -7,6 +7,7 @@ import com.fghbuild.gomode.ui.web.ServiceShellSession
 import com.fghbuild.gomode.ui.web.WebShellLoadState
 import com.fghbuild.gomode.ui.web.completeFrontendPreparation
 import com.fghbuild.gomode.voice.MicrophoneMode
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.gomode.voice.VoiceSessionController
 import com.fghbuild.gomode.voice.VoiceStartupSource
 import com.fghbuild.gomode.voice.VoiceStartupStage
@@ -98,7 +99,7 @@ class PendingMicrophoneVoiceStartTest {
         runTest {
             val timing = VoiceStartupTiming(VoiceStartupSource.MANUAL)
             val session = Voice()
-            session.state.value = VoiceState(error = "Sensitive provider detail")
+            session.state.value = VoiceState(failure = "Sensitive provider detail")
             observeVoiceStartup(backgroundScope, session, timing)
             runCurrent()
             val records = ShadowLog.getLogsForTag("GoModeVoiceStartup").map { it.msg }
@@ -179,6 +180,7 @@ class PendingMicrophoneVoiceStartTest {
 
     private class Voice : VoiceSessionController {
         override val state = MutableStateFlow(VoiceState())
+        override val issues = VoiceIssues()
         var connections = 0
 
         override fun connect(
@@ -201,8 +203,6 @@ class PendingMicrophoneVoiceStartTest {
         override fun contextChanged() = Unit
 
         override fun setError(message: String) = Unit
-
-        override fun dismissError() = Unit
 
         override fun close() = Unit
     }

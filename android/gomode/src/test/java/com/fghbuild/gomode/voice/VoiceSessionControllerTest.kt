@@ -24,6 +24,7 @@ class VoiceSessionControllerTest {
         initial: VoiceState,
     ) : VoiceSessionController {
         override val state = MutableStateFlow(initial)
+        override val issues = VoiceIssues()
         val calls = mutableListOf<String>()
 
         override fun connect(
@@ -48,8 +49,6 @@ class VoiceSessionControllerTest {
         override fun setError(message: String) {
             calls += "error: $message"
         }
-
-        override fun dismissError() = Unit
 
         override fun close() = Unit
     }

@@ -92,7 +92,7 @@ class VoiceAudioSourceSessionTest {
             high.end()
             withTimeout(TIMEOUT_MS) { input.source.first { it == VoiceAudioSource.PhoneMicrophone } }
             awaitStream { high.closes.get() == high.opens.get() }
-            assertNull(awaitState(session) { it.listening }.error)
+            assertNull(awaitState(session) { it.listening }.failure)
         }
 
     @Test
@@ -124,7 +124,7 @@ class VoiceAudioSourceSessionTest {
             val settled = tones(fixtureStats(), 900)
             delay(1_000)
             assertEquals("The phone microphone must replace the ended stream", settled, tones(fixtureStats(), 900))
-            assertNull(session.state.value.error)
+            assertNull(session.state.value.failure)
         }
 
     @Test
@@ -142,6 +142,7 @@ class VoiceAudioSourceSessionTest {
                     FakeHaloTransport(context),
                     fakeG2Scanner(),
                     firmware.connector,
+                    VoiceIssues(),
                 )
             val streams = CoroutineScope(glassesScope.coroutineContext + Dispatchers.Default)
             glassesScope.launch { followGlassesMicrophone(input, flowOf(true), owner.microphone, streams) }
@@ -162,7 +163,7 @@ class VoiceAudioSourceSessionTest {
 
                 firmware.link(G2Side.RIGHT).drop(status = 8)
                 withTimeout(TIMEOUT_MS) { input.source.first { it == VoiceAudioSource.PhoneMicrophone } }
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
                 assertTrue(session.state.value.connected)
 
                 // A reconnection offers a new microphone, which the call hears again. A direct connection
@@ -171,7 +172,7 @@ class VoiceAudioSourceSessionTest {
                 val second = withTimeout(TIMEOUT_MS) { input.source.first { it is GlassesMicrophoneStream } }
                 assertNotSame(first, second)
                 awaitStream { firmware.requests.count { it.kind == "microphone" && it.text == "on" } == 2 }
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
             } finally {
                 speaking.cancel()
                 withContext(Dispatchers.Main) { glassesScope.cancel() }
@@ -255,6 +256,7 @@ class VoiceAudioSourceSessionTest {
                     repository,
                     conversation,
                     "en-US",
+                    VoiceIssues(),
                     thinkingEarcon =
                         object : ThinkingEarcon {
                             override fun setThinking(active: Boolean) = Unit
@@ -265,8 +267,8 @@ class VoiceAudioSourceSessionTest {
                     withContext(Dispatchers.Main) { pages.prepareCall(repository.settings.value) {} }
                 }
                 activity.onActivity { session.connect() }
-                val ready = awaitState(session) { it.connected || it.error != null }
-                assertNull(ready.error)
+                val ready = awaitState(session) { it.connected || it.failure != null }
+                assertNull(ready.failure)
                 block(session)
             } finally {
                 withContext(Dispatchers.Main) {
@@ -283,7 +285,7 @@ class VoiceAudioSourceSessionTest {
     ): VoiceState =
         withTimeout(TIMEOUT_MS) {
             session.state.first {
-                check(it.error == null) { "Voice session failed: ${it.error}" }
+                check(it.failure == null) { "Voice session failed: ${it.failure}" }
                 predicate(it)
             }
         }

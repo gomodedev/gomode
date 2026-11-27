@@ -24,6 +24,7 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.testing.MemoryPreferences
 import com.fghbuild.gomode.ui.glasses.GlassesInputsScreen
 import com.fghbuild.gomode.ui.theme.GoModeTheme
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.halo.testing.FakeHaloTransport
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -61,6 +62,7 @@ class GlassesMicrophoneRecordingTest {
                 FakeHaloTransport(context),
                 fakeG2Scanner(),
                 firmware.connector,
+                VoiceIssues(),
             )
         val file = File(context.getExternalFilesDir(null), "glasses-microphone.wav")
         file.delete()

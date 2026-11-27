@@ -35,6 +35,7 @@ import com.fghbuild.gomode.ui.theme.GoModeTheme
 import com.fghbuild.gomode.ui.web.ServiceShellOwner
 import com.fghbuild.gomode.voice.LocalModelOwner
 import com.fghbuild.gomode.voice.ModelDownloadState
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.gomode.voice.localModelInstallation
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -81,7 +82,16 @@ class GlassesPairingTest {
             firmware.case = G2Charge(55, charging = false)
             val halo = ScanningFakeHalo(context, HALO_ADDRESS)
             val glassesScope = MainScope()
-            val glasses = GlassesOwner(glassesScope, context, repository, halo, fakeG2Scanner(), firmware.connector)
+            val glasses =
+                GlassesOwner(
+                    glassesScope,
+                    context,
+                    repository,
+                    halo,
+                    fakeG2Scanner(),
+                    firmware.connector,
+                    VoiceIssues(),
+                )
             val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
             val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)
             try {

@@ -44,7 +44,6 @@ import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.glasses.GlassesAction
 import com.fghbuild.gomode.glasses.GlassesOwner
-import com.fghbuild.gomode.glasses.showAudioErrors
 import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.glasses.toggleMute
 import com.fghbuild.gomode.service.ServiceSettingsClient
@@ -59,12 +58,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -139,6 +138,8 @@ internal class CarDialVoiceOwner(
     private val localModelOwner: LocalModelOwner,
     private val pages: ServiceShellOwner,
     private val glasses: GlassesOwner,
+    // The shell's list, which gets only this owner's fixed messages.
+    private val shellIssues: VoiceIssues,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(CarDialVoiceState())
@@ -207,17 +208,20 @@ internal class CarDialVoiceOwner(
                 if (voice != null) glasses.detectHeadGestures(voice.state.map { it.started })
             }
         }
-        scope.launch {
-            session.collectLatest { voice ->
-                if (voice != null) showAudioErrors(voice.state, glasses::notify)
-            }
-        }
-        // The glasses show the fixed failure that the call screen shows, never the provider's error.
+        // The shell lists the call session's problems under the CAR_ keys, which nothing else writes.
+        scope.launch { forwardCarIssues(session.map { it?.issues }, shellIssues) }
+        // The shell lists, and the glasses draw, the fixed failure that the call screen shows, never the
+        // provider's error, which only the call session's own list holds.
         scope.launch {
             mutableState
-                .filter { it.status == CarDialStatus.FAILED }
-                .distinctUntilChangedBy { it.identity }
-                .collect { glasses.notify(context.getString(it.failure.message)) }
+                .distinctUntilChangedBy { it.identity to (it.status == CarDialStatus.FAILED) }
+                .collect {
+                    if (it.status == CarDialStatus.FAILED) {
+                        shellIssues.raise(VoiceIssueKey.CAR_CALL, context.getString(it.failure.message))
+                    } else {
+                        shellIssues.resolve(VoiceIssueKey.CAR_CALL)
+                    }
+                }
         }
     }
 
@@ -470,6 +474,7 @@ internal class CarDialVoiceOwner(
                     settingsRepository,
                     voiceConversation = checkNotNull(voiceConversation),
                     languageTag = settings.voiceLanguageTag,
+                    issues = VoiceIssues(),
                     callController = call,
                     switchServer = { id -> switchServer(voiceConversation, id) },
                     startupTiming = { next.timing },
@@ -486,6 +491,7 @@ internal class CarDialVoiceOwner(
                             pages.catalog.glassesDisplay,
                         ),
                     languageTag = settings.voiceLanguageTag,
+                    issues = VoiceIssues(),
                     localModelOwner = localModelOwner,
                     callController = call,
                     frontendTools = page.frontendTools,
@@ -524,8 +530,8 @@ internal class CarDialVoiceOwner(
     ) {
         val connected = next.timing.awaitConnection(voice.state, STARTUP_TIMEOUT_MS)
         if (!connected.connected) {
-            Log.w("GoModeCarDial", "Voice session did not connect: ${connected.error}")
-            if (connected.error == FRONTEND_NOT_READY) next.failure = CarDialFailure.FRONTEND
+            Log.w("GoModeCarDial", "Voice session did not connect: ${connected.failure}")
+            if (connected.failure == FRONTEND_NOT_READY) next.failure = CarDialFailure.FRONTEND
             val language = (voice as? DeviceVoiceSession)?.speechLanguageState?.value
             if (language == SpeechLanguageState.Missing ||
                 language == SpeechLanguageState.Pending ||
@@ -607,6 +613,12 @@ internal class CarDialVoiceOwner(
         finish(CarDialVoiceState(current.identity, server.label, CarDialStatus.FAILED, failure))
     }
 
+    /** Resolves the dismissed [keys] in the call session's own list, which the shell's CAR_ keys follow. */
+    fun dismissIssues(keys: Collection<VoiceIssueKey>) {
+        val call = session.value?.issues ?: return
+        call.resolve(*keys.mapNotNull(::carSessionKey).toTypedArray())
+    }
+
     fun cancel(identity: String? = mutableState.value.identity) {
         val current = request
         if (current == null) {
@@ -652,3 +664,42 @@ internal class CarDialVoiceOwner(
         scope.cancel()
     }
 }
+
+/** The car call session's keys and the shell keys that [forwardCarIssues] lists them under. */
+private val CAR_SESSION_KEYS =
+    mapOf(
+        VoiceIssueKey.AUDIO_ROUTE to VoiceIssueKey.CAR_AUDIO_ROUTE,
+        VoiceIssueKey.CONNECTION to VoiceIssueKey.CAR_CONNECTION,
+        VoiceIssueKey.GATEWAY to VoiceIssueKey.CAR_GATEWAY,
+    )
+
+/**
+ * Lists each problem of the current car call session's list in [shell] under its CAR_ key, as a new
+ * occurrence for each raise, and resolves it when the session resolves it or ends. Returns only when
+ * cancelled.
+ */
+internal suspend fun forwardCarIssues(
+    sessions: Flow<VoiceIssues?>,
+    shell: VoiceIssues,
+) {
+    sessions.collectLatest { call ->
+        shell.resolve(*CAR_SESSION_KEYS.values.toTypedArray())
+        if (call == null) return@collectLatest
+        val forwarded = mutableMapOf<VoiceIssueKey, Long>()
+        call.state.collect { state ->
+            CAR_SESSION_KEYS.forEach { (own, car) ->
+                val entry = state.entries.firstOrNull { it.key == own }
+                if (entry == null) {
+                    if (forwarded.remove(own) != null) shell.resolve(car)
+                } else if (forwarded[own] != entry.id) {
+                    forwarded[own] = entry.id
+                    shell.raise(car, entry.message)
+                }
+            }
+        }
+    }
+}
+
+/** The car call session's key for the shell key [car], or null for a key the session does not write. */
+private fun carSessionKey(car: VoiceIssueKey): VoiceIssueKey? =
+    CAR_SESSION_KEYS.entries.firstOrNull { it.value == car }?.key

@@ -29,6 +29,7 @@ import com.fghbuild.gomode.glasses.GlassesOwner
 import com.fghbuild.gomode.glasses.ScanningFakeHalo
 import com.fghbuild.gomode.ui.GoModeApp
 import com.fghbuild.gomode.ui.theme.GoModeTheme
+import com.fghbuild.gomode.voice.VoiceIssues
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import org.junit.Assume.assumeTrue
@@ -185,6 +186,7 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
                 ScanningFakeHalo(app, CAPTURE_HALO_ADDRESS),
                 fakeG2Scanner(CAPTURE_G2_PAIR),
                 FakeG2Firmware().connector,
+                VoiceIssues(),
             )
         try {
             composeRule.runOnUiThread {
@@ -252,9 +254,6 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         name: String,
     ) {
         composeRule.waitForIdle()
-        // Scenes show a first run. The prelaunch rule removes retained voice failures, which settings disclose.
-        val voiceErrors = (composeRule.activity.application as GoModeApplication).voiceErrors
-        check(voiceErrors.history.value.isEmpty()) { "Retained voice errors would appear in $name" }
         // Cold device/test initialization can reset the managed SystemUI profile.
         // Reapply it after shell readiness; the owning runner restores each value.
         val hiddenIcons =

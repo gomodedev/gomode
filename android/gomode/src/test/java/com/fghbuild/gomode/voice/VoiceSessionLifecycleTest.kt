@@ -37,6 +37,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -101,18 +102,43 @@ class VoiceSessionLifecycleTest {
     }
 
     @Test
-    fun failureSurvivesDisconnectUntilDismissed() {
-        val session = createCloudSession(SettingsRepository(MemoryPreferences()))
+    fun failureStaysListedAfterDisconnectUntilDismissed() {
+        val issues = VoiceIssues()
+        val session = createCloudSession(SettingsRepository(MemoryPreferences()), issues = issues)
         try {
             session.setError("session: download canceled")
             session.disconnect("test")
-            assertEquals("session: download canceled", session.state.value.error)
-            session.dismissError()
-            assertNull(session.state.value.error)
+            assertEquals("session: download canceled", session.state.value.failure)
+            assertEquals("session: download canceled", issues.state.value.message(VoiceIssueKey.CONNECTION))
+            issues.resolve(VoiceIssueKey.CONNECTION)
+            assertEquals(emptyList<VoiceIssue>(), issues.state.value.entries)
         } finally {
             session.close()
         }
     }
+
+    // A shell session resolves its own route and gateway keys when it starts and ends, never a car call's.
+    @Test
+    fun aShellSessionThatStartsOrEndsKeepsACarCallsRouteProblem() =
+        runBlocking {
+            val shell = VoiceIssues()
+            val call = VoiceIssues()
+            val forwarding =
+                CoroutineScope(
+                    Dispatchers.Unconfined,
+                ).launch { forwardCarIssues(MutableStateFlow(call), shell) }
+            try {
+                call.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
+                val session = createCloudSession(SettingsRepository(MemoryPreferences()), issues = shell)
+                session.disconnect("test")
+                session.close()
+                assertEquals("Could not switch audio device", shell.state.value.message(VoiceIssueKey.CAR_AUDIO_ROUTE))
+                call.resolve(VoiceIssueKey.AUDIO_ROUTE)
+                assertNull(shell.state.value.message(VoiceIssueKey.CAR_AUDIO_ROUTE))
+            } finally {
+                forwarding.cancel()
+            }
+        }
 
     @Test
     fun offlineRecoveryReleasesTransportWithoutSpendingRetriesAndHangupCancelsIt() =
@@ -157,7 +183,7 @@ class VoiceSessionLifecycleTest {
             assertEquals(VoiceRecoveryPolicy().retryDelayMs(), policy.retryDelayMs())
             assertTrue(peer.closed)
             assertTrue(peer.disposed)
-            assertNull(session.state.value.error)
+            assertNull(session.state.value.failure)
             session.disconnect("test")
             callback.onBlockedStatusChanged(ShadowNetwork.newInstance(42), false)
             runCurrent()
@@ -275,7 +301,7 @@ class VoiceSessionLifecycleTest {
                         }
                     assertTrue(outcome.exceptionOrNull() is CancellationException)
                     assertEquals(first, settings.settings.first { it.activeServiceId == first }.activeServiceId)
-                    assertEquals(VOICE_TOOL_RESULT_DELIVERY_ERROR, session.state.value.error)
+                    assertEquals(VOICE_TOOL_RESULT_DELIVERY_ERROR, session.state.value.failure)
                     assertFalse(session.state.value.connected)
                     assertEquals(
                         123L,
@@ -312,11 +338,11 @@ class VoiceSessionLifecycleTest {
             channel.accepted = false
             try {
                 session.announce("Private alert")
-                assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.error)
+                assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.failure)
                 assertFalse(session.state.value.connected)
                 session.announce("Late alert")
                 assertEquals(1, channel.sendAttempts)
-                assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.error)
+                assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.failure)
             } finally {
                 session.close()
             }
@@ -417,7 +443,7 @@ class VoiceSessionLifecycleTest {
                     runCurrent()
                     assertFalse("Late ICE completion must not resume offer signaling", continuedToOffer)
                     assertFalse(session.state.value.connected)
-                    assertNull(session.state.value.error)
+                    assertNull(session.state.value.failure)
                     assertEquals("Waiting for server", session.state.value.connectStatus)
                     val records =
                         ShadowLog
@@ -453,7 +479,7 @@ class VoiceSessionLifecycleTest {
                     assertEquals(listOf("OFFER:gateway-offer"), peer.remoteDescriptions)
                     val sent = if (remoteFailure == null) listOf(RENEGOTIATED_ANSWER) else emptyList()
                     assertEquals(sent, channel.sent)
-                    assertNull(session.state.value.error)
+                    assertNull(session.state.value.failure)
                 } finally {
                     session.close()
                 }
@@ -483,7 +509,7 @@ class VoiceSessionLifecycleTest {
                         ).filter { it.msg.contains("event=finished") }
                 assertEquals(1, terminal.size)
                 assertTrue(terminal.toString(), terminal.single().msg.contains("outcome=CANCELED"))
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
             } finally {
                 session.close()
             }
@@ -533,11 +559,11 @@ class VoiceSessionLifecycleTest {
                     advanceTimeBy(14_999)
                     ShadowSystemClock.advanceBy(Duration.ofMillis(14_999))
                     runCurrent()
-                    assertNull(session.state.value.error)
+                    assertNull(session.state.value.failure)
                     advanceTimeBy(1)
                     ShadowSystemClock.advanceBy(Duration.ofMillis(1))
                     runCurrent()
-                    assertEquals("Connection timed out — server did not respond", session.state.value.error)
+                    assertEquals("Connection timed out — server did not respond", session.state.value.failure)
                     assertTrue(peer.closed && peer.disposed)
                     val terminal =
                         ShadowLog
@@ -838,10 +864,12 @@ class VoiceSessionLifecycleTest {
     @Test
     fun selectingAnUnavailableAudioDeviceReportsFailure() {
         val settings = SettingsRepository(MemoryPreferences())
-        val session = createCloudSession(settings)
+        val issues = VoiceIssues()
+        val session = createCloudSession(settings, issues = issues)
         session.selectAudioDevice(Int.MAX_VALUE)
         assertTrue(
-            session.state.value.audioError
+            issues.state.value
+                .message(VoiceIssueKey.AUDIO_ROUTE)
                 .orEmpty()
                 .contains("no longer available"),
         )
@@ -876,7 +904,7 @@ class VoiceSessionLifecycleTest {
 
                 assertEquals("/.well-known/gomode.json", server.takeRequest(5, TimeUnit.SECONDS)?.path)
                 assertNull(server.takeRequest(500, TimeUnit.MILLISECONDS))
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
             } finally {
                 releaseDiscovery.countDown()
                 server.shutdown()
@@ -1446,6 +1474,7 @@ class VoiceSessionLifecycleTest {
         settings: SettingsRepository,
         beginConversation: Boolean = false,
         startupTiming: () -> VoiceStartupTiming? = { null },
+        issues: VoiceIssues = VoiceIssues(),
     ): VoiceSession {
         val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
         val registry = ServiceShellRegistry()
@@ -1482,6 +1511,7 @@ class VoiceSessionLifecycleTest {
             settings,
             voiceConversation = owner,
             languageTag = "en-US",
+            issues = issues,
             startupTiming = startupTiming,
         )
     }

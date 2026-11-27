@@ -4,6 +4,7 @@ package com.fghbuild.gomode.voice
 import android.Manifest
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -23,6 +24,7 @@ import com.fghbuild.eveng2.G2Side
 import com.fghbuild.eveng2.testing.FakeG2Firmware
 import com.fghbuild.eveng2.testing.fakeG2Scanner
 import com.fghbuild.gomode.DeniedMicrophonePermission
+import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.R
 import com.fghbuild.gomode.awaitFreshObject
 import com.fghbuild.gomode.data.GlassesDevice
@@ -153,17 +155,20 @@ class GlassesGestureNoticeTest {
             assertEquals(0, fixture.sessions.size)
         }
 
-    // Waits for the voice error on the phone, then for the glasses to show the same text.
+    // Waits for the failed start in the phone's problem list, then for the glasses to draw the same text.
     private fun awaitPhoneErrorOnGlasses(firmware: FakeG2Firmware) {
         composeRule.waitUntil(TIMEOUT_MS) {
-            composeRule.onAllNodesWithTag("gomode-voice-error-message").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("gomode-voice-issue-message").fetchSemanticsNodes().isNotEmpty()
         }
+        composeRule.onAllNodesWithTag("gomode-voice-issue").assertCountEquals(1)
         val error =
             composeRule
-                .onNodeWithTag("gomode-voice-error-message")
+                .onNodeWithTag("gomode-voice-issue-message")
                 .fetchSemanticsNode()
                 .config[SemanticsProperties.Text]
                 .joinToString("")
+        val issues = (composeRule.activity.application as GoModeApplication).voiceIssues
+        assertEquals(error, issues.state.value.message(VoiceIssueKey.CONNECTION))
         awaitShown(firmware, error)
     }
 
@@ -211,6 +216,7 @@ class GlassesGestureNoticeTest {
                     FakeHaloTransport(context),
                     fakeG2Scanner(),
                     firmware.connector,
+                    (context.applicationContext as GoModeApplication).voiceIssues,
                 )
             val models = LocalModelOwner(context, localModelInstallation(ModelDownloadState.Missing(0)))
             val shellOwner = ServiceShellOwner(context, repository, glasses::connectedDisplay)

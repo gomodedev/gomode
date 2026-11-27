@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +35,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotDisplayed
@@ -120,7 +123,6 @@ class VoicePanelTest {
                             VoicePanel(
                                 VoiceState(
                                     usage = VoiceUsage(counts, report, responses = emptyMap()),
-                                    error = error.value,
                                     transcript =
                                         listOf(
                                             TranscriptEntry(
@@ -180,7 +182,8 @@ class VoicePanelTest {
                                 serviceReconnect = null,
                                 onCycleApp = {},
                                 canCycleApps = false,
-                                onDismissError = {},
+                                issues = connectionIssues(error.value),
+                                onDismissIssues = {},
                                 showUsageStats = showStats.value,
                                 modifier = Modifier.testTag("voice-panel"),
                             )
@@ -293,7 +296,8 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                     )
                 }
             }
@@ -408,7 +412,8 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                         modifier = Modifier.width(280.dp),
                         speechRecovery = {
                             SpeechLanguageRecovery(
@@ -434,7 +439,7 @@ class VoicePanelTest {
         composeRule.onNodeWithText("Check language").performClick()
         composeRule.onNodeWithTag("gomode-speech-language-recovery").assertDoesNotExist()
         assertEquals(0, starts)
-        composeRule.onNodeWithTag("gomode-voice-error-message").assertDoesNotExist()
+        composeRule.onNodeWithTag("gomode-voice-issues").assertDoesNotExist()
         composeRule.runOnIdle {
             active.value = true
             language.value = SpeechLanguageState.Unverified("The provider cannot check this language.")
@@ -467,7 +472,8 @@ class VoicePanelTest {
                         serviceReconnect = reconnect.value,
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                         modifier = Modifier.width(280.dp),
                     )
                 }
@@ -514,7 +520,8 @@ class VoicePanelTest {
                         serviceReconnect = ServiceReconnectDetail("Tasks", "MCP subscription stream ended"),
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                         modifier = Modifier.width(280.dp),
                     )
                 }
@@ -556,6 +563,7 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         {},
                         false,
+                        emptyList(),
                         {},
                     )
                 }
@@ -600,7 +608,8 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                         modifier = Modifier.width(280.dp),
                         microphoneRecovery = recovery.value,
                     )
@@ -640,7 +649,8 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                     )
                 }
             }
@@ -721,7 +731,8 @@ class VoicePanelTest {
                                 serviceReconnect = null,
                                 onCycleApp = { switches++ },
                                 canCycleApps = true,
-                                onDismissError = {},
+                                issues = emptyList(),
+                                onDismissIssues = {},
                             )
                         }
                     }
@@ -872,7 +883,8 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = true,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                     )
                 }
             }
@@ -932,6 +944,7 @@ class VoicePanelTest {
 
     @Test
     fun audioCanBeChosenBeforeConnectingWithoutMovingPersistentControls() {
+        val issues = mutableStateOf(emptyList<VoiceIssue>())
         val state =
             mutableStateOf(
                 VoiceState(
@@ -956,6 +969,7 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     {},
                     true,
+                    issues.value,
                     {},
                 )
             }
@@ -963,13 +977,14 @@ class VoicePanelTest {
         composeRule.onNodeWithTag("gomode-voice-audio-2").performClick().assertIsOn()
         val tags = listOf("gomode-web-open-settings", "gomode-next-app", "gomode-voice-audio-1", "gomode-voice-audio-2")
         val before = tags.associateWith { composeRule.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
-        for (status in listOf(
-            VoiceState(connectStatus = "Connecting…"),
-            VoiceState(connected = true),
-            VoiceState(error = "Speech failed"),
+        for ((status, problems) in listOf(
+            VoiceState(connectStatus = "Connecting…") to emptyList(),
+            VoiceState(connected = true) to emptyList(),
+            VoiceState(failure = "Speech failed") to connectionIssues("Speech failed"),
         )) {
             composeRule.runOnIdle {
                 state.value = status.copy(availableDevices = state.value.availableDevices, selectedDeviceId = 2)
+                issues.value = problems
             }
             for (tag in tags) {
                 val bounds = composeRule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
@@ -987,9 +1002,7 @@ class VoicePanelTest {
         composeRule.setContent {
             MaterialTheme {
                 VoicePanel(
-                    VoiceState(
-                        error = error.value,
-                    ),
+                    VoiceState(failure = error.value),
                     true,
                     { retries++ },
                     {},
@@ -999,7 +1012,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = connectionIssues(error.value),
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1026,7 +1040,7 @@ class VoicePanelTest {
                 MaterialTheme {
                     Box(Modifier.width(320.dp)) {
                         VoicePanel(
-                            VoiceState(error = error.value),
+                            VoiceState(failure = error.value),
                             true,
                             {},
                             {},
@@ -1036,20 +1050,21 @@ class VoicePanelTest {
                             serviceReconnect = null,
                             onCycleApp = {},
                             canCycleApps = false,
-                            onDismissError = { error.value = null },
+                            issues = connectionIssues(error.value),
+                            onDismissIssues = { error.value = null },
                         )
                     }
                 }
             }
         }
-        val message = composeRule.onNodeWithTag("gomode-voice-error-message").fetchSemanticsNode().boundsInRoot
+        val message = composeRule.onNodeWithTag("gomode-voice-issue-message").fetchSemanticsNode().boundsInRoot
         val actions = composeRule.onNodeWithTag("gomode-voice-actions").fetchSemanticsNode().boundsInRoot
         val settingsBounds =
             composeRule
                 .onNodeWithContentDescription("Settings", useUnmergedTree = true)
                 .fetchSemanticsNode()
                 .boundsInRoot
-        val dismiss = composeRule.onNodeWithTag("gomode-voice-error-dismiss").fetchSemanticsNode().boundsInRoot
+        val dismiss = composeRule.onNodeWithTag("gomode-voice-issues-dismiss").fetchSemanticsNode().boundsInRoot
         val connect = composeRule.onNodeWithTag("gomode-voice-connect").fetchSemanticsNode().boundsInRoot
         assertEquals(settingsBounds.left, message.left, 1f)
         assertTrue(message.right <= dismiss.left)
@@ -1058,14 +1073,92 @@ class VoicePanelTest {
         assertTrue(actions.bottom <= message.top)
         composeRule.onNodeWithContentDescription("Connect voice assistant").assertIsDisplayed()
         capture("delivery-error-large-text")
-        composeRule.onNodeWithContentDescription("Dismiss error").performClick()
-        composeRule.onNodeWithTag("gomode-voice-error").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Dismiss errors").performClick()
+        composeRule.onNodeWithTag("gomode-voice-issues").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Connect voice assistant").assertIsDisplayed()
+    }
+
+    @Test
+    fun problemsListAsOneLineOrBulletsBesideOneXAtNormalAndLargeText() {
+        val fontScale = mutableStateOf(1f)
+        val issues = VoiceIssues()
+        issues.raise(VoiceIssueKey.CONNECTION, "Voice gateway unavailable (HTTP 502).")
+        composeRule.setContent {
+            val listed by issues.state.collectAsState()
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, fontScale.value)) {
+                GoModeTheme {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                        VoicePanel(
+                            VoiceState(
+                                availableDevices =
+                                    listOf(
+                                        AudioDevice(1, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, "Speaker"),
+                                        AudioDevice(2, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, "Earpiece"),
+                                    ),
+                                selectedDeviceId = 1,
+                            ),
+                            true,
+                            {},
+                            {},
+                            {},
+                            {},
+                            {},
+                            serviceReconnect = null,
+                            onCycleApp = {},
+                            canCycleApps = true,
+                            issues = listed.listed,
+                            onDismissIssues = { issues.resolve(*listed.listed.map { it.key }.toTypedArray()) },
+                        )
+                    }
+                }
+            }
+        }
+
+        fun assertBesideX(bullets: Int) {
+            composeRule
+                .onAllNodesWithTag(
+                    "gomode-voice-issue-bullet",
+                    useUnmergedTree = true,
+                ).assertCountEquals(bullets)
+            val dismiss = composeRule.onNodeWithTag("gomode-voice-issues-dismiss").fetchSemanticsNode().boundsInRoot
+            val connect = composeRule.onNodeWithTag("gomode-voice-connect").fetchSemanticsNode().boundsInRoot
+            val actions = composeRule.onNodeWithTag("gomode-voice-actions").fetchSemanticsNode().boundsInRoot
+            val messages =
+                composeRule
+                    .onAllNodesWithTag("gomode-voice-issue-message", useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .map { it.boundsInRoot }
+            assertEquals(connect.right, dismiss.right, 1f)
+            assertTrue(actions.bottom <= dismiss.top)
+            assertTrue(messages.all { it.right <= dismiss.left })
+            assertTrue(messages.first().top >= dismiss.top && messages.first().top < dismiss.bottom)
+        }
+
+        assertBesideX(bullets = 0)
+        capture("issues-one")
+        composeRule.runOnIdle { fontScale.value = 2f }
+        assertBesideX(bullets = 0)
+        capture("issues-one-large-text")
+        composeRule.runOnIdle {
+            fontScale.value = 1f
+            issues.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
+            issues.raise(VoiceIssueKey.GATEWAY, "llm: the model ran out of memory while answering; the call goes on.")
+        }
+        assertBesideX(bullets = 3)
+        capture("issues-several")
+        composeRule.runOnIdle { fontScale.value = 2f }
+        assertBesideX(bullets = 3)
+        capture("issues-several-large-text")
+        composeRule.onNodeWithContentDescription("Dismiss errors").performClick()
+        composeRule.onNodeWithTag("gomode-voice-issues").assertDoesNotExist()
+        assertEquals(emptyList<VoiceIssue>(), issues.state.value.entries)
     }
 
     @Test
     fun nextAppStaysBesideSettingsRegardlessOfVoiceState() {
         val state = mutableStateOf(VoiceState())
+        val issues = mutableStateOf(emptyList<VoiceIssue>())
         val canCycle = mutableStateOf(true)
         val voiceEnabled = mutableStateOf(false)
         var cycles = 0
@@ -1082,7 +1175,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = { cycles++ },
                     canCycleApps = canCycle.value,
-                    onDismissError = {},
+                    issues = issues.value,
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1091,11 +1185,12 @@ class VoicePanelTest {
             VoiceState() to true,
             VoiceState(connectStatus = "Connecting…") to true,
             VoiceState(connected = true) to true,
-            VoiceState(error = "Voice unavailable") to false,
+            VoiceState(failure = "Voice unavailable") to false,
         )) {
             composeRule.runOnIdle {
                 state.value = voiceState
                 voiceEnabled.value = enabled
+                issues.value = connectionIssues(voiceState.failure)
             }
             val next = composeRule.onNodeWithTag("gomode-next-app").assertIsDisplayed()
             val settingsBounds = composeRule.onNodeWithTag("gomode-web-open-settings").fetchSemanticsNode().boundsInRoot
@@ -1125,7 +1220,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = emptyList(),
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1170,7 +1266,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = emptyList(),
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1213,6 +1310,7 @@ class VoicePanelTest {
                 LockedCarCall(
                     state = CarDialVoiceState("call", "Example service", CarDialStatus.CONNECTED),
                     voiceState = state.value,
+                    audioProblem = null,
                     onSelectDevice = { requested = it },
                     onEnd = { ended = true },
                 )
@@ -1288,7 +1386,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = emptyList(),
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1341,7 +1440,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = emptyList(),
+                    onDismissIssues = {},
                     modifier = Modifier.testTag("voice-panel"),
                     showUsageStats = true,
                 )
@@ -1387,7 +1487,7 @@ class VoicePanelTest {
         composeRule.onNodeWithContentDescription("Hide transcript").performClick()
         composeRule.runOnIdle { state.value = state.value.copy(connectStatus = "Connecting") }
         log.assertIsDisplayed()
-        composeRule.runOnIdle { state.value = state.value.copy(connectStatus = null, error = "Connection lost") }
+        composeRule.runOnIdle { state.value = state.value.copy(connectStatus = null, failure = "Connection lost") }
         log.assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Show transcript").assertIsDisplayed()
         capture("ended-session-hidden")
@@ -1417,7 +1517,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = emptyList(),
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1473,7 +1574,8 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                     )
                 }
             }
@@ -1531,7 +1633,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = emptyList(),
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1596,7 +1699,8 @@ class VoicePanelTest {
                         serviceReconnect = null,
                         onCycleApp = {},
                         canCycleApps = false,
-                        onDismissError = {},
+                        issues = emptyList(),
+                        onDismissIssues = {},
                     )
                 }
             }
@@ -1710,7 +1814,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = emptyList(),
+                    onDismissIssues = {},
                     showUsageStats = true,
                 )
             }
@@ -1733,7 +1838,7 @@ class VoicePanelTest {
         composeRule.setContent {
             MaterialTheme {
                 VoicePanel(
-                    voiceState = VoiceState(error = "llm: out of memory"),
+                    voiceState = VoiceState(failure = "llm: out of memory"),
                     voiceEnabled = false,
                     onConnect = {},
                     onDisconnect = {},
@@ -1743,7 +1848,8 @@ class VoicePanelTest {
                     serviceReconnect = null,
                     onCycleApp = {},
                     canCycleApps = false,
-                    onDismissError = {},
+                    issues = connectionIssues("llm: out of memory"),
+                    onDismissIssues = {},
                 )
             }
         }
@@ -1751,6 +1857,10 @@ class VoicePanelTest {
         composeRule.onNodeWithText("llm: out of memory").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Voice unavailable").assertIsNotEnabled()
     }
+
+    // The session failure a shell lists for message, if any.
+    private fun connectionIssues(message: String?): List<VoiceIssue> =
+        listOfNotNull(message?.let { VoiceIssue(VoiceIssueKey.CONNECTION, it, id = 1) })
 
     private fun capture(name: String) {
         if (InstrumentationRegistry.getArguments().getString("captureVoicePanel") != "true") return

@@ -111,7 +111,7 @@ class DeviceVoiceSessionTest {
                         advanceTimeBy(15_000)
                         runCurrent()
                         assertTrue(sockets.last().closed)
-                        assertNull(session.state.value.error)
+                        assertNull(session.state.value.failure)
                         advanceTimeBy(2_000)
                         runCurrent()
                         assertEquals(3, sockets.size)
@@ -125,9 +125,9 @@ class DeviceVoiceSessionTest {
                     assertTrue(sockets.last().closed)
                     assertFalse(session.state.value.connected)
                     if (hangup) {
-                        assertNull(session.state.value.error)
+                        assertNull(session.state.value.failure)
                     } else {
-                        assertEquals(RECOVERY_EXHAUSTED_ERROR, session.state.value.error)
+                        assertEquals(RECOVERY_EXHAUSTED_ERROR, session.state.value.failure)
                     }
                     val terminal = session.state.value
                     listeners.last().onMessage(sockets.last(), """{"kind":"session.ready"}""")
@@ -177,7 +177,7 @@ class DeviceVoiceSessionTest {
                     runCurrent()
                     val error =
                         withContext(Dispatchers.Default) {
-                            withTimeout(5_000) { session.state.first { it.error != null }.error }
+                            withTimeout(5_000) { session.state.first { it.failure != null }.failure }
                         }
                     assertTrue(error.orEmpty().contains("HTTP 401"))
                     advanceTimeBy(60_000)
@@ -224,7 +224,7 @@ class DeviceVoiceSessionTest {
                 runCurrent()
                 assertEquals(1, sockets.size)
                 assertTrue(sockets.first().closed)
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
                 assertFalse(session.state.value.connected)
                 frontendReady = false
                 session.announce("Alert received during handoff")
@@ -249,7 +249,7 @@ class DeviceVoiceSessionTest {
                 // A late failure on the abandoned socket cannot end the replacement call.
                 listeners.first().onFailure(sockets.first(), IOException("old route"), null)
                 runCurrent()
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
                 session.disconnect("test")
                 callback.onBlockedStatusChanged(ShadowNetwork.newInstance(43), false)
                 advanceTimeBy(10_000)
@@ -405,7 +405,7 @@ class DeviceVoiceSessionTest {
                     } else {
                         requireNotNull(speech.resultCallback)("Stop")
                     }
-                    assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.error)
+                    assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.failure)
                     assertEquals(com.fghbuild.voicegateway.sdk.v2.TurnState.Idle, session.state.value.turnState)
                     assertFalse(session.state.value.connected)
                     assertFalse(session.state.value.listening)
@@ -459,7 +459,7 @@ class DeviceVoiceSessionTest {
                     runCurrent()
                     assertEquals(
                         if (toolResult) VOICE_TOOL_RESULT_DELIVERY_ERROR else VOICE_MESSAGE_DELIVERY_ERROR,
-                        session.state.value.error,
+                        session.state.value.failure,
                     )
                     assertFalse(session.state.value.connected)
                     assertNull(session.state.value.activeTool)
@@ -685,14 +685,14 @@ class DeviceVoiceSessionTest {
             speech.languageState.value = SpeechLanguageState.Missing
             requireNotNull(speech.errorCallback).invoke("Speech language en-US is not installed")
             assertFalse(session.state.value.connected)
-            assertNull(session.state.value.error)
+            assertNull(session.state.value.failure)
             session.downloadSpeechLanguage()
             assertEquals(SpeechLanguageState.Ready, speech.languageState.value)
-            assertNull(session.state.value.error)
+            assertNull(session.state.value.failure)
             assertFalse(session.state.value.connected)
             session.setError("Gateway unavailable")
             session.downloadSpeechLanguage()
-            assertEquals("Gateway unavailable", session.state.value.error)
+            assertEquals("Gateway unavailable", session.state.value.failure)
         } finally {
             session.close()
         }
@@ -773,7 +773,7 @@ class DeviceVoiceSessionTest {
                 ShadowSystemClock.advanceBy(Duration.ofMillis(23))
                 runCurrent()
                 assertFalse(session.state.value.connected)
-                assertNull(session.state.value.error)
+                assertNull(session.state.value.failure)
                 assertEquals("Connecting…", session.state.value.connectStatus)
                 val records =
                     ShadowLog
@@ -821,7 +821,7 @@ class DeviceVoiceSessionTest {
                         observeVoiceStartup(backgroundScope, session, timing)
                         runCurrent()
                         assertFalse(session.state.value.connected)
-                        assertTrue(session.state.value.error != null)
+                        assertTrue(session.state.value.failure != null)
                         val records = ShadowLog.getLogsForTag("GoModeVoiceStartup").map { it.msg }
                         val terminal = records.filter { it.contains("event=finished") }
                         assertEquals(1, terminal.size)
@@ -859,7 +859,7 @@ class DeviceVoiceSessionTest {
                     assertFalse(opened)
                     assertFalse(session.state.value.connected)
                     assertNull(session.state.value.connectStatus)
-                    assertNull(session.state.value.error)
+                    assertNull(session.state.value.failure)
                     assertEquals(language, speech.languageState.value)
                     val records = ShadowLog.getLogsForTag("GoModeVoiceStartup").map { it.msg }
                     val terminal = records.filter { it.contains("event=finished") }
@@ -926,7 +926,7 @@ class DeviceVoiceSessionTest {
             disconnected.triggerOnError(SpeechRecognizer.ERROR_SERVER_DISCONNECTED)
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250))
             assertTrue("recognizer recovery must preserve the remote LLM connection", session.state.value.connected)
-            assertNull(session.state.value.error)
+            assertNull(session.state.value.failure)
             val recognizer = shadowOf(checkNotNull(ShadowSpeechRecognizer.getLatestSpeechRecognizer()))
             recognizer.triggerOnPartialResults(
                 Bundle().apply {
@@ -1024,6 +1024,7 @@ class DeviceVoiceSessionTest {
                         repository,
                         DeviceVoiceSetupSource.Shared(owner),
                         languageTag = "en-US",
+                        issues = VoiceIssues(),
                         speech = speech,
                         callController = call,
                         switchServer = { id ->
@@ -1160,7 +1161,7 @@ class DeviceVoiceSessionTest {
                     val spokenBefore = speech.spoken.toList()
                     socket.accepted = false
                     backend.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
-                    assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.error)
+                    assertEquals(VOICE_MESSAGE_DELIVERY_ERROR, session.state.value.failure)
                     assertFalse(session.state.value.speaking)
                     assertEquals(spokenBefore, speech.spoken)
                     assertEquals(1, call.endedLocal)
@@ -1560,15 +1561,16 @@ class DeviceVoiceSessionTest {
         )
 
     @Test
-    fun `gateway error remains visible after idle, socket closure, and disconnect until dismissed`() =
+    fun `a fatal gateway error stays listed through disconnect and a retry, until the retry is ready`() =
         runTest {
             val speech = FakeSpeech()
-            val socket = FakeWebSocket()
+            var socket = FakeWebSocket()
             var listener: WebSocketListener? = null
+            val issues = VoiceIssues()
             val session =
-                createSession(speech) { _, captured ->
+                createSession(speech, issues = issues) { _, captured ->
                     listener = captured
-                    socket
+                    FakeWebSocket().also { socket = it }
                 }
             session.connect()
             val connected = requireNotNull(listener)
@@ -1579,29 +1581,33 @@ class DeviceVoiceSessionTest {
             connected.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
             connected.onClosed(socket, 1000, "")
 
-            assertEquals("llm: out of memory", session.state.value.error)
-            assertEquals(1L, session.state.value.errorId)
+            assertEquals("llm: out of memory", session.state.value.failure)
             assertFalse(session.state.value.connected)
             assertFalse(speech.listening)
             assertTrue(socket.closed)
-            val recorded = awaitRecordedError("llm: out of memory")
-            assertEquals(VoiceErrorPhase.CALL, recorded.phase)
             session.disconnect("test")
-            assertEquals("llm: out of memory", session.state.value.error)
-            session.dismissError()
-            assertEquals(null, session.state.value.error)
-            assertEquals("llm: out of memory", recorded.message)
+            assertEquals("llm: out of memory", issues.state.value.message(VoiceIssueKey.CONNECTION))
+
+            session.connect()
+            assertEquals(null, session.state.value.failure)
+            assertEquals("llm: out of memory", issues.state.value.message(VoiceIssueKey.CONNECTION))
+            val retried = requireNotNull(listener)
+            retried.onOpen(socket, upgradeResponse())
+            retried.onMessage(socket, """{"kind":"session.ready"}""")
+            assertTrue(session.state.value.connected)
+            assertEquals(emptyList<VoiceIssue>(), issues.state.value.entries)
             session.close()
         }
 
     @Test
-    fun `recoverable turn failure stays in the transcript and keeps the call`() =
+    fun `a recoverable turn failure is listed apart from the transcript and keeps the call until it ends`() =
         runTest {
             val speech = FakeSpeech()
             val socket = FakeWebSocket()
             var listener: WebSocketListener? = null
+            val issues = VoiceIssues()
             val session =
-                createSession(speech) { _, captured ->
+                createSession(speech, issues = issues) { _, captured ->
                     listener = captured
                     socket
                 }
@@ -1616,42 +1622,13 @@ class DeviceVoiceSessionTest {
             )
             connected.onMessage(socket, """{"kind":"turn.status","state":"idle"}""")
 
-            assertEquals(null, session.state.value.error)
+            assertEquals(null, session.state.value.failure)
             assertTrue(session.state.value.connected)
             assertFalse(socket.closed)
-            assertEquals(
-                listOf(
-                    TranscriptEntry(
-                        TranscriptSpeaker.ASSISTANT,
-                        "[Voice] llm: out of memory",
-                        final = true,
-                    ),
-                ),
-                session.state.value.transcript,
-            )
-            val recorded = awaitRecordedError("llm: out of memory")
-            assertEquals("Remote LLM", recorded.engine)
-            session.close()
-        }
-
-    @Test
-    fun `a failure before engine construction names the configured local model`() =
-        runTest {
-            val repository = SettingsRepository(MemoryPreferences())
-            selectEngine(repository, VoiceLanguageModel.LOCAL_LLM)
-            repository.updateSavedVoiceSetup(null) { it.copy(localLlmModel = LocalLlmModel.GEMMA_4_E4B) }
-            repository.settings.first { it.localLlmModel == LocalLlmModel.GEMMA_4_E4B }
-            val session =
-                createSession(
-                    FakeSpeech(),
-                    settingsRepo = repository,
-                    setupSource = DeviceVoiceSetupSource.Shared(localConversation(repository)),
-                )
-            session.setError("llm: IllegalStateException")
-
-            val recorded = awaitRecordedError("llm: IllegalStateException")
-            assertEquals("Gemma 4 E4B", recorded.engine)
-            assertEquals(VoiceErrorPhase.IDLE, recorded.phase)
+            assertEquals(emptyList<TranscriptEntry>(), session.state.value.transcript)
+            assertEquals("llm: out of memory", issues.state.value.message(VoiceIssueKey.GATEWAY))
+            session.disconnect("test")
+            assertEquals(null, issues.state.value.message(VoiceIssueKey.GATEWAY))
             session.close()
         }
 
@@ -2234,7 +2211,7 @@ class DeviceVoiceSessionTest {
 
         session.connect()
 
-        assertTrue(session.state.value.error != null)
+        assertTrue(session.state.value.failure != null)
         assertEquals(1, calls.started)
         assertEquals(0, calls.activated)
         assertTrue("WebSocket must not open when Telecom rejects the call", listener == null)
@@ -2262,7 +2239,7 @@ class DeviceVoiceSessionTest {
         calls.telecomDisconnect()
         assertFalse(session.state.value.connected)
         assertEquals(0, calls.endedLocal)
-        assertEquals("a hang-up is not a failure", null, session.state.value.error)
+        assertEquals("a hang-up is not a failure", null, session.state.value.failure)
     }
 
     @Test
@@ -2282,7 +2259,7 @@ class DeviceVoiceSessionTest {
 
         calls.telecomDisconnect(VOICE_CALL_PREEMPTED_ERROR)
         assertFalse(session.state.value.connected)
-        assertEquals(VOICE_CALL_PREEMPTED_ERROR, session.state.value.error)
+        assertEquals(VOICE_CALL_PREEMPTED_ERROR, session.state.value.failure)
     }
 
     @Test
@@ -2419,7 +2396,7 @@ class DeviceVoiceSessionTest {
             assertFalse(session.state.value.connected)
             assertEquals(LocalModelState.AwaitingDownload, owner.state.value)
             assertTrue(
-                session.state.value.error
+                session.state.value.failure
                     .orEmpty()
                     .contains("in Settings"),
             )
@@ -2530,7 +2507,7 @@ class DeviceVoiceSessionTest {
             failTurn = true
             requireNotNull(speech.resultCallback)("Fail this turn")
             testScheduler.runCurrent()
-            assertEquals("llm: Local model repeated a malformed tool-call prefix", session.state.value.error)
+            assertEquals("llm: Local model repeated a malformed tool-call prefix", session.state.value.failure)
             assertEquals(
                 48L,
                 session.state.value.usage
@@ -3003,7 +2980,7 @@ class DeviceVoiceSessionTest {
                 assertTrue(session.state.value.connected)
                 conversation.finish()
                 session.announce("Build is waiting")
-                assertEquals(VOICE_CONVERSATION_ENDED_ERROR, session.state.value.error)
+                assertEquals(VOICE_CONVERSATION_ENDED_ERROR, session.state.value.failure)
             } finally {
                 session.close()
                 owner.close()
@@ -3059,7 +3036,7 @@ class DeviceVoiceSessionTest {
                     session.connect()
                     assertTrue(initialized)
                     assertTrue(session.state.value.toString(), session.state.value.connected)
-                    assertNull(session.state.value.error)
+                    assertNull(session.state.value.failure)
                     assertEquals(1, calls.activated)
                 } finally {
                     session.close()
@@ -3093,7 +3070,7 @@ class DeviceVoiceSessionTest {
                     )
                 try {
                     session.connect()
-                    assertEquals(VOICE_SETTINGS_CHANGED, session.state.value.error)
+                    assertEquals(VOICE_SETTINGS_CHANGED, session.state.value.failure)
                     if (conversation != null) assertTrue(conversation.isCurrent())
                     assertEquals(0, calls.started)
                 } finally {
@@ -3149,7 +3126,7 @@ class DeviceVoiceSessionTest {
 
             session.connect()
             assertTrue("connects using standalone offline setup", session.state.value.connected)
-            assertNull("no error reported", session.state.value.error)
+            assertNull("no error reported", session.state.value.failure)
             assertTrue(speech.spoken.isEmpty())
             assertEquals(1, connectedChimes)
 
@@ -3190,13 +3167,6 @@ class DeviceVoiceSessionTest {
                 .ServiceCatalog(kotlinx.coroutines.CoroutineScope(Dispatchers.Main), glassesDisplay = { null }),
         ) { emptyMap() }
 
-    /** Waits for the asynchronous record to publish the failure. */
-    private suspend fun awaitRecordedError(message: String): VoiceErrorRecord =
-        (RuntimeEnvironment.getApplication() as GoModeApplication)
-            .voiceErrors.history
-            .first { entries -> entries.any { it.message == message } }
-            .first { it.message == message }
-
     private fun createSession(
         speech: DeviceSpeech,
         calls: VoiceCallController = NoopVoiceCallController(),
@@ -3212,6 +3182,7 @@ class DeviceVoiceSessionTest {
         chime: VoiceChimePlayer = NoopChime(),
         startupTiming: () -> VoiceStartupTiming? = { null },
         frontendTools: FrontendVoiceTools = FrontendVoiceTools(),
+        issues: VoiceIssues = VoiceIssues(),
         factory: (Request, WebSocketListener) -> WebSocket = { _, _ -> FakeWebSocket() },
     ): DeviceVoiceSession =
         DeviceVoiceSession(
@@ -3221,6 +3192,7 @@ class DeviceVoiceSessionTest {
             speech = speech,
             frontendTools = frontendTools,
             languageTag = languageTag,
+            issues = issues,
             localModelOwner = localModelOwner,
             voiceChimePlayer = chime,
             thinkingEarcon = thinkingEarcon,

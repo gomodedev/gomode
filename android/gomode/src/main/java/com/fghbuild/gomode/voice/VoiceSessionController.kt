@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.StateFlow
 internal interface VoiceSessionController {
     val state: StateFlow<VoiceState>
 
+    /** The list this session raises its problems into, which its creator supplies; see VoiceIssues. */
+    val issues: VoiceIssues
+
     // Recovery preserves transcript and conversation identity. A server handoff
     // supplies the existing ID to its new controller; an ordinary start makes one.
     fun connect(
@@ -45,10 +48,8 @@ internal interface VoiceSessionController {
      */
     fun contextChanged()
 
+    /** setError ends the session with [message], which [VoiceState.failure] and the CONNECTION issue carry. */
     fun setError(message: String)
-
-    /** dismissError hides the current failure; [VoiceErrorLog] keeps it reviewable in settings. */
-    fun dismissError()
 
     /** close ends the session and releases resources the controller owns. */
     fun close()

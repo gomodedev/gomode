@@ -5,6 +5,8 @@ import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.ui.web.WebShellLoadState
 import com.fghbuild.gomode.voice.AudioDevice
+import com.fghbuild.gomode.voice.VoiceIssueKey
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.gomode.voice.VoiceState
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,7 +74,7 @@ class GoModeAppTest {
             states.value = states.value.copy(availableDevices = listOf(AudioDevice(99, 1, "Earpiece")))
             yield()
             assertFalse(selection.isCompleted)
-            states.value = states.value.copy(audioSwitching = false, audioError = "Could not switch audio device")
+            states.value = states.value.copy(audioSwitching = false)
             assertEquals(99, selection.await())
         }
 
@@ -83,14 +85,17 @@ class GoModeAppTest {
                 MutableStateFlow(
                     VoiceState(connected = true, audioSwitching = true, selectedDeviceId = 41),
                 )
-            val confirmation = async { awaitVoiceAudioSelection(states, 42) }
+            val issues = VoiceIssues()
+            val confirmation = async { awaitVoiceAudioSelection(states, issues.state, 42) }
             yield()
             assertFalse(confirmation.isCompleted)
-            states.value = states.value.copy(audioSwitching = false, audioError = "Could not switch audio device")
+            issues.raise(VoiceIssueKey.AUDIO_ROUTE, "Could not switch audio device")
+            states.value = states.value.copy(audioSwitching = false)
             assertFalse(confirmation.await())
-            assertEquals("Could not switch audio device", states.value.audioError)
-            states.value = states.value.copy(selectedDeviceId = 42, audioError = null)
-            assertTrue(awaitVoiceAudioSelection(states, 42))
+            assertEquals("Could not switch audio device", issues.state.value.message(VoiceIssueKey.AUDIO_ROUTE))
+            issues.resolve(VoiceIssueKey.AUDIO_ROUTE)
+            states.value = states.value.copy(selectedDeviceId = 42)
+            assertTrue(awaitVoiceAudioSelection(states, issues.state, 42))
             assertNull(
                 preferredVoiceAudioDevice(
                     MutableStateFlow(states.value.copy(availableDevices = listOf(AudioDevice(42, 1, "Earpiece")))),
@@ -98,7 +103,9 @@ class GoModeAppTest {
                     emptySet(),
                 ),
             )
-            assertTrue(awaitVoiceAudioSelection(MutableStateFlow(states.value.copy(connected = false)), 42))
+            assertTrue(
+                awaitVoiceAudioSelection(MutableStateFlow(states.value.copy(connected = false)), issues.state, 42),
+            )
         }
 
     @Test

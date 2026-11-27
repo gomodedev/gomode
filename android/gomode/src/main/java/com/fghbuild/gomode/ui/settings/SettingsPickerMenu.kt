@@ -19,12 +19,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -36,7 +38,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fghbuild.gomode.GoModeApplication
 import com.fghbuild.gomode.R
+import com.fghbuild.gomode.voice.VoiceIssueKey
+import com.fghbuild.gomode.voice.VoiceIssueOrigin
+import com.fghbuild.gomode.voice.VoiceIssues
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -130,27 +137,35 @@ internal fun SettingsPicker(
     }
 }
 
-/** One picker's save in progress and its failure, which shows until the next successful save. */
+/**
+ * One picker's save in progress and its failure, which the voice issue list holds under [key] until the
+ * next successful save or until the picker shows another [origin]: its control shows it while settings
+ * are open, and the voice panel lists it once they close.
+ */
 internal class PickerSave(
     private val scope: CoroutineScope,
     private val noun: String,
+    private val issues: VoiceIssues,
+    private val key: VoiceIssueKey,
+    private val origin: VoiceIssueOrigin?,
 ) {
     var saving by mutableStateOf(false)
         private set
-    var error by mutableStateOf<String?>(null)
-        private set
+
+    val error: String?
+        @Composable get() = voiceFieldIssue(issues, key, origin)
 
     fun launch(write: suspend () -> Unit) {
         scope.launch {
             saving = true
-            error = null
             try {
                 write()
+                issues.resolve(key)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // Display failed persistence.
-                error = "Unable to save $noun: ${e.message}"
+                issues.raise(key, "Unable to save $noun: ${e.message}", origin)
             } finally {
                 saving = false
             }
@@ -158,12 +173,35 @@ internal class PickerSave(
     }
 }
 
-/** A [PickerSave] for [noun] that starts over when [keys] change. */
+/**
+ * A [PickerSave] for [noun] whose failure is the settings field [key]. It starts over when [origin]
+ * changes, which resolves a failure saved under another origin. A device picker has none.
+ */
 @Composable
 internal fun rememberPickerSave(
     noun: String,
-    vararg keys: Any?,
+    key: VoiceIssueKey,
+    origin: VoiceIssueOrigin? = null,
 ): PickerSave {
     val scope = rememberCoroutineScope()
-    return remember(scope, noun, *keys) { PickerSave(scope, noun) }
+    val issues = rememberVoiceIssues()
+    LaunchedEffect(issues, key, origin) { issues.resolveStale(key, origin) }
+    return remember(scope, noun, issues, key, origin) { PickerSave(scope, noun, issues, key, origin) }
 }
+
+/** The app's voice issue list, which settings fields raise their save failures into. */
+@Composable
+internal fun rememberVoiceIssues(): VoiceIssues =
+    (LocalContext.current.applicationContext as GoModeApplication).voiceIssues
+
+/** The current problem of the settings field [key] that belongs to [origin], which its control shows. */
+@Composable
+internal fun voiceFieldIssue(
+    issues: VoiceIssues,
+    key: VoiceIssueKey,
+    origin: VoiceIssueOrigin?,
+): String? =
+    issues.state
+        .collectAsStateWithLifecycle()
+        .value
+        .message(key, origin)

@@ -23,6 +23,7 @@ import com.fghbuild.gomode.data.GlassesDevice
 import com.fghbuild.gomode.data.SettingsLoadState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.sdk.v1.Display
+import com.fghbuild.gomode.voice.VoiceIssues
 import com.fghbuild.halo.ble.HaloConnection
 import com.fghbuild.halo.ble.HaloDeviceType
 import com.fghbuild.halo.ble.HaloScannedDevice
@@ -132,7 +133,8 @@ internal data class GlassesState(
  * battery readings in [state] for every screen that shows them, and offers its [microphone] and
  * [sensing], if it has them, and turns head movements into [headAnswers] while a voice owner asks for
  * them through [detectHeadGestures]. While that frame is blank, a connection first plays a short greeting
- * that confirms it on the glasses; content that is not blank, or a notice, ends it. Callers hold
+ * that confirms it on the glasses; content that is not blank, or a notice, ends it. Each problem that
+ * the voiceIssues list gains becomes a notice (see showVoiceIssues). Callers hold
  * BLUETOOTH_SCAN before [startScan] and BLUETOOTH_CONNECT before [connect]; the owner checks
  * BLUETOOTH_CONNECT again before connecting on its own.
  *
@@ -160,6 +162,7 @@ internal class GlassesOwner(
     private val halo: HaloConnection,
     private val g2Scanner: G2PairScanner,
     g2Connector: G2ArmConnector,
+    voiceIssues: VoiceIssues,
 ) {
     private val appContext = context.applicationContext
     private val scope =
@@ -733,6 +736,11 @@ internal class GlassesOwner(
 
     private fun hasConnectPermission(): Boolean =
         appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    // Last, so every property notify reads exists: the glasses draw each problem the shell's voice list gains.
+    init {
+        scope.launch { showVoiceIssues(voiceIssues.state, ::notify) }
+    }
 }
 
 private const val TAG = "GoModeGlasses"

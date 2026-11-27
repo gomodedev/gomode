@@ -3,6 +3,7 @@ package com.fghbuild.gomode.ui.settings
 
 import androidx.compose.runtime.Composable
 import com.fghbuild.gomode.data.DEVICE_SPEECH_RATES
+import com.fghbuild.gomode.voice.VoiceIssueKey
 
 internal fun deviceSpeechRateLabel(rate: Float): String = "${rate.toString().removeSuffix(".0")}×"
 
@@ -12,7 +13,7 @@ internal fun DeviceSpeechRateSetting(
     enabled: Boolean,
     save: suspend (rate: Float) -> Unit,
 ) {
-    val saver = rememberPickerSave("speaking speed")
+    val saver = rememberPickerSave("speaking speed", VoiceIssueKey.SAVE_DEVICE_SPEECH_RATE)
     SettingsPicker(
         label = "Speaking speed",
         value = deviceSpeechRateLabel(rate),
