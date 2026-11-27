@@ -1,0 +1,1525 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Voice Gateway v2 API Reference",
+    "version": "v2",
+    "description": "RESTful JSON signaling API served at `/api/voicegateway/v2/voice/`."
+  },
+  "paths": {
+    "/api/voicegateway/v2/voice/choices": {
+      "get": {
+        "operationId": "voiceChoices",
+        "tags": [
+          "Voice"
+        ],
+        "description": "Lists available voice choices and their supported transports.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceChoicesResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/error503"
+          }
+        }
+      }
+    },
+    "/api/voicegateway/v2/voice/rtc/offer": {
+      "post": {
+        "operationId": "voiceRTCOffer",
+        "tags": [
+          "Voice"
+        ],
+        "description": "Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceRTCOfferReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceRTCAnswerResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/error503"
+          }
+        }
+      }
+    },
+    "/api/voicegateway/v2/voice/rtc/{sessionID}": {
+      "post": {
+        "operationId": "closeVoiceRTC",
+        "tags": [
+          "Voice"
+        ],
+        "description": "Closes a WebRTC voice bridge session.",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/error503"
+          }
+        }
+      }
+    },
+    "/api/voicegateway/v2/voice/rtc/{sessionID}/diagnostics": {
+      "post": {
+        "operationId": "diagnoseVoiceRTC",
+        "tags": [
+          "Voice"
+        ],
+        "description": "Returns structured WebRTC connectivity diagnostics for a voice bridge session.",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceRTCDiagnosticsReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceRTCDiagnosticsResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/error503"
+          }
+        }
+      }
+    },
+    "/api/voicegateway/v2/voice/text/ticket": {
+      "post": {
+        "operationId": "voiceTextTicket",
+        "tags": [
+          "Voice"
+        ],
+        "description": "Authorizes a browser text-session upgrade with a short-lived, single-use ticket.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceTextTicketReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTextTicketResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/error503"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AssistantTextDelta": {
+        "type": "object",
+        "description": "AssistantTextDelta is a gateway message that streams assistant text.\nEach fragment appends to previously emitted text; it never replaces it.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"assistant.text.delta\"."
+          },
+          "responseID": {
+            "type": "string",
+            "description": "ResponseID is the opaque gateway-scoped response identity. Assistant\ntext and its usage share this value; user text and uncorrelated providers\nomit it. Separate response IDs must not be merged into one transcript entry."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text is an incremental assistant text fragment."
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ]
+      },
+      "Context": {
+        "type": "object",
+        "description": "Context carries provider-neutral text or instruction context.",
+        "properties": {
+          "systemInstruction": {
+            "type": "string",
+            "description": "SystemInstruction is provider-neutral instruction text for the assistant."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text is additional conversational context for the session."
+          }
+        }
+      },
+      "ContextUpdate": {
+        "type": "object",
+        "description": "ContextUpdate is a client message that appends session context.\nContext is passive unless Generate explicitly requests an assistant response.",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context",
+            "description": "Context contains the instructions or text to append."
+          },
+          "generate": {
+            "type": "boolean",
+            "description": "Generate requests a response to this service update, without recording user speech."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind must be \"context.update\"."
+          }
+        },
+        "required": [
+          "kind",
+          "context"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "description": "Error is a gateway message that reports an error.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"error\"."
+          },
+          "message": {
+            "type": "string",
+            "description": "Message is a human-readable error description."
+          },
+          "recoverable": {
+            "type": "boolean",
+            "description": "Recoverable reports whether the client may continue using the session."
+          }
+        },
+        "required": [
+          "kind",
+          "message",
+          "recoverable"
+        ]
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "BAD_REQUEST",
+          "VOICE_BRIDGE_UNAVAILABLE",
+          "UNAUTHORIZED",
+          "VOICE_OFFER_FAILED"
+        ],
+        "description": "ErrorCode is a machine-readable API error identifier."
+      },
+      "ErrorDetails": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "details": {
+            "description": "Record<string, JSONValue>"
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetails"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "InterruptSource": {
+        "type": "string",
+        "enum": [
+          "user",
+          "tool"
+        ],
+        "description": "InterruptSource identifies why a voice gateway turn was interrupted.\n\n- `user`: InterruptSourceUser means user speech interrupted the assistant.\n- `tool`: InterruptSourceTool means tool execution was cancelled."
+      },
+      "Interrupted": {
+        "type": "object",
+        "description": "Interrupted is a gateway message that reports an interruption.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"interrupted\"."
+          },
+          "message": {
+            "type": "string",
+            "description": "Message optionally provides more detail about the interruption."
+          },
+          "source": {
+            "$ref": "#/components/schemas/InterruptSource",
+            "description": "Source identifies what interrupted the turn."
+          }
+        },
+        "required": [
+          "kind",
+          "source"
+        ]
+      },
+      "MessageEnvelope": {
+        "type": "object",
+        "description": "MessageEnvelope carries the kind used to dispatch data-channel messages.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is the message discriminator used to decode the concrete message type."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "MessageKind": {
+        "type": "string",
+        "enum": [
+          "session.setup",
+          "context.update",
+          "user.message",
+          "tool.result",
+          "turn.cancel",
+          "session.close",
+          "rtc.answer",
+          "session.ready",
+          "session.status",
+          "session.usage",
+          "rtc.offer",
+          "transcript.delta",
+          "transcript.draft",
+          "assistant.text.delta",
+          "reasoning.delta",
+          "speech.started",
+          "speech.ended",
+          "user.speech.started",
+          "tool.call",
+          "turn.status",
+          "interrupted",
+          "error"
+        ],
+        "description": "MessageKind identifies a voice gateway WebRTC data-channel message.\n\n- `session.setup`: MessageKindSessionSetup starts a provider-neutral voice session.\n- `context.update`: MessageKindContextUpdate sends provider-neutral text context to the session.\n- `user.message`: MessageKindUserMessage appends completed user text and asks the assistant to respond.\n- `tool.result`: MessageKindToolResult returns the result of a tool call.\n- `turn.cancel`: MessageKindTurnCancel asks the gateway to cancel the current turn.\n- `session.close`: MessageKindSessionClose asks the gateway to close the session.\n- `rtc.answer`: MessageKindRTCAnswer answers the gateway's rtc.offer.\n- `session.ready`: MessageKindSessionReady reports that the gateway session is ready.\n- `session.status`: MessageKindSessionStatus reports startup progress before session.ready.\n- `session.usage`: MessageKindSessionUsage reports cumulative provider usage for this connection.\n- `rtc.offer`: MessageKindRTCOffer renegotiates the WebRTC media session.\n- `transcript.delta`: MessageKindTranscriptDelta streams transcript text.\n- `transcript.draft`: MessageKindTranscriptDraft replaces provisional user text, without committing it.\n- `assistant.text.delta`: MessageKindAssistantTextDelta streams assistant text.\n- `reasoning.delta`: MessageKindReasoningDelta streams provider reasoning text.\n- `speech.started`: MessageKindSpeechStarted reports that speech output started.\n- `speech.ended`: MessageKindSpeechEnded reports that speech output ended.\n- `user.speech.started`: MessageKindUserSpeechStarted reports that the gateway detected the start of user speech.\n- `tool.call`: MessageKindToolCall asks the client to execute a tool.\n- `turn.status`: MessageKindTurnStatus reports gateway work on the current turn.\n- `interrupted`: MessageKindInterrupted reports an interruption.\n- `error`: MessageKindError reports a gateway error."
+      },
+      "RTCAnswer": {
+        "type": "object",
+        "description": "RTCAnswer is a client message that answers rtc.offer.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind must be \"rtc.answer\"."
+          },
+          "sdp": {
+            "type": "string",
+            "description": "SDP is the client's SDP answer."
+          }
+        },
+        "required": [
+          "kind",
+          "sdp"
+        ]
+      },
+      "RTCOffer": {
+        "type": "object",
+        "description": "RTCOffer is a gateway message that renegotiates the WebRTC media session.\n\nThe gateway sends at most one, after session.ready, and only to a client\nwhose session.setup set renegotiation. The client applies it as the remote\ndescription and replies with rtc.answer; until then the session keeps its\ncurrent media parameters.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"rtc.offer\"."
+          },
+          "sdp": {
+            "type": "string",
+            "description": "SDP is the gateway's SDP offer."
+          }
+        },
+        "required": [
+          "kind",
+          "sdp"
+        ]
+      },
+      "ReasoningDelta": {
+        "type": "object",
+        "description": "ReasoningDelta is a gateway message that streams provider reasoning text.\n\nReasoning is not speech and not a transcript statement. A client decides\nwhether to display it, but must not speak it or replay it as recovery context.\nThe gateway includes it in the session activity log.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"reasoning.delta\"."
+          },
+          "responseID": {
+            "type": "string",
+            "description": "ResponseID is the opaque gateway-scoped response identity. Assistant\ntext and its usage share this value; user text and uncorrelated providers\nomit it. Separate response IDs must not be merged into one transcript entry."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text is an incremental reasoning fragment."
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ]
+      },
+      "RecognitionModel": {
+        "type": "object",
+        "description": "RecognitionModel identifies one configured recognition stage without\nexposing endpoints or credentials.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID is the operator-configured id; it stays the same while the stage's\nsettings change."
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "ServiceAuthorization": {
+        "type": "object",
+        "description": "ServiceAuthorization identifies the host and carries its scoped gateway token.",
+        "properties": {
+          "baseURL": {
+            "type": "string"
+          },
+          "instanceID": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "instanceID",
+          "baseURL",
+          "token"
+        ]
+      },
+      "SessionClose": {
+        "type": "object",
+        "description": "SessionClose is a client message that closes the voice session.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind must be \"session.close\"."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason optionally explains why the client closed the session."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "SessionReady": {
+        "type": "object",
+        "description": "SessionReady is a gateway message that reports the session is ready.\n\nThe gateway sends it before any turn and does not follow it with\nturn.status idle: clients that capture speech start listening on\nsession.ready unless they request a response first.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"session.ready\"."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "SessionSetup": {
+        "type": "object",
+        "description": "SessionSetup is the client message that initializes a voice session.",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context",
+            "description": "Context provides initial instructions or text context for the session."
+          },
+          "includeReasoning": {
+            "type": "boolean",
+            "description": "IncludeReasoning requests optional provider reasoning output for this session.\nIt does not enable thinking or change reasoning effort."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind must be \"session.setup\"."
+          },
+          "recognitionModelID": {
+            "type": "string",
+            "description": "RecognitionModelID selects a recognitionModels entry for a composable LLM.\nOmitted uses the first available entry when input is gateway-owned.\nIt must be omitted for client-owned recognition and indivisible choices."
+          },
+          "renegotiation": {
+            "type": "boolean",
+            "description": "Renegotiation declares that the client answers rtc.offer. The gateway then\nsends one after session.ready when the session takes microphone audio\nbelow 48 kHz, capping the client's Opus encoder with RFC 7587\nmaxplaybackrate so it stops spending uplink bits on audio the backend\ndiscards. It applies only to WebRTC sessions."
+          },
+          "speech": {
+            "$ref": "#/components/schemas/SpeechConfig",
+            "description": "Speech selects the owner of recognition and synthesis for this session."
+          },
+          "synthesisModelID": {
+            "type": "string",
+            "description": "SynthesisModelID selects a synthesisModels entry for a composable LLM.\nOmitted uses the first available entry when output is gateway-owned.\nIt must be omitted for client-owned synthesis and indivisible choices."
+          },
+          "tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Tools declares the client-side tools the assistant may call.",
+            "items": {
+              "$ref": "#/components/schemas/ToolDeclaration"
+            }
+          },
+          "voice": {
+            "$ref": "#/components/schemas/VoiceConfig",
+            "description": "Voice contains the requested voice and language."
+          }
+        },
+        "required": [
+          "kind",
+          "voice",
+          "tools",
+          "context"
+        ]
+      },
+      "SessionStatus": {
+        "type": "object",
+        "description": "SessionStatus reports startup progress. Gateways repeat it at least every five\nseconds while loading or waiting for capacity. Clients may refresh their\nsetup timeout on receipt; only session.ready enables microphone input.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"session.status\"."
+          },
+          "message": {
+            "type": "string",
+            "description": "Message is a short user-visible description of startup work."
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ]
+      },
+      "SessionUsage": {
+        "type": "object",
+        "description": "SessionUsage is an idempotent snapshot for one gateway connection. Clients\nreplace snapshots with the same SessionID and carry totals across automatic\nreconnects in one conversation. Missing reports are excluded from totals;\nthis is observed model usage, not a billing statement or ASR/TTS accounting.",
+        "properties": {
+          "contextTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "ContextTokens is the latest reported context size, never summed."
+          },
+          "contextWindow": {
+            "type": "integer",
+            "format": "int64",
+            "description": "ContextWindow is the latest reported context capacity."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"session.usage\"."
+          },
+          "lastResponse": {
+            "$ref": "#/components/schemas/TokenUsage",
+            "description": "LastResponse contains the latest reported response counts, when available."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model identifies the generation model."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Provider identifies the generation provider."
+          },
+          "responseID": {
+            "type": "string",
+            "description": "ResponseID identifies the response observed by this report. It is opaque\nand unique across gateway connections. Empty means the provider did not\nsupply a reliable response association."
+          },
+          "responseUsage": {
+            "$ref": "#/components/schemas/TokenUsage",
+            "description": "ResponseUsage contains counts for ResponseID in this report only. Unlike\nLastResponse, it is never carried forward into context-only reports."
+          },
+          "sessionID": {
+            "type": "string",
+            "description": "SessionID identifies the gateway connection that owns these totals."
+          },
+          "totals": {
+            "$ref": "#/components/schemas/TokenUsage",
+            "description": "Totals sums all reported responses, including tool continuations."
+          }
+        },
+        "required": [
+          "kind",
+          "sessionID",
+          "provider",
+          "model",
+          "totals"
+        ]
+      },
+      "Speaker": {
+        "type": "string",
+        "enum": [
+          "user",
+          "assistant"
+        ],
+        "description": "Speaker identifies a transcript or speech speaker.\n\n- `user`: SpeakerUser is the human speaker.\n- `assistant`: SpeakerAssistant is the assistant speaker."
+      },
+      "SpeechConfig": {
+        "type": "object",
+        "description": "SpeechConfig selects recognition and synthesis independently. Empty fields use\ntransport defaults: WebRTC uses each configured gateway stage; text uses client\nspeech. Explicit unsupported selections fail before model initialization.",
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/SpeechLocation"
+          },
+          "output": {
+            "$ref": "#/components/schemas/SpeechLocation"
+          }
+        }
+      },
+      "SpeechEnded": {
+        "type": "object",
+        "description": "SpeechEnded is a gateway message that reports speech output ended.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"speech.ended\"."
+          },
+          "speaker": {
+            "$ref": "#/components/schemas/Speaker",
+            "description": "Speaker identifies whose speech output ended."
+          }
+        },
+        "required": [
+          "kind",
+          "speaker"
+        ]
+      },
+      "SpeechLocation": {
+        "type": "string",
+        "enum": [
+          "client",
+          "gateway"
+        ],
+        "description": "SpeechLocation identifies which side owns a speech stage.\n\n- `client`: SpeechLocationClient uses the client's speech facilities.\n- `gateway`: SpeechLocationGateway uses the gateway's configured speech model."
+      },
+      "SpeechStarted": {
+        "type": "object",
+        "description": "SpeechStarted is a gateway message that reports speech output started.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"speech.started\"."
+          },
+          "speaker": {
+            "$ref": "#/components/schemas/Speaker",
+            "description": "Speaker identifies whose speech output started."
+          }
+        },
+        "required": [
+          "kind",
+          "speaker"
+        ]
+      },
+      "StatusResp": {
+        "type": "object",
+        "description": "StatusResp is a common response for mutation endpoints.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Status is a short human-readable result such as \"closed\"."
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "SynthesisModel": {
+        "type": "object",
+        "description": "SynthesisModel identifies one configured synthesis stage without exposing\nendpoints or credentials.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID is the operator-configured id; it stays the same while the stage's\nsettings change."
+          },
+          "label": {
+            "type": "string"
+          },
+          "voices": {
+            "type": "array",
+            "description": "Voices lists the selectable voices. Omitted when the stage offers no\nvoice selection.",
+            "items": {
+              "$ref": "#/components/schemas/Voice"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "TokenUsage": {
+        "type": "object",
+        "description": "TokenUsage contains provider-reported counts. Nil means unavailable. Cached\nand reasoning counts are breakdowns, never additional tokens to sum with input\nand output; providers differ in how they account for reasoning output.",
+        "properties": {
+          "cachedTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "CachedTokens is the reported cached-input breakdown."
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "InputTokens includes the input processed again on each model request."
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "OutputTokens counts generated output as reported by the provider."
+          },
+          "reasoningTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "ReasoningTokens is the reported reasoning breakdown."
+          }
+        }
+      },
+      "ToolCall": {
+        "type": "object",
+        "description": "ToolCall is a gateway message that asks the client to execute a tool.",
+        "properties": {
+          "args": {
+            "description": "Args is the JSON argument object for the requested tool.",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "ID uniquely identifies this tool call for the matching tool.result."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"tool.call\"."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the requested tool name."
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "args"
+        ]
+      },
+      "ToolDeclaration": {
+        "type": "object",
+        "description": "ToolDeclaration is a provider-neutral service tool declaration.",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Description explains when and how the assistant should use the tool."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the tool name the assistant uses in tool.call messages."
+          },
+          "parameters": {
+            "description": "Parameters is a JSON Schema object describing the tool arguments. When\npresent, it must declare \"type\": \"object\".",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "parameters"
+        ]
+      },
+      "ToolResult": {
+        "type": "object",
+        "description": "ToolResult is a client message that returns a tool execution result.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID matches the tool.call ID being answered."
+          },
+          "ignoreNextMicrophoneTurn": {
+            "type": "boolean",
+            "description": "IgnoreNextMicrophoneTurn asks the RTC gateway to discard one detected\nmicrophone utterance before sending audio to the backend. The client\nkeeps its microphone off while the assistant finishes the current reply."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind must be \"tool.result\"."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the tool name that produced the result."
+          },
+          "result": {
+            "description": "Result is the JSON result returned to the assistant.",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "result"
+        ]
+      },
+      "TranscriptDelta": {
+        "type": "object",
+        "description": "TranscriptDelta is a gateway message that streams transcript text.\nEach fragment appends to previously emitted text; it never replaces it.",
+        "properties": {
+          "draft_id": {
+            "type": "string",
+            "description": "DraftID atomically replaces the matching user draft when this text commits."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"transcript.delta\"."
+          },
+          "responseID": {
+            "type": "string",
+            "description": "ResponseID is the opaque gateway-scoped response identity. Assistant\ntext and its usage share this value; user text and uncorrelated providers\nomit it. Separate response IDs must not be merged into one transcript entry."
+          },
+          "speaker": {
+            "$ref": "#/components/schemas/Speaker",
+            "description": "Speaker identifies who produced this transcript text."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text is an incremental transcript fragment."
+          }
+        },
+        "required": [
+          "kind",
+          "speaker",
+          "text"
+        ]
+      },
+      "TranscriptDraft": {
+        "type": "object",
+        "description": "TranscriptDraft is an ephemeral full-text user hypothesis for one microphone\nutterance. Revisions replace text for ID. Empty Text clears only that ID.\nDrafts never enter conversation history, activity logs, or recovery context.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "text"
+        ]
+      },
+      "TurnCancel": {
+        "type": "object",
+        "description": "TurnCancel is a client message that cancels the current turn.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind must be \"turn.cancel\"."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason optionally explains why the current assistant turn was cancelled."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "TurnState": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "thinking",
+          "transcribing"
+        ],
+        "description": "TurnState identifies the gateway work that precedes assistant output.\n\n- `idle`: TurnStateIdle means the gateway has no turn in progress.\n- `thinking`: TurnStateThinking means the assistant is generating a response.\n- `transcribing`: TurnStateTranscribing means the gateway is converting user speech to text."
+      },
+      "TurnStatus": {
+        "type": "object",
+        "description": "TurnStatus is a gateway message that reports work on the current turn.\n\nBackends that cannot observe their own progress never send it. Speech\noutput and tool calls take display precedence over the reported state.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"turn.status\"."
+          },
+          "state": {
+            "$ref": "#/components/schemas/TurnState",
+            "description": "State is the gateway work in progress; idle ends the turn, including\none that produced no speech."
+          }
+        },
+        "required": [
+          "kind",
+          "state"
+        ]
+      },
+      "UserMessage": {
+        "type": "object",
+        "description": "UserMessage is a client message that appends completed user text and asks the assistant to respond.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind must be \"user.message\"."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text is the completed user utterance to send to the assistant."
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ]
+      },
+      "UserSpeechStarted": {
+        "type": "object",
+        "description": "UserSpeechStarted is a gateway message that reports the start of user speech\nthat the gateway's voice activity detection, or its realtime provider's,\ndetected: the start of a new user turn.\n\nThe gateway sends it in order with its other messages, before anything it\nsends in reply to that speech. A user transcript.delta gives no such order:\na realtime provider transcribes user audio apart from its responses, so the\ntranscript of the speech that caused a tool call can arrive after the tool\ncall or the reply. Noise that the detection takes for speech also starts a\nturn, and the gateway sends none for user.message text or for sessions in\nwhich the client recognizes speech.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind",
+            "description": "Kind is \"user.speech.started\"."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "Voice": {
+        "type": "object",
+        "description": "Voice is one selectable voice of a voice choice or synthesis model.",
+        "properties": {
+          "default": {
+            "type": "boolean",
+            "description": "Default marks the voice a session speaks with when SessionSetup.voice.name\nis empty and the session language is one the voice speaks. A list has\neither one default without a language or at most one default per\nlanguage; clients reject a list that mixes both. A list without a\ndefault leaves the choice to the provider."
+          },
+          "language": {
+            "type": "string",
+            "description": "Language is the ISO 639-1 code of the only language the voice speaks,\nsuch as \"fr\". Clients offer the voice only in sessions whose language\ntag has that base subtag, and session.setup rejects it in another.\nEmpty means the voice speaks every language the model does."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the SessionSetup.voice.name that selects this voice."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "VoiceChoice": {
+        "type": "object",
+        "description": "VoiceChoice describes a selectable backend without exposing its credentials.",
+        "properties": {
+          "composable": {
+            "type": "boolean",
+            "description": "Composable allows independent recognition and synthesis model selections."
+          },
+          "id": {
+            "type": "string",
+            "description": "ID is the operator-configured id. It stays the same while the choice's\nsettings change, so clients save it; a saved id the catalog no longer\nlists falls back to the default."
+          },
+          "label": {
+            "type": "string"
+          },
+          "speechModes": {
+            "type": "array",
+            "description": "SpeechModes lists supported input/output ownership combinations.\nMissing metadata from older gateways means transport defaults only.",
+            "items": {
+              "$ref": "#/components/schemas/SpeechConfig"
+            }
+          },
+          "transports": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/VoiceTransport"
+            }
+          },
+          "voices": {
+            "type": "array",
+            "description": "Voices lists the selectable voices. Omitted when the choice does not\noffer voice selection.",
+            "items": {
+              "$ref": "#/components/schemas/Voice"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "transports"
+        ]
+      },
+      "VoiceChoiceDefault": {
+        "type": "object",
+        "description": "VoiceChoiceDefault names the choice a transport family uses when a session\nomits choiceID. A family is one transport: WebRTC audio for gateway speech,\nor text for client speech with a gateway LLM.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID names a choice that offers Transport."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/VoiceTransport",
+            "description": "Transport is the family this default applies to."
+          }
+        },
+        "required": [
+          "transport",
+          "id"
+        ]
+      },
+      "VoiceChoicesResp": {
+        "type": "object",
+        "description": "VoiceChoicesResp advertises the available voice choices and one default per\noffered family.",
+        "properties": {
+          "choices": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/VoiceChoice"
+            }
+          },
+          "defaults": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Defaults holds one entry per offered transport, ordered by transport name.",
+            "items": {
+              "$ref": "#/components/schemas/VoiceChoiceDefault"
+            }
+          },
+          "recognitionModels": {
+            "type": "array",
+            "description": "RecognitionModels lists gateway recognition stages in preference order.",
+            "items": {
+              "$ref": "#/components/schemas/RecognitionModel"
+            }
+          },
+          "stunServers": {
+            "type": "array",
+            "description": "STUNServers lists the stun: or stuns: URLs a WebRTC client configures as\nits ICE servers. Omitted means none: the client gathers host candidates\nonly and contacts no STUN server.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "synthesisModels": {
+            "type": "array",
+            "description": "SynthesisModels lists gateway synthesis stages in preference order.",
+            "items": {
+              "$ref": "#/components/schemas/SynthesisModel"
+            }
+          }
+        },
+        "required": [
+          "choices",
+          "defaults"
+        ]
+      },
+      "VoiceConfig": {
+        "type": "object",
+        "description": "VoiceConfig describes provider-neutral voice preferences.",
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "Language is the requested BCP 47 language tag, such as \"en-US\" or \"fr-CA\".\nEmpty defaults to \"en-US\"; an invalid tag fails session setup. A session\nspeaks one language, and the assistant replies in it. Synthesis and\nrecognition models that take a language receive it, recognition as a\nhint or forced; other models ignore it. A model that declares its\nlanguages fails session setup for another one. A model whose server\nrejects the language fails when its connection starts: at session setup\nfor realtime choices, and at each utterance for recognition."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the requested voice name from the catalog's voices. Empty uses\nthe voice the catalog marks default for the session language, else the\nconfigured voice, else the provider default. A voice of another language\nfails session setup."
+          }
+        },
+        "required": [
+          "language"
+        ]
+      },
+      "VoiceRTCAnswerResp": {
+        "type": "object",
+        "description": "VoiceRTCAnswerResp is the response for POST /api/voicegateway/v2/voice/rtc/offer.",
+        "properties": {
+          "sdp": {
+            "type": "string",
+            "description": "SDP is the gateway WebRTC answer session description to pass to setRemoteDescription with type \"answer\"."
+          },
+          "sessionID": {
+            "type": "string",
+            "description": "SessionID identifies the voice RTC session for diagnostics and close calls."
+          }
+        },
+        "required": [
+          "sdp",
+          "sessionID"
+        ]
+      },
+      "VoiceRTCClientDiagnostics": {
+        "type": "object",
+        "description": "VoiceRTCClientDiagnostics reports client-observed WebRTC state for diagnosis.",
+        "properties": {
+          "connectionState": {
+            "$ref": "#/components/schemas/VoiceRTCConnectionState",
+            "description": "ConnectionState is the client's RTCPeerConnection.connectionState."
+          },
+          "dataChannelState": {
+            "$ref": "#/components/schemas/VoiceRTCDataChannelState",
+            "description": "DataChannelState is the client's voice-gateway RTCDataChannel.readyState."
+          },
+          "iceConnectionState": {
+            "$ref": "#/components/schemas/VoiceRTCICEConnectionState",
+            "description": "ICEConnectionState is the client's RTCPeerConnection.iceConnectionState."
+          },
+          "iceGatheringState": {
+            "$ref": "#/components/schemas/VoiceRTCICEGatheringState",
+            "description": "ICEGatheringState is the client's RTCPeerConnection.iceGatheringState."
+          },
+          "signalingState": {
+            "$ref": "#/components/schemas/VoiceRTCSignalingState",
+            "description": "SignalingState is the client's RTCPeerConnection.signalingState."
+          }
+        }
+      },
+      "VoiceRTCConnectionState": {
+        "type": "string",
+        "enum": [
+          "new",
+          "connecting",
+          "connected",
+          "disconnected",
+          "failed",
+          "closed"
+        ],
+        "description": "VoiceRTCConnectionState is a WebRTC peer connection state."
+      },
+      "VoiceRTCConnectivityIssue": {
+        "type": "string",
+        "enum": [
+          "none",
+          "voice_bridge_unavailable",
+          "server_session_missing",
+          "server_ice_failed",
+          "udp_unreachable",
+          "data_channel_not_open",
+          "voice_backend_connecting",
+          "session_ready_not_delivered",
+          "unknown_timeout"
+        ],
+        "description": "VoiceRTCConnectivityIssue identifies a structured voice RTC connectivity issue."
+      },
+      "VoiceRTCConnectivitySide": {
+        "type": "string",
+        "enum": [
+          "none",
+          "server",
+          "client",
+          "network",
+          "unknown"
+        ],
+        "description": "VoiceRTCConnectivitySide identifies where a voice RTC failure appears to be."
+      },
+      "VoiceRTCDataChannelState": {
+        "type": "string",
+        "enum": [
+          "new",
+          "connecting",
+          "open",
+          "closing",
+          "closed"
+        ],
+        "description": "VoiceRTCDataChannelState is a WebRTC data channel state."
+      },
+      "VoiceRTCDiagnosticsReq": {
+        "type": "object",
+        "description": "VoiceRTCDiagnosticsReq is the request body for POST /api/voicegateway/v2/voice/rtc/{sessionID}/diagnostics.",
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/VoiceRTCClientDiagnostics",
+            "description": "Client contains the browser/client WebRTC state observed by the caller."
+          }
+        }
+      },
+      "VoiceRTCDiagnosticsResp": {
+        "type": "object",
+        "description": "VoiceRTCDiagnosticsResp reports structured WebRTC connectivity diagnostics.",
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/VoiceRTCClientDiagnostics",
+            "description": "Client echoes the client diagnostics included in the request."
+          },
+          "issue": {
+            "$ref": "#/components/schemas/VoiceRTCConnectivityIssue",
+            "description": "Issue is the machine-readable connectivity diagnosis."
+          },
+          "message": {
+            "type": "string",
+            "description": "Message is a human-readable explanation of the diagnosis."
+          },
+          "server": {
+            "$ref": "#/components/schemas/VoiceRTCServerDiagnostics",
+            "description": "Server contains gateway-observed WebRTC state."
+          },
+          "sessionID": {
+            "type": "string",
+            "description": "SessionID is the diagnosed voice RTC session ID."
+          },
+          "side": {
+            "$ref": "#/components/schemas/VoiceRTCConnectivitySide",
+            "description": "Side identifies where the issue appears to be."
+          }
+        },
+        "required": [
+          "sessionID",
+          "issue",
+          "side",
+          "message",
+          "server"
+        ]
+      },
+      "VoiceRTCICEConnectionState": {
+        "type": "string",
+        "enum": [
+          "new",
+          "checking",
+          "connected",
+          "completed",
+          "disconnected",
+          "failed",
+          "closed"
+        ],
+        "description": "VoiceRTCICEConnectionState is a WebRTC ICE transport connection state."
+      },
+      "VoiceRTCICEGatheringState": {
+        "type": "string",
+        "enum": [
+          "new",
+          "gathering",
+          "complete"
+        ],
+        "description": "VoiceRTCICEGatheringState is a WebRTC ICE candidate gathering state."
+      },
+      "VoiceRTCOfferReq": {
+        "type": "object",
+        "description": "VoiceRTCOfferReq is the request body for POST /api/voicegateway/v2/voice/rtc/offer.",
+        "properties": {
+          "choiceID": {
+            "type": "string",
+            "description": "ChoiceID selects a gateway choice; empty uses the advertised default."
+          },
+          "sdp": {
+            "type": "string",
+            "description": "SDP is the browser/client WebRTC offer session description from RTCSessionDescription.sdp after createOffer and setLocalDescription."
+          },
+          "service": {
+            "$ref": "#/components/schemas/ServiceAuthorization",
+            "description": "Service authorizes a session on a standalone gateway. Embedded gateways use host authentication."
+          }
+        },
+        "required": [
+          "sdp"
+        ]
+      },
+      "VoiceRTCServerDiagnostics": {
+        "type": "object",
+        "description": "VoiceRTCServerDiagnostics reports server-observed WebRTC state for diagnosis.",
+        "properties": {
+          "audioTrackReceived": {
+            "type": "boolean",
+            "description": "AudioTrackReceived reports whether the gateway received the client's microphone track."
+          },
+          "backendConnected": {
+            "type": "boolean",
+            "description": "BackendConnected reports whether the gateway connected to the configured voice backend."
+          },
+          "connectionState": {
+            "$ref": "#/components/schemas/VoiceRTCConnectionState",
+            "description": "ConnectionState is the gateway PeerConnection aggregate connection state."
+          },
+          "dataChannelOpened": {
+            "type": "boolean",
+            "description": "DataChannelOpened reports whether the voice data channel reached open."
+          },
+          "dataChannelState": {
+            "$ref": "#/components/schemas/VoiceRTCDataChannelState",
+            "description": "DataChannelState is the gateway-observed voice data channel state."
+          },
+          "iceConnectionState": {
+            "$ref": "#/components/schemas/VoiceRTCICEConnectionState",
+            "description": "ICEConnectionState is the gateway PeerConnection ICE connection state."
+          },
+          "iceGatheringState": {
+            "$ref": "#/components/schemas/VoiceRTCICEGatheringState",
+            "description": "ICEGatheringState is the gateway PeerConnection ICE gathering state."
+          },
+          "sessionFound": {
+            "type": "boolean",
+            "description": "SessionFound reports whether the gateway still has the requested session."
+          },
+          "sessionReadySent": {
+            "type": "boolean",
+            "description": "SessionReadySent reports whether the gateway sent session.ready to the client."
+          },
+          "signalingState": {
+            "$ref": "#/components/schemas/VoiceRTCSignalingState",
+            "description": "SignalingState is the gateway PeerConnection signaling state."
+          },
+          "udpEndpoints": {
+            "type": "array",
+            "description": "UDPEndpoints are the LAN/Tailscale and optional UPnP public UDP candidates advertised to the client.",
+            "items": {
+              "$ref": "#/components/schemas/VoiceRTCUDPEndpoint"
+            }
+          },
+          "udpMappingError": {
+            "type": "string",
+            "description": "UDPMappingError is the last UPnP mapping or refresh error, if any."
+          }
+        },
+        "required": [
+          "sessionFound"
+        ]
+      },
+      "VoiceRTCSignalingState": {
+        "type": "string",
+        "enum": [
+          "stable",
+          "have-local-offer",
+          "have-remote-offer",
+          "have-local-pranswer",
+          "have-remote-pranswer",
+          "closed"
+        ],
+        "description": "VoiceRTCSignalingState is a WebRTC peer connection signaling state."
+      },
+      "VoiceRTCUDPEndpoint": {
+        "type": "object",
+        "description": "VoiceRTCUDPEndpoint reports one server UDP candidate for diagnosis.",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Host is an IP address advertised in the gateway SDP answer."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Port is the UDP port paired with host in the gateway SDP answer."
+          }
+        },
+        "required": [
+          "host",
+          "port"
+        ]
+      },
+      "VoiceTextTicketReq": {
+        "type": "object",
+        "description": "VoiceTextTicketReq authorizes a browser text-session WebSocket upgrade.\nEmbedded hosts authenticate this HTTP request before dispatch.",
+        "properties": {
+          "choiceID": {
+            "type": "string",
+            "description": "ChoiceID selects a text-capable choice, bound to the issued ticket."
+          },
+          "service": {
+            "$ref": "#/components/schemas/ServiceAuthorization",
+            "description": "Service authorizes a session on a standalone gateway."
+          }
+        }
+      },
+      "VoiceTextTicketResp": {
+        "type": "object",
+        "description": "VoiceTextTicketResp carries a single-use ticket that expires after 30 seconds.\nConnect to /api/voicegateway/v2/voice/text/browser with the\ngomode.ticket.<ticket> WebSocket subprotocol alongside gomode.text.v2.\nNever put it in a URL or store it persistently.",
+        "properties": {
+          "ticket": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket"
+        ]
+      },
+      "VoiceTransport": {
+        "type": "string",
+        "enum": [
+          "text",
+          "webrtc"
+        ],
+        "description": "VoiceTransport identifies how clients communicate with a voice choice.\n\n- `text`: VoiceTransportText carries text with client speech recognition and synthesis.\n- `webrtc`: VoiceTransportWebRTC carries audio through WebRTC."
+      }
+    },
+    "responses": {
+      "error400": {
+        "description": "Error codes: `BAD_REQUEST`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "error401": {
+        "description": "Error codes: `UNAUTHORIZED`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "error500": {
+        "description": "Error codes: `VOICE_OFFER_FAILED`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "error503": {
+        "description": "Error codes: `VOICE_BRIDGE_UNAVAILABLE`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,468 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Go Mode Service Discovery API Reference",
+    "version": "v1",
+    "description": "Service-neutral JSON discovery manifest served publicly at `/.well-known/gomode.json` for Go Mode Android bootstrap. Clients must only accept `apiVersion` values they explicitly support and must require `webShell.bridgeVersion` to match the native bridge they implement."
+  },
+  "paths": {
+    "/.well-known/gomode.json": {
+      "get": {
+        "operationId": "getSettings",
+        "tags": [
+          "Settings"
+        ],
+        "description": "Returns Go Mode service compatibility settings.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClientExtensions": {
+        "type": "object",
+        "description": "ClientExtensions holds the settings objects of the Go Mode client capability\nextensions, keyed as in ClientCapabilities.extensions. Clients encode it to\nbuild that map, so generated SDKs carry each extension identifier.",
+        "properties": {
+          "com.fghbuild.gomode/display": {
+            "$ref": "#/components/schemas/Display",
+            "description": "Display is present while glasses are connected."
+          }
+        }
+      },
+      "ConversationContext": {
+        "type": "object",
+        "description": "ConversationContext orders one advertised model-context resource for one\nauthenticated conversation. URI identifies the resource this update replaces.\nOnly a read of that URI can establish\na new epoch. Dependencies are private event routing, never model content.\nContent is the server-defined public resource text after a tool; resource reads\nomit it because their standard contents already carry the same text.",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "dependencies": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ResourceDependency"
+            }
+          },
+          "epoch": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "uri",
+          "epoch",
+          "version",
+          "dependencies"
+        ]
+      },
+      "ConversationResultMeta": {
+        "type": "object",
+        "description": "ConversationResultMeta carries an authorized resource update after a tool.",
+        "properties": {
+          "com.fghbuild.gomode/context": {
+            "$ref": "#/components/schemas/ConversationContext"
+          }
+        }
+      },
+      "Display": {
+        "type": "object",
+        "description": "Display describes one connected display so a server can fit its content to\nit. It is the settings object of the com.fghbuild.gomode/display client\ncapability extension, whose contract the Go constant DisplayExtension\ndocuments. Servers must ignore fields they do not know.",
+        "properties": {
+          "bitsPerPixel": {
+            "type": "integer",
+            "format": "int64",
+            "description": "BitsPerPixel is the pixel depth, from 1 to 24: a pixel shows one of\n2^BitsPerPixel luminance levels or colours, as ColorSpace defines."
+          },
+          "colorSpace": {
+            "$ref": "#/components/schemas/DisplayColorSpace",
+            "description": "ColorSpace is what a pixel value represents."
+          },
+          "height": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Height is the number of pixel rows. It is positive."
+          },
+          "imageTypes": {
+            "type": "array",
+            "description": "ImageTypes lists the MIME types of the glasses image blocks the client\ndraws on this display, such as \"image/png\". It is empty when the client\ndraws glasses text alone, as on Even Realities G2 with stock firmware.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "shape": {
+            "$ref": "#/components/schemas/DisplayShape",
+            "description": "Shape is the visible area within the Width by Height pixels."
+          },
+          "width": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Width is the number of pixel columns. It is positive."
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "shape",
+          "colorSpace",
+          "bitsPerPixel"
+        ]
+      },
+      "DisplayColorSpace": {
+        "type": "string",
+        "enum": [
+          "luminance",
+          "rgb"
+        ],
+        "description": "DisplayColorSpace is what a display's pixel values represent.\n\n- `luminance`: DisplayColorSpaceLuminance pixels are brightness levels that the device shows in its single tint, such as green on Even Realities G2.\n- `rgb`: DisplayColorSpaceRGB pixels are colours. Below 24 bits per pixel, the client picks the 2^BitsPerPixel colours of each image from 24-bit RGB."
+      },
+      "DisplayShape": {
+        "type": "string",
+        "enum": [
+          "circle",
+          "rectangle"
+        ],
+        "description": "DisplayShape is the visible area of a display.\n\n- `circle`: DisplayShapeCircle shows the circle inscribed in the Width by Height pixels; pixels outside it are not visible.\n- `rectangle`: DisplayShapeRectangle shows every pixel."
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "ErrorBody describes a Go Mode API error.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "ErrorResponse is the standard JSON error envelope for Go Mode SDK clients.",
+        "properties": {
+          "details": {
+            "description": "Record<string, JSONValue>"
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "LocationActivation": {
+        "type": "object",
+        "description": "LocationActivation groups one location-based activation signal for a skill.",
+        "properties": {
+          "physicalPosition": {
+            "$ref": "#/components/schemas/PhysicalPosition"
+          },
+          "wifi": {
+            "$ref": "#/components/schemas/LocationWiFi"
+          }
+        }
+      },
+      "LocationWiFi": {
+        "type": "object",
+        "description": "LocationWiFi matches any one of the configured Wi-Fi SSIDs.",
+        "properties": {
+          "ssids": {
+            "type": "array",
+            "description": "SSIDs are Wi-Fi network names that can activate the skill.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "PhysicalPosition": {
+        "type": "object",
+        "description": "PhysicalPosition matches a named latitude and longitude within RadiusMeters.",
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "format": "double"
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is a user-facing label for this physical position."
+          },
+          "radiusMeters": {
+            "type": "number",
+            "format": "double",
+            "description": "RadiusMeters is the activation radius around the latitude and longitude."
+          }
+        },
+        "required": [
+          "name",
+          "latitude",
+          "longitude",
+          "radiusMeters"
+        ]
+      },
+      "ResourceDependency": {
+        "type": "object",
+        "description": "ResourceDependency routes host change-feed events without interpreting domain\ncontent. Each group contains at most 50 URIs. Empty aspects match any change.",
+        "properties": {
+          "aspects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "uris"
+        ]
+      },
+      "Settings": {
+        "type": "object",
+        "description": "Settings is the service compatibility document consumed by Go Mode clients.",
+        "properties": {
+          "apiVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "APIVersion is the Go Mode discovery schema version. A client must reject\nmanifests with an API version it does not explicitly support."
+          },
+          "service": {
+            "type": "string"
+          },
+          "serviceVersion": {
+            "type": "string",
+            "description": "ServiceVersion is the host product version. It is informational and does\nnot participate in Go Mode compatibility checks."
+          },
+          "webShell": {
+            "$ref": "#/components/schemas/WebShellSettings"
+          }
+        },
+        "required": [
+          "service",
+          "apiVersion",
+          "webShell"
+        ]
+      },
+      "SkillActivation": {
+        "type": "object",
+        "description": "SkillActivation carries hints the shell matches against current context to\ndecide when to load a skill. Matching is on-device: the service never receives\nthe user's context or location just because a skill was considered.",
+        "properties": {
+          "locations": {
+            "type": "array",
+            "description": "Locations are local physical-location and Wi-Fi hints that make this skill\nan activation candidate.",
+            "items": {
+              "$ref": "#/components/schemas/LocationActivation"
+            }
+          }
+        }
+      },
+      "SkillFrontmatter": {
+        "type": "object",
+        "description": "SkillFrontmatter is the YAML frontmatter schema for a Go Mode SKILL.md file.\n\nThe Markdown body carries human and model instructions. The frontmatter carries\nmachine-readable activation hints and the MCP tool allowlist that the native\nshell can register when the skill becomes active.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "gomode": {
+            "$ref": "#/components/schemas/SkillGoMode"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "gomode"
+        ]
+      },
+      "SkillGoMode": {
+        "type": "object",
+        "description": "SkillGoMode contains Go Mode-specific SKILL.md frontmatter fields.",
+        "properties": {
+          "activation": {
+            "$ref": "#/components/schemas/SkillActivation"
+          },
+          "mcpServers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SkillMCPServer"
+            }
+          }
+        },
+        "required": [
+          "mcpServers"
+        ]
+      },
+      "SkillMCPServer": {
+        "type": "object",
+        "description": "SkillMCPServer declares which tools from an MCP endpoint belong to one skill.",
+        "properties": {
+          "authRequired": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "protocolVersion": {
+            "type": "string",
+            "description": "ProtocolVersion is the MCP protocol version spoken by this endpoint."
+          },
+          "tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Tools is the explicit allowlist of MCP tool names activated by the skill.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "endpoint",
+          "protocolVersion",
+          "authRequired",
+          "tools"
+        ]
+      },
+      "ToolGroup": {
+        "type": "object",
+        "description": "ToolGroup describes a bootstrap MCP tool group advertised by the manifest.\n\nA tool group is the compatibility manifest's compact view of a Go Mode skill.\nThe authoritative context, activation hints, and tool subset live in the\nskill's SKILL.md frontmatter; the manifest stays small so clients can decide\nwhether native features are compatible before loading skill files.",
+        "properties": {
+          "authRequired": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "protocolVersion": {
+            "type": "string",
+            "description": "ProtocolVersion is the MCP protocol version spoken by this group endpoint.\nThe shell sends it on MCP requests so each group can be checked and\nupgraded independently during protocol migrations."
+          },
+          "skillUrl": {
+            "type": "string",
+            "description": "SkillURL points to the SKILL.md file whose frontmatter defines activation,\ninstructions, and the MCP tool subset for this skill."
+          }
+        },
+        "required": [
+          "name",
+          "endpoint",
+          "protocolVersion",
+          "authRequired"
+        ]
+      },
+      "VoiceGatewaySettings": {
+        "type": "object",
+        "description": "VoiceGatewaySettings describes the preferred voice gateway for this service.",
+        "properties": {
+          "authRequired": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "tokenEndpoint": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "required"
+        ]
+      },
+      "WebShellSettings": {
+        "type": "object",
+        "description": "WebShellSettings describes the hosted frontend's native-shell contract.",
+        "properties": {
+          "bridgeVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "BridgeVersion is the hosted-frontend/native bridge contract version. A\nshell must reject manifests whose bridge version differs from the bridge\nversion implemented by that shell."
+          },
+          "toolGroups": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ToolGroup"
+            }
+          },
+          "voiceGateway": {
+            "$ref": "#/components/schemas/VoiceGatewaySettings"
+          }
+        },
+        "required": [
+          "bridgeVersion",
+          "toolGroups",
+          "voiceGateway"
+        ]
+      }
+    },
+    "responses": {
+      "error": {
+        "description": "API error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

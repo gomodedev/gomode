@@ -1,0 +1,581 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "OAuth 2.0 Types Reference",
+    "version": "v1",
+    "description": "DTO types for the OAuth 2.0 authorization server. Includes discovery metadata, client registration, token responses, introspection, and device authorization types."
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "AuthorizationServerMetadata": {
+        "type": "object",
+        "description": "AuthorizationServerMetadata is OAuth/OIDC discovery metadata.",
+        "properties": {
+          "authorization_endpoint": {
+            "type": "string"
+          },
+          "authorization_response_iss_parameter_supported": {
+            "type": "boolean"
+          },
+          "client_id_metadata_document_supported": {
+            "type": "boolean"
+          },
+          "code_challenge_methods_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "dpop_signing_alg_values_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "end_session_endpoint": {
+            "type": "string"
+          },
+          "grant_types_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "introspection_endpoint": {
+            "type": "string"
+          },
+          "introspection_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "jwks_uri": {
+            "type": "string"
+          },
+          "pushed_authorization_request_endpoint": {
+            "type": "string"
+          },
+          "registration_endpoint": {
+            "type": "string"
+          },
+          "require_pushed_authorization_requests": {
+            "type": "boolean"
+          },
+          "response_types_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "revocation_endpoint": {
+            "type": "string"
+          },
+          "revocation_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint": {
+            "type": "string"
+          },
+          "token_endpoint_auth_methods_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "issuer",
+          "authorization_endpoint",
+          "token_endpoint",
+          "jwks_uri",
+          "registration_endpoint",
+          "response_types_supported",
+          "grant_types_supported",
+          "code_challenge_methods_supported",
+          "token_endpoint_auth_methods_supported",
+          "authorization_response_iss_parameter_supported",
+          "require_pushed_authorization_requests"
+        ]
+      },
+      "ClientIDMetadataDocument": {
+        "type": "object",
+        "description": "ClientIDMetadataDocument describes an OAuth client identified by its HTTPS metadata URL.",
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jwks": {
+            "$ref": "#/components/schemas/JWKSet"
+          },
+          "jwks_uri": {
+            "type": "string"
+          },
+          "redirect_uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "response_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "redirect_uris"
+        ]
+      },
+      "DeviceAuthorizationRequest": {
+        "type": "object",
+        "description": "DeviceAuthorizationRequest is an RFC 8628 device authorization request body.",
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ]
+      },
+      "DeviceAuthorizationResponse": {
+        "type": "object",
+        "description": "DeviceAuthorizationResponse is an RFC 8628 device authorization response body.",
+        "properties": {
+          "device_code": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "interval": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "verification_uri": {
+            "type": "string"
+          },
+          "verification_uri_complete": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_code",
+          "user_code",
+          "verification_uri",
+          "expires_in"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "ErrorResponse is an OAuth error response body.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "IntrospectionRequest": {
+        "type": "object",
+        "description": "IntrospectionRequest is an RFC 7662 token introspection request body.",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "token_type_hint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "IntrospectionResponse": {
+        "type": "object",
+        "description": "IntrospectionResponse is an RFC 7662 token introspection response body.",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "aud": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "cnf": {
+            "$ref": "#/components/schemas/TokenConfirmation"
+          },
+          "exp": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "iat": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "iss": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "sub": {
+            "type": "string"
+          },
+          "token_type": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active"
+        ]
+      },
+      "JWK": {
+        "type": "object",
+        "description": "JWK is a JSON Web Key.  For server keys (RSA), only kty/n/e/kid/use/alg\nare populated.  For client DPoP keys, crv/x/y may also be set.",
+        "properties": {
+          "alg": {
+            "type": "string"
+          },
+          "crv": {
+            "type": "string"
+          },
+          "e": {
+            "type": "string"
+          },
+          "key_ops": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "kid": {
+            "type": "string"
+          },
+          "kty": {
+            "type": "string"
+          },
+          "n": {
+            "type": "string"
+          },
+          "use": {
+            "type": "string"
+          },
+          "x": {
+            "type": "string"
+          },
+          "y": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kty"
+        ]
+      },
+      "JWKSet": {
+        "type": "object",
+        "description": "JWKSet is a JSON Web Key Set response.",
+        "properties": {
+          "keys": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/JWK"
+            }
+          }
+        },
+        "required": [
+          "keys"
+        ]
+      },
+      "PARResponse": {
+        "type": "object",
+        "description": "PARResponse is an RFC 9126 pushed authorization request response.",
+        "properties": {
+          "expires_in": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "request_uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_uri",
+          "expires_in"
+        ]
+      },
+      "ProtectedResourceMetadata": {
+        "type": "object",
+        "description": "ProtectedResourceMetadata is OAuth 2.0 Protected Resource Metadata.",
+        "properties": {
+          "authorization_servers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource": {
+            "type": "string"
+          },
+          "resource_documentation": {
+            "type": "string"
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "resource",
+          "authorization_servers"
+        ]
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "description": "RegisterRequest is a dynamic client registration request.",
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redirect_uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_name",
+          "redirect_uris",
+          "token_endpoint_auth_method"
+        ]
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "description": "RegisterResponse is a dynamic client registration response (RFC 7592).",
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_id_issued_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redirect_uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "registration_access_token": {
+            "type": "string"
+          },
+          "registration_client_uri": {
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_id_issued_at",
+          "redirect_uris",
+          "token_endpoint_auth_method"
+        ]
+      },
+      "Token": {
+        "type": "object",
+        "description": "Token holds an OAuth 2.0 access token and associated metadata.",
+        "properties": {
+          "AccessToken": {
+            "type": "string"
+          },
+          "Expiry": {
+            "description": "zero means no expiry",
+            "allOf": [
+              {
+                "description": "RFC 3339 timestamp"
+              }
+            ]
+          },
+          "RefreshToken": {
+            "type": "string"
+          },
+          "TokenType": {
+            "type": "string",
+            "description": "e.g., \"Bearer\"; always set by the constructor"
+          }
+        },
+        "required": [
+          "AccessToken",
+          "TokenType",
+          "RefreshToken",
+          "Expiry"
+        ]
+      },
+      "TokenConfirmation": {
+        "type": "object",
+        "description": "TokenConfirmation holds key confirmation claims per RFC 9449 §6.1.",
+        "properties": {
+          "jkt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jkt"
+        ]
+      },
+      "TokenResponse": {
+        "type": "object",
+        "description": "TokenResponse is an OAuth token endpoint response.",
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "token_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in"
+        ]
+      },
+      "UpdateClientRequest": {
+        "type": "object",
+        "description": "UpdateClientRequest is an RFC 7592 client update request body.\nNil pointer fields leave the corresponding client field unchanged.",
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "grant_types": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "redirect_uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

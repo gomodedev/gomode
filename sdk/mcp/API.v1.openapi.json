@@ -1,0 +1,1097 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "MCP API Reference",
+    "version": "v1",
+    "description": "JSON-RPC MCP endpoint client. Construct clients with the MCP endpoint URL advertised by the service. Requests must include MCP transport headers such as `Mcp-Protocol-Version` and `Mcp-Method`; method-specific requests may also require `Mcp-Name` and `Mcp-Param-*` headers."
+  },
+  "paths": {
+    "/": {
+      "post": {
+        "operationId": "mcp",
+        "tags": [
+          "MCP"
+        ],
+        "description": "Sends a raw MCP JSON-RPC request to the client base URL. The caller supplies required MCP transport headers.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JSONRPCRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JSONRPCResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Annotations": {
+        "type": "object",
+        "description": "Annotations provide optional metadata for MCP resources and content.",
+        "properties": {
+          "audience": {
+            "type": "array",
+            "description": "Audience describes who the data is intended for.",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            }
+          },
+          "lastModified": {
+            "type": "string",
+            "description": "LastModified is an ISO 8601 timestamp for the last modification time."
+          },
+          "priority": {
+            "type": "number",
+            "format": "double",
+            "description": "Priority describes importance from 0 to 1, with 1 most important."
+          }
+        }
+      },
+      "CacheScope": {
+        "type": "string",
+        "enum": [
+          "public",
+          "private"
+        ],
+        "description": "CacheScope describes who may cache an MCP result."
+      },
+      "Capabilities": {
+        "type": "object",
+        "description": "Capabilities describes server-supported MCP features.",
+        "properties": {
+          "completions": {
+            "$ref": "#/components/schemas/MetaObject",
+            "description": "Completions is present if the server supports argument completion suggestions."
+          },
+          "experimental": {
+            "$ref": "#/components/schemas/Extensions",
+            "description": "Experimental contains non-standard capabilities supported by the server."
+          },
+          "extensions": {
+            "$ref": "#/components/schemas/Extensions",
+            "description": "Extensions contains optional MCP extensions supported by the server."
+          },
+          "logging": {
+            "$ref": "#/components/schemas/MetaObject",
+            "description": "DeprecatedLogging is present if the server supports sending log messages to the client.\n\nDeprecated as of protocol version 2026-07-28, but still present in that\nschema. This is native 2026-07-28 compatibility, not released-version\ncompat.go support; remove it only after the upstream 2026+ schema drops it."
+          },
+          "prompts": {
+            "$ref": "#/components/schemas/PromptsCapability",
+            "description": "Prompts is present if the server offers prompt templates."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/ResourcesCapability",
+            "description": "Resources is present if the server offers resources to read."
+          },
+          "tools": {
+            "$ref": "#/components/schemas/ToolsCapability",
+            "description": "Tools is present if the server offers tools to call."
+          }
+        },
+        "required": [
+          "tools"
+        ]
+      },
+      "ClientCapabilities": {
+        "type": "object",
+        "description": "ClientCapabilities describes capabilities the client supports for a request.",
+        "properties": {
+          "elicitation": {
+            "$ref": "#/components/schemas/ElicitationCapability",
+            "description": "Elicitation is present if the client supports server-initiated user elicitation."
+          },
+          "experimental": {
+            "$ref": "#/components/schemas/Extensions",
+            "description": "Experimental contains non-standard capabilities supported by the client."
+          },
+          "extensions": {
+            "$ref": "#/components/schemas/Extensions",
+            "description": "Extensions contains optional MCP extensions supported by the client."
+          },
+          "roots": {
+            "$ref": "#/components/schemas/MetaObject",
+            "description": "DeprecatedRoots is present if the client supports listing roots.\n\nDeprecated as of protocol version 2026-07-28, but still present in that\nschema. This is native 2026-07-28 compatibility, not released-version\ncompat.go support; remove it only after the upstream 2026+ schema drops it."
+          },
+          "sampling": {
+            "$ref": "#/components/schemas/SamplingCapability",
+            "description": "DeprecatedSampling is present if the client supports server-initiated LLM sampling.\n\nDeprecated as of protocol version 2026-07-28, but still present in that\nschema. This is native 2026-07-28 compatibility, not released-version\ncompat.go support; remove it only after the upstream 2026+ schema drops it."
+          }
+        }
+      },
+      "ContentBlock": {
+        "type": "object",
+        "description": "ContentBlock is an MCP content item.\n\nThe draft schema models this as a union. Validate checks that only fields for\nthe selected content type are present.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "annotations": {
+            "$ref": "#/components/schemas/Annotations",
+            "description": "Annotations provide optional client metadata."
+          },
+          "data": {
+            "type": "string",
+            "description": "Data is base64-encoded data for image and audio blocks."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description helps clients and LLMs understand linked resources."
+          },
+          "icons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Icon"
+            }
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "MimeType is required for image and audio content and optional for resources."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is used by resource_link content."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/ResourceContent",
+            "description": "Resource contains embedded resource contents for resource blocks."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size is the raw resource size in bytes, if known."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text is the text content for text blocks."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title is a human-readable display name."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ContentType",
+            "description": "Type identifies the content variant."
+          },
+          "uri": {
+            "type": "string",
+            "description": "URI identifies resource_link content."
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "ContentType": {
+        "type": "string",
+        "enum": [
+          "audio",
+          "image",
+          "resource",
+          "resource_link",
+          "text"
+        ],
+        "description": "ContentType identifies the kind of content block in a tool result."
+      },
+      "ElicitationCapability": {
+        "type": "object",
+        "description": "ElicitationCapability describes client elicitation support.",
+        "properties": {
+          "form": {
+            "$ref": "#/components/schemas/MetaObject",
+            "description": "Form declares support for form-mode elicitation."
+          },
+          "url": {
+            "$ref": "#/components/schemas/MetaObject",
+            "description": "URL declares support for URL-mode elicitation."
+          }
+        }
+      },
+      "Extensions": {
+        "type": "object",
+        "description": "Extensions stores namespaced MCP extension payloads.\n\nThe draft schema constrains values to JSON objects. RawMessage keeps the DTO\nforward-compatible; validate extension values before depending on object shape.",
+        "additionalProperties": {
+          "description": "JSONValue"
+        }
+      },
+      "Icon": {
+        "type": "object",
+        "description": "Icon describes an optionally-sized icon for UI display.",
+        "properties": {
+          "mimeType": {
+            "type": "string",
+            "description": "MimeType overrides a missing or generic source MIME type."
+          },
+          "sizes": {
+            "type": "array",
+            "description": "Sizes lists supported dimensions, such as \"48x48\" or \"any\".",
+            "items": {
+              "type": "string"
+            }
+          },
+          "src": {
+            "type": "string",
+            "description": "Src is an icon URI, such as an HTTPS URL or data URI."
+          },
+          "theme": {
+            "type": "string",
+            "description": "Theme indicates whether the icon targets a light or dark background."
+          }
+        },
+        "required": [
+          "src"
+        ]
+      },
+      "Implementation": {
+        "type": "object",
+        "description": "Implementation describes an MCP client or server implementation.",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Description explains what this implementation does."
+          },
+          "icons": {
+            "type": "array",
+            "description": "Icons contains optional sized icons for UI display.",
+            "items": {
+              "$ref": "#/components/schemas/Icon"
+            }
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the programmatic implementation identifier."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title is a human-readable display name."
+          },
+          "version": {
+            "type": "string",
+            "description": "Version is the implementation version."
+          },
+          "websiteUrl": {
+            "type": "string",
+            "description": "WebsiteURL is an optional website for this implementation."
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ]
+      },
+      "JSONRPCError": {
+        "type": "object",
+        "description": "JSONRPCError is a JSON-RPC error object.",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Code identifies the error type."
+          },
+          "data": {
+            "description": "Data carries sender-defined additional error information.",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Message is a concise single-sentence description of the error."
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "JSONRPCNotification": {
+        "type": "object",
+        "description": "JSONRPCNotification is a JSON-RPC notification that does not expect a response.",
+        "properties": {
+          "jsonrpc": {
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/NotificationMethod"
+          },
+          "params": {
+            "description": "JSONValue"
+          }
+        },
+        "required": [
+          "jsonrpc",
+          "method"
+        ]
+      },
+      "JSONRPCRequest": {
+        "type": "object",
+        "description": "JSONRPCRequest is a JSON-RPC request that expects a response.",
+        "properties": {
+          "id": {
+            "description": "JSONValue"
+          },
+          "jsonrpc": {
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/Method"
+          },
+          "params": {
+            "description": "JSONValue"
+          }
+        },
+        "required": [
+          "jsonrpc",
+          "method"
+        ]
+      },
+      "JSONRPCResponse": {
+        "type": "object",
+        "description": "JSONRPCResponse is a JSON-RPC response containing either a result or an error.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/JSONRPCError"
+          },
+          "id": {
+            "description": "JSONValue"
+          },
+          "jsonrpc": {
+            "type": "string"
+          },
+          "result": {
+            "description": "JSONValue"
+          }
+        },
+        "required": [
+          "jsonrpc"
+        ]
+      },
+      "MetaObject": {
+        "type": "object",
+        "description": "MetaObject is metadata attached to MCP interactions.\n\nMCP reserves protocol-level key names. Implementations should use prefixed\nreverse-DNS keys for their own metadata.",
+        "additionalProperties": {
+          "description": "JSONValue"
+        }
+      },
+      "Method": {
+        "type": "string",
+        "enum": [
+          "server/discover",
+          "tools/list",
+          "tools/call",
+          "resources/list",
+          "resources/read",
+          "resources/templates/list",
+          "skills/get",
+          "skills/list",
+          "subscriptions/listen"
+        ],
+        "description": "Method is an MCP JSON-RPC method name."
+      },
+      "NotificationMethod": {
+        "type": "string",
+        "enum": [
+          "notifications/subscriptions/acknowledged",
+          "notifications/subscriptions/initial_state",
+          "notifications/resources/list_changed",
+          "notifications/resources/updated"
+        ],
+        "description": "NotificationMethod is an MCP JSON-RPC notification method name."
+      },
+      "OpenAIUserLocation": {
+        "type": "object",
+        "description": "OpenAIUserLocation contains optional client location hints. Only the device's\nIANA timezone is used; these untrusted hints must not influence authorization.",
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "description": "Timezone is the caller device's IANA timezone, such as America/Toronto."
+          }
+        }
+      },
+      "PaginatedRequestParams": {
+        "type": "object",
+        "description": "PaginatedRequestParams contains common request metadata and an optional cursor.",
+        "properties": {
+          "_meta": {
+            "description": "RequestMeta"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Cursor is an opaque pagination token."
+          }
+        },
+        "required": [
+          "_meta"
+        ]
+      },
+      "PromptsCapability": {
+        "type": "object",
+        "description": "PromptsCapability describes prompt support advertised by the server.",
+        "properties": {
+          "listChanged": {
+            "type": "boolean",
+            "description": "ListChanged indicates support for prompt list change notifications."
+          }
+        }
+      },
+      "ResourceContent": {
+        "type": "object",
+        "description": "ResourceContent contains resource data returned by resources/read.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "blob": {
+            "type": "string",
+            "description": "Blob contains base64-encoded binary resource contents."
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "MimeType is the resource MIME type, if known."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text contains textual resource contents."
+          },
+          "uri": {
+            "type": "string",
+            "description": "URI identifies this resource."
+          }
+        },
+        "required": [
+          "uri"
+        ]
+      },
+      "ResourceDescriptor": {
+        "type": "object",
+        "description": "ResourceDescriptor describes a resource the server can read.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "annotations": {
+            "$ref": "#/components/schemas/Annotations",
+            "description": "Annotations provide optional client metadata."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description helps clients and LLMs understand the resource."
+          },
+          "icons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Icon"
+            }
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "MimeType is the resource MIME type, if known."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the programmatic resource identifier."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size is the raw resource size in bytes, if known."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title is a human-readable display name."
+          },
+          "uri": {
+            "type": "string",
+            "description": "URI identifies this resource."
+          }
+        },
+        "required": [
+          "uri",
+          "name"
+        ]
+      },
+      "ResourceTemplateDescriptor": {
+        "type": "object",
+        "description": "ResourceTemplateDescriptor describes a parameterized MCP resource.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "annotations": {
+            "$ref": "#/components/schemas/Annotations",
+            "description": "Annotations provide optional client metadata."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description helps clients and LLMs understand the template."
+          },
+          "icons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Icon"
+            }
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "MimeType is the MIME type for matching resources, if uniform."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the programmatic template identifier."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title is a human-readable display name."
+          },
+          "uriTemplate": {
+            "type": "string",
+            "description": "URITemplate is an RFC 6570 URI template for constructing resource URIs."
+          }
+        },
+        "required": [
+          "name",
+          "uriTemplate"
+        ]
+      },
+      "ResourceTemplatesListResult": {
+        "type": "object",
+        "description": "ResourceTemplatesListResult is the response payload for resources/templates/list.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "cacheScope": {
+            "$ref": "#/components/schemas/CacheScope"
+          },
+          "nextCursor": {
+            "type": "string"
+          },
+          "resourceTemplates": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ResourceTemplateDescriptor"
+            }
+          },
+          "resultType": {
+            "$ref": "#/components/schemas/ResultType"
+          },
+          "ttlMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "resultType",
+          "resourceTemplates",
+          "ttlMs",
+          "cacheScope"
+        ]
+      },
+      "ResourcesCapability": {
+        "type": "object",
+        "description": "ResourcesCapability describes resource support advertised by the server.",
+        "properties": {
+          "listChanged": {
+            "type": "boolean",
+            "description": "ListChanged indicates support for resource list change notifications."
+          },
+          "subscribe": {
+            "type": "boolean",
+            "description": "Subscribe indicates support for subscribing to individual resource updates."
+          }
+        }
+      },
+      "ResourcesListResult": {
+        "type": "object",
+        "description": "ResourcesListResult is the response payload for resources/list.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "cacheScope": {
+            "$ref": "#/components/schemas/CacheScope"
+          },
+          "nextCursor": {
+            "type": "string"
+          },
+          "resources": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ResourceDescriptor"
+            }
+          },
+          "resultType": {
+            "$ref": "#/components/schemas/ResultType"
+          },
+          "ttlMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "resultType",
+          "resources",
+          "ttlMs",
+          "cacheScope"
+        ]
+      },
+      "ResourcesReadParams": {
+        "type": "object",
+        "description": "ResourcesReadParams is the request params payload for resources/read.",
+        "properties": {
+          "_meta": {
+            "description": "RequestMeta"
+          },
+          "inputResponses": {
+            "description": "InputResponses carries responses to server-initiated requests from a prior input_required result.",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          },
+          "requestState": {
+            "type": "string",
+            "description": "RequestState carries opaque state from a prior input_required result."
+          },
+          "uri": {
+            "type": "string",
+            "description": "URI identifies the resource to read."
+          }
+        },
+        "required": [
+          "_meta",
+          "uri"
+        ]
+      },
+      "ResourcesReadResult": {
+        "type": "object",
+        "description": "ResourcesReadResult is the response payload for resources/read.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "cacheScope": {
+            "$ref": "#/components/schemas/CacheScope",
+            "description": "CacheScope indicates whether the response may be cached publicly or privately."
+          },
+          "contents": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Contents contains text or blob resource contents.",
+            "items": {
+              "$ref": "#/components/schemas/ResourceContent"
+            }
+          },
+          "resultType": {
+            "$ref": "#/components/schemas/ResultType"
+          },
+          "ttlMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "TTLMS hints how long clients may cache this response in milliseconds."
+          }
+        },
+        "required": [
+          "resultType",
+          "contents",
+          "ttlMs",
+          "cacheScope"
+        ]
+      },
+      "ResultType": {
+        "type": "string",
+        "enum": [
+          "complete"
+        ],
+        "description": "ResultType describes whether an MCP result is complete or partial."
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "user",
+          "assistant"
+        ],
+        "description": "Role identifies an MCP audience role."
+      },
+      "SamplingCapability": {
+        "type": "object",
+        "description": "SamplingCapability describes deprecated client sampling support.",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/MetaObject",
+            "description": "Context declares context inclusion support."
+          },
+          "tools": {
+            "$ref": "#/components/schemas/MetaObject",
+            "description": "Tools declares tool-use support."
+          }
+        }
+      },
+      "ServerDiscoverResult": {
+        "type": "object",
+        "description": "ServerDiscoverResult is the result returned for a server/discover request.",
+        "properties": {
+          "cacheScope": {
+            "$ref": "#/components/schemas/CacheScope",
+            "description": "CacheScope indicates whether the response may be cached publicly or privately."
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities",
+            "description": "Capabilities advertises server features."
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Instructions gives natural-language guidance for using the server effectively.\n\nClients may include it in an LLM system prompt. It should not duplicate tool\ndescriptions."
+          },
+          "resultType": {
+            "$ref": "#/components/schemas/ResultType"
+          },
+          "serverInfo": {
+            "$ref": "#/components/schemas/Implementation",
+            "description": "ServerInfo describes the server software implementation."
+          },
+          "supportedVersions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "SupportedVersions lists MCP protocol versions supported by this server.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ttlMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "TTLMS hints how long clients may cache this response in milliseconds."
+          }
+        },
+        "required": [
+          "resultType",
+          "supportedVersions",
+          "capabilities",
+          "serverInfo",
+          "ttlMs",
+          "cacheScope"
+        ]
+      },
+      "SubscriptionFilter": {
+        "type": "object",
+        "description": "SubscriptionFilter describes MCP subscription notifications requested by a client.",
+        "properties": {
+          "resourceSubscriptions": {
+            "type": "array",
+            "description": "ResourceSubscriptions requests updates for individual resource URIs.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resourcesListChanged": {
+            "type": "boolean",
+            "description": "ResourcesListChanged requests resource list change notifications."
+          }
+        }
+      },
+      "SubscriptionNotificationParams": {
+        "type": "object",
+        "description": "SubscriptionNotificationParams is the payload for subscription notifications.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "notifications": {
+            "$ref": "#/components/schemas/SubscriptionFilter",
+            "description": "Notifications is the subset of requested notification types the server accepted."
+          },
+          "uri": {
+            "type": "string",
+            "description": "URI identifies an updated resource."
+          }
+        }
+      },
+      "SubscriptionsInitialStateParams": {
+        "type": "object",
+        "description": "SubscriptionsInitialStateParams is the payload for the\nnotifications/subscriptions/initial_state notification.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "contents": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Contents is the resources/read result for the same target, so a client\nthat applies the payload holds the post-subscription state without a\nsecond read.",
+            "items": {
+              "$ref": "#/components/schemas/ResourceContent"
+            }
+          },
+          "uri": {
+            "type": "string",
+            "description": "URI is the subscribed target whose initial state was delivered."
+          }
+        },
+        "required": [
+          "uri",
+          "contents"
+        ]
+      },
+      "SubscriptionsListenParams": {
+        "type": "object",
+        "description": "SubscriptionsListenParams is the request params payload for subscriptions/listen.",
+        "properties": {
+          "_meta": {
+            "description": "RequestMeta"
+          },
+          "notifications": {
+            "$ref": "#/components/schemas/SubscriptionFilter",
+            "description": "Notifications declares notification types the client opts in to."
+          }
+        },
+        "required": [
+          "_meta",
+          "notifications"
+        ]
+      },
+      "ToolAnnotations": {
+        "type": "object",
+        "description": "ToolAnnotations describe MCP tool behavior hints.",
+        "properties": {
+          "destructiveHint": {
+            "type": "boolean",
+            "description": "DestructiveHint indicates the tool may perform destructive updates."
+          },
+          "idempotentHint": {
+            "type": "boolean",
+            "description": "IdempotentHint indicates repeated calls with the same arguments have no additional effect."
+          },
+          "openWorldHint": {
+            "type": "boolean",
+            "description": "OpenWorldHint indicates the tool may interact with external entities."
+          },
+          "readOnlyHint": {
+            "type": "boolean",
+            "description": "ReadOnlyHint indicates the tool does not modify its environment."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title is a human-readable title for the tool."
+          }
+        }
+      },
+      "ToolCallResult": {
+        "type": "object",
+        "description": "ToolCallResult is the response payload for a tool call.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "content": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Content is the unstructured result of the tool call.",
+            "items": {
+              "$ref": "#/components/schemas/ContentBlock"
+            }
+          },
+          "isError": {
+            "type": "boolean",
+            "description": "IsError indicates the tool call ended in an error visible to the model."
+          },
+          "resultType": {
+            "$ref": "#/components/schemas/ResultType"
+          },
+          "structuredContent": {
+            "description": "StructuredContent is optional JSON matching the tool output schema on success.",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          }
+        },
+        "required": [
+          "resultType",
+          "content"
+        ]
+      },
+      "ToolDescriptor": {
+        "type": "object",
+        "description": "ToolDescriptor describes a tool the client can call.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "annotations": {
+            "$ref": "#/components/schemas/ToolAnnotations",
+            "description": "Annotations contains optional tool behavior hints."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description helps clients and LLMs understand the tool."
+          },
+          "icons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Icon"
+            }
+          },
+          "inputSchema": {
+            "description": "InputSchema defines the expected JSON object arguments for the tool.",
+            "allOf": [
+              {
+                "description": "JSONSchema"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Name is the programmatic tool identifier."
+          },
+          "outputSchema": {
+            "description": "OutputSchema defines the structuredContent shape for successful results.",
+            "allOf": [
+              {
+                "description": "JSONSchema"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "Title is a human-readable display name."
+          }
+        },
+        "required": [
+          "name",
+          "inputSchema"
+        ]
+      },
+      "ToolsCallParams": {
+        "type": "object",
+        "description": "ToolsCallParams is the request params payload for tools/call.",
+        "properties": {
+          "_meta": {
+            "description": "RequestMeta"
+          },
+          "arguments": {
+            "description": "Arguments contains tool arguments as a JSON object.",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          },
+          "inputResponses": {
+            "description": "InputResponses carries responses to server-initiated requests from a prior input_required result.",
+            "allOf": [
+              {
+                "description": "JSONValue"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Name identifies the tool to invoke."
+          },
+          "requestState": {
+            "type": "string",
+            "description": "RequestState carries opaque state from a prior input_required result."
+          }
+        },
+        "required": [
+          "_meta",
+          "name"
+        ]
+      },
+      "ToolsCapability": {
+        "type": "object",
+        "description": "ToolsCapability describes tool support advertised by the server.",
+        "properties": {
+          "listChanged": {
+            "type": "boolean",
+            "description": "ListChanged indicates support for tool list change notifications."
+          }
+        }
+      },
+      "ToolsListResult": {
+        "type": "object",
+        "description": "ToolsListResult is the response payload for tools/list.",
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MetaObject"
+          },
+          "cacheScope": {
+            "$ref": "#/components/schemas/CacheScope"
+          },
+          "nextCursor": {
+            "type": "string"
+          },
+          "resultType": {
+            "$ref": "#/components/schemas/ResultType"
+          },
+          "tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ToolDescriptor"
+            }
+          },
+          "ttlMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "resultType",
+          "tools",
+          "ttlMs",
+          "cacheScope"
+        ]
+      }
+    },
+    "responses": {
+      "error": {
+        "description": "MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200. Tool execution errors preserve their human-readable content and expose an application semantic code in `result._meta[\"com.fghbuild.gomode/errorCode\"]` when one is available.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/JSONRPCResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}
