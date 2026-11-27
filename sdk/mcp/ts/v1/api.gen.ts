@@ -24,9 +24,18 @@ function makeRequester(fetchFn: FetchFn) {
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetchFn(path, init);
     if (!res.ok) {
-      const err = (await res.json()) as JSONRPCResponse;
-      const e = new APIError(res.status, String(err.error?.code ?? "UNKNOWN"), undefined, res.headers.get("Retry-After"));
-      e.message = err.error?.message ?? "";
+      // A body that is not the error model, such as a proxy's plain-text 429, keeps its status.
+      const retryAfter = res.headers.get("Retry-After");
+      const text = await res.text();
+      let e: APIError;
+      try {
+        const err = JSON.parse(text) as JSONRPCResponse;
+        e = new APIError(res.status, String(err.error?.code ?? "UNKNOWN"), undefined, retryAfter);
+        e.message = err.error?.message ?? "";
+      } catch {
+        e = new APIError(res.status, "UNKNOWN", undefined, retryAfter);
+        e.message = text;
+      }
       throw e;
     }
     return res.json() as Promise<T>;
