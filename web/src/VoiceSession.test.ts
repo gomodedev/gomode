@@ -4155,7 +4155,9 @@ describe("voice network recovery", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(session.state.error).toBeNull();
       await vi.advanceTimersByTimeAsync(29_000);
+      expect(session.state.conversationActive).toBe(true);
       triggerIceState("failed");
+      expect(session.state.conversationActive).toBe(true);
       await vi.advanceTimersByTimeAsync(999);
       expect(FakePeerConnection.instances).toHaveLength(2);
       await vi.advanceTimersByTimeAsync(1);
@@ -4167,6 +4169,9 @@ describe("voice network recovery", () => {
       await vi.advanceTimersByTimeAsync(0);
       await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(4));
       expect(session.state.error).toBeNull();
+      expect(session.state.conversationActive).toBe(true);
+      session.disconnect();
+      expect(session.state.conversationActive).toBe(false);
     } finally {
       session.disconnect();
       vi.useRealTimers();

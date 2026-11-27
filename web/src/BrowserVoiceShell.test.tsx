@@ -6,6 +6,7 @@ import { A, Router } from "@solidjs/router";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { expect, vi } from "../tests/expect";
 import { deferred } from "../tests/deferred";
+import { FakeAudioContext } from "../tests/thinking-audio";
 import { defaultVoiceMessages } from "./VoiceMessages";
 import BrowserVoiceShell, { type BrowserVoiceShellProps } from "./BrowserVoiceShell";
 import { HostModeProvider } from "./HostMode";
@@ -53,6 +54,8 @@ function mount(
   ));
 }
 beforeEach(() => {
+  // Ending a conversation plays the disconnect chime.
+  vi.stubGlobal("AudioContext", FakeAudioContext);
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: { getUserMedia: vi.fn(), enumerateDevices: vi.fn(async () => []) },
@@ -72,6 +75,7 @@ afterEach(() => {
   delete window.goModeHost;
   globalThis.fetch = originalFetch;
   voiceSession.disconnect();
+  vi.unstubAllGlobals();
 });
 
 it("replaces host resource subscriptions when a new voice conversation starts", async () => {
@@ -103,6 +107,43 @@ it("replaces host resource subscriptions when a new voice conversation starts", 
     expect(subscribe.mock.calls[1]?.[0]?.sessionID).toBe(voiceSession.conversationID);
   } finally {
     prepareAudio.mockRestore();
+    subscribe.mockRestore();
+  }
+});
+
+it("keeps one service monitor through automatic recovery and closes it when the conversation ends", async () => {
+  const capabilities = vi.spyOn(mcpClient, "resourceCapabilities").mockResolvedValue({ subscribe: true });
+  const read = vi.spyOn(mcpClient, "readTextResource").mockResolvedValue("[]");
+  const discovery = vi
+    .spyOn(mcpClient, "listModelResources")
+    .mockResolvedValue({ resources: [{ uri: "fixture://catalog", name: "catalog" }], notifications: true });
+  const close = vi.fn();
+  const subscribe = vi.spyOn(mcpClient, "subscribeResources").mockReturnValue({ close });
+  try {
+    scope.setTools([]);
+    scope.setDataReady(true);
+    mount(() => scope);
+    await screen.findByTestId("voice-runtime");
+    voiceSession.setState((state) => ({ ...state, connected: true, conversationActive: true }));
+    await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+    const reads = read.mock.calls.length;
+
+    voiceSession.setState((state) => ({ ...state, connected: false, connectPhase: "reconnecting" }));
+    voiceSession.setState((state) => ({ ...state, connectPhase: "setup" }));
+    voiceSession.setState((state) => ({ ...state, connected: true, connectPhase: null }));
+    await Promise.resolve();
+    expect(capabilities).toHaveBeenCalledOnce();
+    expect(discovery).toHaveBeenCalledOnce();
+    expect(subscribe).toHaveBeenCalledOnce();
+    expect(read.mock.calls.length).toBe(reads);
+    expect(close).not.toHaveBeenCalled();
+
+    voiceSession.setState((state) => ({ ...state, connected: false, conversationActive: false }));
+    expect(close).toHaveBeenCalledOnce();
+  } finally {
+    discovery.mockRestore();
+    capabilities.mockRestore();
+    read.mockRestore();
     subscribe.mockRestore();
   }
 });
@@ -161,7 +202,7 @@ it("owns service context reads with the connected runtime and rejects retired re
     mount(() => scope);
     await screen.findByTestId("voice-runtime");
     expect(read).not.toHaveBeenCalled();
-    voiceSession.setState((state) => ({ ...state, connected: true }));
+    voiceSession.setState((state) => ({ ...state, connected: true, conversationActive: true }));
     await waitFor(() =>
       expect(read).toHaveBeenCalledWith("gomode://notifications", expect.any(AbortSignal), {
         sessionID: voiceSession.conversationID,

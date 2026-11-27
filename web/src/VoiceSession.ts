@@ -447,6 +447,11 @@ export interface VoiceState extends AudioRouteState {
   connectStatus: string | null;
   connectPhase: "setup" | "waiting" | "signaling" | "reconnecting" | null;
   connected: boolean;
+  /**
+   * A conversation runs: from its first session.ready until it is disconnected or fails, staying
+   * true while automatic recovery replaces the session.
+   */
+  conversationActive: boolean;
   listening: boolean;
   speaking: boolean;
   microphoneMode: MicrophoneMode;
@@ -1009,7 +1014,6 @@ export class VoiceSession {
   private _readyAt: number | null = null;
   private _recoveryContext = "";
   private readonly _audioRoutes: AudioRoutes;
-  private _voiceModeActive = false;
   private _callMetadata: MediaMetadata | null = null;
   private readonly _chime: VoiceChimePlayer;
   private readonly _thinkingEarcon: ThinkingEarcon;
@@ -1047,6 +1051,7 @@ export class VoiceSession {
       connectStatus: null,
       connectPhase: null,
       connected: false,
+      conversationActive: false,
       listening: false,
       speaking: false,
       microphoneMode: "listening",
@@ -2702,8 +2707,10 @@ export class VoiceSession {
       }
       this._callMetadata = null;
     }
-    if (!this._voiceModeActive) return;
-    this._voiceModeActive = false;
+    if (!this.state.conversationActive) return;
+    this._update((s) => {
+      s.conversationActive = false;
+    });
     if (!this.state.speechOff && (this.state.speechOutput !== "client" || !browserSpeechAvoidsChimes()))
       this._chime.playDisconnected();
   }
@@ -2713,7 +2720,7 @@ export class VoiceSession {
     try {
       // The caller is the host service, even when it uses an external voice gateway.
       const settings = await createGoModeClient().getSettings();
-      if (!this._ownsConnection(attempt) || !this._voiceModeActive) return;
+      if (!this._ownsConnection(attempt) || !this.state.conversationActive) return;
       if (typeof settings.service !== "string" || settings.service.trim() === "") {
         throw new Error("Go Mode service name is missing");
       }
@@ -2924,8 +2931,10 @@ export class VoiceSession {
         s.connected = true;
         s.error = null;
       });
-      if (!this._voiceModeActive) {
-        this._voiceModeActive = true;
+      if (!this.state.conversationActive) {
+        this._update((s) => {
+          s.conversationActive = true;
+        });
         if (!this.state.speechOff && (this.state.speechOutput !== "client" || !browserSpeechAvoidsChimes()))
           this._chime.playConnected();
       }

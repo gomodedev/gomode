@@ -69,7 +69,9 @@ export default function BrowserVoiceRuntime(props: BrowserVoiceRuntimeProps) {
     });
   });
   createEffect(() => {
-    if (!active() || !voiceSession.state.connected) return;
+    // One monitor per conversation: recovery keeps it, and the replacement session reads fresh
+    // context during setup, so a reconnect costs no monitor discovery, reads, or subscription.
+    if (!active() || !voiceSession.state.conversationActive) return;
     const events = props.resourceEvents;
     const source: ServiceResourceSource | undefined = events
       ? (options, receive) =>
