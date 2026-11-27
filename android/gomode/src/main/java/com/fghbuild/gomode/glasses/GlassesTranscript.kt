@@ -23,6 +23,7 @@
 // run active sessions at once. An idle session sends nothing, so it cannot clear the glasses while the
 // other owner's session runs. The shell also calls showVoiceErrors, so the wearer reads each voice error
 // that the phone shows; every such error ends the session, so the transcript leaves the display to it.
+// Both owners call showAudioErrors, whose fixed messages their phone screens show.
 package com.fghbuild.gomode.glasses
 
 import com.fghbuild.gomode.voice.TranscriptKind
@@ -39,8 +40,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 
@@ -321,4 +324,19 @@ internal suspend fun showVoiceErrors(
         .mapNotNull { state -> state.error?.let { state.errorId to it } }
         .distinctUntilChangedBy { (id, _) -> id }
         .collect { (_, error) -> notify(error) }
+}
+
+/**
+ * Passes each new [VoiceState.audioError] of [voice] to [notify], the current one included, such as a
+ * route that a switch could not reach. Its clearing sends nothing. Returns only when cancelled.
+ */
+internal suspend fun showAudioErrors(
+    voice: Flow<VoiceState>,
+    notify: (String) -> Unit,
+) {
+    voice
+        .map { it.audioError }
+        .distinctUntilChanged()
+        .filterNotNull()
+        .collect(notify)
 }

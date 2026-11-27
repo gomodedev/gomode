@@ -69,6 +69,7 @@ import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.glasses.GlassesAction
 import com.fghbuild.gomode.glasses.GlassesMicrophoneStream
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.showAudioErrors
 import com.fghbuild.gomode.glasses.showVoiceErrors
 import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.glasses.toggleMute
@@ -402,6 +403,9 @@ internal fun GoModeApp(
     }
     LaunchedEffect(manualVoiceSession, glassesOwner) {
         showVoiceErrors(manualVoiceSession.state, glassesOwner::notify)
+    }
+    LaunchedEffect(manualVoiceSession, glassesOwner) {
+        showAudioErrors(manualVoiceSession.state, glassesOwner::notify)
     }
     LaunchedEffect(manualVoiceSession, glassesOwner) {
         glassesOwner.detectHeadGestures(manualVoiceSession.state.map { it.started })

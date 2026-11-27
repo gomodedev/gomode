@@ -432,6 +432,22 @@ class GlassesTranscriptTest {
             assertEquals(listOf("Gateway unavailable", "Gateway unavailable"), shown)
         }
 
+    @Test
+    fun eachAudioErrorIsShownOnceAndItsClearingShowsNothing() =
+        runTest {
+            val voice = MutableStateFlow(VoiceState(audioError = "Could not list audio devices"))
+            val shown = mutableListOf<String>()
+            backgroundScope.launch { showAudioErrors(voice) { shown += it } }
+            runCurrent()
+            voice.value = voice.value.copy(micLevel = 0.5f)
+            runCurrent()
+            voice.value = voice.value.copy(audioError = null)
+            runCurrent()
+            voice.value = voice.value.copy(audioError = "Could not switch audio device")
+            runCurrent()
+            assertEquals(listOf("Could not list audio devices", "Could not switch audio device"), shown)
+        }
+
     // Records the text a fake display is told to show until the test ends.
     private fun TestScope.follow(
         voice: MutableStateFlow<VoiceState>,

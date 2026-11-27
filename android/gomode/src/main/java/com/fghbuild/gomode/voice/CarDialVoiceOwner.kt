@@ -44,6 +44,7 @@ import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.glasses.GlassesAction
 import com.fghbuild.gomode.glasses.GlassesOwner
+import com.fghbuild.gomode.glasses.showAudioErrors
 import com.fghbuild.gomode.glasses.showVoiceTranscript
 import com.fghbuild.gomode.glasses.toggleMute
 import com.fghbuild.gomode.service.ServiceSettingsClient
@@ -204,6 +205,11 @@ internal class CarDialVoiceOwner(
         scope.launch {
             session.collectLatest { voice ->
                 if (voice != null) glasses.detectHeadGestures(voice.state.map { it.started })
+            }
+        }
+        scope.launch {
+            session.collectLatest { voice ->
+                if (voice != null) showAudioErrors(voice.state, glasses::notify)
             }
         }
         // The glasses show the fixed failure that the call screen shows, never the provider's error.
