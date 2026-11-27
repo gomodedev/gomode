@@ -110,9 +110,10 @@ type AuditRecorder interface {
 // per-IP limits and "client:<client_id>" for per-client limits. Introspection
 // uses the authenticated client identity when one is scoped and otherwise
 // falls back to the remote address. The implementation chooses the window
-// size and request budget per key.
+// size and request budget per key. A rejection also reports how long until the
+// key is allowed again; the server sends it as Retry-After.
 type RateLimiter interface {
-	Allow(key string) bool
+	Allow(key string) (wait time.Duration, ok bool)
 }
 
 // ConsentPageData is the server-rendered OAuth consent page model.
@@ -528,10 +529,13 @@ func (s *Server) rateLimit(w http.ResponseWriter, key string) bool {
 	if s.rateLimiter == nil {
 		return true
 	}
-	if s.rateLimiter.Allow(key) {
+	wait, ok := s.rateLimiter.Allow(key)
+	if ok {
 		return true
 	}
-	w.Header().Set("Retry-After", "60")
+	// Retry-After holds whole seconds; round up so a retry lands after the reset.
+	seconds := max(1, (wait+time.Second-1)/time.Second)
+	w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
 	http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 	return false
 }

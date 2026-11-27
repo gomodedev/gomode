@@ -5714,8 +5714,8 @@ func TestRateLimiting(t *testing.T) {
 		if w.Code != http.StatusTooManyRequests {
 			t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusTooManyRequests, w.Body.String())
 		}
-		if got := w.Header().Get("Retry-After"); got != "60" {
-			t.Fatalf("Retry-After = %q, want 60", got)
+		if got := w.Header().Get("Retry-After"); got != "43" {
+			t.Fatalf("Retry-After = %q, want the limiter's 42.5 s rounded up to 43", got)
 		}
 	})
 
@@ -5775,19 +5775,21 @@ type inspectRateLimiter struct {
 	keys []string
 }
 
-func (l *inspectRateLimiter) Allow(key string) bool {
+func (l *inspectRateLimiter) Allow(key string) (time.Duration, bool) {
 	l.keys = append(l.keys, key)
-	return true
+	return 0, true
 }
 
 func (l *inspectRateLimiter) sawKey(key string) bool {
 	return slices.Contains(l.keys, key)
 }
 
-// denyRateLimiter always denies requests.
+// denyRateLimiter always denies requests for the next 42.5 s.
 type denyRateLimiter struct{}
 
-func (denyRateLimiter) Allow(key string) bool { return false }
+func (denyRateLimiter) Allow(key string) (time.Duration, bool) {
+	return 42500 * time.Millisecond, false
+}
 
 // countRateLimiter allows up to max requests per key.
 type countRateLimiter struct {
@@ -5796,14 +5798,14 @@ type countRateLimiter struct {
 	counts map[string]int
 }
 
-func (l *countRateLimiter) Allow(key string) bool {
+func (l *countRateLimiter) Allow(key string) (time.Duration, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.counts == nil {
 		l.counts = map[string]int{}
 	}
 	l.counts[key]++
-	return l.counts[key] <= l.max
+	return time.Minute, l.counts[key] <= l.max
 }
 
 // tieredCountRateLimiter gives aggregate IP and per-IP-client keys independent
@@ -5815,7 +5817,7 @@ type tieredCountRateLimiter struct {
 	counts    map[string]int
 }
 
-func (l *tieredCountRateLimiter) Allow(key string) bool {
+func (l *tieredCountRateLimiter) Allow(key string) (time.Duration, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.counts == nil {
@@ -5826,7 +5828,7 @@ func (l *tieredCountRateLimiter) Allow(key string) bool {
 	if strings.HasPrefix(key, "ip:") {
 		limit = l.ipMax
 	}
-	return l.counts[key] <= limit
+	return time.Minute, l.counts[key] <= limit
 }
 
 // testFlowServerConfig returns a ServerConfig pre-populated with test defaults,
