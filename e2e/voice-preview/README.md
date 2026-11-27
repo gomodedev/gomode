@@ -63,7 +63,9 @@ covers 2× text at 320 dp.
 
 The browser lists its current problems below the controls: one line, or bullets
 when there are several, with one X that clears them all. A problem leaves the
-list when its cause clears. Android retains the five newest failures, with
+list when its cause clears. A settings field's problem shows at its control
+while settings are open and in the list once they close. Before the runtime
+loads, the shell lists setup and context failures the same way. Android retains the five newest failures, with
 their engine and session phase, in voice settings.
 
 X hides the transcript without clearing it. A Material subtitles icon shows it

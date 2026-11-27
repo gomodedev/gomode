@@ -1,0 +1,66 @@
+/* The voice problem list: one line, or bullets, beside one X; separate from the lazy runtime. */
+
+/* The X stays beside the first line while problems wrap below it. */
+.panel {
+  display: flex;
+  gap: 0.25rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.issues {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A single problem: its recovery action follows the message and wraps under it on narrow panels. */
+.issueLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  align-items: center;
+  min-height: 44px;
+  margin: 0;
+}
+
+/* The first bullet's line centers on the X. */
+.issueList {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.625rem 0 0 1.25rem;
+  margin: 0;
+}
+
+.issueList > li::marker {
+  color: var(--color-danger);
+}
+
+.issueList .recovery {
+  margin-inline-start: 0.5rem;
+}
+
+.issueMessage {
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+}
+
+.recovery {
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  color: var(--color-text);
+  cursor: pointer;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+}
+
+.recovery:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.recovery[aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.6;
+}

@@ -1,6 +1,7 @@
 // Saved all-in-one or independently selected voice stages shared by overlay and host settings.
 
 import {
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -12,21 +13,35 @@ import {
   Match,
   Switch,
   on,
+  untrack,
   type Accessor,
   type JSX,
 } from "solid-js";
 import { browserRecognitionAvailable, browserSynthesisAvailable, browserVoiceMatchesLanguage } from "./BrowserSpeech";
 import { BROWSER_SPEECH_RATES, voiceSession, type SpeechStage, type VoiceSetupMode } from "./VoiceSession";
+import type { VoiceSettingsIssueKey } from "./VoiceIssues";
 import { WebAudioThinkingEarcon } from "./ThinkingEarcon";
 import { defaultVoiceSettingsMessages, type VoiceSettingsMessages } from "./VoiceMessages";
 import VoiceIcon from "./VoiceIcon";
 import controls from "./VoiceControls.module.css";
 import styles from "./VoiceSettings.module.css";
 
+/**
+ * Every field reports its problems through voiceSession.issues under its key, so a host page that
+ * embeds these settings without the overlay shows them at the controls too. While this view is
+ * shown, the list leaves them to it.
+ */
+const [languageDraftOwner, setLanguageDraftOwner] = createSignal<Element | null>(null);
+
+/**
+ * The root element of the settings view whose language draft failed to save, or null. The overlay
+ * blocks Connect only for its own view's draft; another view's draft never reaches a session.
+ */
+export { languageDraftOwner };
+
 export default function VoiceSettings(props: {
   messages?: Partial<VoiceSettingsMessages> | Accessor<Partial<VoiceSettingsMessages>>;
-  onError?: (error: string | null) => void;
-  onLanguageError?: (error: string | null) => void;
+  /** False while the host hides this view, so field problems show in the list instead. */
   visible?: boolean;
   /** Rendered at the end of the setup row, such as the host's close button. */
   tabAction?: JSX.Element;
@@ -52,6 +67,12 @@ export default function VoiceSettings(props: {
     const value = props.messages;
     return { ...defaultVoiceSettingsMessages, ...(typeof value === "function" ? value() : value) };
   };
+  const issues = voiceSession.issues;
+  createEffect(() => {
+    if (props.visible !== false) onCleanup(issues.showSettings());
+  });
+  const report = (key: VoiceSettingsIssueKey, error: unknown) =>
+    issues.raise(key, error instanceof Error ? error.message : String(error), null);
   const [tag, setTag] = createSignal(voiceSession.state.languageTag);
   let savedTag = voiceSession.state.languageTag;
   createEffect(() => {
@@ -59,7 +80,36 @@ export default function VoiceSettings(props: {
     setTag((draft) => (draft === savedTag ? next : draft));
     savedTag = next;
   });
-  const [languageError, setLanguageError] = createSignal<string | null>(null);
+  // Each view keeps its own draft, so the shared problem belongs to the view whose draft raised it.
+  let root!: HTMLDivElement;
+  const ownsLanguageError = () => languageDraftOwner() === root;
+  const languageError = () => (ownsLanguageError() ? issues.message("save.languageTag") : null);
+  const failLanguage = (error: unknown) =>
+    batch(() => {
+      setLanguageDraftOwner(root);
+      report("save.languageTag", error);
+    });
+  const clearLanguageError = () => {
+    if (!untrack(ownsLanguageError)) return;
+    batch(() => {
+      setLanguageDraftOwner(null);
+      issues.resolve("save.languageTag");
+    });
+  };
+  // Only dismissal resolves the key while this view still owns it: return the field to the saved
+  // language, the one a session uses.
+  createEffect(
+    on(
+      () => issues.message("save.languageTag"),
+      (error) => {
+        if (error !== null || !untrack(ownsLanguageError)) return;
+        setLanguageDraftOwner(null);
+        setTag(voiceSession.state.languageTag);
+      },
+    ),
+  );
+  // The draft dies with this view, and so does its problem.
+  onCleanup(clearLanguageError);
   // The overlay grows upward from the viewport bottom, so a message shown during
   // a press moves its target before release and the click misses. Show blur
   // errors after the press, one task later: a touch tap dispatches its
@@ -95,14 +145,8 @@ export default function VoiceSettings(props: {
       document.removeEventListener("pointercancel", release, true);
     });
   });
-  // One save failure at a time among setup controls: a later successful save
-  // shows that storage works again, so it clears whichever control failed.
-  const [setupSaveError, setSetupSaveError] = createSignal<{ owner: SetupControl; message: string } | null>(null);
-  const [voiceSaveError, setVoiceSaveError] = createSignal<string | null>(null);
-  const [browserVoiceError, setBrowserVoiceError] = createSignal<string | null>(null);
-  const [speedSaveError, setSpeedSaveError] = createSignal<string | null>(null);
-  const [reasoningError, setReasoningError] = createSignal<string | null>(null);
-  const [usageError, setUsageError] = createSignal<string | null>(null);
+  // A changed gateway, choice, or speech location replaces the voice pickers; their failed saves no
+  // longer apply. Deferred, so mounting a second view keeps the first one's problems.
   createEffect(
     on(
       () => [
@@ -112,19 +156,17 @@ export default function VoiceSettings(props: {
         voiceSession.state.speechInput,
         voiceSession.state.speechOutput,
       ],
-      () => {
-        setVoiceSaveError(null);
-        setBrowserVoiceError(null);
-      },
+      () => issues.resolve("save.browserSpeechRate", "save.browserVoiceURI", "save.voiceName"),
+      { defer: true },
     ),
   );
-  const saveFailure = (owner: SetupControl) => {
-    const failure = setupSaveError();
-    return failure?.owner === owner ? failure.message : null;
-  };
-  const onSetupSave = (owner: SetupControl) => (error: string | null) =>
-    setSetupSaveError(error === null ? null : { owner, message: error });
-  const issues = voiceSession.issues;
+  // One save failure at a time among setup controls: a later successful save
+  // shows that storage works again, so it clears whichever control failed.
+  const onSetupSave = (key: SetupSaveKey) => (error: string | null) =>
+    batch(() => {
+      issues.resolve(...SETUP_SAVE_KEYS.filter((other) => error === null || other !== key));
+      if (error !== null) issues.raise(key, error, null);
+    });
   const resolutionError = (stage: SpeechStage | null) =>
     voiceSession.state.choicesStatus === "error"
       ? null
@@ -135,18 +177,8 @@ export default function VoiceSettings(props: {
     voiceSession.state.choicesStatus !== "loading" && voiceSession.state.choicesStatus !== "error";
   // Without a speaking-voice picker, the model picker owns the session's voice failure.
   const unplacedVoiceError = () => (speakingVoicesShown() ? null : issues.message("voiceName"));
-  const modelError = () => saveFailure("model") ?? resolutionError(null) ?? unplacedVoiceError();
-  const speakingVoiceError = () => voiceSaveError() ?? issues.message("voiceName");
-  const error = () =>
-    shownLanguageError() ??
-    usageError() ??
-    reasoningError() ??
-    setupSaveError()?.message ??
-    voiceSaveError() ??
-    browserVoiceError() ??
-    speedSaveError();
-  createEffect(() => props.onError?.(error()));
-  createEffect(() => props.onLanguageError?.(languageError()));
+  const modelError = () => issues.message("save.choice") ?? resolutionError(null) ?? unplacedVoiceError();
+  const speakingVoiceError = () => issues.message("save.voiceName") ?? issues.message("voiceName");
   const browserDescriptionId = createUniqueId();
   const speechOffHintId = createUniqueId();
   const active = () => voiceSession.state.connected || voiceSession.state.connectStatus !== null;
@@ -194,9 +226,9 @@ export default function VoiceSettings(props: {
     try {
       voiceSession.selectLanguage(tag());
       setTag(voiceSession.state.languageTag);
-      setLanguageError(null);
+      clearLanguageError();
     } catch (err) {
-      setLanguageError(err instanceof Error ? err.message : String(err));
+      failLanguage(err);
     }
   };
   createEffect(() => {
@@ -220,16 +252,18 @@ export default function VoiceSettings(props: {
   const languageHintId = createUniqueId();
   const reasoningErrorId = createUniqueId();
   const usageErrorId = createUniqueId();
+  const reasoningError = () => issues.message("save.showReasoning");
+  const usageError = () => issues.message("save.showUsageStats");
   const setupRadios: Partial<Record<VoiceSetupMode, HTMLInputElement>> = {};
   const chooseSetup = (mode: VoiceSetupMode) => {
     try {
       voiceSession.selectSetupMode(mode);
-      setSetupSaveError(null);
+      onSetupSave("save.setupMode")(null);
     } catch (error) {
       // A native radio checks itself before change; restore the effective setup.
       for (const [option, radio] of Object.entries(setupRadios))
         radio.checked = option === voiceSession.state.setupMode;
-      setSetupSaveError({ owner: "setup", message: error instanceof Error ? error.message : String(error) });
+      onSetupSave("save.setupMode")(error instanceof Error ? error.message : String(error));
     }
   };
   const retry = () => (
@@ -248,7 +282,7 @@ export default function VoiceSettings(props: {
   );
 
   return (
-    <div class={styles.settings}>
+    <div ref={root} class={styles.settings}>
       <section class={styles.group} aria-labelledby={voiceHeadingId}>
         <h2 id={voiceHeadingId} class={styles.heading}>
           {messages().voiceSection}
@@ -262,7 +296,7 @@ export default function VoiceSettings(props: {
               class={styles.segmented}
               role="radiogroup"
               aria-label={messages().voiceSetup}
-              aria-describedby={saveFailure("setup") === null ? undefined : setupErrorId}
+              aria-describedby={issues.message("save.setupMode") === null ? undefined : setupErrorId}
             >
               <For each={["all-in-one", "parts"] as const}>
                 {(mode) => (
@@ -294,7 +328,7 @@ export default function VoiceSettings(props: {
             </div>
             {props.tabAction}
           </div>
-          <FieldError id={setupErrorId} message={saveFailure("setup")} />
+          <FieldError id={setupErrorId} message={issues.message("save.setupMode")} />
         </div>
         <div class={styles.fieldGrid}>
           <Switch>
@@ -322,7 +356,7 @@ export default function VoiceSettings(props: {
                 browser={messages().browserSpeech}
                 supported={recognitionSupported}
                 disabled={active()}
-                error={saveFailure("input") ?? resolutionError("input")}
+                error={issues.message("save.speechInput") ?? resolutionError("input")}
                 hint={
                   <Show when={voiceSession.state.speechInput === "client"}>
                     <p id={browserDescriptionId} class={styles.hint}>
@@ -333,7 +367,7 @@ export default function VoiceSettings(props: {
                   </Show>
                 }
                 hintId={voiceSession.state.speechInput === "client" ? browserDescriptionId : undefined}
-                onSave={onSetupSave("input")}
+                onSave={onSetupSave("save.speechInput")}
               />
               <ChoiceChips
                 label={messages().languageModel}
@@ -342,7 +376,7 @@ export default function VoiceSettings(props: {
                 retry={
                   voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined
                 }
-                onSave={onSetupSave("model")}
+                onSave={onSetupSave("save.choice")}
               />
               <SpeechStageChips
                 stage="output"
@@ -351,7 +385,7 @@ export default function VoiceSettings(props: {
                 off={messages().speechOff}
                 supported={synthesisSupported}
                 disabled={active()}
-                error={saveFailure("output") ?? resolutionError("output")}
+                error={issues.message("save.speechOutput") ?? resolutionError("output")}
                 hint={
                   <Switch>
                     <Match when={voiceSession.state.speechOff}>
@@ -365,7 +399,7 @@ export default function VoiceSettings(props: {
                   </Switch>
                 }
                 hintId={voiceSession.state.speechOff ? speechOffHintId : undefined}
-                onSave={onSetupSave("output")}
+                onSave={onSetupSave("save.speechOutput")}
               />
             </Match>
             <Match when={true}>
@@ -376,7 +410,7 @@ export default function VoiceSettings(props: {
                 retry={
                   voiceSession.state.voiceStatus === "error" && unplacedVoiceError() !== null ? retry() : undefined
                 }
-                onSave={onSetupSave("model")}
+                onSave={onSetupSave("save.choice")}
               />
             </Match>
           </Switch>
@@ -401,7 +435,7 @@ export default function VoiceSettings(props: {
                 placeholder={messages().voiceLanguageExample}
                 onInput={(event) => {
                   setTag(event.currentTarget.value);
-                  setLanguageError(null);
+                  clearLanguageError();
                 }}
                 // Flush before a close or connect click can use the saved preference.
                 onBlur={saveLanguage}
@@ -421,7 +455,7 @@ export default function VoiceSettings(props: {
               synthesisSupported
             }
           >
-            <Field label={messages().speakingVoice} for={browserVoiceId} error={browserVoiceError()}>
+            <Field label={messages().speakingVoice} for={browserVoiceId} error={issues.message("save.browserVoiceURI")}>
               {(errorId) => (
                 <Picker>
                   <select
@@ -431,10 +465,10 @@ export default function VoiceSettings(props: {
                     onChange={(event) => {
                       try {
                         voiceSession.selectBrowserVoice(event.currentTarget.value);
-                        setBrowserVoiceError(null);
+                        issues.resolve("save.browserVoiceURI");
                       } catch (err) {
                         event.currentTarget.value = browserVoice();
-                        setBrowserVoiceError(err instanceof Error ? err.message : String(err));
+                        report("save.browserVoiceURI", err);
                       }
                     }}
                     aria-describedby={errorId()}
@@ -454,7 +488,7 @@ export default function VoiceSettings(props: {
                 </Picker>
               )}
             </Field>
-            <Field label={messages().speakingSpeed} for={speedId} error={speedSaveError()}>
+            <Field label={messages().speakingSpeed} for={speedId} error={issues.message("save.browserSpeechRate")}>
               {(errorId) => (
                 <Picker>
                   <select
@@ -464,10 +498,10 @@ export default function VoiceSettings(props: {
                     onChange={(event) => {
                       try {
                         voiceSession.selectBrowserSpeechRate(Number(event.currentTarget.value));
-                        setSpeedSaveError(null);
+                        issues.resolve("save.browserSpeechRate");
                       } catch (err) {
                         event.currentTarget.value = String(voiceSession.state.browserSpeechRate);
-                        setSpeedSaveError(err instanceof Error ? err.message : String(err));
+                        report("save.browserSpeechRate", err);
                       }
                     }}
                     aria-describedby={errorId()}
@@ -498,10 +532,10 @@ export default function VoiceSettings(props: {
                     onChange={(event) => {
                       try {
                         voiceSession.selectSpeakingVoice(event.currentTarget.value);
-                        setVoiceSaveError(null);
+                        issues.resolve("save.voiceName");
                       } catch (err) {
                         event.currentTarget.value = voiceSession.state.voiceName ?? "";
-                        setVoiceSaveError(err instanceof Error ? err.message : String(err));
+                        report("save.voiceName", err);
                       }
                     }}
                     aria-describedby={errorId()}
@@ -537,10 +571,11 @@ export default function VoiceSettings(props: {
                   const next = event.currentTarget.checked;
                   try {
                     voiceSession.setShowReasoning(next);
-                    setReasoningError(null);
+                    issues.resolve("save.showReasoning");
                   } catch (err) {
                     event.currentTarget.checked = !next;
-                    setReasoningError(
+                    report(
+                      "save.showReasoning",
                       `${messages().reasoningSaveFailed}: ${err instanceof Error ? err.message : String(err)}`,
                     );
                   }
@@ -562,10 +597,13 @@ export default function VoiceSettings(props: {
                   const next = event.currentTarget.checked;
                   try {
                     voiceSession.setShowUsageStats(next);
-                    setUsageError(null);
+                    issues.resolve("save.showUsageStats");
                   } catch (err) {
                     event.currentTarget.checked = !next;
-                    setUsageError(`${messages().usageSaveFailed}: ${err instanceof Error ? err.message : String(err)}`);
+                    report(
+                      "save.showUsageStats",
+                      `${messages().usageSaveFailed}: ${err instanceof Error ? err.message : String(err)}`,
+                    );
                   }
                 }}
               />
@@ -586,7 +624,10 @@ export default function VoiceSettings(props: {
   );
 }
 
-type SetupControl = "input" | "model" | "output" | "setup";
+/** The setup controls, which share one save failure at a time. */
+const SETUP_SAVE_KEYS = ["save.choice", "save.setupMode", "save.speechInput", "save.speechOutput"] as const;
+
+type SetupSaveKey = (typeof SETUP_SAVE_KEYS)[number];
 
 /** A stacked label, its control, optional hint, and the error the control owns. */
 function Field(props: {

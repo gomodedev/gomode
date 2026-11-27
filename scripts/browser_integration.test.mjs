@@ -55,6 +55,9 @@ test("a production consumer loads voice runtime and UI only through its dynamic 
   const eagerInputs = [...eager].flatMap((name) => Object.keys(outputs[name].inputs));
   assert.ok(eagerInputs.includes("web/src/BrowserVoiceShell.tsx"));
   assert.ok(eagerInputs.includes("web/src/FrontendVoiceTools.ts"));
+  // The shell lists setup and context problems before the runtime loads.
+  assert.ok(eagerInputs.includes("web/src/VoiceIssues.ts"));
+  assert.ok(eagerInputs.includes("web/src/VoiceIssueList.tsx"));
   for (const optional of ["web/src/VoiceSession.ts", "web/src/VoiceOverlay.tsx", "web/src/BrowserVoiceRuntime.tsx"]) {
     assert.ok(!eagerInputs.includes(optional), `${optional} leaked into the eager graph`);
     assert.ok(

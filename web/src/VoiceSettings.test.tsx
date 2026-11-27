@@ -379,6 +379,33 @@ describe("VoiceSettings", () => {
     expect(inputs[1]).toHaveValue("de-DE");
   });
 
+  it("keeps a failed language draft and its dismissal to the view that raised it", () => {
+    vi.useFakeTimers();
+    render(() => (
+      <>
+        <VoiceSettings />
+        <VoiceSettings />
+      </>
+    ));
+    const [host, other] = screen.getAllByRole("textbox");
+    if (!host || !other) throw new Error("two settings views need two textboxes");
+    fireEvent.input(host, { target: { value: "en_US" } });
+    fireEvent.blur(host);
+    vi.advanceTimersByTime(0);
+    expect(host).toHaveAttribute("aria-invalid", "true");
+    expect(other).toHaveValue("en-US");
+    expect(other).toHaveAttribute("aria-invalid", "false");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    // Editing the other view neither clears nor reverts the failed draft.
+    fireEvent.input(other, { target: { value: "en-G" } });
+    expect(host).toHaveValue("en_US");
+    expect(voiceSession.issues.message("save.languageTag")).toContain("en_US");
+    // Dismissal reverts only the view whose draft failed.
+    voiceSession.issues.resolve("save.languageTag");
+    expect(host).toHaveValue("en-US");
+    expect(other).toHaveValue("en-G");
+  });
+
   it("describes the language's scope below its field, as on Android", () => {
     render(() => <VoiceSettings messages={{ voiceLanguageHint: "Gilt für Spracherkennung." }} />);
     expect(screen.getByRole("textbox", { name: "Voice language" })).toHaveAccessibleDescription(
@@ -517,6 +544,41 @@ describe("VoiceSettings", () => {
     } finally {
       save.mockRestore();
     }
+  });
+
+  it("shows field problems at their control when a host embeds settings, leaving the list to others while shown", async () => {
+    const [visible, setVisible] = createSignal(true);
+    const save = vi.spyOn(window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("Storage unavailable");
+    });
+    try {
+      const user = userEvent.setup();
+      const listed = () => voiceSession.issues.listed().map((issue) => issue.key);
+      const view = render(() => <VoiceSettings visible={visible()} />);
+      const toggle = screen.getByRole("switch", { name: "Show usage stats" });
+      await user.click(toggle);
+      expect(toggle).toHaveAccessibleDescription("Could not save the usage preference: Storage unavailable");
+      expect(voiceSession.issues.message("save.showUsageStats")).not.toBeNull();
+      expect(listed()).toEqual([]);
+      setVisible(false);
+      expect(listed()).toEqual(["save.showUsageStats"]);
+      setVisible(true);
+      expect(listed()).toEqual([]);
+      view.unmount();
+      expect(listed()).toEqual(["save.showUsageStats"]);
+    } finally {
+      save.mockRestore();
+    }
+  });
+
+  it("drops the language problem with the draft when the view unmounts", () => {
+    vi.useFakeTimers();
+    const view = render(() => <VoiceSettings />);
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "en_US" } });
+    vi.advanceTimersByTime(1000);
+    expect(voiceSession.issues.message("save.languageTag")).toContain("en_US");
+    view.unmount();
+    expect(voiceSession.issues.message("save.languageTag")).toBeNull();
   });
 
   it("restores the selected output when persistence fails", async () => {

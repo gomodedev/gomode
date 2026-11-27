@@ -25,11 +25,19 @@
 // reuses it with the same session ID, ordinary publication failures are advisory, and abort or
 // retirement cancels setup. Message catalogs in VoiceMessages contain only labels, so hosts load
 // them with their language dictionaries independently of the lazy runtime.
+//
+// Setup and context publication failures go to voiceIssues under the "setup" and "context" keys,
+// each with its Retry. Until the runtime mounts the overlay, which lists every problem, the shell
+// lists these two itself; it logs the setup failure's cause to the console. Before the runtime
+// loads, the setup entry's Retry is the only way to retry setup: after the X dismisses it, voice
+// stays unavailable until setup runs again for a new scope, readiness, or mode, or the host changes
+// its setupFailed text. The X returns focus to the element focused before the list.
 
 import {
   batch,
   createEffect,
   createSignal,
+  on,
   onCleanup,
   Show,
   untrack,
@@ -42,7 +50,8 @@ import { loadBrowserVoiceRuntime } from "./BrowserVoiceSetup";
 import { discoverBrowserVoice, sameOriginVoiceEndpoint, type BrowserVoiceEndpoints } from "./BrowserVoiceManifest";
 import type { FrontendPreparationScope } from "./FrontendVoiceTools";
 import { defaultVoiceMessages, type VoiceMessages } from "./VoiceMessages";
-import VoiceIcon from "./VoiceIcon";
+import { VOICE_SHELL_ISSUE_KEYS, voiceIssues, voiceShellIssue } from "./VoiceIssues";
+import VoiceIssueList from "./VoiceIssueList";
 import styles from "./BrowserVoiceShell.module.css";
 import type { ServiceAuthorization } from "../../sdk/voicegateway/ts/v2/types.gen";
 import type { BrowserVoiceRuntime } from "./BrowserVoiceRuntime";
@@ -62,9 +71,8 @@ export interface BrowserVoiceShellProps {
   resourceEvents?: Accessor<readonly McpResourceNotification[] | null>;
   /** Read the host’s current localized voice catalog. */
   messages?: Accessor<VoiceMessages>;
+  /** The listed setup failure; the cause goes to the console. */
   setupFailed: string;
-  errorClass?: string;
-  onError: (error: unknown) => void;
   children?: (runtime: BrowserVoiceRuntime) => JSX.Element;
 }
 
@@ -77,7 +85,6 @@ export interface BrowserVoiceRuntimeProps {
   resourceEvents?: BrowserVoiceShellProps["resourceEvents"];
   preparation: FrontendPreparationScope;
   messages?: BrowserVoiceShellProps["messages"];
-  onError: BrowserVoiceShellProps["onError"];
   children?: BrowserVoiceShellProps["children"];
 }
 
@@ -88,7 +95,8 @@ type LoadedRuntime = {
 
 interface SetupAttempt {
   controller: AbortController;
-  retry(): void;
+  /** Settles once the retry attempt is ready, failed, or retired. */
+  retry(): Promise<void>;
 }
 
 type SetupState =
@@ -98,6 +106,7 @@ type SetupState =
 
 export default function BrowserVoiceShell(props: BrowserVoiceShellProps) {
   const host = useHostMode();
+  const messages = () => props.messages?.() ?? defaultVoiceMessages;
   const [setup, setSetup] = createSignal<SetupState>({ kind: "inactive" });
   const retire = () => {
     const previous = untrack(setup);
@@ -114,9 +123,8 @@ export default function BrowserVoiceShell(props: BrowserVoiceShellProps) {
       mcpEndpoint: props.mcpEndpoint,
       gatewayHeaders: new Headers(props.gatewayHeaders),
       preparation: scope,
-      onError: props.onError,
     };
-    function start(retrying: boolean) {
+    function start(retrying: boolean): Promise<void> {
       const attempt: SetupAttempt = { controller: new AbortController(), retry: () => start(true) };
       const current = () => {
         const value = untrack(setup);
@@ -158,37 +166,64 @@ export default function BrowserVoiceShell(props: BrowserVoiceShellProps) {
             },
           });
       }
-      void prepare().catch((error: unknown) => {
+      return prepare().catch((error: unknown) => {
         if (!current()) return;
+        console.error("Voice setup failed", error);
         setSetup({ kind: "failed", attempt });
-        configuration.onError(error);
       });
     }
-    start(false);
+    void start(false);
     onCleanup(retire);
   });
   const retry = () => {
     const value = untrack(setup);
-    if (value.kind === "failed") value.attempt.retry();
+    return value.kind === "failed" ? value.attempt.retry() : Promise.resolve();
   };
+  const setupFailed = () => setup().kind === "failed" || setup().kind === "retrying";
+  // The entry follows the setup state and the host's current text; a retry keeps it in place.
+  createEffect(() => {
+    if (setupFailed()) voiceIssues.raise("setup", props.setupFailed, { label: "retry", run: retry });
+    else voiceIssues.resolve("setup");
+  });
+  // The list vanishes with its X, so focus returns to where it came from.
+  let region!: HTMLDivElement;
+  let focusBeforeList: HTMLElement | null = null;
+  const restoreFocus = () => {
+    if (focusBeforeList?.isConnected) focusBeforeList.focus();
+    focusBeforeList = null;
+  };
+  createEffect(
+    on(
+      [() => props.preparation.contextPublication().failure !== null, () => messages().contextUnavailable],
+      ([failed, message]) => {
+        if (!failed) voiceIssues.resolve("context");
+        else voiceIssues.raise("context", message, { label: "retry", run: () => props.preparation.retryContext() });
+      },
+    ),
+  );
+  onCleanup(() => voiceIssues.resolve(...VOICE_SHELL_ISSUE_KEYS));
   const runtime = () => {
     const value = setup();
     return value.kind === "ready" ? value.runtime : null;
   };
   return (
     <>
-      <Show when={props.preparation.contextPublication().failure}>
-        <div role="status" class={styles.notice}>
-          <span>{(props.messages?.() ?? defaultVoiceMessages).contextUnavailable}</span>
-          <button
-            type="button"
-            aria-label={(props.messages?.() ?? defaultVoiceMessages).retry}
-            title={(props.messages?.() ?? defaultVoiceMessages).retry}
-            disabled={props.preparation.contextPublication().pending}
-            onClick={() => void props.preparation.retryContext()}
-          >
-            <VoiceIcon name="refresh" />
-          </button>
+      <Show when={runtime() === null}>
+        <div
+          ref={region}
+          class={styles.region}
+          onFocusIn={(event) => {
+            const from = event.relatedTarget;
+            if (from instanceof HTMLElement && !region.contains(from)) focusBeforeList = from;
+          }}
+        >
+          <VoiceIssueList
+            owner={voiceIssues}
+            issues={voiceIssues.list().filter((issue) => voiceShellIssue(issue.key))}
+            messages={messages}
+            class={styles.notice}
+            restoreFocus={restoreFocus}
+          />
         </div>
       </Show>
       <Show when={runtime()} keyed>
@@ -197,20 +232,6 @@ export default function BrowserVoiceShell(props: BrowserVoiceShellProps) {
             {props.children}
           </Runtime>
         )}
-      </Show>
-      <Show when={setup().kind === "failed" || setup().kind === "retrying"}>
-        <div role="alert" class={`${styles.notice} ${props.errorClass ?? ""}`}>
-          <span>{props.setupFailed}</span>
-          <button
-            type="button"
-            aria-label={(props.messages?.() ?? defaultVoiceMessages).retry}
-            title={(props.messages?.() ?? defaultVoiceMessages).retry}
-            aria-disabled={setup().kind === "retrying"}
-            onClick={retry}
-          >
-            <VoiceIcon name="refresh" />
-          </button>
-        </div>
       </Show>
     </>
   );

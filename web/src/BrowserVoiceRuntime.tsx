@@ -96,7 +96,8 @@ export default function BrowserVoiceRuntime(props: BrowserVoiceRuntimeProps) {
         setServiceContext: (changes) => voiceSession.setServiceContext(changes),
         announce: (text) => voiceSession.announce(text),
       },
-      props.onError,
+      // Advisory: the monitor retries with backoff, and the model keeps its last context meanwhile.
+      (error) => console.warn("Voice service context", error),
       { sessionID: voiceSession.conversationID },
       source,
     );

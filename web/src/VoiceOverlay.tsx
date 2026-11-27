@@ -20,10 +20,10 @@ import { Portal } from "solid-js/web";
 import { TurnStateThinking, TurnStateTranscribing } from "../../sdk/voicegateway/ts/v2/types.gen";
 import { bluetoothAudioDeviceLabel } from "./AudioRoutes";
 import { microphoneMuted, voiceSession } from "./VoiceSession";
-import { voiceSettingsIssue, type VoiceIssue, type VoiceIssueKey } from "./VoiceIssues";
+import VoiceIssueList from "./VoiceIssueList";
 import type { MicrophoneMode, VoiceState, TranscriptEntry, ToolInvocation } from "./VoiceSession";
 import { notifications } from "./notifications";
-import VoiceSettings from "./VoiceSettings";
+import VoiceSettings, { languageDraftOwner } from "./VoiceSettings";
 import { defaultVoiceMessages, type VoiceMessages } from "./VoiceMessages";
 import VoiceIcon from "./VoiceIcon";
 import type { VoiceUsage } from "./VoiceUsage";
@@ -68,15 +68,6 @@ function localizedStatus(
   }
 }
 
-/** The list shows the newest problems up to this count. */
-const MAX_SHOWN_ISSUES = 3;
-/** Longer problem messages are cut with "…"; the full text stays in the tooltip. */
-const MAX_ISSUE_CHARS = 160;
-
-function cutIssueMessage(message: string): string {
-  return message.length <= MAX_ISSUE_CHARS ? message : `${message.slice(0, MAX_ISSUE_CHARS - 1).trimEnd()}…`;
-}
-
 export default function VoiceOverlay(props: {
   messages?: VoiceMessages | Accessor<VoiceMessages>;
   /** The owning runtime may revoke a pending start before its controls finish unmounting. */
@@ -107,10 +98,6 @@ export default function VoiceOverlay(props: {
   let settingsTrigger: HTMLButtonElement | null = null;
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const hasUsage = () => session.state.connected || session.state.usage !== null || session.state.transcript.length > 0;
-  const [settingsError, setSettingsError] = createSignal<string | null>(null);
-  const [dismissedSettingsError, setDismissedSettingsError] = createSignal<string | null>(null);
-  createEffect(on(settingsError, () => setDismissedSettingsError(null), { defer: true }));
-  const [languageError, setLanguageError] = createSignal<string | null>(null);
   const settingsId = createUniqueId();
   const audioHelpId = createUniqueId();
   const [audioHelp, setAudioHelp] = createSignal<"input" | "output" | null>(null);
@@ -126,24 +113,6 @@ export default function VoiceOverlay(props: {
     setSettingsOpen(false);
     if (settingsTrigger?.isConnected) settingsTrigger.focus();
     else panelRef?.querySelector<HTMLButtonElement>("button[aria-controls]")?.focus();
-  };
-  const dismissSettingsError = (error: string) => {
-    setDismissedSettingsError(error);
-    connectButtonRef?.focus();
-  };
-  // Open settings show their field problems at the controls instead.
-  const listedIssues = () =>
-    session.issues.list().filter((issue) => !(settingsOpen() && voiceSettingsIssue(issue.key)));
-  const dismissIssues = () => {
-    session.issues.resolve(...listedIssues().map((issue) => issue.key));
-    connectButtonRef?.focus();
-  };
-  const recoverIssue = async (key: VoiceIssueKey) => {
-    await session.issues.recover(key);
-    // The recovered entry's button is gone; keep focus in the panel unless the user moved it.
-    const focused = document.activeElement;
-    if (!session.issues.list().some((issue) => issue.key === key) && (focused === null || focused === document.body))
-      connectButtonRef?.focus();
   };
   const SettingsButton = () => (
     <button
@@ -291,7 +260,9 @@ export default function VoiceOverlay(props: {
         if (!microphoneUnavailable) await session.requestMicrophoneAccess();
         return;
       }
-      if (languageError() !== null) {
+      // This panel's draft language failed to save; starting would silently use the saved one.
+      const draftOwner = languageDraftOwner();
+      if (draftOwner !== null && panelRef?.contains(draftOwner)) {
         setSettingsOpen(true);
         panelRef?.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
         return;
@@ -438,14 +409,12 @@ export default function VoiceOverlay(props: {
               {microphoneAccessHelp()}
             </p>
           </Show>
-          <Show when={listedIssues().length > 0}>
-            <IssueList
-              issues={listedIssues()}
-              messages={messages}
-              onRecover={(key) => void recoverIssue(key)}
-              onDismiss={dismissIssues}
-            />
-          </Show>
+          <VoiceIssueList
+            owner={session.issues}
+            issues={session.issues.listed()}
+            messages={messages}
+            restoreFocus={() => connectButtonRef?.focus()}
+          />
           <Show when={session.state.connectStatus} keyed>
             {(status) => (
               <ConnectingPanel
@@ -464,15 +433,6 @@ export default function VoiceOverlay(props: {
             closeControl={hasDiscussion() && transcriptExpanded() ? TranscriptToggle : null}
             messages={messages}
           />
-          <Show when={!settingsOpen() && settingsError() !== dismissedSettingsError() && settingsError()}>
-            {(error) => (
-              <ErrorNotice
-                message={error()}
-                dismissLabel={messages().dismissErrors}
-                onDismiss={() => dismissSettingsError(error())}
-              />
-            )}
-          </Show>
           <Show when={hasUsage() && session.state.showUsageStats && (isActive() || transcriptExpanded())}>
             <section class={styles.usage} aria-label={messages().usage}>
               <UsagePanel usage={session.state.usage} messages={messages} />
@@ -487,8 +447,6 @@ export default function VoiceOverlay(props: {
           >
             <VoiceSettings
               messages={messages}
-              onError={setSettingsError}
-              onLanguageError={setLanguageError}
               visible={settingsOpen()}
               tabAction={
                 <button
@@ -540,76 +498,6 @@ function UsagePanel(props: { usage: VoiceUsage | null; messages: Accessor<VoiceM
         </Show>
       </div>
     </>
-  );
-}
-
-/** One problem renders as a line; several as a bulleted list, oldest first. */
-function IssueList(props: {
-  issues: readonly VoiceIssue[];
-  messages: Accessor<VoiceMessages>;
-  onRecover: (key: VoiceIssueKey) => void;
-  onDismiss: () => void;
-}) {
-  const shown = () => props.issues.slice(-MAX_SHOWN_ISSUES);
-  const Issue = (issue: VoiceIssue) => {
-    const message = () => issue.message || props.messages().connectionFailed;
-    const cut = () => cutIssueMessage(message());
-    return (
-      <>
-        <span class={styles.issueMessage} title={cut() === message() ? undefined : message()}>
-          {cut()}
-        </span>
-        <Show when={issue.recovery}>
-          {(recovery) => (
-            <button type="button" class={styles.accessAction} onClick={() => props.onRecover(issue.key)}>
-              {props.messages()[recovery().label]}
-            </button>
-          )}
-        </Show>
-      </>
-    );
-  };
-  return (
-    <div class={styles.errorPanel}>
-      <div role="alert" class={styles.issues}>
-        <Show
-          when={shown().length > 1}
-          fallback={<For each={shown()}>{(issue) => <p class={styles.issueLine}>{Issue(issue)}</p>}</For>}
-        >
-          <ul class={styles.issueList}>
-            <For each={shown()}>{(issue) => <li>{Issue(issue)}</li>}</For>
-          </ul>
-        </Show>
-      </div>
-      <button
-        type="button"
-        class={controls.control}
-        aria-label={props.messages().dismissErrors}
-        title={props.messages().dismissErrors}
-        onClick={() => props.onDismiss()}
-      >
-        <VoiceIcon name="close" />
-      </button>
-    </div>
-  );
-}
-
-function ErrorNotice(props: { message: string; dismissLabel: string; onDismiss: () => void }) {
-  return (
-    <div class={styles.errorPanel}>
-      <span role="alert" class={styles.statusError}>
-        {props.message}
-      </span>
-      <button
-        type="button"
-        class={controls.control}
-        aria-label={props.dismissLabel}
-        title={props.dismissLabel}
-        onClick={() => props.onDismiss()}
-      >
-        <VoiceIcon name="close" />
-      </button>
-    </div>
   );
 }
 

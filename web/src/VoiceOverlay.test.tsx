@@ -11,6 +11,7 @@ import { installBrowserSpeech } from "../tests/browser-speech";
 
 import { TurnStateIdle, TurnStateThinking, TurnStateTranscribing } from "../../sdk/voicegateway/ts/v2/types.gen";
 import VoiceOverlay from "./VoiceOverlay";
+import VoiceSettings from "./VoiceSettings";
 import { defaultVoiceMessages, type VoiceMessages } from "./VoiceMessages";
 import { notifications } from "./notifications";
 import { voiceSession } from "./VoiceSession";
@@ -567,6 +568,37 @@ describe("VoiceOverlay status", () => {
     expect(shown()).toHaveLength(1);
   });
 
+  it("lists a failed settings save once settings close, and returns it to its control when they reopen", async () => {
+    const error = "Could not save the reasoning preference: Storage unavailable";
+    const user = userEvent.setup();
+    render(() => <VoiceOverlay />);
+    await user.click(screen.getByRole("button", { name: "Voice settings" }));
+    const save = vi.spyOn(window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("Storage unavailable");
+    });
+    try {
+      await user.click(screen.getByRole("switch", { name: "Show assistant reasoning" }));
+    } finally {
+      save.mockRestore();
+    }
+    const shown = () => screen.queryAllByText(error).filter((el) => !el.closest("[hidden]"));
+    const dismiss = () => screen.queryByRole("button", { name: "Dismiss errors" });
+    expect(shown()).toHaveLength(1);
+    expect(dismiss()).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Close voice settings" }));
+    expect(shown()).toHaveLength(1);
+    expect(dismiss()).toBeInTheDocument();
+    expect(voiceSession.issues.message("save.showReasoning")).toBe(error);
+    await user.click(screen.getByRole("button", { name: "Voice settings" }));
+    expect(shown()).toHaveLength(1);
+    expect(screen.getByRole("switch", { name: "Show assistant reasoning" })).toHaveAccessibleDescription(error);
+    expect(dismiss()).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Close voice settings" }));
+    await user.click(dismiss()!);
+    expect(shown()).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Connect voice assistant" })).toHaveFocus();
+  });
+
   it("restores both dropdowns to the confirmed route after a failed switch", async () => {
     Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", { configurable: true, value: vi.fn() });
     const input = vi.spyOn(voiceSession, "selectInputDevice").mockImplementation(async () => {
@@ -842,6 +874,37 @@ describe("VoiceOverlay settings", () => {
     await user.click(screen.getByRole("button", { name: "Connect voice assistant" }));
     expect(voiceSession.state.languageTag).toBe("de-DE");
     expect(connectMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns a dismissed invalid language to the saved one, which Connect then uses", async () => {
+    const user = userEvent.setup();
+    render(() => <VoiceOverlay />);
+    await user.click(screen.getByRole("button", { name: "Voice settings" }));
+    await user.type(screen.getByRole("textbox"), "_invalid");
+    await user.click(screen.getByRole("button", { name: "Close voice settings" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Invalid language tag");
+    await user.click(screen.getByRole("button", { name: "Dismiss errors" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("textbox", { hidden: true })).toHaveValue("en-US");
+    await user.click(screen.getByRole("button", { name: "Connect voice assistant" }));
+    expect(connectMock).toHaveBeenCalledOnce();
+    expect(voiceSession.state.languageTag).toBe("en-US");
+  });
+
+  it("starts with the saved language when only a host settings view holds a failed draft", async () => {
+    const user = userEvent.setup();
+    render(() => (
+      <>
+        <VoiceSettings />
+        <VoiceOverlay />
+      </>
+    ));
+    const host = screen.getByRole("textbox");
+    await user.type(host, "_invalid");
+    await user.click(screen.getByRole("button", { name: "Connect voice assistant" }));
+    expect(host).toHaveAttribute("aria-invalid", "true");
+    expect(connectMock).toHaveBeenCalledOnce();
+    expect(voiceSession.state.languageTag).toBe("en-US");
   });
 
   it("keeps an invalid language blocked after a successful voice mode change", async () => {

@@ -1,7 +1,7 @@
 // Tests owned browser voice setup, retry, cancellation, and context recovery.
 
 import { afterEach, beforeEach, it } from "node:test";
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { A, Router } from "@solidjs/router";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { expect, vi } from "../tests/expect";
@@ -17,9 +17,11 @@ import {
 } from "./FrontendVoiceTools";
 import { mcpClient } from "./McpClient";
 import { voiceSession } from "./VoiceSession";
+import { voiceIssues } from "./VoiceIssues";
 
 const originalFetch = globalThis.fetch;
-const errors = vi.fn();
+// The shell logs a setup failure's cause; the list shows the host's message.
+const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 let owner: FrontendPreparation;
 let scope: FrontendPreparationScope;
 const manifest = {
@@ -29,9 +31,15 @@ const manifest = {
 };
 function mount(
   preparation: () => FrontendPreparationScope,
-  options?: Pick<BrowserVoiceShellProps, "authorize" | "mcpEndpoint" | "gatewayHeaders" | "messages" | "children">,
+  options?: Partial<
+    Pick<
+      BrowserVoiceShellProps,
+      "authorize" | "mcpEndpoint" | "gatewayHeaders" | "messages" | "setupFailed" | "children"
+    >
+  >,
 ) {
-  const { children, ...configuration } = options ?? {};
+  // Rest copies would freeze a getter, so setupFailed stays read through options.
+  const { children, setupFailed: _setupFailed, ...configuration } = options ?? {};
   return render(() => (
     <Router
       root={() => (
@@ -42,8 +50,7 @@ function mount(
             toolGroup="items"
             clientName="example-web"
             preparation={preparation()}
-            setupFailed="Voice setup unavailable."
-            onError={errors}
+            setupFailed={options?.setupFailed ?? "Voice setup unavailable."}
             {...configuration}
           >
             {children ?? (() => <div data-testid="voice-runtime">Runtime mounted</div>)}
@@ -75,6 +82,7 @@ afterEach(() => {
   delete window.goModeHost;
   globalThis.fetch = originalFetch;
   voiceSession.disconnect();
+  voiceIssues.resolve(...voiceIssues.list().map((issue) => issue.key));
   vi.unstubAllGlobals();
 });
 
@@ -294,7 +302,7 @@ it("aborts old discovery and cannot configure old MCP clients after scope replac
   expect(errors).not.toHaveBeenCalled();
 });
 
-it("ignores discovery completing after disposal and reports concise host-owned setup errors", async () => {
+it("ignores discovery completing after disposal and lists the host's setup message, logging its cause", async () => {
   const delayed = deferred<Response>();
   globalThis.fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(delayed.promise);
   scope.setTools([]);
@@ -307,7 +315,9 @@ it("ignores discovery completing after disposal and reports concise host-owned s
   globalThis.fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ service: "wrong" }));
   mount(() => scope);
   expect(await screen.findByRole("alert")).toHaveTextContent("Voice setup unavailable.");
+  expect(voiceIssues.message("setup")).toBe("Voice setup unavailable.");
   expect(errors).toHaveBeenCalledOnce();
+  expect(errors.mock.calls[0]?.[1]).toBeInstanceOf(Error);
 });
 
 it("retries setup once while retaining the focused recovery controls and current translation", async () => {
@@ -321,8 +331,6 @@ it("retries setup once while retaining the focused recovery controls and current
   mount(() => scope, { messages });
   const notice = await screen.findByRole("alert");
   const retry = screen.getByRole("button", { name: "Try voice again" });
-  expect(retry).toHaveAttribute("title", "Try voice again");
-  expect(retry.querySelector('[data-icon="refresh"]')).toHaveAttribute("aria-hidden", "true");
   retry.focus();
   fireEvent.click(retry);
   expect(retry).toHaveAttribute("aria-disabled", "true");
@@ -530,20 +538,74 @@ it("renders one native advisory and shares keyboard-retry work without loading b
   scope.setDataReady(true);
   mount(() => scope);
   await expect(scope.prepareSession("native", new AbortController().signal)).rejects.toThrow();
-  const notice = await screen.findByRole("status");
+  const notice = await screen.findByRole("alert");
   expect(notice.textContent).toContain(defaultVoiceMessages.contextUnavailable);
-  expect(screen.getAllByRole("status")).toHaveLength(1);
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(scope.ready()).toBe(true);
   expect(globalThis.fetch).not.toHaveBeenCalled();
   const retry = screen.getByRole("button", { name: "Retry" });
   publish.mockImplementationOnce(() => gate.promise);
   retry.focus();
   fireEvent.click(retry);
-  expect(retry).toBeDisabled();
-  expect(screen.getByRole("status")).toBe(notice);
+  expect(retry).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(retry);
+  expect(screen.getByRole("alert")).toBe(notice);
   await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
   gate.resolve();
-  await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect(globalThis.fetch).not.toHaveBeenCalled();
   expect(errors).not.toHaveBeenCalled();
+});
+
+it("lists setup and context problems together before the runtime loads, and hands them to the overlay", async () => {
+  const publish = vi.fn(async () => {});
+  publish.mockRejectedValueOnce(new Error("private server response"));
+  scope = owner.createScope({ selection: () => "selected", createPublisher: () => ({ publish, dispose() {} }) });
+  scope.setTools([]);
+  scope.setDataReady(true);
+  const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValueOnce(new Error("Discovery unavailable"));
+  fetch.mockImplementation(async (url) =>
+    String(url).endsWith("/gomode.json") ? Response.json(manifest) : Response.json({ choices: [], defaults: [] }),
+  );
+  globalThis.fetch = fetch;
+  mount(() => scope);
+  await expect(scope.prepareSession("browser", new AbortController().signal)).rejects.toThrow();
+  const items = () => screen.queryAllByRole("listitem").map((item) => item.textContent);
+  await waitFor(() => expect(items()).toHaveLength(2));
+  expect(items()).toEqual(
+    expect.arrayContaining([`${defaultVoiceMessages.contextUnavailable}Retry`, "Voice setup unavailable.Retry"]),
+  );
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Connect voice assistant" })).toBeNull();
+  const retrySetup = screen
+    .getAllByRole("listitem")
+    .find((item) => item.textContent?.startsWith("Voice setup unavailable."));
+  fireEvent.click(within(retrySetup!).getByRole("button", { name: "Retry" }));
+  await screen.findByTestId("voice-runtime");
+  // The overlay lists the remaining context problem, and the shell's list is gone.
+  expect(screen.getByRole("button", { name: "Connect voice assistant" })).toBeInTheDocument();
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent(defaultVoiceMessages.contextUnavailable);
+  expect(screen.queryByText("Voice setup unavailable.")).toBeNull();
+});
+
+it("follows the host's setup text and restores focus after the X", async () => {
+  globalThis.fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new Error("Discovery unavailable"));
+  scope.setTools([]);
+  scope.setDataReady(true);
+  const [text, setText] = createSignal("Voice setup unavailable.");
+  mount(() => scope, {
+    get setupFailed() {
+      return text();
+    },
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Voice setup unavailable.");
+  setText("Sprachsteuerung nicht verfügbar.");
+  expect(screen.getByRole("alert")).toHaveTextContent("Sprachsteuerung nicht verfügbar.");
+  const link = screen.getByRole("link", { name: "Native mode" });
+  link.focus();
+  screen.getByRole("button", { name: "Dismiss errors" }).focus();
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss errors" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(link).toHaveFocus();
 });

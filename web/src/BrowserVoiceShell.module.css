@@ -1,11 +1,7 @@
-/* Shared setup and advisory context recovery controls, separate from the lazy browser runtime. */
+/* The surface of the shell's own problem list, shown until the lazy runtime's overlay mounts. */
 .notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 1rem;
   box-sizing: border-box;
-  padding: 0.75rem 1rem;
+  padding: 0.25rem 0.5rem 0.25rem 1rem;
   color: var(--color-text-secondary);
   background: var(--color-bg-surface);
   border-top: 1px solid var(--color-border);
@@ -14,54 +10,7 @@
   line-height: 1.5;
 }
 
-.notice > span {
-  flex: 1 1 16rem;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.notice button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  width: 2.75rem;
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  min-height: 2.75rem;
-  padding: 0.5rem;
-  color: var(--color-primary);
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-medium);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  cursor: pointer;
-}
-
-.notice button:hover {
-  background: var(--color-bg-hover);
-}
-
-.notice button:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.notice button:disabled,
-.notice button[aria-disabled="true"] {
-  color: var(--color-text-muted);
-  cursor: default;
-}
-
-@media (forced-colors: active) {
-  .notice button {
-    --voice-icon-forced-color: ButtonText;
-  }
-
-  .notice button:disabled,
-  .notice button[aria-disabled="true"] {
-    --voice-icon-forced-color: GrayText;
-  }
+/* Observes focus entering the list without adding a box. */
+.region {
+  display: contents;
 }

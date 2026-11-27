@@ -5,7 +5,7 @@ import { voiceGatewayBaseURL } from "./BrowserVoiceManifest";
 import { BrowserSpeechBuffer } from "./BrowserSpeechBuffer";
 import { MicrophoneLevel } from "./MicrophoneLevel";
 import { MicrophoneInput } from "./MicrophoneInput";
-import { VoiceIssues, type VoiceIssueKey, type VoiceSettingsIssueKey } from "./VoiceIssues";
+import { voiceIssues, type VoiceIssues, type VoiceIssueKey, type VoiceSettingsIssueKey } from "./VoiceIssues";
 import { NetworkRequestError, observeNetworkChanges } from "./NetworkChanges";
 import { mergeVoiceUsage, type VoiceUsage } from "./VoiceUsage";
 import { batch, createSignal, untrack } from "solid-js";
@@ -3422,7 +3422,7 @@ function appendChunk(
 }
 
 // Singleton — lives at module level so the WebRTC connection survives component remounts.
-export const voiceSession = new VoiceSession(new VoiceIssues());
+export const voiceSession = new VoiceSession(voiceIssues);
 
 // Disconnect on actual page unload (browser close/refresh).
 if (typeof window !== "undefined") {

@@ -3,16 +3,35 @@
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
 /**
- * Settings fields whose problems show at their control while settings are open, and in the
- * overlay's list while they are closed, never in both.
+ * Settings fields whose problems show at their control while a settings view is shown, and in the
+ * list otherwise, never in both.
+ *
+ * The session resolves the setup against the gateway and owns the unprefixed keys. VoiceSettings
+ * owns each "save." key: its field rejected the user's last edit, so the saved value still applies.
  */
-export const VOICE_SETTINGS_ISSUE_KEYS = ["choices", "choices.input", "choices.output", "voiceName"] as const;
+export const VOICE_SETTINGS_ISSUE_KEYS = [
+  "choices",
+  "choices.input",
+  "choices.output",
+  "save.browserSpeechRate",
+  "save.browserVoiceURI",
+  "save.choice",
+  "save.languageTag",
+  "save.setupMode",
+  "save.showReasoning",
+  "save.showUsageStats",
+  "save.speechInput",
+  "save.speechOutput",
+  "save.voiceName",
+  "voiceName",
+] as const;
 
 export type VoiceSettingsIssueKey = (typeof VOICE_SETTINGS_ISSUE_KEYS)[number];
 
 /** The source of a problem; for a settings field, the field. */
 export type VoiceIssueKey =
   | VoiceSettingsIssueKey
+  | VoiceShellIssueKey
   | "audioDevices"
   | "audioInput"
   | "audioOutput"
@@ -23,9 +42,17 @@ export type VoiceIssueKey =
   | "microphoneProcessing"
   | "playback";
 
+/**
+ * BrowserVoiceShell owns these keys and lists them itself until the runtime's overlay mounts:
+ * context publication failed, or setup failed before the runtime could load.
+ */
+export const VOICE_SHELL_ISSUE_KEYS = ["context", "setup"] as const;
+
+export type VoiceShellIssueKey = (typeof VOICE_SHELL_ISSUE_KEYS)[number];
+
 /** The one operation that can clear a problem, run from a user gesture; label names its message. */
 export interface VoiceIssueRecovery {
-  label: "enableMicrophoneMeter" | "enableSound";
+  label: "enableMicrophoneMeter" | "enableSound" | "retry";
   run: () => Promise<void>;
 }
 
@@ -39,6 +66,10 @@ export function voiceSettingsIssue(key: VoiceIssueKey): key is VoiceSettingsIssu
   return (VOICE_SETTINGS_ISSUE_KEYS as readonly VoiceIssueKey[]).includes(key);
 }
 
+export function voiceShellIssue(key: VoiceIssueKey): key is VoiceShellIssueKey {
+  return (VOICE_SHELL_ISSUE_KEYS as readonly VoiceIssueKey[]).includes(key);
+}
+
 /**
  * VoiceIssues holds every current problem the browser voice component reports, oldest first.
  *
@@ -49,6 +80,8 @@ export function voiceSettingsIssue(key: VoiceIssueKey): key is VoiceSettingsIssu
  * - Dismissal resolves the listed keys at once. A condition that still holds returns when its
  *   source meets it again.
  * - An entry keeps its one recovery operation, which this owner runs.
+ * - A settings field problem shows at its control while any settings view is shown, and is listed
+ *   otherwise. Each VoiceSettings view, in the overlay or on a host page, registers while shown.
  * - The owner depends only on Solid, so it loads without the lazy voice runtime.
  *
  * The set of keys is closed, so the list is bounded; the overlay shows only the newest few.
@@ -56,11 +89,33 @@ export function voiceSettingsIssue(key: VoiceIssueKey): key is VoiceSettingsIssu
 export class VoiceIssues {
   readonly list: Accessor<readonly VoiceIssue[]>;
   private readonly _setList: Setter<readonly VoiceIssue[]>;
+  private readonly _settingsViews: Accessor<number>;
+  private readonly _setSettingsViews: Setter<number>;
 
   constructor() {
     const [list, setList] = createSignal<readonly VoiceIssue[]>([]);
     this.list = list;
     this._setList = setList;
+    const [settingsViews, setSettingsViews] = createSignal(0);
+    this._settingsViews = settingsViews;
+    this._setSettingsViews = setSettingsViews;
+  }
+
+  /** The problems a list shows: all of them, less the settings fields' while a settings view shows them. */
+  listed(): readonly VoiceIssue[] {
+    const list = this.list();
+    return this._settingsViews() === 0 ? list : list.filter((issue) => !voiceSettingsIssue(issue.key));
+  }
+
+  /** Register a shown settings view; call the result once it hides or unmounts. */
+  showSettings(): () => void {
+    let shown = true;
+    this._setSettingsViews((count) => count + 1);
+    return () => {
+      if (!shown) return;
+      shown = false;
+      this._setSettingsViews((count) => count - 1);
+    };
   }
 
   raise(key: VoiceIssueKey, message: string, recovery: VoiceIssueRecovery | null): void {
@@ -94,3 +149,6 @@ export class VoiceIssues {
     );
   }
 }
+
+/** The page's one owner, shared by the shell, the session, and every settings view. */
+export const voiceIssues = new VoiceIssues();

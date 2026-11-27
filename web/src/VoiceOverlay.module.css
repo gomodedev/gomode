@@ -80,27 +80,6 @@
   align-items: center;
 }
 
-.accessAction {
-  min-height: 44px;
-  padding: 0.5rem 0.75rem;
-  font: inherit;
-  color: var(--color-text);
-  cursor: pointer;
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 0.5rem;
-}
-
-.accessAction:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.accessAction[aria-disabled="true"] {
-  cursor: wait;
-  opacity: 0.6;
-}
-
 @media (width <= 360px) {
   .callToolbar,
   .toolbarActions,
@@ -169,59 +148,6 @@
 
 .statusTool {
   color: var(--color-plan);
-}
-
-.statusError {
-  color: var(--color-danger);
-  overflow-wrap: anywhere;
-}
-
-.errorPanel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.25rem;
-}
-
-/* The X stays beside the first line while problems wrap below it. */
-.errorPanel:has(.issues) {
-  align-items: flex-start;
-}
-
-.issues {
-  flex: 1;
-  min-width: 0;
-}
-
-/* A single problem: its recovery action follows the message and wraps under it on narrow panels. */
-.issueLine {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
-  align-items: center;
-  min-height: 44px;
-  margin: 0;
-}
-
-/* The first bullet's line centers on the X. */
-.issueList {
-  display: grid;
-  gap: 0.25rem;
-  padding: 0.625rem 0 0 1.25rem;
-  margin: 0;
-}
-
-.issueList > li::marker {
-  color: var(--color-danger);
-}
-
-.issueList .accessAction {
-  margin-inline-start: 0.5rem;
-}
-
-.issueMessage {
-  color: var(--color-danger);
-  overflow-wrap: anywhere;
 }
 
 @keyframes pulse {

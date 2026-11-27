@@ -23,7 +23,6 @@ if (root)
               clientName="example-web"
               preparation={scope}
               setupFailed="Voice setup unavailable."
-              onError={(error) => console.error("Voice setup failed", error)}
             />
           </HostModeProvider>
         )}
