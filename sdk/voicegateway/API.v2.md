@@ -34,6 +34,8 @@ All errors return:
 | 401 | `UNAUTHORIZED` |
 | 500 | `VOICE_OFFER_FAILED` |
 | 429 | `RATE_LIMITED` |
+| 404 | `NOT_FOUND` |
+| 403 | `FORBIDDEN` |
 
 ## Types
 
@@ -48,6 +50,8 @@ ErrorCode is a machine-readable API error identifier.
 | `UNAUTHORIZED` |  |
 | `VOICE_OFFER_FAILED` |  |
 | `RATE_LIMITED` |  |
+| `NOT_FOUND` |  |
+| `FORBIDDEN` |  |
 
 ### InterruptSource
 

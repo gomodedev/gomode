@@ -72,5 +72,7 @@ var SDKAPI = apispec.Config[voiceapi.ErrorCode]{
 		{Code: voiceapi.CodeUnauthorized, Status: 401},
 		{Code: voiceapi.CodeVoiceOfferFailed, Status: 500},
 		{Code: voiceapi.CodeRateLimited, Status: 429},
+		{Code: voiceapi.CodeNotFound, Status: 404},
+		{Code: voiceapi.CodeForbidden, Status: 403},
 	},
 }

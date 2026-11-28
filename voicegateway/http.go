@@ -392,7 +392,7 @@ func (h *handler) handleTextTicket(w http.ResponseWriter, r *http.Request) {
 	if h.requireServiceAuth {
 		u, err := url.Parse(req.Service.BaseURL)
 		if err != nil || (origin != "" && origin != u.Scheme+"://"+u.Host) {
-			voiceapi.WriteError(h.log, w, http.StatusForbidden, voiceapi.CodeUnauthorized, "voice origin does not match service")
+			voiceapi.WriteError(h.log, w, http.StatusForbidden, publishedErrorCode(r, voiceapi.CodeForbidden), "voice origin does not match service")
 			return
 		}
 	}
@@ -418,7 +418,7 @@ func (h *handler) handleTextTicket(w http.ResponseWriter, r *http.Request) {
 	if len(h.textTickets) >= 1024 {
 		h.textTicketMu.Unlock()
 		ratelimit.SetRetryAfter(w.Header(), wait)
-		voiceapi.WriteError(h.log, w, http.StatusTooManyRequests, voiceapi.SessionProtocolFromContext(r.Context()).Version.RateLimitedCode(), "too many pending voice tickets")
+		voiceapi.WriteError(h.log, w, http.StatusTooManyRequests, publishedErrorCode(r, voiceapi.CodeRateLimited), "too many pending voice tickets")
 		return
 	}
 	ticket := rand.Text()
@@ -557,7 +557,7 @@ func (h *handler) authorizeSession(w http.ResponseWriter, r *http.Request, sessi
 	}
 	bound, ok := h.sessions.Load(sessionID)
 	if !ok {
-		voiceapi.WriteError(h.log, w, http.StatusNotFound, voiceapi.CodeBadRequest, "voice session not found")
+		voiceapi.WriteError(h.log, w, http.StatusNotFound, publishedErrorCode(r, voiceapi.CodeNotFound), "voice session not found")
 		return false
 	}
 	token, ok := bearerToken(r)

@@ -8,6 +8,8 @@ export type ErrorCode =
   | "UNAUTHORIZED"
   | "VOICE_OFFER_FAILED"
   | "RATE_LIMITED"
+  | "NOT_FOUND"
+  | "FORBIDDEN"
   | (string & {});
 /**
  * Supported values.
@@ -17,6 +19,8 @@ export const ErrorCodeVoiceBridgeUnavailable = "VOICE_BRIDGE_UNAVAILABLE";
 export const ErrorCodeUnauthorized = "UNAUTHORIZED";
 export const ErrorCodeVoiceOfferFailed = "VOICE_OFFER_FAILED";
 export const ErrorCodeRateLimited = "RATE_LIMITED";
+export const ErrorCodeNotFound = "NOT_FOUND";
+export const ErrorCodeForbidden = "FORBIDDEN";
 
 export type InterruptSource =
   | "user"

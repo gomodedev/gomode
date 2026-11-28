@@ -18,6 +18,22 @@ type VoiceRTCErrorProvider interface {
 	VoiceRTCError(sessionID string) string
 }
 
+// publishedErrorCode returns code as r's wire version publishes it. v1 answered BAD_REQUEST where v2
+// answers NOT_FOUND or RATE_LIMITED, and UNAUTHORIZED where v2 answers FORBIDDEN.
+func publishedErrorCode(r *http.Request, code voiceapi.ErrorCode) voiceapi.ErrorCode {
+	if voiceapi.SessionProtocolFromContext(r.Context()).Version != voiceapi.ProtocolV1 {
+		return code
+	}
+	switch code {
+	case voiceapi.CodeNotFound, voiceapi.CodeRateLimited:
+		return voiceapi.CodeBadRequest
+	case voiceapi.CodeForbidden:
+		return voiceapi.CodeUnauthorized
+	default:
+		return code
+	}
+}
+
 func publishedChoices(choices voicev2.VoiceChoicesResp) voicev1.VoiceChoicesResp {
 	out := voicev1.VoiceChoicesResp{Choices: make([]voicev1.VoiceChoice, 0, len(choices.Choices))}
 	out.DefaultChoiceID = choices.DefaultChoiceID(voicev2.VoiceTransportWebRTC)

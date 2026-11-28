@@ -14,6 +14,7 @@ import (
 	"github.com/gomodedev/gomode/internal/testlog"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
+	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
 type protocolBridgeSpy struct {
@@ -159,5 +160,37 @@ func TestTextTicketVersionBinding(t *testing.T) {
 				t.Fatalf("mismatched protocol: %d, delegations %d", w.Code, calls)
 			}
 		})
+	}
+}
+
+func TestPublishedErrorCodes(t *testing.T) {
+	t.Parallel()
+	cfg, serviceJSON := testServiceAuth(t)
+	var auth voicev2.ServiceAuthorization
+	if err := json.Unmarshal([]byte(serviceJSON), &auth); err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewHandler(testlog.New(t), cfg.TrustedIssuers, &fakeMediaBridge{}, textSessionServerFunc(func(context.Context, http.ResponseWriter, *http.Request) error { return nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		version          voiceapi.ProtocolVersion
+		notFound, origin voiceapi.ErrorCode
+	}{
+		{voiceapi.ProtocolV1, voiceapi.CodeBadRequest, voiceapi.CodeUnauthorized},
+		{voiceapi.ProtocolV2, voiceapi.CodeNotFound, voiceapi.CodeForbidden},
+	} {
+		prefix := "/api/voicegateway/" + tc.version.String() + "/voice"
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, prefix+"/rtc/unknown", http.NoBody)
+		r.Header.Set("Authorization", "Bearer "+auth.Token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		assertErrorResponse(t, w, http.StatusNotFound, tc.notFound, "voice session not found")
+		r = httptest.NewRequestWithContext(t.Context(), http.MethodPost, prefix+"/text/ticket", strings.NewReader(`{"service":`+serviceJSON+`}`))
+		r.Header.Set("Origin", "https://attacker.example")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		assertErrorResponse(t, w, http.StatusForbidden, tc.origin, "voice origin does not match service")
 	}
 }

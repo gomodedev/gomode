@@ -39,15 +39,6 @@ func (v ProtocolVersion) String() string {
 	}
 }
 
-// RateLimitedCode is the error code of a 429 on this wire version. v1 predates CodeRateLimited and
-// keeps answering CodeBadRequest.
-func (v ProtocolVersion) RateLimitedCode() ErrorCode {
-	if v == ProtocolV1 {
-		return CodeBadRequest
-	}
-	return CodeRateLimited
-}
-
 // TextSubprotocol returns the WebSocket subprotocol for this wire version.
 func (v ProtocolVersion) TextSubprotocol() string { return "gomode.text." + v.String() }
 

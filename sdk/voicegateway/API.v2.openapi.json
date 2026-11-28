@@ -30,6 +30,12 @@
           "401": {
             "$ref": "#/components/responses/error401"
           },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
           "429": {
             "$ref": "#/components/responses/error429"
           },
@@ -76,6 +82,12 @@
           "401": {
             "$ref": "#/components/responses/error401"
           },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
           "429": {
             "$ref": "#/components/responses/error429"
           },
@@ -121,6 +133,12 @@
           },
           "401": {
             "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
           },
           "429": {
             "$ref": "#/components/responses/error429"
@@ -178,6 +196,12 @@
           "401": {
             "$ref": "#/components/responses/error401"
           },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
           "429": {
             "$ref": "#/components/responses/error429"
           },
@@ -223,6 +247,12 @@
           },
           "401": {
             "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
           },
           "429": {
             "$ref": "#/components/responses/error429"
@@ -327,7 +357,9 @@
           "VOICE_BRIDGE_UNAVAILABLE",
           "UNAUTHORIZED",
           "VOICE_OFFER_FAILED",
-          "RATE_LIMITED"
+          "RATE_LIMITED",
+          "NOT_FOUND",
+          "FORBIDDEN"
         ],
         "description": "ErrorCode is a machine-readable API error identifier."
       },
@@ -1508,6 +1540,26 @@
       },
       "error401": {
         "description": "Error codes: `UNAUTHORIZED`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "error403": {
+        "description": "Error codes: `FORBIDDEN`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "error404": {
+        "description": "Error codes: `NOT_FOUND`.",
         "content": {
           "application/json": {
             "schema": {
