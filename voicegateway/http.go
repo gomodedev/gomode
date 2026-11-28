@@ -16,9 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gomodedev/gomode/httpserver/ratelimit"
-
 	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/httpserver/ratelimit"
 	"github.com/gomodedev/gomode/oauth/oauthverify"
 	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"

@@ -34,7 +34,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/gomodedev/gomode/httpserver/ratelimit"
-
 	"github.com/gomodedev/gomode/internal/pairing"
 	"github.com/gomodedev/gomode/oauth"
 	v5 "github.com/gomodedev/gomode/oauth/oauthserver/data/v5"

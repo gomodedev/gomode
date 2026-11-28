@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/gomodedev/gomode/httpserver/ratelimit"
-
 	"github.com/gomodedev/gomode/internal/pairing"
 	"github.com/gomodedev/gomode/internal/rsatest"
 	"github.com/gomodedev/gomode/internal/testlog"
