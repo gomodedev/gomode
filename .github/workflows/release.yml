@@ -25,6 +25,19 @@ jobs:
             go.mod
             go.sum
       - name: Publish release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: make release
+        run: |
+          log=$(mktemp)
+          trap 'rm -f -- "$log"' EXIT
+          if make release 2>&1 | tee "$log"; then
+            exit 0
+          fi
+          # A release published during the upload can claim the tag before
+          # GoReleaser publishes its draft. A retry finds the published release.
+          if grep -Fq 'Resource:Release Field:tag_name Code:already_exists' "$log"; then
+            make release
+          else
+            exit 1
+          fi
