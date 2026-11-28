@@ -1,4 +1,4 @@
-// Tests token-bucket admission, retry waits, bucket bounds, and Retry-After rounding.
+// Tests token-bucket admission, retry waits, bucket bounds, and rate limit response headers.
 
 package ratelimit
 
@@ -87,4 +87,39 @@ func TestSetRetryAfter(t *testing.T) {
 			t.Errorf("SetRetryAfter(%v) = %q, want %q", tc.wait, got, tc.want)
 		}
 	}
+}
+
+func TestWriteHeaders(t *testing.T) {
+	t.Run("an allowed request reports its budget without Retry-After", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			h := http.Header{}
+			WriteHeaders(h, New(60, time.Minute, 10).Allow("k"))
+			// One of ten tokens is spent; it refills in a second, so the reset is one second away.
+			want := map[string]string{
+				"X-Ratelimit-Limit":     "60",
+				"X-Ratelimit-Remaining": "9",
+				"X-Ratelimit-Reset":     strconv.FormatInt(time.Now().Add(time.Second).Unix(), 10),
+				"Retry-After":           "",
+			}
+			for k, v := range want {
+				if got := h.Get(k); got != v {
+					t.Errorf("%s = %q, want %q", k, got, v)
+				}
+			}
+		})
+	})
+	t.Run("a rejection adds Retry-After", func(t *testing.T) {
+		h := http.Header{}
+		WriteHeaders(h, Result{Limit: 1, ResetAt: time.Now(), RetryAfter: 1500 * time.Millisecond})
+		if got := h.Get("Retry-After"); got != "2" {
+			t.Errorf("Retry-After = %q, want 2", got)
+		}
+	})
+	t.Run("an unlimited result writes nothing", func(t *testing.T) {
+		h := http.Header{}
+		WriteHeaders(h, New(0, time.Minute, 0).Allow("k"))
+		if len(h) != 0 {
+			t.Errorf("headers = %v, want none", h)
+		}
+	})
 }

@@ -2,8 +2,8 @@
 //
 // It uses only the standard library, so the oauth protocol packages can depend on it.
 //
-// Every host and Go Mode handler that answers 429 sets Retry-After with SetRetryAfter, so clients
-// see one rule: whole seconds, rounded up, at least one.
+// Every host and Go Mode handler that answers 429 sets Retry-After with SetRetryAfter, or with
+// WriteHeaders for a Limiter result, so clients see one rule: whole seconds, rounded up, at least one.
 package ratelimit
 
 import (
@@ -149,4 +149,21 @@ func RetryAfterSeconds(wait time.Duration) int {
 // SetRetryAfter sets the Retry-After header of a 429 or 503 response to wait.
 func SetRetryAfter(h http.Header, wait time.Duration) {
 	h.Set("Retry-After", strconv.Itoa(RetryAfterSeconds(wait)))
+}
+
+// WriteHeaders describes result to the client: X-RateLimit-Limit (requests per window),
+// X-RateLimit-Remaining, and X-RateLimit-Reset (Unix seconds when the bucket is full again), plus
+// Retry-After on a rejection. Call it before the handler writes, on every limited response. An
+// unlimited result writes nothing.
+func WriteHeaders(h http.Header, result Result) {
+	if result.Limit == 0 && result.Allowed {
+		return
+	}
+	h.Set("X-RateLimit-Limit", strconv.Itoa(result.Limit))
+	h.Set("X-RateLimit-Remaining", strconv.Itoa(result.Remaining))
+	// Round up so a client that waits until the reset finds the bucket full.
+	h.Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt.Add(time.Second-1).Unix(), 10))
+	if !result.Allowed {
+		SetRetryAfter(h, result.RetryAfter)
+	}
 }

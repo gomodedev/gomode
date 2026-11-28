@@ -531,10 +531,10 @@ func (s *Server) rateLimit(w http.ResponseWriter, key string) bool {
 		return true
 	}
 	result := s.rateLimiter.Allow(key)
+	ratelimit.WriteHeaders(w.Header(), result)
 	if result.Allowed {
 		return true
 	}
-	ratelimit.SetRetryAfter(w.Header(), result.RetryAfter)
 	http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 	return false
 }
