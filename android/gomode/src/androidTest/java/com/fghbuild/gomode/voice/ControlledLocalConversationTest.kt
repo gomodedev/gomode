@@ -229,6 +229,10 @@ class ControlledLocalConversationTest {
                                 speech = speech,
                                 localModelOwner = owner,
                                 voiceChimePlayer = QuietChime(),
+                                switchServer = { id ->
+                                    conversation.noteRequestedSwitch(id)
+                                    repository.switchService(id)
+                                },
                             )
                         }
                     val settings by repository.settings.collectAsState()
@@ -289,6 +293,10 @@ class ControlledLocalConversationTest {
                 runBlocking { repository.switchService(ids.second) }
                 composeRule.waitUntil(30_000) { repository.settings.value.activeServiceId == ids.second }
                 a.releaseTool.countDown()
+                composeRule.waitUntil(30_000) {
+                    session.state.value.transcript
+                        .any { it.text.contains("Now using B.") }
+                }
                 waitForListening(session, speech)
                 composeRule.runOnIdle { speech.submit("USER_RETURN") }
                 waitForListening(session, speech)
@@ -300,12 +308,12 @@ class ControlledLocalConversationTest {
                 assertTrue(metadata.getString("openai/session").matches(Regex("[0-9a-f-]{36}")))
                 assertTrue(runner.messages.any { it.role == Role.TOOL && it.toString().contains("A-mcp") })
                 assertTrue(runner.messages.any { it.role == Role.TOOL && it.toString().contains("B-frontend") })
-                assertTrue(
-                    runner.messages
-                        .last { it.role == Role.USER }
-                        .toString()
-                        .contains(ids.second),
-                )
+                val prompts = runner.messages.filter { it.role == Role.USER }.map { it.toString() }
+                val announcement = prompts.single { it.contains("New notification: active server changed.") }
+                val activeB = "Active server: B [${ids.second}]"
+                assertTrue(announcement, announcement.contains(activeB))
+                val returnPrompt = prompts.single { it.contains("USER_RETURN") }
+                assertFalse(returnPrompt, returnPrompt.contains(activeB))
                 assertTrue(
                     session.state.value.transcript
                         .any { it.text.contains("cedar back on A") },
@@ -510,7 +518,11 @@ class ControlledLocalConversationTest {
                         )
                     }
 
-                    message.role == Role.USER -> {
+                    message.role == Role.USER && text.contains("New notification: active server changed.") -> {
+                        Message.model("Now using B.")
+                    }
+
+                    message.role == Role.USER && text.contains("USER_RETURN") -> {
                         // B is active until the switch, so its tool runs first.
                         Message.model(
                             toolCalls =
@@ -525,18 +537,6 @@ class ControlledLocalConversationTest {
                                         ),
                                     ),
                                     ToolCall("switch_server", mapOf("server_id" to a)),
-                                ),
-                        )
-                    }
-
-                    text.contains("A-mcp") -> {
-                        Message.model(
-                            toolCalls =
-                                listOf(
-                                    ToolCall(
-                                        "switch_server",
-                                        mapOf("server_id" to b),
-                                    ),
                                 ),
                         )
                     }
