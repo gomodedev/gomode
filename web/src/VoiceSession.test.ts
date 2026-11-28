@@ -2803,6 +2803,30 @@ describe("VoiceSession", () => {
     }
   });
 
+  it("holds alerts past the update limit for the next idle turn", async () => {
+    const session = createVoiceSession();
+    try {
+      await session.connect();
+      const channel = FakePeerConnection.dataChannels.at(-1);
+      if (!channel) throw new Error("Missing voice channel");
+      const event = (state: string) =>
+        channel.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: "turn.status", state }) }));
+      const alerts = ["a", "b", "c"].map((letter) => letter.repeat(6000));
+      event("thinking");
+      for (const alert of alerts) session.announce(alert);
+      event("idle");
+      expect(channel.send).toHaveBeenLastCalledWith(
+        JSON.stringify({ kind: "context.update", context: { text: `${alerts[0]}\n\n${alerts[1]}` }, generate: true }),
+      );
+      event("idle");
+      expect(channel.send).toHaveBeenLastCalledWith(
+        JSON.stringify({ kind: "context.update", context: { text: alerts[2] }, generate: true }),
+      );
+    } finally {
+      session.disconnect();
+    }
+  });
+
   it("sends only service context that the session setup did not carry", async () => {
     mcpMocks.mcpReadTextResource.mockImplementation(async (uri) => (uri === "fixture://catalog" ? "Catalog" : "Focus"));
     const session = createVoiceSession();

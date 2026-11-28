@@ -75,6 +75,7 @@ import {
   type FrontendSessionPreparation,
 } from "./FrontendVoiceTools";
 import { modelContextText, readInitialModelContext } from "./ModelContext";
+import { MODEL_CONTEXT_LIMIT } from "./ConversationContext";
 import { WebAudioVoiceChime, type VoiceChimePlayer } from "./VoiceChime";
 import { WebAudioThinkingEarcon, type ThinkingEarcon } from "./ThinkingEarcon";
 import {
@@ -2442,10 +2443,20 @@ export class VoiceSession {
     for (const [uri, text] of changed) this._deliveredServiceContext.set(uri, text);
     const context = modelContextText(changed.map(([, text]) => text)) || null;
     if (this._pendingAlerts.length === 0 && context === null) return;
-    const text = [context, ...this._pendingAlerts].filter((value): value is string => value !== null).join("\n\n");
-    const generate = allowResponse && this._pendingAlerts.length > 0;
-    this._pendingAlerts = [];
-    this._sendContextUpdate(text, generate);
+    // Alerts past the limit wait for the next flush, once this update's turn ends. The first
+    // alert always goes so each flush makes progress.
+    const parts = context === null ? [] : [context];
+    let length = context?.length ?? 0;
+    let taken = 0;
+    for (const alert of this._pendingAlerts) {
+      const next = alert.length + (parts.length === 0 ? 0 : 2);
+      if (taken > 0 && length + next > MODEL_CONTEXT_LIMIT) break;
+      parts.push(alert);
+      length += next;
+      taken++;
+    }
+    this._pendingAlerts = this._pendingAlerts.slice(taken);
+    this._sendContextUpdate(parts.join("\n\n"), allowResponse && taken > 0);
   }
 
   clearTranscript(): void {

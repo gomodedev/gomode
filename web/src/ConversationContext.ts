@@ -18,6 +18,8 @@ export const MODEL_CONTEXT_META_KEY = "com.fghbuild.gomode/modelContext";
 export const MAX_MODEL_RESOURCES = 16;
 export const MODEL_RESOURCE_BUDGET = 6000;
 export const MODEL_CONTEXT_BUDGET = 10000;
+/** The largest assembled model message: a context diff and the alerts that follow it. */
+export const MODEL_CONTEXT_LIMIT = 13000;
 
 /** Private result metadata, never domain/model data. */
 export function parseContextUpdate(value: unknown): ContextSnapshot {

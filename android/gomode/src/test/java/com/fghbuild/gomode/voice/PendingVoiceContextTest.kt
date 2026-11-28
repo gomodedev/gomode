@@ -1,6 +1,7 @@
 // Tests alert retention, size limits, and explicit native model wake-up.
 package com.fghbuild.gomode.voice
 
+import com.fghbuild.gomode.service.MODEL_CONTEXT_LIMIT
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,7 +30,7 @@ class PendingVoiceContextTest {
         assertEquals(
             64,
             pending
-                .drain()
+                .drain(announce = true)
                 ?.text
                 ?.split("\n\n")
                 ?.size,
@@ -39,25 +40,32 @@ class PendingVoiceContextTest {
     @Test
     fun alertsPastTheLimitWaitForTheNextDrain() {
         val pending = PendingVoiceContext { null }
-        repeat(3) { pending.addAlert("x".repeat(10)) }
+        repeat(3) { pending.addAlert("x".repeat(6000)) }
         assertEquals(
-            "two alerts and their separator fit",
+            "two alerts and their separator fit the limit",
             2,
             pending
-                .drain(limit = 22)
+                .drain(announce = false)
                 ?.text
                 ?.split("\n\n")
                 ?.size,
         )
         assertTrue(pending.announces())
-        assertNull(
-            "an alert longer than the limit waits",
-            PendingVoiceContext { null }.also { it.addAlert("long") }.drain(3),
-        )
         assertEquals(
-            "a turn that must respond takes the first alert regardless",
-            VoiceContextUpdate("x".repeat(10), true),
-            pending.drain(limit = 1, announce = true),
+            1,
+            pending
+                .drain(announce = false)
+                ?.text
+                ?.split("\n\n")
+                ?.size,
+        )
+        val long = "x".repeat(MODEL_CONTEXT_LIMIT + 1)
+        pending.addAlert(long)
+        assertNull("an alert longer than the limit waits", pending.drain(announce = false))
+        assertEquals(
+            "an update that requests a turn takes the first alert regardless",
+            VoiceContextUpdate(long, true),
+            pending.drain(announce = true),
         )
         assertFalse(pending.announces())
     }
@@ -68,6 +76,6 @@ class PendingVoiceContextTest {
         pending.addAlert("Retired alert")
         pending.markContextChanged()
         pending.clear()
-        assertNull(pending.drain())
+        assertNull(pending.drain(announce = true))
     }
 }

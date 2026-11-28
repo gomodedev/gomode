@@ -1471,7 +1471,8 @@ internal class VoiceSession(
     private fun flushPendingNotifications(allowResponse: Boolean = true) {
         if (endIfConversationChanged(voiceConversation)) return
         if (contextUpdateBlocked()) return
-        val update = pendingNotifications.drain() ?: return
+        // Alerts past the limit wait for the next flush, once this update's turn ends.
+        val update = pendingNotifications.drain(announce = true) ?: return
         sendClientContent(update.text, update.generate && allowResponse)
     }
 

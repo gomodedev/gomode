@@ -8,6 +8,7 @@
 // stops monitoring.
 package com.fghbuild.gomode.voice
 
+import com.fghbuild.gomode.service.MODEL_CONTEXT_LIMIT
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -90,14 +91,11 @@ internal class PendingVoiceContext(
     }
 
     /**
-     * drain takes the context diff, then alerts in order while the text fits [limit]; the rest stay
-     * pending for the next drain. [announce] takes the first alert regardless, so a turn that must
-     * respond has an alert to respond to.
+     * drain takes the context diff, then alerts in order while the text fits MODEL_CONTEXT_LIMIT;
+     * the rest stay pending for the next drain. [announce] takes the first alert regardless, so an
+     * update that requests a turn has an alert to respond to and each drain makes progress.
      */
-    fun drain(
-        limit: Int = Int.MAX_VALUE,
-        announce: Boolean = false,
-    ): VoiceContextUpdate? {
+    fun drain(announce: Boolean): VoiceContextUpdate? {
         val context = if (contextChanged) conversation()?.contextUpdate() else null
         contextChanged = false
         val texts = listOfNotNull(context?.text).toMutableList()
@@ -105,7 +103,7 @@ internal class PendingVoiceContext(
         var taken = 0
         while (alerts.isNotEmpty()) {
             val next = alerts.first().length + if (texts.isEmpty()) 0 else 2
-            if (length + next > limit && !(announce && taken == 0)) break
+            if (length + next > MODEL_CONTEXT_LIMIT && !(announce && taken == 0)) break
             texts += alerts.removeAt(0)
             length += next
             taken++

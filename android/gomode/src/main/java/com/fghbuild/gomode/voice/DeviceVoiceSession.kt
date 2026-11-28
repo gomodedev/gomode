@@ -19,7 +19,6 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.VoiceLanguageModel
 import com.fghbuild.gomode.sdk.v1.Display
 import com.fghbuild.gomode.service.DefaultNetworkMonitor
-import com.fghbuild.gomode.service.MODEL_CONTEXT_LIMIT
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.isTransientHTTPStatus
 import com.fghbuild.gomode.ui.web.FrontendVoiceTools
@@ -1052,7 +1051,7 @@ internal class DeviceVoiceSession(
                     // The diff is taken as the turn starts, so it holds each changed section once.
                     // Alerts that do not fit stay pending and get their own turn after this one.
                     val context =
-                        if (serviceUpdate) null else pendingNotifications.drain(MODEL_CONTEXT_LIMIT)?.text
+                        if (serviceUpdate) null else pendingNotifications.drain(announce = false)?.text
                     activeEngine.processTurn(
                         input = UserTurnInput(text = text, serviceUpdate = serviceUpdate, context = context),
                         onDelta = { delta ->
@@ -1472,12 +1471,13 @@ internal class DeviceVoiceSession(
         if (currentEngine != null && currentEngine.engineType != VoiceLanguageModel.GATEWAY) {
             // A local model takes context only with a turn, so quiet changes wait for the next one.
             if (pendingNotifications.announces()) {
-                pendingNotifications.drain(MODEL_CONTEXT_LIMIT, announce = true)?.let {
+                pendingNotifications.drain(announce = true)?.let {
                     executeLocalTurn(attempt, it.text, currentEngine, serviceUpdate = true)
                 }
             }
         } else {
-            pendingNotifications.drain()?.let { update ->
+            // Alerts past the limit wait for the next flush, once this update's turn ends.
+            pendingNotifications.drain(announce = true)?.let { update ->
                 // A queued user utterance already requests the next response. Deliver
                 // its service alerts as context before that request, without a competing turn.
                 sendContextUpdate(update.text, update.generate && allowResponse && pendingUserUtterance == null)

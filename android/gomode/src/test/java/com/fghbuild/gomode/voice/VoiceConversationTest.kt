@@ -94,11 +94,11 @@ class VoiceConversationTest {
                         "New notification: active server changed.\n\nActive server: Other [$other]",
                         generate = true,
                     ),
-                    pending.drain(),
+                    pending.drain(announce = true),
                 )
                 pending.markContextChanged()
                 assertFalse(pending.announces())
-                assertNull("the diff at delivery sent each change once", pending.drain())
+                assertNull("the diff at delivery sent each change once", pending.drain(announce = true))
                 owner.noteRequestedSwitch(id)
                 repository.switchService(id)
                 repository.settings.first { it.activeServiceId == id }
