@@ -5,6 +5,7 @@ import { ok } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createEffect, createRoot } from "solid-js";
 import { expect, vi } from "../tests/expect";
+import { createVoiceSession, silentChime, silentThinking } from "../tests/voice-session";
 import { FakeMicrophoneContext, microphoneFrames } from "../tests/microphone-audio";
 
 import {
@@ -12,11 +13,9 @@ import {
   formatVoiceRTCDiagnostics,
   MAX_RECOVERY_CONTEXT_CHARS,
   summarizeSDPCandidates,
-  VoiceSession,
   configureVoiceGateway,
   voiceToolDeclarations,
 } from "./VoiceSession";
-import { VoiceIssues } from "./VoiceIssues";
 import {
   captureFrontendVoiceTools,
   createFrontendPreparationClient,
@@ -329,7 +328,7 @@ describe("VoiceSession", () => {
       configureVoiceGateway("https://unrelated.example", null);
       const chime = { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() };
       const thinking = { prepare: vi.fn(), setThinking: vi.fn() };
-      const session = new VoiceSession(new VoiceIssues(), chime, thinking);
+      const session = createVoiceSession({ chime, thinking });
       session.setState((s) => ({
         ...s,
         speechInput: native ? "client" : "gateway",
@@ -425,7 +424,7 @@ describe("VoiceSession", () => {
         configureVoiceGateway("https://voice.example", null);
         globalThis.fetch = async (input, init) =>
           String(input).endsWith("/voice/choices") ? new Response(JSON.stringify(catalog)) : signaling(input, init);
-        const saved = new VoiceSession(new VoiceIssues());
+        const saved = createVoiceSession();
         await saved.loadVoiceChoices();
         if (native) {
           saved.selectSetupMode("all-in-one");
@@ -437,11 +436,7 @@ describe("VoiceSession", () => {
         saved.disconnect();
         // Construction happened before the host configured this gateway.
         configureVoiceGateway("https://unrelated.example", null);
-        const session = new VoiceSession(
-          new VoiceIssues(),
-          { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-          { prepare: vi.fn(), setThinking: vi.fn() },
-        );
+        const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
         configureVoiceGateway("https://voice.example", null);
         let finishSettings!: (response: Response) => void;
         let finishConnection!: (response: Response) => void;
@@ -506,11 +501,7 @@ describe("VoiceSession", () => {
         ["gateway", "client"],
         ["client", "gateway"],
       ] as const) {
-        const session = new VoiceSession(
-          new VoiceIssues(),
-          { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-          { prepare: vi.fn(), setThinking: vi.fn() },
-        );
+        const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
         try {
           session.selectSpeechInput(input);
           session.selectSpeechOutput(output);
@@ -561,7 +552,7 @@ describe("VoiceSession", () => {
     independentSpeech = true;
     mixedSpeech = true;
     localStorage.setItem("gomode.voiceSpeechModel.https://voice.example.input", "removed");
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       expect(session.issues.message("connection")).toBeNull();
@@ -578,11 +569,7 @@ describe("VoiceSession", () => {
     configureVoiceGateway("https://voice.example", null);
     independentSpeech = true;
     mixedSpeech = true;
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     try {
       await session.loadVoiceChoices();
       session.selectSpeechModel("input", "asr-b");
@@ -612,11 +599,7 @@ describe("VoiceSession", () => {
 
   it("uses gateway recognition with browser TTS without requiring browser recognition", async () => {
     const restore = installBrowserSpeech("Firefox/150");
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     mixedSpeech = true;
     const remoteAudio = vi.fn();
     vi.stubGlobal("Audio", remoteAudio);
@@ -667,11 +650,7 @@ describe("VoiceSession", () => {
 
   it("reads a complete long browser reply over RTC at playback speed before releasing mute-once", async () => {
     const restore = installBrowserSpeech("Firefox/150");
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     mixedSpeech = true;
     try {
       session.selectSpeechOutput("client");
@@ -707,11 +686,7 @@ describe("VoiceSession", () => {
   it("retains delayed browser speech ownership after idle and cancels it on a new microphone onset", async () => {
     const restore = installBrowserSpeech("Firefox/150");
     localStorage.setItem("gomode.browserVoiceURI", "chosen");
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     mixedSpeech = true;
     try {
       session.selectSpeechOutput("client");
@@ -753,11 +728,7 @@ describe("VoiceSession", () => {
   it("uses browser recognition with gateway speech and cancels remote playback without losing tools", async () => {
     const restore = installBrowserSpeech("Chrome desktop");
     Reflect.deleteProperty(window, "speechSynthesis");
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     mixedSpeech = true;
     vi.stubGlobal("Audio", window.Audio);
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
@@ -827,11 +798,7 @@ describe("VoiceSession", () => {
 
   it("mutes active browser recognition for a gateway tool continuation and resumes after that reply", async () => {
     const restore = installBrowserSpeech("Chrome desktop");
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     mixedSpeech = true;
     const tool = deferred<{ structuredContent: Record<string, never> }>();
     mcpMocks.mcpCallTool.mockReturnValue(tool.promise);
@@ -886,11 +853,7 @@ describe("VoiceSession", () => {
 
   it("reconnects mixed sessions with the same speech selection and retires old playback callbacks", async () => {
     const restore = installBrowserSpeech("Firefox/150");
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     mixedSpeech = true;
     try {
       session.selectSpeechOutput("client");
@@ -924,11 +887,7 @@ describe("VoiceSession", () => {
     const restore = installBrowserSpeech("Firefox/150");
     localStorage.setItem("gomode.browserVoiceURI", "missing");
     fakeSynthesis.voices = [{ voiceURI: "other", lang: "en-US" } as SpeechSynthesisVoice];
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     mixedSpeech = true;
     try {
       session.selectSpeechOutput("client");
@@ -953,11 +912,7 @@ describe("VoiceSession", () => {
     localStorage.setItem("gomode.voiceInput", "client");
     localStorage.setItem("gomode.voiceOutput", "gateway");
     const restore = installBrowserSpeech("Firefox/150");
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      { prepare: vi.fn(), setThinking: vi.fn() },
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: silentThinking() });
     try {
       await session.connect();
       expect(session.issues.message("connection")).toContain("unavailable");
@@ -970,7 +925,7 @@ describe("VoiceSession", () => {
 
   it("attenuates the transmitted microphone during replies and restores it after interruption and input replacement", async () => {
     FakeMicrophoneContext.instances = [];
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const context = FakeMicrophoneContext.instances.find((context) => context.gains.length > 0);
@@ -1008,11 +963,7 @@ describe("VoiceSession", () => {
   });
   it("lists a paused level meter with its gesture recovery until the meter runs again", async () => {
     FakeMicrophoneContext.instances = [];
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     try {
       await session.connect();
       const meter = FakeMicrophoneContext.instances.find((context) => context.gains.length === 0);
@@ -1036,11 +987,7 @@ describe("VoiceSession", () => {
   it("keeps the gesture-unlocked meter and meters during cloud playback without freezing on mute or silence", async () => {
     FakeMicrophoneContext.instances = [];
     const poll = microphoneFrames();
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     session.prepareAudio();
     const context = FakeMicrophoneContext.instances[0];
     expect(context).toBeDefined();
@@ -1074,7 +1021,7 @@ describe("VoiceSession", () => {
   it("coalesces access requests and releases a late stream without clearing a newer failure", async () => {
     const media = deferred<MediaStream>();
     const getMedia = vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValue(media.promise);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const first = session.requestMicrophoneAccess();
     await session.requestMicrophoneAccess();
     expect(getMedia).toHaveBeenCalledOnce();
@@ -1096,7 +1043,7 @@ describe("VoiceSession", () => {
       configurable: true,
       value: { query: async () => status },
     });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const stopObserving = session.observeMicrophoneAccess();
     try {
       await Promise.resolve();
@@ -1133,7 +1080,7 @@ describe("VoiceSession", () => {
       [["stun:stun.example:3478", "stuns:stun.example"], [{ urls: ["stun:stun.example:3478", "stuns:stun.example"] }]],
     ] as const) {
       advertisedSTUN = advertised === null ? null : [...advertised];
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       try {
         await session.connect();
         expect(FakePeerConnection.last?.configuration?.iceServers).toEqual(want);
@@ -1147,7 +1094,7 @@ describe("VoiceSession", () => {
     vi.stubGlobal("Audio", window.Audio);
     const play = vi.spyOn(HTMLMediaElement.prototype, "play");
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       play.mockRejectedValueOnce(new DOMException("Autoplay blocked", "NotAllowedError"));
       await session.connect();
@@ -1197,7 +1144,7 @@ describe("VoiceSession", () => {
       const playback = deferred<void>();
       const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockReturnValue(playback.promise);
       const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       try {
         await session.connect();
         FakePeerConnection.last?.ontrack?.call(
@@ -1227,7 +1174,7 @@ describe("VoiceSession", () => {
   }
 
   it("offers microphone recovery after denial without starting a session on re-enable", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const getMedia = vi.mocked(navigator.mediaDevices.getUserMedia);
     getMedia.mockRejectedValueOnce(new DOMException("Permission denied", "NotAllowedError"));
     await session.connect();
@@ -1261,11 +1208,7 @@ describe("VoiceSession", () => {
       const gatewayFetch = globalThis.fetch;
       globalThis.fetch = (input, init) =>
         String(input) === "/.well-known/gomode.json" ? discovery.promise : gatewayFetch(input, init);
-      const session = new VoiceSession(new VoiceIssues(), {
-        prepare: vi.fn(),
-        playConnected: vi.fn(),
-        playDisconnected: vi.fn(),
-      });
+      const session = createVoiceSession({ chime: silentChime() });
       try {
         await session.connect();
         FakePeerConnection.dataChannels[0]?.onmessage?.(
@@ -1291,7 +1234,7 @@ describe("VoiceSession", () => {
   }
   it("does not report a device-list failure when the browser has no media APIs", async () => {
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.enumerateDevices();
     expect(session.issues.message("audioDevices")).toBeNull();
     expect(session.state.audioInputs).toEqual([]);
@@ -1301,7 +1244,7 @@ describe("VoiceSession", () => {
   it("prefers newly connected Bluetooth and remembers its routes across sessions", async () => {
     const sink = vi.fn(async (_id: string) => {});
     Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", { configurable: true, value: sink });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const speaker = { kind: "audiooutput", deviceId: "speaker", label: "Speakers" } as MediaDeviceInfo;
     const headset = [
       { kind: "audioinput", deviceId: "bt-mic", label: "Bluetooth microphone" } as MediaDeviceInfo,
@@ -1331,7 +1274,7 @@ describe("VoiceSession", () => {
       vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue(
         headset.map((d) => ({ ...d, label: "Headset" })),
       );
-      const restored = new VoiceSession(new VoiceIssues());
+      const restored = createVoiceSession();
       await restored.enumerateDevices();
       expect(restored.state.selectedOutputId).toBe("bt-out");
       expect(restored.state.selectedInputId).toBe("bt-mic");
@@ -1342,7 +1285,7 @@ describe("VoiceSession", () => {
   });
 
   it("routes a Bluetooth arrival after an outstanding microphone switch completes", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const microphone = { stop: vi.fn(), enabled: true };
     const stream = { getTracks: () => [microphone], getAudioTracks: () => [microphone] } as unknown as MediaStream;
     try {
@@ -1364,7 +1307,7 @@ describe("VoiceSession", () => {
   });
 
   it("keeps a Bluetooth arrival queued across overlapping unplug recovery refreshes", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const microphone = { stop: vi.fn(), enabled: true };
     const stream = { getTracks: () => [microphone], getAudioTracks: () => [microphone] } as unknown as MediaStream;
     vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(stream);
@@ -1407,7 +1350,7 @@ describe("VoiceSession", () => {
         }
       },
     );
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.selectInputDevice("bt-mic");
       await session.selectOutputDevice("bt-out");
@@ -1452,7 +1395,7 @@ describe("VoiceSession", () => {
         }
       },
     );
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.selectInputDevice("");
       await session.selectOutputDevice("");
@@ -1487,7 +1430,7 @@ describe("VoiceSession", () => {
         getTracks: () => [bluetooth],
         getAudioTracks: () => [bluetooth],
       } as unknown as MediaStream);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.selectInputDevice("usb");
       const connecting = session.connect();
@@ -1522,7 +1465,7 @@ describe("VoiceSession", () => {
           }
         },
       );
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       try {
         await session.selectOutputDevice(output);
         await session.connect();
@@ -1560,7 +1503,7 @@ describe("VoiceSession", () => {
       getTracks: () => [oldTrack],
       getAudioTracks: () => [oldTrack],
     } as unknown as MediaStream);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       session.setMicrophoneMode("muted");
@@ -1603,7 +1546,7 @@ describe("VoiceSession", () => {
         }
       },
     );
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue(devices);
       await session.selectInputDevice("usb");
@@ -1643,7 +1586,7 @@ describe("VoiceSession", () => {
           }
         },
       );
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       try {
         vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue(devices);
         await session.selectInputDevice("usb");
@@ -1709,7 +1652,7 @@ describe("VoiceSession", () => {
         expect(FakePeerConnection.last?.addedTracks[0]).not.toBe(oldTrack);
         return { getTracks: () => [newTrack], getAudioTracks: () => [newTrack] } as unknown as MediaStream;
       });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.selectInputDevice("usb");
     await session.connect();
     expect(FakePeerConnection.last?.addedTracks).toHaveLength(1);
@@ -1733,7 +1676,7 @@ describe("VoiceSession", () => {
         }
       },
     );
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const pc = FakePeerConnection.last;
@@ -1788,7 +1731,7 @@ describe("VoiceSession", () => {
               label: source === "manual" ? "Manual USB device" : "Bluetooth headset",
             } as MediaDeviceInfo,
           ]);
-          const session = new VoiceSession(new VoiceIssues());
+          const session = createVoiceSession();
           try {
             const connecting = session.connect();
             await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce());
@@ -1840,7 +1783,7 @@ describe("VoiceSession", () => {
           }
         },
       );
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       const speaker = deferred<void>();
       try {
         vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue([
@@ -1882,7 +1825,7 @@ describe("VoiceSession", () => {
   it("ignores an older device list that omits a currently selected microphone", async () => {
     const devices = [{ kind: "audioinput", deviceId: "usb", label: "USB headset" } as MediaDeviceInfo];
     vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue(devices);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.selectInputDevice("usb");
     await session.connect();
     const oldList = deferred<MediaDeviceInfo[]>();
@@ -1913,7 +1856,7 @@ describe("VoiceSession", () => {
       getTracks: () => [oldTrack],
       getAudioTracks: () => [oldTrack],
     } as unknown as MediaStream);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.selectInputDevice("usb");
     await session.connect();
     vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue([]);
@@ -1936,7 +1879,7 @@ describe("VoiceSession", () => {
       getTracks: () => [track],
       getAudioTracks: () => [track],
     } as unknown as MediaStream);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(new Error("Permission denied"));
     await session.selectInputDevice("headset");
@@ -1954,7 +1897,7 @@ describe("VoiceSession", () => {
       getTracks: () => [track],
       getAudioTracks: () => [track],
     } as unknown as MediaStream);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels.at(-1);
@@ -2010,7 +1953,7 @@ describe("VoiceSession", () => {
           .mockResolvedValueOnce(stream(oldTrack))
           .mockResolvedValueOnce(stream(pendingTrack))
           .mockResolvedValue(stream(currentTrack));
-        const session = new VoiceSession(new VoiceIssues());
+        const session = createVoiceSession();
         const entered = deferred<void>();
         const replacement = deferred<void>();
         let switching: Promise<void> | null = null;
@@ -2081,7 +2024,7 @@ describe("VoiceSession", () => {
         .mockResolvedValueOnce(stream(oldTrack))
         .mockResolvedValueOnce(stream(pendingTrack))
         .mockResolvedValueOnce(stream(retryTrack));
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       try {
         await session.connect();
         const processing = [...FakeMicrophoneContext.instances]
@@ -2122,7 +2065,7 @@ describe("VoiceSession", () => {
       getTracks: () => [oldTrack],
       getAudioTracks: () => [oldTrack],
     } as unknown as MediaStream);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       session.setMicrophoneMode("muteOnce");
@@ -2162,7 +2105,7 @@ describe("VoiceSession", () => {
       getTracks: () => [oldTrack],
       getAudioTracks: () => [oldTrack],
     } as unknown as MediaStream);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     session.setMicrophoneMode("muted");
     const pc = FakePeerConnection.last;
@@ -2184,7 +2127,7 @@ describe("VoiceSession", () => {
   it("does not resume setup when disconnected during MCP discovery", async () => {
     const tools = deferred<Awaited<ReturnType<typeof mcpClient.listTools>>>();
     mcpMocks.mcpListTools.mockReturnValue(tools.promise);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     const connecting = session.connect();
     await vi.waitFor(() => expect(mcpMocks.mcpListTools).toHaveBeenCalled());
@@ -2202,7 +2145,7 @@ describe("VoiceSession", () => {
     const media = deferred<MediaStream>();
     const stop = vi.fn();
     vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValue(media.promise);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     const connecting = session.connect();
     await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
@@ -2219,7 +2162,7 @@ describe("VoiceSession", () => {
   it("ignores a late signaling response and stale data-channel events", async () => {
     const offer = deferred<VoiceRTCAnswerResp>();
     offerResponse = offer.promise.then((answer) => new Response(JSON.stringify(answer)));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     const connecting = session.connect();
     await vi.waitFor(() => expect(offerRequests).toHaveLength(1));
@@ -2259,7 +2202,7 @@ describe("VoiceSession", () => {
       });
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     try {
       const connecting = session.connect();
@@ -2285,7 +2228,7 @@ describe("VoiceSession", () => {
   });
 
   it("stops a device-switch microphone stream returned after disconnect", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     const media = deferred<MediaStream>();
     const stop = vi.fn();
@@ -2302,11 +2245,7 @@ describe("VoiceSession", () => {
   });
 
   it("mutes through a local tool without disconnecting or calling MCP", async () => {
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels[0];
@@ -2381,7 +2320,7 @@ describe("VoiceSession", () => {
       playConnected: vi.fn(),
       playDisconnected: vi.fn(),
     };
-    const session = new VoiceSession(new VoiceIssues(), chime);
+    const session = createVoiceSession({ chime });
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
     channel?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: MessageKindSessionReady }) }));
@@ -2393,11 +2332,7 @@ describe("VoiceSession", () => {
   });
 
   it("preserves MCP success status when structured content contains domain error data", async () => {
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels[0];
@@ -2452,11 +2387,7 @@ describe("VoiceSession", () => {
       },
     ]);
     scope.setDataReady(true);
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     try {
       const declarations = captureFrontendVoiceTools().declarations;
       expect(voiceToolDeclarations([], declarations).some((tool) => tool.name === "select_item")).toBe(true);
@@ -2515,11 +2446,7 @@ describe("VoiceSession", () => {
   });
 
   it("keeps replacement setup alive when fatal-error observers reconnect", async () => {
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     let replacement: Promise<void> | null = null;
     const dispose = createRoot((dispose) => {
       createEffect(() => {
@@ -2556,7 +2483,7 @@ describe("VoiceSession", () => {
     const execute = vi.fn(() => ({ selected: true }));
     scope.setTools([{ declaration: { name: "select_item", description: "Select", parameters: {} }, execute }]);
     scope.setDataReady(true);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const dispose = createRoot((dispose) => {
       createEffect(() => {
         if (session.state.activeTool === "select_item") session.disconnect();
@@ -2591,7 +2518,7 @@ describe("VoiceSession", () => {
       );
       scope.setDataReady(true);
       if (kind === "mcp") mcpMocks.mcpCallTool.mockRejectedValueOnce(new Error("old failure"));
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       let active = false;
       let replaced = false;
       let replacement: Promise<void> | undefined;
@@ -2644,11 +2571,7 @@ describe("VoiceSession", () => {
       },
     ]);
     scope.setDataReady(true);
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels[0];
@@ -2670,11 +2593,7 @@ describe("VoiceSession", () => {
 
   it("tracks gateway turn status until disconnect", async () => {
     const earcon = { prepare: vi.fn(), setThinking: vi.fn() };
-    const session = new VoiceSession(
-      new VoiceIssues(),
-      { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() },
-      earcon,
-    );
+    const session = createVoiceSession({ chime: silentChime(), thinking: earcon });
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
     channel?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: MessageKindSessionReady }) }));
@@ -2695,7 +2614,7 @@ describe("VoiceSession", () => {
       playConnected: vi.fn(),
       playDisconnected: vi.fn(),
     };
-    const session = new VoiceSession(new VoiceIssues(), chime);
+    const session = createVoiceSession({ chime });
 
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
@@ -2721,7 +2640,7 @@ describe("VoiceSession", () => {
         },
       },
     });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
     dispatchToolCall(channel, "active-tool", "lookup");
@@ -2759,7 +2678,7 @@ describe("VoiceSession", () => {
     const prepare = vi.fn((sessionID: string, signal: AbortSignal) => scope.prepareSession(sessionID, signal));
     const retireSession = vi.fn((sessionID: string) => scope.retireSession(sessionID));
     configureVoiceGateway("/", null, undefined, undefined, { prepareSession: prepare, retireSession });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     session.selectLanguage("fr-CA");
     await session.connect();
     dispatchToolCall(FakePeerConnection.dataChannels[0], "first", "lookup");
@@ -2817,7 +2736,7 @@ describe("VoiceSession", () => {
 
   it("surfaces tool result delivery failures without replaying the action", async () => {
     for (const failure of ["closed", "exception"]) {
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       await session.connect();
       const channel = FakePeerConnection.dataChannels.at(-1);
       if (!channel) throw new Error("Missing voice channel");
@@ -2848,7 +2767,7 @@ describe("VoiceSession", () => {
   });
 
   it("wakes for a queued alert after a silent model turn becomes idle", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels.at(-1);
@@ -2886,7 +2805,7 @@ describe("VoiceSession", () => {
 
   it("sends only service context that the session setup did not carry", async () => {
     mcpMocks.mcpReadTextResource.mockImplementation(async (uri) => (uri === "fixture://catalog" ? "Catalog" : "Focus"));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels.at(-1);
@@ -2918,7 +2837,7 @@ describe("VoiceSession", () => {
   });
 
   it("surfaces a rejected current context send", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     const channel = FakePeerConnection.dataChannels.at(-1);
     if (!channel) throw new Error("Missing voice channel");
@@ -2930,11 +2849,7 @@ describe("VoiceSession", () => {
   });
 
   it("ends a failed session's route and gateway problems with it", async () => {
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     await session.connect();
     session.issues.raise("audioOutput", "Speaker disconnected. Choose another speaker.", null);
     session.issues.raise("gateway", "Streaming OutOfOrder support is unmeasured", null);
@@ -2950,7 +2865,7 @@ describe("VoiceSession", () => {
 
   it("keeps device problems to the speech stages that route through the gateway", async () => {
     const restore = installBrowserSpeech("Chrome desktop");
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       vi.mocked(navigator.mediaDevices.enumerateDevices).mockRejectedValueOnce(new Error("Device list busy"));
       await session.enumerateDevices();
@@ -2971,11 +2886,7 @@ describe("VoiceSession", () => {
   });
 
   it("replaces a repeated connection failure in place until the next session is ready", async () => {
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     for (const failure of ["first failure", "second failure"]) {
       await session.connect();
       FakePeerConnection.dataChannels
@@ -2998,7 +2909,7 @@ describe("VoiceSession", () => {
 
   it("retains the latest tool names after completion and disconnect, then resets for a new conversation", async () => {
     mcpMocks.mcpCallTool.mockResolvedValue({ structuredContent: {} });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     const channel = FakePeerConnection.dataChannels.at(-1);
     dispatchToolCall(channel, "first", "same_tool");
@@ -3022,11 +2933,7 @@ describe("VoiceSession", () => {
   it("preserves outstanding tools and transport after a recoverable gateway error", async () => {
     const tool = deferred<Awaited<ReturnType<typeof mcpClient.callTool>>>();
     mcpMocks.mcpCallTool.mockReturnValue(tool.promise);
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
     channel?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ kind: MessageKindSessionReady }) }));
@@ -3058,7 +2965,7 @@ describe("VoiceSession", () => {
   });
 
   it("replaces live drafts, commits atomically, and isolates replaced connections", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
     const send = (value: object) => channel?.onmessage?.(new MessageEvent("message", { data: JSON.stringify(value) }));
@@ -3090,7 +2997,7 @@ describe("VoiceSession", () => {
   it("discards a late MCP result from a replaced voice connection", async () => {
     const tool = deferred<Awaited<ReturnType<typeof mcpClient.callTool>>>();
     mcpMocks.mcpCallTool.mockReturnValue(tool.promise);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     dispatchToolCall(FakePeerConnection.dataChannels[0], "old-tool", "lookup");
     await vi.waitFor(() => expect(mcpMocks.mcpCallTool).toHaveBeenCalled());
@@ -3109,7 +3016,7 @@ describe("VoiceSession", () => {
   it("discards a late MCP error from a replaced voice connection", async () => {
     const tool = deferred<Awaited<ReturnType<typeof mcpClient.callTool>>>();
     mcpMocks.mcpCallTool.mockReturnValue(tool.promise);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     dispatchToolCall(FakePeerConnection.dataChannels[0], "old-tool", "lookup");
     await vi.waitFor(() => expect(mcpMocks.mcpCallTool).toHaveBeenCalled());
@@ -3126,7 +3033,7 @@ describe("VoiceSession", () => {
   });
 
   it("falls back to the default for a choice withdrawn before connecting", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.loadVoiceChoices();
     session.selectChoice("gemini");
     const gatewayFetch = globalThis.fetch;
@@ -3153,11 +3060,7 @@ describe("VoiceSession", () => {
   });
 
   it("fails recovery when the gateway withdraws the session's choice", async () => {
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     await session.loadVoiceChoices();
     session.selectChoice("gemini");
     await session.connect();
@@ -3193,7 +3096,7 @@ describe("VoiceSession", () => {
 
   it("pins the selected gateway and choice through setup and reconnect", async () => {
     configureVoiceGateway("https://original.example", null);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.loadVoiceChoices();
     session.selectChoice("gemini");
     const instructions = deferred<string>();
@@ -3218,7 +3121,7 @@ describe("VoiceSession", () => {
   });
 
   it("sends the complete local SDP after ICE gathering", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     await session.connect();
 
@@ -3240,7 +3143,7 @@ describe("VoiceSession", () => {
       ...service,
       token: serviceToken("user-1", ++issued),
     }));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     await session.connect();
 
@@ -3272,7 +3175,7 @@ describe("VoiceSession", () => {
       ...service,
       token: oauthToken("user-1", ++issued),
     }));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     await session.connect();
     session.disconnect();
@@ -3300,7 +3203,7 @@ describe("VoiceSession", () => {
       };
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       session.disconnect();
@@ -3328,7 +3231,7 @@ describe("VoiceSession", () => {
       token: serviceToken(++issued === 1 ? "user-1" : "user-2", issued),
     }));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       configureVoiceGateway("https://new-voice.example.com", async () => ({
@@ -3357,7 +3260,7 @@ describe("VoiceSession", () => {
     const authorization = deferred<{ kind: string; instanceID: string; baseURL: string; token: string }>();
     const oldProvider = vi.fn(() => authorization.promise);
     configureVoiceGateway("https://old-voice.example.com", oldProvider);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     const connecting = session.connect();
     await vi.waitFor(() => expect(oldProvider).toHaveBeenCalledOnce());
@@ -3401,7 +3304,7 @@ describe("VoiceSession", () => {
     const offer = deferred<VoiceRTCAnswerResp>();
     offerResponse = offer.promise.then((answer) => new Response(JSON.stringify(answer)));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       const connecting = session.connect();
       await vi.waitFor(() => expect(offerRequests).toHaveLength(1));
@@ -3430,7 +3333,7 @@ describe("VoiceSession", () => {
   });
 
   it("closes a same-origin gateway session on disconnect only once", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
 
     session.disconnect();
@@ -3449,7 +3352,7 @@ describe("VoiceSession", () => {
   it("leaves same-origin close authentication to the gateway fetch wrapper", async () => {
     let token: string | null = "host-token";
     configureVoiceGateway("/", null, () => token);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     token = "refreshed-token";
 
@@ -3478,7 +3381,7 @@ describe("VoiceSession", () => {
       return fetchGateway(input, init);
     };
     configureVoiceGateway("/", null, undefined, () => ({ "X-Host-Session": identity }));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     identity = "session-B";
     configureVoiceGateway("/", null, undefined, () => ({ "X-Host-Session": identity }));
@@ -3493,7 +3396,7 @@ describe("VoiceSession", () => {
   it("closes the gateway session and drops late tools when the voice protocol reports a fatal error", async () => {
     const tool = deferred<Awaited<ReturnType<typeof mcpClient.callTool>>>();
     mcpMocks.mcpCallTool.mockReturnValue(tool.promise);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
     dispatchToolCall(channel, "pending-tool", "lookup");
@@ -3529,7 +3432,7 @@ describe("VoiceSession", () => {
     }));
     diagnosticResponse = {} as VoiceRTCDiagnosticsResp;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       configureVoiceGateway("https://new-voice.example.com", async () => ({
@@ -3572,7 +3475,7 @@ describe("VoiceSession", () => {
         }
         return fetch(input, init);
       };
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       try {
         await session.connect();
         await vi.advanceTimersByTimeAsync(15_000);
@@ -3596,7 +3499,7 @@ describe("VoiceSession", () => {
     const gate = deferred<void>();
     const prepare = vi.fn(async (_sessionID: string, _signal: AbortSignal) => gate.promise);
     configureVoiceGateway("/", null, undefined, undefined, { prepareSession: prepare, retireSession: vi.fn() });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       const connecting = session.connect();
       await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
@@ -3619,7 +3522,7 @@ describe("VoiceSession", () => {
     const original = vi.fn(async (_sessionID: string, _signal: AbortSignal) => gate.promise);
     const replacement = vi.fn(async (_sessionID: string, _signal: AbortSignal) => {});
     configureVoiceGateway("/", null, undefined, undefined, { prepareSession: original, retireSession: vi.fn() });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       const old = session.connect();
       await vi.waitFor(() => expect(original).toHaveBeenCalledOnce());
@@ -3644,7 +3547,7 @@ describe("VoiceSession", () => {
 
   it("treats host focus publication failure as advisory but honors explicit abort", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       configureVoiceGateway("/", null, undefined, undefined, {
         prepareSession: async () => {
@@ -3673,7 +3576,7 @@ describe("VoiceSession", () => {
   });
 
   it("answers the gateway's media renegotiation", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels[0];
@@ -3702,7 +3605,7 @@ describe("VoiceSession", () => {
     mcpMocks.mcpReadTextResource.mockResolvedValue(
       '{"items":[{"id":"1","reference":"Item #1","title":"Build feature","state":"running","needsAttention":false,"active":true}]}',
     );
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     session.setShowReasoning(true);
 
     await session.connect();
@@ -3721,7 +3624,7 @@ describe("VoiceSession", () => {
   it("leaves voice selection to the provider unless a named preference is saved", async () => {
     for (const catalog of [null, [], ["Aoede", "Orus"]]) {
       offeredVoices = catalog;
-      const session = new VoiceSession(new VoiceIssues());
+      const session = createVoiceSession();
       await session.connect();
       const channel = FakePeerConnection.dataChannels.at(-1);
       channel?.onopen?.();
@@ -3733,7 +3636,7 @@ describe("VoiceSession", () => {
   it("pins the saved speaking voice during delayed setup and reconnect", async () => {
     offeredVoices = ["Aoede", "Orus"];
     configureVoiceGateway("https://original.example", null);
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.loadVoiceChoices();
     session.selectSpeakingVoice("Aoede");
     const instructions = deferred<string>();
@@ -3777,11 +3680,7 @@ describe("VoiceSession", () => {
   for (const row of recoveryFixtures.recovery) {
     it(`shared voice recovery: ${row.name}`, async () => {
       offeredVoices = row.initialVoices;
-      const session = new VoiceSession(new VoiceIssues(), {
-        prepare: vi.fn(),
-        playConnected: vi.fn(),
-        playDisconnected: vi.fn(),
-      });
+      const session = createVoiceSession({ chime: silentChime() });
       await session.loadVoiceChoices();
       if (row.voice !== "") session.selectSpeakingVoice(row.voice);
       await session.connect();
@@ -3815,7 +3714,7 @@ describe("VoiceSession", () => {
 
   it("uses the provider default for a withdrawn saved speaking voice", async () => {
     offeredVoices = ["Aoede", "Orus"];
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.loadVoiceChoices();
     session.selectSpeakingVoice("Aoede");
     offeredVoices = ["Orus"];
@@ -3831,7 +3730,7 @@ describe("VoiceSession", () => {
 
   it("reports speaking-voice reads that fail during fresh connection discovery", async () => {
     offeredVoices = ["Aoede", "Orus"];
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const read = window.Storage.prototype.getItem;
     const load = vi.spyOn(window.Storage.prototype, "getItem").mockImplementation(function (this: Storage, key) {
       if (key.startsWith("gomode.speakingVoice.")) throw new Error("Voice storage unavailable");
@@ -3852,9 +3751,9 @@ describe("VoiceSession", () => {
   });
 
   it("saves a regional language and sends it to the gateway", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     session.selectLanguage(" fr-ca ");
-    expect(new VoiceSession(new VoiceIssues()).state.languageTag).toBe("fr-CA");
+    expect(createVoiceSession().state.languageTag).toBe("fr-CA");
     await session.connect();
     FakePeerConnection.dataChannels[0]?.onopen?.();
     const sent = FakePeerConnection.dataChannels[0]?.send.mock.calls[0]?.[0];
@@ -3875,7 +3774,7 @@ describe("VoiceSession", () => {
         : "Aucune sélection.",
     );
     const chime = { prepare: vi.fn(), playConnected: vi.fn(), playDisconnected: vi.fn() };
-    const session = new VoiceSession(new VoiceIssues(), chime);
+    const session = createVoiceSession({ chime });
     session.selectLanguage("es-MX");
     await session.connect();
     const channel = FakePeerConnection.dataChannels[0];
@@ -3894,7 +3793,7 @@ describe("VoiceSession", () => {
 
   it("leaves common policy to the gateway when the host has no instructions", async () => {
     mcpMocks.mcpServerInstructions.mockResolvedValueOnce("");
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     await session.connect();
     FakePeerConnection.dataChannels[0]?.onopen?.();
@@ -3906,7 +3805,7 @@ describe("VoiceSession", () => {
 
   it("starts without service context when service-item loading fails", async () => {
     mcpMocks.mcpReadTextResource.mockRejectedValue(new Error("resource unavailable"));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     await session.connect();
     FakePeerConnection.dataChannels[0]?.onopen?.();
@@ -3920,7 +3819,7 @@ describe("VoiceSession", () => {
     vi.useFakeTimers();
     FakePeerConnection.completeICE = false;
     FakePeerConnection.reflexiveCandidateDelayMs = 50;
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     try {
       const connect = session.connect();
@@ -3945,7 +3844,7 @@ describe("VoiceSession", () => {
     vi.useFakeTimers();
     const offer = deferred<VoiceRTCAnswerResp>();
     offerResponse = offer.promise.then((answer) => new Response(JSON.stringify(answer)));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
 
     try {
       const connect = session.connect();
@@ -3964,11 +3863,7 @@ describe("VoiceSession", () => {
 
   it("keeps WebRTC setup alive while the local stack reports progress", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues(), {
-      prepare: vi.fn(),
-      playConnected: vi.fn(),
-      playDisconnected: vi.fn(),
-    });
+    const session = createVoiceSession({ chime: silentChime() });
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels[0];
@@ -4008,7 +3903,7 @@ function triggerIceState(state: RTCIceConnectionState): void {
 
 describe("voice network recovery", () => {
   it("associates response reports independently of text order, fragments and reasoning", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const send = (message: object) =>
       FakePeerConnection.dataChannels[0]?.onmessage?.(new MessageEvent("message", { data: JSON.stringify(message) }));
     const report = (responseID: string | undefined, inputTokens: number) =>
@@ -4067,7 +3962,7 @@ describe("voice network recovery", () => {
   });
   it("retains usage across recovery and disconnect, then resets for a new conversation", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const report = (channel: FakeDataChannel, sessionID: string, inputTokens: number) =>
       channel.onmessage?.(
         new MessageEvent("message", {
@@ -4113,7 +4008,7 @@ describe("voice network recovery", () => {
   });
   it("retains a fatal delivery error when ICE recovery was pending", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const channel = FakePeerConnection.dataChannels[0]!;
@@ -4141,7 +4036,7 @@ describe("voice network recovery", () => {
       .mockResolvedValueOnce('{"items":[{"id":"1","title":"Old state","state":"running","needsAttention":false}]}')
       .mockResolvedValueOnce("Aucune sélection.")
       .mockResolvedValueOnce('{"items":[{"id":"1","title":"Fresh state","state":"waiting","needsAttention":true}]}');
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       FakePeerConnection.dataChannels[0]?.onopen?.();
@@ -4167,7 +4062,7 @@ describe("voice network recovery", () => {
 
   it("keeps replacement recovery scheduled when a retired peer reports connected", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       const retired = FakePeerConnection.last!;
@@ -4192,7 +4087,7 @@ describe("voice network recovery", () => {
 
   it("cancels the disconnected grace recovery when ICE reconnects", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       triggerIceState("disconnected");
@@ -4218,7 +4113,7 @@ describe("voice network recovery", () => {
     t.after(() => {
       Reflect.deleteProperty(navigator, "connection");
     });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       online = false;
@@ -4257,7 +4152,7 @@ describe("voice network recovery", () => {
       requested.resolve();
       return media.promise;
     });
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const connecting = session.connect();
     try {
       await requested.promise;
@@ -4279,7 +4174,7 @@ describe("voice network recovery", () => {
 
   it("backs off recovery retries and stops five minutes after the loss", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       triggerIceState("failed");
@@ -4310,7 +4205,7 @@ describe("voice network recovery", () => {
 
   it("continues backing off when a replacement session drops soon after it is ready", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     const ready = () => {
       const channel = FakePeerConnection.dataChannels.at(-1);
       channel?.onopen?.();
@@ -4350,7 +4245,7 @@ describe("voice network recovery", () => {
 
   it("cancels a pending recovery when manually disconnected", async () => {
     vi.useFakeTimers();
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       await session.connect();
       triggerIceState("disconnected");
@@ -4366,27 +4261,27 @@ describe("voice network recovery", () => {
 
 describe("reasoning display preference", () => {
   it("defaults to hidden and persists the choice for later sessions", () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     expect(session.state.showReasoning).toBe(false);
     session.setShowReasoning(true);
     expect(localStorage.getItem("gomode.voiceReasoning")).toBe("on");
-    expect(new VoiceSession(new VoiceIssues()).state.showReasoning).toBe(true);
+    expect(createVoiceSession().state.showReasoning).toBe(true);
     session.setShowReasoning(false);
     expect(localStorage.getItem("gomode.voiceReasoning")).toBe("off");
-    expect(new VoiceSession(new VoiceIssues()).state.showReasoning).toBe(false);
+    expect(createVoiceSession().state.showReasoning).toBe(false);
   });
 });
 
 describe("usage display preference", () => {
   it("defaults to hidden and persists the choice for later sessions", () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     expect(session.state.showUsageStats).toBe(false);
     session.setShowUsageStats(true);
     expect(localStorage.getItem("gomode.voiceUsageStats")).toBe("on");
-    expect(new VoiceSession(new VoiceIssues()).state.showUsageStats).toBe(true);
+    expect(createVoiceSession().state.showUsageStats).toBe(true);
     session.setShowUsageStats(false);
     expect(localStorage.getItem("gomode.voiceUsageStats")).toBe("off");
-    expect(new VoiceSession(new VoiceIssues()).state.showUsageStats).toBe(false);
+    expect(createVoiceSession().state.showUsageStats).toBe(false);
   });
 });
 
@@ -4454,7 +4349,7 @@ it("pins the gateway base path for RTC signaling and cleanup", async () => {
   const prepareSession = vi.fn(async (_sessionID: string, _signal: AbortSignal) => {});
   const retireSession = vi.fn();
   configureVoiceGateway("/test/", null, undefined, undefined, { prepareSession, retireSession });
-  const session = new VoiceSession(new VoiceIssues());
+  const session = createVoiceSession();
   await session.connect();
   expect(prepareSession).toHaveBeenCalledOnce();
   expect(prepareSession.mock.calls[0]?.[0]).toBe(session.conversationID);

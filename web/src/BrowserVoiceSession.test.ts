@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ok } from "node:assert/strict";
 import { expect, vi } from "../tests/expect";
+import { createVoiceSession } from "../tests/voice-session";
 import { FakeMicrophoneContext, microphoneFrames } from "../tests/microphone-audio";
 import { FakeRecognition, fakeSynthesis, installBrowserSpeech } from "../tests/browser-speech";
-import { configureVoiceGateway, VoiceSession } from "./VoiceSession";
-import { VoiceIssues } from "./VoiceIssues";
+import { configureVoiceGateway, type VoiceSession } from "./VoiceSession";
 import { deferred } from "../tests/deferred";
 import { resolveBrowserVoiceEndpoints } from "./BrowserVoiceManifest";
 import { mcpClient } from "./McpClient";
@@ -91,7 +91,7 @@ beforeEach(() => {
   });
   vi.spyOn(mcpClient, "readTextResource").mockResolvedValue("[]");
   configureVoiceGateway("https://gateway.example", null);
-  session = new VoiceSession(new VoiceIssues(), chime, earcon);
+  session = createVoiceSession({ chime, thinking: earcon });
   session.selectSpeechInput("client");
   session.selectSpeechOutput("client");
 });
@@ -1176,7 +1176,7 @@ describe("browser voice sessions", () => {
     expect(JSON.parse(socket.sent[0] ?? "{}")).not.toHaveProperty("recognitionModelID");
     expect(JSON.parse(socket.sent[0] ?? "{}")).not.toHaveProperty("synthesisModelID");
     expect(JSON.parse(socket.sent[0] ?? "{}").voice).not.toHaveProperty("name");
-    expect(new VoiceSession(new VoiceIssues(), chime).state.speechInput).toBe("client");
+    expect(createVoiceSession({ chime }).state.speechInput).toBe("client");
     expect(localStorage.getItem("gomode.voiceLanguage")).toBe("fr-CA");
   });
 

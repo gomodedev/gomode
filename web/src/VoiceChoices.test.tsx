@@ -5,12 +5,12 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { expect, vi } from "../tests/expect";
+import { createVoiceSession } from "../tests/voice-session";
 import { installBrowserSpeech } from "../tests/browser-speech";
 import VoiceSettings from "./VoiceSettings";
 import { allDisabled, checkedValue, chip, chips } from "../tests/chips";
 import { deferred } from "../tests/deferred";
-import { configureVoiceGateway, voiceSession, VoiceSession } from "./VoiceSession";
-import { VoiceIssues } from "./VoiceIssues";
+import { configureVoiceGateway, voiceSession } from "./VoiceSession";
 
 const metadata = {
   choices: [
@@ -371,7 +371,7 @@ describe("voice choices", () => {
   });
 
   it("rejects choices without valid transports", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       for (const transports of [null, [], ["invalid"]]) {
         globalThis.fetch = async () =>
@@ -386,7 +386,7 @@ describe("voice choices", () => {
   });
 
   it("rejects malformed and duplicate stage catalogs", async () => {
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     try {
       for (const recognitionModels of [
         [
@@ -505,7 +505,7 @@ describe("voice choices", () => {
     await user.selectOptions(speaking, "Aoede");
     await user.selectOptions(speaking, "");
     globalThis.fetch = async () => new Response(JSON.stringify(metadata));
-    const restored = new VoiceSession(new VoiceIssues());
+    const restored = createVoiceSession();
     await restored.loadVoiceChoices();
     expect(restored.state.voiceName).toBe("");
     expect(restored.issues.message("voiceName")).toBeNull();
@@ -519,7 +519,7 @@ describe("voice choices", () => {
     await user.click(chip(chips("Recognition"), "browser"));
     await user.click(chip(chips("Speech"), "browser"));
     await user.click(chip(chips("Language model"), "local"));
-    const restored = new VoiceSession(new VoiceIssues());
+    const restored = createVoiceSession();
     await restored.loadVoiceChoices();
     expect(restored.state.setupMode).toBe("parts");
     expect(restored.state.choiceIDs.text).toBe("local");
@@ -567,7 +567,7 @@ describe("voice choices", () => {
     const user = userEvent.setup();
     const speaking = () => screen.getByRole("combobox", { name: "Speaking voice" });
     await user.selectOptions(speaking(), "Aoede");
-    const restored = new VoiceSession(new VoiceIssues());
+    const restored = createVoiceSession();
     await restored.loadVoiceChoices();
     expect(restored.state.voiceName).toBe("Aoede");
     await user.click(screen.getByRole("radio", { name: "Separate stages" }));
@@ -839,7 +839,7 @@ describe("voice choices", () => {
 
   it("defers replacement-gateway settings until the active setup is released", async () => {
     globalThis.fetch = async () => new Response(JSON.stringify(independent));
-    const session = new VoiceSession(new VoiceIssues());
+    const session = createVoiceSession();
     await session.loadVoiceChoices();
     session.selectSpeechStage("output", "client", null);
     session.setState((s) => ({ ...s, connected: true }));
