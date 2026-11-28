@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/gomodedev/gomode/internal/testlog"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 	voicev2 "github.com/gomodedev/gomode/voicegateway/api/v2"
 )
 
@@ -192,6 +194,39 @@ func TestTextSessionTickets(t *testing.T) {
 		h.handleBrowserTextSession(w, r)
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("expired status = %d", w.Code)
+		}
+	})
+	t.Run("a full ticket table rejects until the earliest ticket expires", func(t *testing.T) {
+		t.Parallel()
+		for _, version := range voiceapi.ProtocolVersions() {
+			h := NewEmbeddedHandler(testlog.New(t), nil, textSessionServerFunc(func(context.Context, http.ResponseWriter, *http.Request) error { return nil }))
+			issue := func() *httptest.ResponseRecorder {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/"+version.String()+"/voice/text/ticket", strings.NewReader(`{}`)))
+				return w
+			}
+			for range 1024 {
+				if w := issue(); w.Code != http.StatusOK {
+					t.Fatalf("%s: ticket status = %d %s", version, w.Code, w.Body)
+				}
+			}
+			w := issue()
+			var body voiceapi.ErrorResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			// v1 predates RATE_LIMITED.
+			want := voiceapi.CodeRateLimited
+			if version == voiceapi.ProtocolV1 {
+				want = voiceapi.CodeBadRequest
+			}
+			if w.Code != http.StatusTooManyRequests || body.Error.Code != want {
+				t.Errorf("%s: got %d %s, want 429 %s", version, w.Code, body.Error.Code, want)
+			}
+			// Tickets live 30 s, so the earliest one frees its slot within that.
+			if s, err := strconv.Atoi(w.Header().Get("Retry-After")); err != nil || s < 1 || s > 30 {
+				t.Errorf("%s: Retry-After = %q, want 1 to 30", version, w.Header().Get("Retry-After"))
+			}
 		}
 	})
 	t.Run("unavailable backend does not issue tickets", func(t *testing.T) {

@@ -33,6 +33,7 @@ All errors return:
 | 503 | `VOICE_BRIDGE_UNAVAILABLE` |
 | 401 | `UNAUTHORIZED` |
 | 500 | `VOICE_OFFER_FAILED` |
+| 429 | `RATE_LIMITED` |
 
 ## Types
 
@@ -46,6 +47,7 @@ ErrorCode is a machine-readable API error identifier.
 | `VOICE_BRIDGE_UNAVAILABLE` |  |
 | `UNAUTHORIZED` |  |
 | `VOICE_OFFER_FAILED` |  |
+| `RATE_LIMITED` |  |
 
 ### InterruptSource
 

@@ -74,6 +74,10 @@ sealed interface ErrorCode {
         override val value = "VOICE_OFFER_FAILED"
     }
     @Serializable
+    data object RateLimited : ErrorCode {
+        override val value = "RATE_LIMITED"
+    }
+    @Serializable
     data class Other(override val value: String) : ErrorCode
 }
 
@@ -87,6 +91,7 @@ object ErrorCodeSerializer : KSerializer<ErrorCode> {
             "VOICE_BRIDGE_UNAVAILABLE" -> ErrorCode.VoiceBridgeUnavailable
             "UNAUTHORIZED" -> ErrorCode.Unauthorized
             "VOICE_OFFER_FAILED" -> ErrorCode.VoiceOfferFailed
+            "RATE_LIMITED" -> ErrorCode.RateLimited
             else -> ErrorCode.Other(v)
         }
     }

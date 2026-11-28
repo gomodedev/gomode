@@ -71,5 +71,6 @@ var SDKAPI = apispec.Config[voiceapi.ErrorCode]{
 		{Code: voiceapi.CodeVoiceBridgeUnavailable, Status: 503},
 		{Code: voiceapi.CodeUnauthorized, Status: 401},
 		{Code: voiceapi.CodeVoiceOfferFailed, Status: 500},
+		{Code: voiceapi.CodeRateLimited, Status: 429},
 	},
 }

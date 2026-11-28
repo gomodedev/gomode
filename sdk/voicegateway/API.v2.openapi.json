@@ -30,6 +30,9 @@
           "401": {
             "$ref": "#/components/responses/error401"
           },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
           "500": {
             "$ref": "#/components/responses/error500"
           },
@@ -73,6 +76,9 @@
           "401": {
             "$ref": "#/components/responses/error401"
           },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
           "500": {
             "$ref": "#/components/responses/error500"
           },
@@ -115,6 +121,9 @@
           },
           "401": {
             "$ref": "#/components/responses/error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
           },
           "500": {
             "$ref": "#/components/responses/error500"
@@ -169,6 +178,9 @@
           "401": {
             "$ref": "#/components/responses/error401"
           },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
           "500": {
             "$ref": "#/components/responses/error500"
           },
@@ -211,6 +223,9 @@
           },
           "401": {
             "$ref": "#/components/responses/error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
           },
           "500": {
             "$ref": "#/components/responses/error500"
@@ -311,7 +326,8 @@
           "BAD_REQUEST",
           "VOICE_BRIDGE_UNAVAILABLE",
           "UNAUTHORIZED",
-          "VOICE_OFFER_FAILED"
+          "VOICE_OFFER_FAILED",
+          "RATE_LIMITED"
         ],
         "description": "ErrorCode is a machine-readable API error identifier."
       },
@@ -1492,6 +1508,16 @@
       },
       "error401": {
         "description": "Error codes: `UNAUTHORIZED`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "error429": {
+        "description": "Error codes: `RATE_LIMITED`.",
         "content": {
           "application/json": {
             "schema": {

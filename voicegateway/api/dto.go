@@ -33,6 +33,8 @@ const (
 
 	CodeVoiceBridgeUnavailable ErrorCode = "VOICE_BRIDGE_UNAVAILABLE"
 	CodeVoiceOfferFailed       ErrorCode = "VOICE_OFFER_FAILED"
+	// CodeRateLimited answers 429; its Retry-After header, when present, says when to retry.
+	CodeRateLimited ErrorCode = "RATE_LIMITED"
 )
 
 // Error is a concrete error type with status code, error code, optional

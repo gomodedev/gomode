@@ -67,6 +67,7 @@ public struct ErrorCode: Codable, Equatable, Hashable {
     public static let VoiceBridgeUnavailable = ErrorCode("VOICE_BRIDGE_UNAVAILABLE")
     public static let Unauthorized = ErrorCode("UNAUTHORIZED")
     public static let VoiceOfferFailed = ErrorCode("VOICE_OFFER_FAILED")
+    public static let RateLimited = ErrorCode("RATE_LIMITED")
 
     public static func other(_ value: String) -> ErrorCode { ErrorCode(value) }
 

@@ -418,7 +418,7 @@ func (h *handler) handleTextTicket(w http.ResponseWriter, r *http.Request) {
 	if len(h.textTickets) >= 1024 {
 		h.textTicketMu.Unlock()
 		ratelimit.SetRetryAfter(w.Header(), wait)
-		voiceapi.WriteError(h.log, w, http.StatusTooManyRequests, voiceapi.CodeBadRequest, "too many pending voice tickets")
+		voiceapi.WriteError(h.log, w, http.StatusTooManyRequests, voiceapi.SessionProtocolFromContext(r.Context()).Version.RateLimitedCode(), "too many pending voice tickets")
 		return
 	}
 	ticket := rand.Text()
